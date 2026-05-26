@@ -1,0 +1,31 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {"major": 3, "minor": 25},
+
+    "configurePresets": [
+        {
+            "name": "_linux-base",
+            "hidden": true,
+            "description": "Linux with system gcc/g++. OpenMP via libgomp.",
+            "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+
+        {
+            "name": "linux",
+            "displayName": "Linux (gcc/g++)",
+            "description": "Builds all overlays for every fortran-migrator target it can find on CMAKE_PREFIX_PATH.",
+            "inherits": "_linux-base"
+        }
+    ],
+
+    "buildPresets": [
+        {
+            "name": "linux",
+            "configurePreset": "linux"
+        }
+    ]
+}
