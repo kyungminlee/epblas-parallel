@@ -35,6 +35,38 @@ if(NOT EPBLAS_BUILT_TARGETS)
         "epblas: no fortran-migrator targets discovered on CMAKE_PREFIX_PATH "
         "— configuring an empty build. Install fortran-migrator for at least "
         "one of: ${EPBLAS_KNOWN_TARGETS}.")
+    return()
 endif()
 
-# Overlay subdirs, composite definitions, install/export land in later steps.
+# multifloats is the upstream double-double library; the parallel
+# overlay for the multifloats target compiles its C++ kernels
+# against the `multifloats` target. Fetched the same way the
+# migrator did — same upstream, same tag floor.
+if("multifloats" IN_LIST EPBLAS_BUILT_TARGETS)
+    set(BUILD_TESTING OFF)
+    set(MULTIFLOATS_BUILD_BENCH OFF)
+    if(DEFINED MULTIFLOATS_DIR)
+        message(STATUS "epblas: using local multifloats: ${MULTIFLOATS_DIR}")
+        add_subdirectory(${MULTIFLOATS_DIR}
+            ${CMAKE_CURRENT_BINARY_DIR}/_mf EXCLUDE_FROM_ALL)
+    else()
+        include(FetchContent)
+        set(MULTIFLOATS_GIT_REPO "https://github.com/kyungminlee/multifloats.git"
+            CACHE STRING "Git URL for the multifloats library")
+        set(MULTIFLOATS_GIT_TAG "v0.6.0"
+            CACHE STRING "Git tag/branch/commit for multifloats (>= v0.6.0)")
+        message(STATUS "epblas: fetching multifloats from ${MULTIFLOATS_GIT_REPO} (${MULTIFLOATS_GIT_TAG})")
+        FetchContent_Declare(multifloats_fetch
+            GIT_REPOSITORY ${MULTIFLOATS_GIT_REPO}
+            GIT_TAG        ${MULTIFLOATS_GIT_TAG}
+        )
+        FetchContent_Populate(multifloats_fetch)
+        add_subdirectory(
+            ${multifloats_fetch_SOURCE_DIR}
+            ${CMAKE_CURRENT_BINARY_DIR}/_mf EXCLUDE_FROM_ALL)
+    endif()
+endif()
+
+add_subdirectory(src/parallel_blas)
+
+# Composite definitions and install/export land in later steps.

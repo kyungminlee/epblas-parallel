@@ -1,0 +1,499 @@
+/*
+ * etrsv — kind10 (REAL(KIND=10)) triangular solve.
+ *   A x = b           (TRANS='N')
+ *   Aᵀ x = b          (TRANS='T'/'C')
+ * where A is N×N triangular (UPLO, DIAG). x overwrites b in-place.
+ *
+ * Three public entries:
+ *
+ *   etrsv_         — top-level dispatch. Routes stride-1 calls above
+ *                    the 2·NB threshold into etrsv_blocked_; otherwise
+ *                    falls through to the unblocked Netlib serial body.
+ *                    Skips the blocked-path dispatch when already
+ *                    inside an OpenMP parallel region.
+ *
+ *   etrsv_serial_  — pure serial unblocked Netlib body. K-unroll-by-2
+ *                    + backward inner walks per Addenda 18/19. No
+ *                    OpenMP. Safe to call from inside a parallel
+ *                    region.
+ *
+ *   etrsv_blocked_ — LAPACK-blocked algorithm wrapped in a SINGLE
+ *                    `#pragma omp parallel` region. Threads cooperate
+ *                    manually: thread 0 does each diagonal sub-solve
+ *                    via etrsv_serial_, then all threads partition
+ *                    the trailing egemv across the long axis and call
+ *                    egemv_ on their slice (egemv's own OMP fork is
+ *                    gated off by omp_in_parallel()).
+ */
+
+#include <stddef.h>
+#include <stdlib.h>
+#include <ctype.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
+
+typedef long double T;
+
+static inline char up(const char *p) {
+    return (char)toupper((unsigned char)*p);
+}
+
+#define A_(i, j)  a[(size_t)(j) * lda + (i)]
+
+#define ETRSV_BLOCKED_NB_DEFAULT 64
+
+static int etrsv_blocked_nb(void) {
+    static int cached = 0;
+    if (cached == 0) {
+        const char *s = getenv("ETRSV_NB");
+        int v = (s && *s) ? atoi(s) : 0;
+        cached = (v > 0) ? v : ETRSV_BLOCKED_NB_DEFAULT;
+    }
+    return cached;
+}
+
+void etrsv_blocked_(
+    const char *uplo, const char *trans, const char *diag,
+    const int *n_,
+    const T *restrict a, const int *lda_,
+    T *restrict x, const int *incx_,
+    size_t uplo_len, size_t trans_len, size_t diag_len);
+
+void etrsv_serial_(
+    const char *uplo, const char *trans, const char *diag,
+    const int *n_,
+    const T *restrict a, const int *lda_,
+    T *restrict x, const int *incx_,
+    size_t uplo_len, size_t trans_len, size_t diag_len);
+
+void etrsv_(
+    const char *uplo, const char *trans, const char *diag,
+    const int *n_,
+    const T *restrict a, const int *lda_,
+    T *restrict x, const int *incx_,
+    size_t uplo_len, size_t trans_len, size_t diag_len)
+{
+    const int N = *n_;
+    const int incx = *incx_;
+
+    if (N == 0) return;
+
+#ifdef _OPENMP
+    const int in_par = omp_in_parallel();
+#else
+    const int in_par = 0;
+#endif
+    /* Threshold `N >= 3*NB` (not the usual 2*NB) — etrsv's per-op cost
+     * is so low that the OMP fork-join + per-step barriers cost more
+     * than the parallel work at N == 2*NB. At N=128 (=2*NB with NB=64)
+     * the T-branch's K-unroll serial path was ~3 µs per call; OMP=4
+     * dispatch regressed it to 0.80x. Bumping to 3*NB (192) keeps
+     * N=128 on the (faster) serial path while N=256+ still goes
+     * blocked-parallel and wins. */
+    if (incx == 1 && N >= 3 * etrsv_blocked_nb() && !in_par
+        && blas_omp_max_threads() > 1) {
+        etrsv_blocked_(uplo, trans, diag, n_, a, lda_, x, incx_,
+                       uplo_len, trans_len, diag_len);
+        return;
+    }
+
+    etrsv_serial_(uplo, trans, diag, n_, a, lda_, x, incx_,
+                  uplo_len, trans_len, diag_len);
+}
+
+/* Pure-serial unblocked Netlib body. No OpenMP. Inherits the
+ * Addendum 18 (backward inner) + Addendum 19 (K-unroll-by-2 split
+ * accumulators) tuning of the previous etrsv_. */
+void etrsv_serial_(
+    const char *uplo, const char *trans, const char *diag,
+    const int *n_,
+    const T *restrict a, const int *lda_,
+    T *restrict x, const int *incx_,
+    size_t uplo_len, size_t trans_len, size_t diag_len)
+{
+    (void)uplo_len; (void)trans_len; (void)diag_len;
+    const int N = *n_;
+    const int lda = *lda_, incx = *incx_;
+    const char UPLO = up(uplo);
+    char TR = up(trans);
+    if (TR == 'C') TR = 'T';
+    const char DIAG = up(diag);
+    const int nounit = (DIAG != 'U');
+
+    if (N == 0) return;
+
+    const T zero = 0.0L;
+
+    (void)zero;
+    if (incx == 1) {
+        if (TR == 'N') {
+            if (UPLO == 'L') {
+                /* Forward substitution: x[i] = (b[i] - sum_{k<i} A(i,k) x[k]) / A(i,i).
+                 *
+                 * J-unroll-by-2: process columns i and i+1 jointly so the
+                 * trailing-x update loop loads/stores each x[k] once for
+                 * BOTH columns' contributions. Halves x memory traffic on
+                 * the AXPY-style inner — same trick as egemv N-branch.
+                 * Inner becomes `x[k] = (x[k] - xi*a0[k]) - xi1*a1[k]`. */
+                int i = 0;
+                for (; i + 1 < N; i += 2) {
+                    if (nounit) x[i] /= A_(i, i);
+                    const T xi = x[i];
+                    /* Apply column i's contribution to x[i+1] before solving it. */
+                    x[i + 1] -= xi * A_(i + 1, i);
+                    if (nounit) x[i + 1] /= A_(i + 1, i + 1);
+                    const T xi1 = x[i + 1];
+                    const T *a0 = &A_(0, i);
+                    const T *a1 = &A_(0, i + 1);
+                    for (int k = i + 2; k < N; ++k) {
+                        x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
+                    }
+                }
+                if (i < N) {
+                    if (nounit) x[i] /= A_(i, i);
+                    const T xi = x[i];
+                    const T *ai = &A_(0, i);
+                    for (int k = i + 1; k < N; ++k) x[k] -= xi * ai[k];
+                }
+            } else {
+                /* UPLO='U': back substitution iterates i backward.
+                 * x[i] = (b[i] - sum_{k>i} A(i,k) x[k]) / A(i,i).
+                 *
+                 * J-unroll-by-2 (same trick as LN branch, descending): pair
+                 * (i, i-1) so the inner k = 0..i-2 walk loads/stores each
+                 * x[k] once for both columns' contributions. */
+                int i = N - 1;
+                for (; i - 1 >= 0; i -= 2) {
+                    if (nounit) x[i] /= A_(i, i);
+                    const T xi = x[i];
+                    /* Apply column i's contribution to x[i-1] before solving it. */
+                    x[i - 1] -= xi * A_(i - 1, i);
+                    if (nounit) x[i - 1] /= A_(i - 1, i - 1);
+                    const T xi1 = x[i - 1];
+                    const T *a0 = &A_(0, i);
+                    const T *a1 = &A_(0, i - 1);
+                    for (int k = 0; k < i - 1; ++k) {
+                        x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
+                    }
+                }
+                if (i >= 0) {
+                    if (nounit) x[i] /= A_(i, i);
+                    const T xi = x[i];
+                    const T *ai = &A_(0, i);
+                    for (int k = 0; k < i; ++k) x[k] -= xi * ai[k];
+                }
+            }
+        } else {  /* TRANS = 'T': solve Aᵀ x = b. */
+            if (UPLO == 'L') {
+                /* Lower-stored A; Aᵀ is upper. Iterate i backward.
+                 * x[i] = (b[i] - sum_{k>i} A(k,i) x[k]) / A(i,i).
+                 *
+                 * Inner walk is *backward* (k = N-1 .. i+1) to mirror the
+                 * Fortran reference. With the outer loop also descending,
+                 * x[i+1..N-1] is read in the same direction as the previous
+                 * outer iter wrote x[i+1], so the bottom of x stays hot in
+                 * L1. Forward inner under descending outer ends each iter
+                 * at x[N-1] — the next outer's first read x[i] sits at the
+                 * opposite end, so under cache pressure x gets evicted and
+                 * has to be re-streamed every iter. At N=1024 the forward
+                 * variant collapses to ~0.43× of migrated; backward closes
+                 * the gap (Addendum 18).
+                 *
+                 * K-unroll-by-2 with split accumulators (t0, t1) breaks the
+                 * single-acc fmul→fadd dep chain (same x87-latency fix as
+                 * etrmv TRANS='T' and ytrsv U-T; Addendum 19 / Rule 22). */
+                for (int i = N - 1; i >= 0; --i) {
+                    T t0 = x[i], t1 = zero;
+                    const T *ai = &A_(0, i);
+                    int k = N - 1;
+                    for (; k - 1 > i; k -= 2) {
+                        t0 -= ai[k]     * x[k];
+                        t1 -= ai[k - 1] * x[k - 1];
+                    }
+                    for (; k > i; --k) t0 -= ai[k] * x[k];
+                    T t = t0 + t1;
+                    if (nounit) t /= ai[i];
+                    x[i] = t;
+                }
+            } else {
+                /* UPLO='U': iterate i forward.
+                 * x[i] = (b[i] - sum_{k<i} A(k,i) x[k]) / A(i,i).
+                 *
+                 * K-unroll-by-2 with split accumulators — see LT branch
+                 * note above. */
+                for (int i = 0; i < N; ++i) {
+                    T t0 = x[i], t1 = zero;
+                    const T *ai = &A_(0, i);
+                    int k = 0;
+                    for (; k + 1 < i; k += 2) {
+                        t0 -= ai[k]     * x[k];
+                        t1 -= ai[k + 1] * x[k + 1];
+                    }
+                    if (k < i) t0 -= ai[k] * x[k];
+                    T t = t0 + t1;
+                    if (nounit) t /= ai[i];
+                    x[i] = t;
+                }
+            }
+        }
+    } else {
+        /* General-stride fallback. */
+        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        if (TR == 'N') {
+            if (UPLO == 'L') {
+                for (int i = 0; i < N; ++i) {
+                    const int ix = kx + i * incx;
+                    if (x[ix] != zero) {
+                        if (nounit) x[ix] /= A_(i, i);
+                        const T xi = x[ix];
+                        for (int k = i + 1; k < N; ++k) x[kx + k * incx] -= xi * A_(k, i);
+                    }
+                }
+            } else {
+                for (int i = N - 1; i >= 0; --i) {
+                    const int ix = kx + i * incx;
+                    if (x[ix] != zero) {
+                        if (nounit) x[ix] /= A_(i, i);
+                        const T xi = x[ix];
+                        for (int k = 0; k < i; ++k) x[kx + k * incx] -= xi * A_(k, i);
+                    }
+                }
+            }
+        } else {
+            if (UPLO == 'L') {
+                /* Inner walks backward to match Fortran reference; same
+                 * cache-direction reasoning as the incx=1 LT path above
+                 * (Addendum 18 / Rule 21). K-unroll-by-2 with split
+                 * accumulators (Addendum 19 / Rule 22). */
+                for (int i = N - 1; i >= 0; --i) {
+                    T t0 = x[kx + i * incx], t1 = zero;
+                    int k = N - 1;
+                    for (; k - 1 > i; k -= 2) {
+                        t0 -= A_(k, i)     * x[kx + k * incx];
+                        t1 -= A_(k - 1, i) * x[kx + (k - 1) * incx];
+                    }
+                    for (; k > i; --k) t0 -= A_(k, i) * x[kx + k * incx];
+                    T t = t0 + t1;
+                    if (nounit) t /= A_(i, i);
+                    x[kx + i * incx] = t;
+                }
+            } else {
+                /* K-unroll-by-2 with split accumulators. */
+                for (int i = 0; i < N; ++i) {
+                    T t0 = x[kx + i * incx], t1 = zero;
+                    int k = 0;
+                    for (; k + 1 < i; k += 2) {
+                        t0 -= A_(k,     i) * x[kx + k       * incx];
+                        t1 -= A_(k + 1, i) * x[kx + (k + 1) * incx];
+                    }
+                    if (k < i) t0 -= A_(k, i) * x[kx + k * incx];
+                    T t = t0 + t1;
+                    if (nounit) t /= A_(i, i);
+                    x[kx + i * incx] = t;
+                }
+            }
+        }
+    }
+}
+
+/* ── Block-parallel variant: single parallel region ─────────────────
+ *
+ * Mirrors qtrsv_blocked_ (Addendum 29). One `#pragma omp parallel`
+ * wraps the entire diagonal walk:
+ *
+ *   - Thread 0 calls etrsv_serial_ on each diagonal sub-block.
+ *   - All threads partition the trailing egemv across its long axis
+ *     and call egemv_ on their slice. egemv's own OMP fork is gated
+ *     off by omp_in_parallel(), so the inner gemv runs serially on
+ *     each thread's slice.
+ *   - Two `#pragma omp barrier`s per step.
+ */
+
+extern void egemv_(
+    const char *trans,
+    const int *m, const int *n,
+    const T *alpha,
+    const T *a, const int *lda,
+    const T *x, const int *incx,
+    const T *beta,
+    T *y, const int *incy,
+    size_t trans_len);
+
+void etrsv_blocked_(
+    const char *uplo, const char *trans, const char *diag,
+    const int *n_,
+    const T *restrict a, const int *lda_,
+    T *restrict x, const int *incx_,
+    size_t uplo_len, size_t trans_len, size_t diag_len)
+{
+    const int N = *n_;
+    const int lda = *lda_, incx = *incx_;
+    const int nb = etrsv_blocked_nb();
+    const char UPLO = up(uplo);
+    char TR = up(trans);
+    if (TR == 'C') TR = 'T';
+
+    if (N == 0) return;
+    if (incx != 1 || N < 2 * nb) {
+        etrsv_serial_(uplo, trans, diag, n_, a, lda_, x, incx_,
+                      uplo_len, trans_len, diag_len);
+        return;
+    }
+
+    const T neg_one = -1.0L;
+    const T one_v   =  1.0L;
+    const char NN[1] = {'N'};
+    const char TT[1] = {'T'};
+    const int one_i = 1;
+
+#ifdef _OPENMP
+    const int use_omp = (blas_omp_max_threads() > 1 && !omp_in_parallel());
+#else
+    const int use_omp = 0;
+#endif
+
+#ifdef _OPENMP
+    #pragma omp parallel if(use_omp)
+#endif
+    {
+        int tid = 0, nt = 1;
+#ifdef _OPENMP
+        if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
+#endif
+
+        if (TR == 'N' && UPLO == 'L') {
+            for (int j = 0; j < N; j += nb) {
+                int jb = (N - j < nb) ? (N - j) : nb;
+                if (tid == 0) {
+                    etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), lda_,
+                                  &x[j], &one_i, uplo_len, trans_len, diag_len);
+                }
+#ifdef _OPENMP
+                if (use_omp) {
+                    #pragma omp barrier
+                }
+#endif
+                int mt = N - j - jb;
+                if (mt > 0) {
+                    int j2 = j + jb;
+                    long long lo = (long long)mt * tid / nt;
+                    long long hi = (long long)mt * (tid + 1) / nt;
+                    int m_slice = (int)(hi - lo);
+                    if (m_slice > 0) {
+                        const int i_off = j2 + (int)lo;
+                        egemv_(NN, &m_slice, &jb, &neg_one,
+                               &A_(i_off, j), lda_,
+                               &x[j], &one_i, &one_v,
+                               &x[i_off], &one_i, 1);
+                    }
+                }
+#ifdef _OPENMP
+                if (use_omp) {
+                    #pragma omp barrier
+                }
+#endif
+            }
+        } else if (TR == 'N' && UPLO == 'U') {
+            int j = ((N - 1) / nb) * nb;
+            while (j >= 0) {
+                int jb = (N - j < nb) ? (N - j) : nb;
+                if (tid == 0) {
+                    etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), lda_,
+                                  &x[j], &one_i, uplo_len, trans_len, diag_len);
+                }
+#ifdef _OPENMP
+                if (use_omp) {
+                    #pragma omp barrier
+                }
+#endif
+                if (j > 0) {
+                    long long lo = (long long)j * tid / nt;
+                    long long hi = (long long)j * (tid + 1) / nt;
+                    int m_slice = (int)(hi - lo);
+                    if (m_slice > 0) {
+                        const int i_off = (int)lo;
+                        egemv_(NN, &m_slice, &jb, &neg_one,
+                               &A_(i_off, j), lda_,
+                               &x[j], &one_i, &one_v,
+                               &x[i_off], &one_i, 1);
+                    }
+                }
+#ifdef _OPENMP
+                if (use_omp) {
+                    #pragma omp barrier
+                }
+#endif
+                j -= nb;
+            }
+        } else if (TR == 'T' && UPLO == 'L') {
+            int j = ((N - 1) / nb) * nb;
+            while (j >= 0) {
+                int jb = (N - j < nb) ? (N - j) : nb;
+                if (tid == 0) {
+                    etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), lda_,
+                                  &x[j], &one_i, uplo_len, trans_len, diag_len);
+                }
+#ifdef _OPENMP
+                if (use_omp) {
+                    #pragma omp barrier
+                }
+#endif
+                if (j > 0) {
+                    long long lo = (long long)j * tid / nt;
+                    long long hi = (long long)j * (tid + 1) / nt;
+                    int n_slice = (int)(hi - lo);
+                    if (n_slice > 0) {
+                        const int n_off = (int)lo;
+                        egemv_(TT, &jb, &n_slice, &neg_one,
+                               &A_(j, n_off), lda_,
+                               &x[j], &one_i, &one_v,
+                               &x[n_off], &one_i, 1);
+                    }
+                }
+#ifdef _OPENMP
+                if (use_omp) {
+                    #pragma omp barrier
+                }
+#endif
+                j -= nb;
+            }
+        } else {
+            /* TR == 'T' && UPLO == 'U' */
+            for (int j = 0; j < N; j += nb) {
+                int jb = (N - j < nb) ? (N - j) : nb;
+                if (tid == 0) {
+                    etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), lda_,
+                                  &x[j], &one_i, uplo_len, trans_len, diag_len);
+                }
+#ifdef _OPENMP
+                if (use_omp) {
+                    #pragma omp barrier
+                }
+#endif
+                int mt = N - j - jb;
+                if (mt > 0) {
+                    int j2 = j + jb;
+                    long long lo = (long long)mt * tid / nt;
+                    long long hi = (long long)mt * (tid + 1) / nt;
+                    int n_slice = (int)(hi - lo);
+                    if (n_slice > 0) {
+                        const int n_off = j2 + (int)lo;
+                        egemv_(TT, &jb, &n_slice, &neg_one,
+                               &A_(j, n_off), lda_,
+                               &x[j], &one_i, &one_v,
+                               &x[n_off], &one_i, 1);
+                    }
+                }
+#ifdef _OPENMP
+                if (use_omp) {
+                    #pragma omp barrier
+                }
+#endif
+            }
+        }
+    }
+}
+
+#undef A_
