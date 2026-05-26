@@ -1,6 +1,6 @@
 # Hand-written parallel BLAS overlay — multi-target driver.
 #
-# For each target in EPBLAS_BUILT_TARGETS (set by the top-level
+# For each target in EPPARABLAS_BUILT_TARGETS (set by the top-level
 # CMakeLists after find_package'ing the migrator's per-target
 # packages), this file sets LIB_PREFIX and add_subdirectory's the
 # matching per-target subdir, which produces a STATIC archive
@@ -22,8 +22,8 @@ find_package(OpenMP COMPONENTS C CXX)
 set(PARALLEL_BLAS_MARCH "native" CACHE STRING
     "value passed to -march for parallel BLAS kernels (empty to disable)")
 
-foreach(_target IN LISTS EPBLAS_BUILT_TARGETS)
-    set(LIB_PREFIX "${EPBLAS_PREFIX_${_target}}")
+foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
+    set(LIB_PREFIX "${EPPARABLAS_PREFIX_${_target}}")
     set(_per_target_dir ${CMAKE_CURRENT_SOURCE_DIR}/${_target})
     if(NOT IS_DIRECTORY ${_per_target_dir})
         message(STATUS "parallel_blas: no kernels for target '${_target}' "
