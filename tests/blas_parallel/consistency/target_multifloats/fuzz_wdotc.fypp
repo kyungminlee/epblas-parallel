@@ -1,0 +1,47 @@
+! fuzz_wdotc — multifloats DOT.
+program fuzz_wdotc
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        function wdotc(n, x, incx, y, incy) result(d)
+            import :: real64x2, cmplx64x2
+            integer, intent(in) :: n, incx, incy
+            type(cmplx64x2), intent(in) :: x(*), y(*)
+            type(cmplx64x2) :: d
+        end function
+        function wdotc_migrated(n, x, incx, y, incy) result(d)
+            import :: real64x2, cmplx64x2
+            integer, intent(in) :: n, incx, incy
+            type(cmplx64x2), intent(in) :: x(*), y(*)
+            type(cmplx64x2) :: d
+        end function
+    end interface
+    integer :: seed, ncases, ic, n, incx, incy, lenx, leny, fails
+    type(cmplx64x2) :: d_ov, d_mig
+    type(real64x2) :: err, tol
+    type(cmplx64x2), allocatable :: X(:), Y(:)
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_wdotc: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096); incx = rand_incx(); incy = rand_incx()
+        lenx = 1 + (n - 1) * abs(incx); leny = 1 + (n - 1) * abs(incy)
+        allocate(X(lenx), Y(leny))
+        call fill_matrix_complex(X, lenx, 1, lenx); call fill_matrix_complex(Y, leny, 1, leny)
+        d_ov  = wdotc(n, X, incx, Y, incy)
+        d_mig = wdotc_migrated(n, X, incx, Y, incy)
+        block
+            type(real64x2) :: am, dm, tv
+            am = abs(d_mig); dm = abs(d_ov - d_mig); tv = real64x2(tiny(1.0_8))
+            if (am < tv) then; err = dm; else; err = dm / am; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(n, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then; fails = fails + 1; print '(a,i0,a,3i6)', 'FAIL ', ic, ' n,incx,incy=', n, incx, incy; end if
+        deallocate(X, Y)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_wdotc: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

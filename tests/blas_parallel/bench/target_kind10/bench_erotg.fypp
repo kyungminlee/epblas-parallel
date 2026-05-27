@@ -1,0 +1,2 @@
+#:set routine = 'erotg'
+#:include 'bench_rotg_real_body.fypp'

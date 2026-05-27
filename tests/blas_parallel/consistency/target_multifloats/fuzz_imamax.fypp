@@ -1,0 +1,47 @@
+! fuzz_imamax — multifloats IAMAX.
+program fuzz_imamax
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        function imamax(n, x, incx) result(k)
+            import :: real64x2, cmplx64x2
+            integer, intent(in) :: n, incx
+            type(real64x2), intent(in) :: x(*)
+            integer :: k
+        end function
+        function imamax_migrated(n, x, incx) result(k)
+            import :: real64x2, cmplx64x2
+            integer, intent(in) :: n, incx
+            type(real64x2), intent(in) :: x(*)
+            integer :: k
+        end function
+    end interface
+    integer :: seed, ncases, ic, n, incx, lenx, fails, k_ov, k_mig
+    type(real64x2), allocatable :: X(:)
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_imamax: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096); incx = pick_pos()
+        lenx = 1 + (n - 1) * abs(incx); allocate(X(lenx))
+        call fill_matrix_real(X, lenx, 1, lenx)
+        k_ov = imamax(n, X, incx); k_mig = imamax_migrated(n, X, incx)
+        if (k_ov /= k_mig) then
+            fails = fails + 1; call err_stats_record(1.0_8)
+            print '(a,i0,a,2i6,a,2i6)', 'FAIL ', ic, ' n,incx=', n, incx, ' got/exp=', k_ov, k_mig
+        else; call err_stats_record(0.0_8); end if
+        deallocate(X)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_imamax: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+contains
+    function pick_pos() result(k)
+        integer :: k; real(8) :: u
+        call random_number(u)
+        if (u < 0.7_8) then; k = 1
+        else if (u < 0.9_8) then; k = 2
+        else; k = 3; end if
+    end function
+end program

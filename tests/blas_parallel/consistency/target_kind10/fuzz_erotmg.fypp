@@ -1,0 +1,2 @@
+#:set routine = 'erotmg'
+#:include 'fuzz_rotmg_real_body.fypp'

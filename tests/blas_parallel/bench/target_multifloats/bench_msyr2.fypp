@@ -1,0 +1,110 @@
+! bench_msyr2 — multifloats real DD symmetric rank-1.
+
+program bench_msyr2
+    use multifloats
+    use fuzz_util, only: fill_matrix_real
+    implicit none
+    interface
+        subroutine msyr2(uplo, n, alpha, x, incx, y, incy, a, lda)
+            import :: real64x2
+            character, intent(in) :: uplo
+            integer, intent(in) :: n, lda, incx, incy
+            type(real64x2), intent(in) :: alpha
+            type(real64x2), intent(in) :: x(*), y(*)
+            type(real64x2), intent(inout) :: a(lda, *)
+        end subroutine msyr2
+        subroutine msyr2_migrated(uplo, n, alpha, x, incx, y, incy, a, lda)
+            import :: real64x2
+            character, intent(in) :: uplo
+            integer, intent(in) :: n, lda, incx, incy
+            type(real64x2), intent(in) :: alpha
+            type(real64x2), intent(in) :: x(*), y(*)
+            type(real64x2), intent(inout) :: a(lda, *)
+        end subroutine msyr2_migrated
+    end interface
+    integer :: iters, nsizes, i, iup
+    integer, allocatable :: sizes(:)
+    type(real64x2), allocatable :: A(:), A_init(:), X(:), Y(:)
+    type(real64x2) :: alpha
+    real(8) :: t_subject, t_mig
+    character(len=1), parameter :: UPLOS(2) = ['L', 'U']
+    iters = read_int_env('BLAS_BENCH_ITERS', 4); call read_sizes(sizes); nsizes = size(sizes)
+    alpha = real64x2(0.7_8)
+    print '(a)', 'uplo    size      subject GF/s   migrated GF/s   speedup'
+    do iup = 1, 2
+        do i = 1, nsizes
+            call run_size(UPLOS(iup), sizes(i), iters, t_subject, t_mig); call emit(UPLOS(iup), sizes(i), t_subject, t_mig)
+        end do
+    end do
+contains
+    function read_int_env(name, dflt) result(v)
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: dflt
+        integer :: v, ios
+        character(len=64) :: buf
+        v = dflt; call get_environment_variable(name, buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then; read(buf, *, iostat=ios) v; if (ios /= 0) v = dflt; end if
+    end function
+    subroutine read_sizes(arr)
+        integer, allocatable, intent(out) :: arr(:)
+        character(len=256) :: buf
+        integer :: ios, i, j, n, val
+        character(len=32) :: tok
+        call get_environment_variable('BLAS_BENCH_SIZES', buf, status=ios)
+        if (ios /= 0 .or. len_trim(buf) == 0) then; arr = [128, 256, 512, 1024]; return; end if
+        n = 1; do i = 1, len_trim(buf); if (buf(i:i) == ',') n = n + 1; end do; allocate(arr(n))
+        j = 1; tok = ''; n = 0
+        do i = 1, len_trim(buf) + 1
+            if (i > len_trim(buf) .or. buf(i:i) == ',') then
+                read(tok, *, iostat=ios) val
+                if (ios == 0) then; n = n + 1; arr(n) = val; end if
+                tok = ''; j = 1
+            else; tok(j:j) = buf(i:i); j = j + 1; end if
+        end do
+        if (n < size(arr)) arr = arr(1:n)
+    end subroutine
+    subroutine clk(t)
+        real(8), intent(out) :: t
+        integer(8) :: c, r
+        call system_clock(count=c, count_rate=r)
+        t = real(c, 8) / real(r, 8)
+    end subroutine
+    function med(x) result(m)
+        real(8), intent(in) :: x(:)
+        real(8) :: m
+        real(8), allocatable :: y(:)
+        integer :: i, j, n
+        real(8) :: tmp
+        n = size(x); allocate(y(n)); y = x
+        do i = 1, n - 1; do j = i + 1, n; if (y(j) < y(i)) then; tmp = y(i); y(i) = y(j); y(j) = tmp; end if; end do; end do
+        if (mod(n, 2) == 1) then; m = y((n + 1) / 2); else; m = 0.5_8 * (y(n / 2) + y(n / 2 + 1)); end if
+    end function
+    subroutine run_size(uplo, s, iters, t_subject, t_mig)
+        character, intent(in) :: uplo
+        integer, intent(in) :: s, iters
+        real(8), intent(out) :: t_subject, t_mig
+        integer :: it
+        real(8), allocatable :: so(:), sm(:)
+        real(8) :: t0, t1
+        allocate(A(s*s), A_init(s*s), X(s), Y(s)); allocate(so(iters), sm(iters))
+        call fill_matrix_real(A_init, s, s, s); call fill_matrix_real(X, s, 1, s); call fill_matrix_real(Y, s, 1, s)
+        A = A_init; call msyr(uplo, s, alpha, X, 1, A, s)
+        A = A_init; call msyr2_migrated(uplo, s, alpha, X, 1, Y, 1, A, s)
+        do it = 1, iters
+            A = A_init; call clk(t0); call msyr(uplo, s, alpha, X, 1, A, s); call clk(t1); so(it) = t1 - t0
+            A = A_init; call clk(t0); call msyr2_migrated(uplo, s, alpha, X, 1, Y, 1, A, s); call clk(t1); sm(it) = t1 - t0
+        end do
+        t_subject = med(so); t_mig = med(sm)
+        deallocate(A, A_init, X, Y, so, sm)
+    end subroutine
+    subroutine emit(uplo, s, to, tm)
+        character, intent(in) :: uplo
+        integer, intent(in) :: s
+        real(8), intent(in) :: to, tm
+        real(8) :: go, gm, sp
+        go = 2.0_8 * real(s, 8)**2 / to / 1.0e9_8
+        gm = 2.0_8 * real(s, 8)**2 / tm / 1.0e9_8
+        if (to > 0.0_8) then; sp = tm / to; else; sp = 0.0_8; end if
+        print '(a1,5x,i6,4x,f12.4,4x,f12.4,4x,f7.2,a)', uplo, s, go, gm, sp, 'x'
+    end subroutine
+end program

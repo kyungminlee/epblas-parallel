@@ -1,0 +1,76 @@
+! fuzz_mgbmv — multifloats real DD general band matrix-vector.
+
+program fuzz_mgbmv
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine mgbmv(trans, m, n, kl, ku, alpha, a, lda, x, incx, beta, y, incy)
+            import :: real64x2
+            character, intent(in) :: trans
+            integer, intent(in) :: m, n, kl, ku, lda, incx, incy
+            type(real64x2), intent(in) :: alpha, beta
+            type(real64x2), intent(in) :: a(lda, *), x(*)
+            type(real64x2), intent(inout) :: y(*)
+        end subroutine mgbmv
+        subroutine mgbmv_migrated(trans, m, n, kl, ku, alpha, a, lda, x, incx, beta, y, incy)
+            import :: real64x2
+            character, intent(in) :: trans
+            integer, intent(in) :: m, n, kl, ku, lda, incx, incy
+            type(real64x2), intent(in) :: alpha, beta
+            type(real64x2), intent(in) :: a(lda, *), x(*)
+            type(real64x2), intent(inout) :: y(*)
+        end subroutine mgbmv_migrated
+    end interface
+    integer :: seed, ncases, ic, m, n, kl, ku, lda, lenx, leny, incx, incy, lenx_alloc, leny_alloc, fails
+    character :: trans
+    type(real64x2) :: alpha, beta, err, tol
+    type(real64x2), allocatable :: A(:), X(:), Y0(:), Y_ov(:), Y_mig(:)
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_mgbmv: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        m = rand_int_log(1, 96); n = rand_int_log(1, 96)
+        kl = rand_int_log(0, min(m - 1, 8)); if (kl < 0) kl = 0
+        ku = rand_int_log(0, min(n - 1, 8)); if (ku < 0) ku = 0
+        call random_number(u); if (u < 0.5_8) then; trans = 'N'; else; trans = 'T'; end if
+        call rand_alpha_beta(alpha, beta)
+        if (trans == 'N') then; lenx = n; leny = m
+        else;                   lenx = m; leny = n
+        end if
+        lda = (kl + ku + 1) + rand_pad()
+        incx = rand_incx(); incy = rand_incx()
+        lenx_alloc = 1 + (lenx - 1) * abs(incx)
+        leny_alloc = 1 + (leny - 1) * abs(incy)
+        allocate(A(lda * n), X(lenx_alloc), Y0(leny_alloc), Y_ov(leny_alloc), Y_mig(leny_alloc))
+        call fill_matrix_real(A, kl + ku + 1, n, lda)
+        call fill_matrix_real(X, lenx_alloc, 1, lenx_alloc)
+        call fill_matrix_real(Y0, leny_alloc, 1, leny_alloc)
+        Y_ov = Y0; Y_mig = Y0
+        call mgbmv(trans, m, n, kl, ku, alpha, A, lda, X, incx, beta, Y_ov, incy)
+        call mgbmv_migrated(trans, m, n, kl, ku, alpha, A, lda, X, incx, beta, Y_mig, incy)
+        block
+            integer :: i
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do i = 1, leny_alloc
+                a_abs = abs(Y_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(Y_ov(i) - Y_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = real64x2(tiny(1.0_8))
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(max(m, n), 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then
+            fails = fails + 1
+            print '(a,i0,a,a1,a,2i6,a,2i4,a,i3,a,i3)', 'FAIL ', ic, ' T=', trans, ' mn=', m, n, ' klu=', kl, ku, ' incx=', incx, ' incy=', incy
+        end if
+        deallocate(A, X, Y0, Y_ov, Y_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_mgbmv: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

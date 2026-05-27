@@ -106,4 +106,15 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
     message(STATUS "composite: epparablas::${_composite} = WHOLE_ARCHIVE(${_overlay}) → ${_serial}")
 endforeach()
 
+# Overlay test suite. Needs Fortran (the consistency / fuzz / bench
+# drivers are .fypp-templated Fortran) and the fypp executable.
+option(BUILD_TESTING "Build the overlay test suite (needs Fortran + fypp)" ON)
+if(BUILD_TESTING)
+    enable_language(Fortran)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+    include(FortranCompiler)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 # Install/export lands in step 8.

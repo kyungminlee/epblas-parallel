@@ -1,0 +1,2 @@
+#:set routine = 'qsymm'
+#:include 'bench_symm_real_body.fypp'

@@ -1,0 +1,68 @@
+! fuzz_wgerc — multifloats complex DD conjugated rank-1 update consistency.
+
+program fuzz_wgerc
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine wgerc(m, n, alpha, x, incx, y, incy, a, lda)
+            import :: cmplx64x2
+            integer, intent(in) :: m, n, lda, incx, incy
+            type(cmplx64x2), intent(in) :: alpha
+            type(cmplx64x2), intent(in) :: x(*), y(*)
+            type(cmplx64x2), intent(inout) :: a(lda, *)
+        end subroutine wgerc
+        subroutine wgerc_migrated(m, n, alpha, x, incx, y, incy, a, lda)
+            import :: cmplx64x2
+            integer, intent(in) :: m, n, lda, incx, incy
+            type(cmplx64x2), intent(in) :: alpha
+            type(cmplx64x2), intent(in) :: x(*), y(*)
+            type(cmplx64x2), intent(inout) :: a(lda, *)
+        end subroutine wgerc_migrated
+    end interface
+    integer :: seed, ncases, ic, m, n, lda, incx, incy, lenx_alloc, leny_alloc, fails
+    type(cmplx64x2) :: alpha, dummy_beta
+    type(real64x2)  :: err, tol
+    type(cmplx64x2), allocatable :: A0(:), A_ov(:), A_mig(:), X(:), Y(:)
+    seed = read_seed(); ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_wgerc: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        m = rand_int_log(1, 128); n = rand_int_log(1, 128)
+        call rand_alpha_beta_complex(alpha, dummy_beta)
+        lda = m + rand_pad(); if (lda < 1) lda = 1
+        incx = rand_incx(); incy = rand_incx()
+        lenx_alloc = 1 + (m - 1) * abs(incx)
+        leny_alloc = 1 + (n - 1) * abs(incy)
+        allocate(A0(lda * n), A_ov(lda * n), A_mig(lda * n), X(lenx_alloc), Y(leny_alloc))
+        call fill_matrix_complex(A0, m, n, lda)
+        call fill_matrix_complex(X, lenx_alloc, 1, lenx_alloc)
+        call fill_matrix_complex(Y, leny_alloc, 1, leny_alloc)
+        A_ov = A0; A_mig = A0
+        call wgerc(m, n, alpha, X, incx, Y, incy, A_ov, lda)
+        call wgerc_migrated(m, n, alpha, X, incx, Y, incy, A_mig, lda)
+        block
+            integer :: i, j, idx
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do j = 1, n; do i = 1, m
+                idx = (j - 1) * lda + i
+                a_abs = abs(A_mig(idx)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(A_ov(idx) - A_mig(idx)); if (d_abs > diff_max) diff_max = d_abs
+            end do; end do
+            tiny_val = real64x2(tiny(1.0_8))
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(max(m, n), 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then
+            fails = fails + 1
+            print '(a,i0,a,2i6,a,i3,a,i3)', 'FAIL ', ic, ' mn=', m, n, ' incx=', incx, ' incy=', incy
+        end if
+        deallocate(A0, A_ov, A_mig, X, Y)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_wgerc: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

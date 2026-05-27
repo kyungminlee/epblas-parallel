@@ -1,0 +1,3 @@
+#:set routine = 'xswap'
+#:set flop_per_n = 8
+#:include 'bench_copyswap_complex_body.fypp'

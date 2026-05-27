@@ -1,0 +1,2 @@
+#:set routine = 'edot'
+#:include 'fuzz_dot_real_body.fypp'

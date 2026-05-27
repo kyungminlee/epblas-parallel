@@ -1,0 +1,98 @@
+#! Consistency fuzz driver — real GER (rank-1 update).
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(m, n, alpha, x, incx, y, incy, a, lda)
+            import :: rk
+            integer,   intent(in) :: m, n, lda, incx, incy
+            real(rk), intent(in)    :: alpha
+            real(rk), intent(in)    :: x(*), y(*)
+            real(rk), intent(inout) :: a(lda, *)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(m, n, alpha, x, incx, y, incy, a, lda)
+            import :: rk
+            integer,   intent(in) :: m, n, lda, incx, incy
+            real(rk), intent(in)    :: alpha
+            real(rk), intent(in)    :: x(*), y(*)
+            real(rk), intent(inout) :: a(lda, *)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, ic
+    integer :: m, n, lda, incx, incy, lenx, leny
+    integer :: fails
+    real(rk) :: alpha, dummy_beta, err, tol
+    real(rk), allocatable :: A0(:), A_ov(:), A_mig(:), X(:), Y(:)
+    real(8) :: u
+
+    seed = read_seed()
+    ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed)
+
+    fails = 0
+    do ic = 1, ncases
+        m = rand_int_log(1, 192)
+        n = rand_int_log(1, 192)
+        tol = max(10.0_rk, 4.0_rk * real(max(m, n), rk)) * eps
+        call rand_alpha_beta(alpha, dummy_beta)
+        lda = m + rand_pad()
+        if (lda < 1) lda = 1
+        incx = rand_incx(); incy = rand_incx()
+        lenx = 1 + (m - 1) * abs(incx)
+        leny = 1 + (n - 1) * abs(incy)
+
+        allocate(A0(lda * n), A_ov(lda * n), A_mig(lda * n))
+        allocate(X(lenx), Y(leny))
+
+        call fill_matrix_real(A0, m, n, lda)
+        call fill_matrix_real(X,  lenx, 1, lenx)
+        call fill_matrix_real(Y,  leny, 1, leny)
+        A_ov  = A0
+        A_mig = A0
+
+        call ${routine}$(m, n, alpha, X, incx, Y, incy, A_ov,  lda)
+        call ${routine}$_migrated(m, n, alpha, X, incx, Y, incy, A_mig, lda)
+
+        block
+            integer :: i, j, idx
+            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = 0.0_rk; diff_max = 0.0_rk
+            do j = 1, n
+                do i = 1, m
+                    idx = (j - 1) * lda + i
+                    a_abs = abs(A_mig(idx))
+                    if (a_abs > ref_max) ref_max = a_abs
+                    d_abs = abs(A_ov(idx) - A_mig(idx))
+                    if (d_abs > diff_max) diff_max = d_abs
+                end do
+            end do
+            tiny_val = tiny(1.0_rk)
+            if (ref_max < tiny_val) then; err = diff_max
+            else;                          err = diff_max / ref_max
+            end if
+        end block
+
+        call err_stats_record(err)
+
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,2i6,a,i6,a,i3,a,i3,a,es12.4,a,es12.4)', &
+                'FAIL case ', ic, '  mn=', m, n, '  lda=', lda, &
+                '  incx=', incx, '  incy=', incy, &
+                '  err=', err, '  tol=', tol
+        end if
+
+        deallocate(A0, A_ov, A_mig, X, Y)
+    end do
+
+    print '(a,i0,a,i0,a,i0)', &
+        'fuzz_${routine}$: ', ncases - fails, '/', ncases, &
+        ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program fuzz_${routine}$

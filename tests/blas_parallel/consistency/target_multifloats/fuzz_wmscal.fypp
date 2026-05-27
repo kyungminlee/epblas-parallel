@@ -1,0 +1,53 @@
+! fuzz_wmscal — multifloats mixed SCAL: real alpha, complex x.
+program fuzz_wmscal
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine wmscal(n, alpha, x, incx)
+            import :: real64x2, cmplx64x2
+            integer, intent(in) :: n, incx
+            type(real64x2), intent(in) :: alpha
+            type(cmplx64x2), intent(inout) :: x(*)
+        end subroutine
+        subroutine wmscal_migrated(n, alpha, x, incx)
+            import :: real64x2, cmplx64x2
+            integer, intent(in) :: n, incx
+            type(real64x2), intent(in) :: alpha
+            type(cmplx64x2), intent(inout) :: x(*)
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, n, incx, lenx, fails, i
+    type(real64x2) :: alpha, beta_unused, err, tol
+    type(cmplx64x2), allocatable :: X0(:), X_ov(:), X_mig(:)
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_wmscal: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096); incx = rand_incx_pos()
+        call rand_alpha_beta(alpha, beta_unused)
+        lenx = 1 + (n - 1) * abs(incx)
+        allocate(X0(lenx), X_ov(lenx), X_mig(lenx))
+        call fill_matrix_complex(X0, lenx, 1, lenx)
+        X_ov = X0; X_mig = X0
+        call wmscal(n, alpha, X_ov, incx)
+        call wmscal_migrated(n, alpha, X_mig, incx)
+        block
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do i = 1, lenx
+                a_abs = abs(X_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(X_ov(i) - X_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = real64x2(tiny(1.0_8))
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(n, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then; fails = fails + 1; print '(a,i0,a,2i6)', 'FAIL ', ic, ' n,incx=', n, incx; end if
+        deallocate(X0, X_ov, X_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_wmscal: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

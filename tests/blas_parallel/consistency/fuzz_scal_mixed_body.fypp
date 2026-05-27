@@ -1,0 +1,48 @@
+#! Consistency fuzz — mixed SCAL: x := alpha*x with alpha real, x complex.
+#! (yescal/xqscal/wmscal — CSSCAL/ZDSCAL analog.)
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+    interface
+        subroutine ${routine}$(n, alpha, x, incx)
+            import :: rk
+            integer, intent(in) :: n, incx
+            real(rk), intent(in) :: alpha
+            complex(rk), intent(inout) :: x(*)
+        end subroutine
+        subroutine ${routine}$_migrated(n, alpha, x, incx)
+            import :: rk
+            integer, intent(in) :: n, incx
+            real(rk), intent(in) :: alpha
+            complex(rk), intent(inout) :: x(*)
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, n, incx, lenx, fails
+    real(rk) :: alpha, beta_unused, err, tol
+    complex(rk), allocatable :: X0(:), X_ov(:), X_mig(:)
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096); incx = rand_incx_pos()
+        call rand_alpha_beta(alpha, beta_unused)
+        tol = max(10.0_rk, 4.0_rk * real(n, rk)) * eps
+        lenx = 1 + (n - 1) * abs(incx)
+        allocate(X0(lenx), X_ov(lenx), X_mig(lenx))
+        call fill_matrix_complex(X0, lenx, 1, lenx)
+        X_ov = X0; X_mig = X0
+        call ${routine}$(n, alpha, X_ov, incx)
+        call ${routine}$_migrated(n, alpha, X_mig, incx)
+        err = max_rel_err_complex(X_ov, X_mig, lenx, 1, lenx)
+        call err_stats_record(err)
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,2i6,a,es12.4)', 'FAIL ', ic, ' n,incx=', n, incx, ' err=', err
+        end if
+        deallocate(X0, X_ov, X_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program fuzz_${routine}$

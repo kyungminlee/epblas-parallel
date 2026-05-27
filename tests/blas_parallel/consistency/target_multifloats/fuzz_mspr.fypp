@@ -1,0 +1,69 @@
+! fuzz_mspr — multifloats real DD symmetric packed rank-1 update.
+
+program fuzz_mspr
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine mspr(uplo, n, alpha, x, incx, ap)
+            import :: real64x2
+            character, intent(in) :: uplo
+            integer, intent(in) :: n, incx
+            type(real64x2), intent(in) :: alpha
+            type(real64x2), intent(in) :: x(*)
+            type(real64x2), intent(inout) :: ap(*)
+        end subroutine mspr
+        subroutine mspr_migrated(uplo, n, alpha, x, incx, ap)
+            import :: real64x2
+            character, intent(in) :: uplo
+            integer, intent(in) :: n, incx
+            type(real64x2), intent(in) :: alpha
+            type(real64x2), intent(in) :: x(*)
+            type(real64x2), intent(inout) :: ap(*)
+        end subroutine mspr_migrated
+    end interface
+    integer :: seed, ncases, ic, n, plen, incx, lenx_alloc, fails
+    character :: uplo
+    type(real64x2) :: alpha, dummy_beta, err, tol
+    type(real64x2), allocatable :: AP0(:), AP_ov(:), AP_mig(:), X(:)
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_mspr: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 128)
+        call random_number(u); if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if
+        call rand_alpha_beta(alpha, dummy_beta)
+        plen = n * (n + 1) / 2
+        incx = rand_incx()
+        lenx_alloc = 1 + (n - 1) * abs(incx)
+        allocate(AP0(plen), AP_ov(plen), AP_mig(plen), X(lenx_alloc))
+        call fill_matrix_real(AP0, plen, 1, plen)
+        call fill_matrix_real(X, lenx_alloc, 1, lenx_alloc)
+        AP_ov = AP0; AP_mig = AP0
+        call mspr(uplo, n, alpha, X, incx, AP_ov)
+        call mspr_migrated(uplo, n, alpha, X, incx, AP_mig)
+        block
+            integer :: i
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do i = 1, plen
+                a_abs = abs(AP_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(AP_ov(i) - AP_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = real64x2(tiny(1.0_8))
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(n, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then
+            fails = fails + 1
+            print '(a,i0,a,a1,a,i6,a,i3)', 'FAIL ', ic, ' U=', uplo, ' n=', n, ' incx=', incx
+        end if
+        deallocate(AP0, AP_ov, AP_mig, X)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_mspr: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

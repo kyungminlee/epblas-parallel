@@ -1,0 +1,80 @@
+#! Consistency fuzz driver — real TBSV.
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(uplo, trans, diag, n, k, a, lda, x, incx)
+            import :: rk
+            character, intent(in) :: uplo, trans, diag
+            integer,   intent(in) :: n, k, lda, incx
+            real(rk), intent(in)    :: a(lda, *)
+            real(rk), intent(inout) :: x(*)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(uplo, trans, diag, n, k, a, lda, x, incx)
+            import :: rk
+            character, intent(in) :: uplo, trans, diag
+            integer,   intent(in) :: n, k, lda, incx
+            real(rk), intent(in)    :: a(lda, *)
+            real(rk), intent(inout) :: x(*)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, ic, n, k, lda, fails, j, drow, incx, lenx
+    character :: uplo, trans, diag
+    real(rk) :: err, tol, dshift
+    real(rk), allocatable :: A(:), X0(:), X_ov(:), X_mig(:)
+    real(8) :: u
+
+    seed = read_seed(); ncases = read_cases()
+
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 128)
+        k = rand_int_log(0, min(n - 1, 8)); if (k < 0) k = 0
+        tol = max(10.0_rk, 100.0_rk * real(n, rk)) * eps
+        call random_number(u); if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if
+        trans = rand_trans()
+        call random_number(u); if (u < 0.5_8) then; diag = 'N'; else; diag = 'U'; end if
+        lda = (k + 1) + rand_pad()
+        incx = rand_incx(); lenx = 1 + (n - 1) * abs(incx)
+        allocate(A(lda * n), X0(lenx), X_ov(lenx), X_mig(lenx))
+        call fill_matrix_real(A, k + 1, n, lda)
+        ! Shift diagonal for well-conditioning.
+        if (uplo == 'U') then; drow = k + 1
+        else;                  drow = 1
+        end if
+        dshift = real(n + 1, rk)
+        do j = 1, n
+            A((j - 1) * lda + drow) = A((j - 1) * lda + drow) + dshift
+        end do
+        call fill_matrix_real(X0, lenx, 1, lenx)
+        X_ov = X0; X_mig = X0
+        call ${routine}$(uplo, trans, diag, n, k, A, lda, X_ov, incx)
+        call ${routine}$_migrated(uplo, trans, diag, n, k, A, lda, X_mig, incx)
+        block
+            integer :: i
+            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = 0.0_rk; diff_max = 0.0_rk
+            do i = 1, lenx
+                a_abs = abs(X_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(X_ov(i) - X_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = tiny(1.0_rk)
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        call err_stats_record(err)
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,3a1,a,i6,a,i4,a,i3,a,es12.4)', &
+                'FAIL ', ic, ' UTD=', uplo, trans, diag, ' n=', n, ' k=', k, ' incx=', incx, ' err=', err
+        end if
+        deallocate(A, X0, X_ov, X_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program fuzz_${routine}$

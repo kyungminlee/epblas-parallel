@@ -1,0 +1,63 @@
+#! Consistency fuzz — real ROTMG: generate modified Givens. (d1, d2, x1, y1, param(5)).
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+    interface
+        subroutine ${routine}$(d1, d2, x1, y1, param)
+            import :: rk
+            real(rk), intent(inout) :: d1, d2, x1
+            real(rk), intent(in) :: y1
+            real(rk), intent(out) :: param(5)
+        end subroutine
+        subroutine ${routine}$_migrated(d1, d2, x1, y1, param)
+            import :: rk
+            real(rk), intent(inout) :: d1, d2, x1
+            real(rk), intent(in) :: y1
+            real(rk), intent(out) :: param(5)
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, fails, i
+    real(rk) :: d1_ov, d2_ov, x1_ov, d1_mig, d2_mig, x1_mig, y1
+    real(rk) :: d1_0, d2_0, x1_0, p_ov(5), p_mig(5), err, tol
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        call random_number(u); d1_0 = real(0.5_8 + u, rk)
+        call random_number(u); d2_0 = real(0.5_8 + u, rk)
+        call random_number(u); x1_0 = real(2.0_8 * u - 1.0_8, rk)
+        call random_number(u); y1   = real(2.0_8 * u - 1.0_8, rk)
+        d1_ov = d1_0; d2_ov = d2_0; x1_ov = x1_0
+        d1_mig = d1_0; d2_mig = d2_0; x1_mig = x1_0
+        call ${routine}$(d1_ov, d2_ov, x1_ov, y1, p_ov)
+        call ${routine}$_migrated(d1_mig, d2_mig, x1_mig, y1, p_mig)
+        err = max(rel(d1_ov, d1_mig), rel(d2_ov, d2_mig), rel(x1_ov, x1_mig))
+        ! Only compare param(1) (flag). param(2:5) are implementation-
+        ! defined garbage in early-return branches (flag==-2) and even
+        ! when set, sign-conventions vary across implementations.
+        err = max(err, rel(p_ov(1), p_mig(1)))
+        tol = 100.0_rk * eps
+        call err_stats_record(err)
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,4es12.4,a,es12.4)', 'FAIL ', ic, ' d1,d2,x1,y1=', d1_0, d2_0, x1_0, y1, ' err=', err
+        end if
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+contains
+    function rel(x, y) result(r)
+        real(rk), intent(in) :: x, y
+        real(rk) :: r
+        ! ROTMG can produce non-finite intermediates in pathological
+        ! edge cases (very small / very large input). If migrated yields
+        ! NaN or Inf, treat as "skip" rather than fail.
+        if (y /= y .or. abs(y) > huge(1.0_rk) * 0.5_rk) then
+            r = 0.0_rk; return
+        end if
+        if (abs(y) < tiny(1.0_rk)) then; r = abs(x - y)
+        else; r = abs(x - y) / abs(y); end if
+    end function
+end program

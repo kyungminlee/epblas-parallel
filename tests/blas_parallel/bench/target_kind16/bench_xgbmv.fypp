@@ -1,0 +1,2 @@
+#:set routine = 'xgbmv'
+#:include 'bench_gbmv_complex_body.fypp'

@@ -1,0 +1,126 @@
+#! Consistency fuzz — real SYMM. Parameterized by `routine`.
+#! Fills the non-UPLO triangle of A with sentinels and checks they
+#! stay untouched after the call.
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(side, uplo, m, n, alpha, a, lda, &
+                               b, ldb, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: side, uplo
+            integer,   intent(in) :: m, n, lda, ldb, ldc
+            real(rk), intent(in) :: alpha, beta
+            real(rk), intent(in) :: a(lda, *), b(ldb, *)
+            real(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(side, uplo, m, n, alpha, a, lda, &
+                                        b, ldb, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: side, uplo
+            integer,   intent(in) :: m, n, lda, ldb, ldc
+            real(rk), intent(in) :: alpha, beta
+            real(rk), intent(in) :: a(lda, *), b(ldb, *)
+            real(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, ic
+    integer :: m, n, lda, ldb, ldc, na
+    integer :: fails, sentinel_fails, bad_a_ov
+    character :: side, uplo
+    real(rk) :: alpha, beta, err, tol
+    real(rk), allocatable :: A(:), Aref(:), B(:), C0(:), C_ov(:), C_mig(:)
+    real(8) :: u
+
+    seed = read_seed()
+    ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed)
+
+    fails = 0
+    sentinel_fails = 0
+    do ic = 1, ncases
+        m = rand_int_log(1, 128)
+        n = rand_int_log(1, 128)
+        tol = max(10.0_rk, 4.0_rk * real(max(m, n), rk)) * eps
+        call random_number(u)
+        if (u < 0.5_8) then; side = 'L'; else; side = 'R'; end if
+        call random_number(u)
+        if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if
+        call rand_alpha_beta(alpha, beta)
+
+        if (side == 'L') then; na = m; else; na = n; end if
+        lda = na + rand_pad()
+        ldb = m  + rand_pad()
+        ldc = m  + rand_pad()
+        if (lda < 1) lda = 1
+        if (ldb < 1) ldb = 1
+        if (ldc < 1) ldc = 1
+
+        allocate(A   (lda * na))
+        allocate(Aref(lda * na))
+        allocate(B   (ldb * n))
+        allocate(C0  (ldc * n))
+        allocate(C_ov(ldc * n))
+        allocate(C_mig(ldc * n))
+
+        call fill_matrix_real(A,  na, na, lda)
+        ! Stuff non-UPLO triangle of A with sentinels (must not be read).
+        block
+            integer :: i, j, idx
+            do j = 1, na
+                do i = 1, na
+                    idx = (j - 1) * lda + i
+                    if ((uplo == 'L' .and. i < j) .or. &
+                        (uplo == 'U' .and. i > j)) then
+                        A(idx) = sentinel_re
+                    end if
+                end do
+            end do
+        end block
+        Aref = A
+        call fill_matrix_real(B,  m, n, ldb)
+        call fill_matrix_real(C0, m, n, ldc)
+        C_ov  = C0
+        C_mig = C0
+
+        call ${routine}$(side, uplo, m, n, alpha, A, lda, B, ldb, beta, C_ov,  ldc)
+        ! Check A wasn't modified
+        bad_a_ov = 0
+        block
+            integer :: i
+            do i = 1, lda * na
+                if (A(i) /= Aref(i)) then; bad_a_ov = i; exit; end if
+            end do
+        end block
+        call ${routine}$_migrated(side, uplo, m, n, alpha, A, lda, B, ldb, beta, C_mig, ldc)
+        err = max_rel_err_real(C_ov, C_mig, m, n, ldc)
+
+        call err_stats_record(err)
+
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,2a1,a,2i6,a,3i6,a,es12.4,a,es12.4)', &
+                'FAIL case ', ic, '  SU=', side, uplo, &
+                '  mn=', m, n, '  lda/ldb/ldc=', lda, ldb, ldc, &
+                '  err=', err, '  tol=', tol
+        end if
+        if (bad_a_ov /= 0) then
+            sentinel_fails = sentinel_fails + 1
+            print '(a,i0)', 'OVERLAY wrote into A at idx ', bad_a_ov
+        end if
+
+        deallocate(A, Aref, B, C0, C_ov, C_mig)
+    end do
+
+    print '(a,i0,a,i0,a,i0,a,i0)', &
+        'fuzz_${routine}$: ', ncases - fails, '/', ncases, &
+        ' passed; tol_fails=', fails, ' sentinel_fails=', sentinel_fails
+
+    call err_stats_print()
+    if (fails > 0 .or. sentinel_fails > 0) error stop 1
+end program fuzz_${routine}$

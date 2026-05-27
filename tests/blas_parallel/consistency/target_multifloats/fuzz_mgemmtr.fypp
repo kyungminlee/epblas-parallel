@@ -1,0 +1,75 @@
+! fuzz_mgemmtr — multifloats GEMMTR (triangular GEMM update).
+program fuzz_mgemmtr
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine mgemmtr(uplo, transa, transb, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+            import :: real64x2, cmplx64x2
+            character, intent(in) :: uplo, transa, transb
+            integer, intent(in) :: n, k, lda, ldb, ldc
+            type(real64x2), intent(in) :: alpha, beta
+            type(real64x2), intent(in) :: a(lda, *), b(ldb, *)
+            type(real64x2), intent(inout) :: c(ldc, *)
+        end subroutine
+        subroutine mgemmtr_migrated(uplo, transa, transb, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+            import :: real64x2, cmplx64x2
+            character, intent(in) :: uplo, transa, transb
+            integer, intent(in) :: n, k, lda, ldb, ldc
+            type(real64x2), intent(in) :: alpha, beta
+            type(real64x2), intent(in) :: a(lda, *), b(ldb, *)
+            type(real64x2), intent(inout) :: c(ldc, *)
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, n, kk, lda, ldb, ldc, ra, ca, rb, cb, fails, i
+    character :: uplo, ta, tb
+    type(real64x2) :: alpha, beta
+    type(real64x2) :: err, tol
+    type(real64x2), allocatable :: A(:), B(:), C0(:), C_ov(:), C_mig(:)
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_mgemmtr: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 128); kk = rand_int_log(1, 128)
+        call random_number(u); uplo = merge('U', 'L', u < 0.5_8)
+        ta = rand_trans(); tb = rand_trans()
+        call rand_alpha_beta(alpha, beta)
+        if (ta == 'N') then; ra = n; ca = kk; else; ra = kk; ca = n; end if
+        if (tb == 'N') then; rb = kk; cb = n; else; rb = n; cb = kk; end if
+        lda = ra + rand_pad(); ldb = rb + rand_pad(); ldc = n + rand_pad()
+        if (lda < 1) lda = 1; if (ldb < 1) ldb = 1; if (ldc < 1) ldc = 1
+        allocate(A(lda * ca), B(ldb * cb))
+        allocate(C0(ldc * n), C_ov(ldc * n), C_mig(ldc * n))
+        call fill_matrix_real(A, ra, ca, lda); call fill_matrix_real(B, rb, cb, ldb)
+        call fill_matrix_real(C0, n, n, ldc)
+        C_ov = C0; C_mig = C0
+        call mgemmtr(uplo, ta, tb, n, kk, alpha, A, lda, B, ldb, beta, C_ov, ldc)
+        call mgemmtr_migrated(uplo, ta, tb, n, kk, alpha, A, lda, B, ldb, beta, C_mig, ldc)
+        block
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tv
+            integer :: ix
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do i = 1, n
+                do ix = 1, n
+                    a_abs = abs(C_mig((i-1)*ldc + ix))
+                    if (a_abs > ref_max) ref_max = a_abs
+                    d_abs = abs(C_ov((i-1)*ldc + ix) - C_mig((i-1)*ldc + ix))
+                    if (d_abs > diff_max) diff_max = d_abs
+                end do
+            end do
+            tv = real64x2(tiny(1.0_8))
+            if (ref_max < tv) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(kk, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then
+            fails = fails + 1
+            print '(a,i0,a,3a1,a,2i6)', 'FAIL ', ic, ' uplo/T=', uplo, ta, tb, ' n,k=', n, kk
+        end if
+        deallocate(A, B, C0, C_ov, C_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_mgemmtr: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

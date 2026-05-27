@@ -1,0 +1,108 @@
+#! Consistency fuzz driver — real GEMV, parameterized by routine name.
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(trans, m, n, alpha, a, lda, x, incx, beta, y, incy)
+            import :: rk
+            character, intent(in) :: trans
+            integer,   intent(in) :: m, n, lda, incx, incy
+            real(rk), intent(in)    :: alpha, beta
+            real(rk), intent(in)    :: a(lda, *), x(*)
+            real(rk), intent(inout) :: y(*)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(trans, m, n, alpha, a, lda, x, incx, beta, y, incy)
+            import :: rk
+            character, intent(in) :: trans
+            integer,   intent(in) :: m, n, lda, incx, incy
+            real(rk), intent(in)    :: alpha, beta
+            real(rk), intent(in)    :: a(lda, *), x(*)
+            real(rk), intent(inout) :: y(*)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, ic
+    integer :: m, n, lda, lenx, leny, incx, incy, lenx_alloc, leny_alloc
+    integer :: fails
+    character :: trans
+    real(rk) :: alpha, beta, err, tol
+    real(rk), allocatable :: A(:), X(:), Y0(:), Y_ov(:), Y_mig(:)
+    real(8) :: u
+
+    seed = read_seed()
+    ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed)
+
+    fails = 0
+    do ic = 1, ncases
+        m = rand_int_log(1, 256)
+        n = rand_int_log(1, 256)
+        tol = max(10.0_rk, 4.0_rk * real(max(m, n), rk)) * eps
+        call random_number(u)
+        if (u < 0.5_8) then; trans = 'N'; else; trans = 'T'; end if
+        call rand_alpha_beta(alpha, beta)
+
+        if (trans == 'N') then; lenx = n; leny = m
+        else;                   lenx = m; leny = n
+        end if
+        lda = m + rand_pad()
+        if (lda < 1) lda = 1
+        incx = rand_incx(); incy = rand_incx()
+        lenx_alloc = 1 + (lenx - 1) * abs(incx)
+        leny_alloc = 1 + (leny - 1) * abs(incy)
+
+        allocate(A(lda * n))
+        allocate(X(lenx_alloc))
+        allocate(Y0(leny_alloc))
+        allocate(Y_ov(leny_alloc))
+        allocate(Y_mig(leny_alloc))
+
+        call fill_matrix_real(A,  m,          n, lda)
+        call fill_matrix_real(X,  lenx_alloc, 1, lenx_alloc)
+        call fill_matrix_real(Y0, leny_alloc, 1, leny_alloc)
+        Y_ov  = Y0
+        Y_mig = Y0
+
+        call ${routine}$(trans, m, n, alpha, A, lda, X, incx, beta, Y_ov,  incy)
+        call ${routine}$_migrated(trans, m, n, alpha, A, lda, X, incx, beta, Y_mig, incy)
+
+        block
+            integer :: i
+            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = 0.0_rk; diff_max = 0.0_rk
+            do i = 1, leny_alloc
+                a_abs = abs(Y_mig(i))
+                if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(Y_ov(i) - Y_mig(i))
+                if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = tiny(1.0_rk)
+            if (ref_max < tiny_val) then; err = diff_max
+            else;                          err = diff_max / ref_max
+            end if
+        end block
+
+        call err_stats_record(err)
+
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,a1,a,2i6,a,i6,a,i3,a,i3,a,es12.4,a,es12.4)', &
+                'FAIL case ', ic, '  T=', trans, &
+                '  mn=', m, n, '  lda=', lda, &
+                '  incx=', incx, '  incy=', incy, &
+                '  err=', err, '  tol=', tol
+        end if
+
+        deallocate(A, X, Y0, Y_ov, Y_mig)
+    end do
+
+    print '(a,i0,a,i0,a,i0)', &
+        'fuzz_${routine}$: ', ncases - fails, '/', ncases, &
+        ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program fuzz_${routine}$

@@ -1,0 +1,84 @@
+! fuzz_wtpmv — multifloats complex DD triangular packed matrix-vector.
+
+program fuzz_wtpmv
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine wtpmv(uplo, trans, diag, n, ap, x, incx)
+            import :: cmplx64x2
+            character, intent(in) :: uplo, trans, diag
+            integer, intent(in) :: n, incx
+            type(cmplx64x2), intent(in) :: ap(*)
+            type(cmplx64x2), intent(inout) :: x(*)
+        end subroutine wtpmv
+        subroutine wtpmv_migrated(uplo, trans, diag, n, ap, x, incx)
+            import :: cmplx64x2
+            character, intent(in) :: uplo, trans, diag
+            integer, intent(in) :: n, incx
+            type(cmplx64x2), intent(in) :: ap(*)
+            type(cmplx64x2), intent(inout) :: x(*)
+        end subroutine wtpmv_migrated
+    end interface
+    integer :: seed, ncases, ic, n, plen, incx, lenx_alloc, fails, j, jk
+    character :: uplo, trans, diag
+    type(cmplx64x2) :: aii
+    type(real64x2)  :: err, tol
+    type(cmplx64x2), allocatable :: AP(:), X0(:), X_ov(:), X_mig(:)
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_wtpmv: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 64)
+        call random_number(u); if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if
+        call random_number(u)
+        if (u < 1.0_8/3.0_8) then; trans = 'N'
+        else if (u < 2.0_8/3.0_8) then; trans = 'T'
+        else; trans = 'C'
+        end if
+        call random_number(u); if (u < 0.5_8) then; diag = 'N'; else; diag = 'U'; end if
+        plen = n * (n + 1) / 2
+        incx = rand_incx()
+        lenx_alloc = 1 + (n - 1) * abs(incx)
+        allocate(AP(plen), X0(lenx_alloc), X_ov(lenx_alloc), X_mig(lenx_alloc))
+        call fill_matrix_complex(AP, plen, 1, plen)
+        jk = 0
+        do j = 1, n
+            if (uplo == 'U') then
+                aii = AP(jk + j)
+                AP(jk + j) = cmplx64x2(aii%re + real64x2(real(n + 1, 8)), aii%im)
+                jk = jk + j
+            else
+                aii = AP(jk + 1)
+                AP(jk + 1) = cmplx64x2(aii%re + real64x2(real(n + 1, 8)), aii%im)
+                jk = jk + (n - j + 1)
+            end if
+        end do
+        call fill_matrix_complex(X0, lenx_alloc, 1, lenx_alloc); X_ov = X0; X_mig = X0
+        call wtpmv(uplo, trans, diag, n, AP, X_ov, incx)
+        call wtpmv_migrated(uplo, trans, diag, n, AP, X_mig, incx)
+        block
+            integer :: ii
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do ii = 1, lenx_alloc
+                a_abs = abs(X_mig(ii)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(X_ov(ii) - X_mig(ii)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = real64x2(tiny(1.0_8))
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(8.0_8 * real(n, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then
+            fails = fails + 1
+            print '(a,i0,a,3a1,a,i6,a,i3)', 'FAIL ', ic, ' UTD=', uplo, trans, diag, ' n=', n, ' incx=', incx
+        end if
+        deallocate(AP, X0, X_ov, X_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_wtpmv: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

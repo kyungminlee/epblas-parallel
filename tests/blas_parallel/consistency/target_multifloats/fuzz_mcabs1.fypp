@@ -1,0 +1,41 @@
+! fuzz_mcabs1 — multifloats CABS1.
+program fuzz_mcabs1
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        function mcabs1(z) result(r)
+            import :: real64x2, cmplx64x2
+            type(cmplx64x2), intent(in) :: z
+            type(real64x2) :: r
+        end function
+        function mcabs1_migrated(z) result(r)
+            import :: real64x2, cmplx64x2
+            type(cmplx64x2), intent(in) :: z
+            type(real64x2) :: r
+        end function
+    end interface
+    integer :: seed, ncases, ic, fails
+    type(cmplx64x2) :: z
+    type(real64x2) :: r_o, r_m, err, tol
+    real(8) :: ur, ui
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_mcabs1: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        call random_number(ur); call random_number(ui)
+        z = cmplx64x2(real64x2(2.0_8*ur-1.0_8), real64x2(2.0_8*ui-1.0_8))
+        r_o = mcabs1(z); r_m = mcabs1_migrated(z)
+        block
+            type(real64x2) :: ay, d
+            ay = abs(r_m); d = abs(r_o - r_m)
+            if (ay < real64x2(tiny(1.0_8))) then; err = d; else; err = d / ay; end if
+        end block
+        tol = real64x2(10.0_8) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then; fails = fails + 1; print '(a,i0)', 'FAIL ', ic; end if
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_mcabs1: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

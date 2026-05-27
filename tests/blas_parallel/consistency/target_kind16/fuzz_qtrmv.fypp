@@ -1,0 +1,2 @@
+#:set routine = 'qtrmv'
+#:include 'fuzz_trmv_real_body.fypp'

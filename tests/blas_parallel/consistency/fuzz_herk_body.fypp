@@ -1,0 +1,155 @@
+#! Consistency fuzz driver — Hermitian rank-k update (HERK).
+#! For kind10/kind16 only (multifloats uses a hand-written shim).
+#! TRANS ∈ {N, C}. Alpha and beta are REAL (not complex). Diagonal
+#! entries of C stay real after the call.
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(uplo, trans, n, k, alpha, a, lda, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: uplo, trans
+            integer,   intent(in) :: n, k, lda, ldc
+            real(rk),    intent(in) :: alpha, beta
+            complex(rk), intent(in) :: a(lda, *)
+            complex(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(uplo, trans, n, k, alpha, a, lda, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: uplo, trans
+            integer,   intent(in) :: n, k, lda, ldc
+            real(rk),    intent(in) :: alpha, beta
+            complex(rk), intent(in) :: a(lda, *)
+            complex(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, ic
+    integer :: n, k, lda, ldc, rows_a, cols_a
+    integer :: fails, sentinel_fails, bad_ov, bad_mig
+    character :: uplo, trans
+    real(rk)    :: alpha, beta, err, tol
+    complex(rk) :: c_sentinel
+    complex(rk), allocatable :: A(:), C0(:), C_ov(:), C_mig(:)
+    real(8) :: u
+
+    c_sentinel = cmplx(sentinel_re, sentinel_im, rk)
+
+    seed = read_seed()
+    ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed)
+
+    fails = 0
+    sentinel_fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 96)
+        k = rand_int_log(1, 96)
+        tol = max(10.0_rk, 4.0_rk * real(k, rk)) * eps
+        call random_number(u)
+        if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if
+        call random_number(u)
+        if (u < 0.5_8) then; trans = 'N'; else; trans = 'C'; end if
+        call random_number(u)
+        alpha = real(2.0_8 * u - 1.0_8, rk)
+        call random_number(u)
+        beta  = real(2.0_8 * u - 1.0_8, rk)
+
+        if (trans == 'N') then; rows_a = n; cols_a = k
+        else;                   rows_a = k; cols_a = n
+        end if
+        lda = rows_a + rand_pad()
+        ldc = n      + rand_pad()
+        if (lda < 1) lda = 1
+        if (ldc < 1) ldc = 1
+
+        allocate(A(lda * cols_a))
+        allocate(C0   (ldc * n))
+        allocate(C_ov (ldc * n))
+        allocate(C_mig(ldc * n))
+
+        call fill_matrix_complex(A,  rows_a, cols_a, lda)
+        call fill_matrix_complex(C0, n,      n,      ldc)
+        block
+            integer :: i, j, idx
+            do j = 1, n
+                do i = 1, n
+                    idx = (j - 1) * ldc + i
+                    if ((uplo == 'L' .and. i < j) .or. &
+                        (uplo == 'U' .and. i > j)) then
+                        C0(idx) = c_sentinel
+                    end if
+                end do
+            end do
+        end block
+        C_ov  = C0
+        C_mig = C0
+
+        call ${routine}$(uplo, trans, n, k, alpha, A, lda, beta, C_ov,  ldc)
+        call ${routine}$_migrated(uplo, trans, n, k, alpha, A, lda, beta, C_mig, ldc)
+
+        block
+            integer :: i, j, idx
+            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            complex(rk) :: dz
+            ref_max  = 0.0_rk
+            diff_max = 0.0_rk
+            do j = 1, n
+                do i = 1, n
+                    idx = (j - 1) * ldc + i
+                    if ((uplo == 'L' .and. i >= j) .or. &
+                        (uplo == 'U' .and. i <= j)) then
+                        a_abs = abs(C_mig(idx))
+                        if (a_abs > ref_max) ref_max = a_abs
+                        dz = C_ov(idx) - C_mig(idx)
+                        d_abs = abs(dz)
+                        if (d_abs > diff_max) diff_max = d_abs
+                    end if
+                end do
+            end do
+            tiny_val = tiny(1.0_rk)
+            if (ref_max < tiny_val) then; err = diff_max
+            else;                          err = diff_max / ref_max
+            end if
+        end block
+        bad_ov  = check_sentinels_complex(C_ov,  n, n, ldc)
+        bad_mig = check_sentinels_complex(C_mig, n, n, ldc)
+        block
+            integer :: i, j, idx
+            do j = 1, n
+                do i = 1, n
+                    idx = (j - 1) * ldc + i
+                    if ((uplo == 'L' .and. i < j) .or. &
+                        (uplo == 'U' .and. i > j)) then
+                        if (C_ov(idx)  /= c_sentinel) bad_ov  = j
+                        if (C_mig(idx) /= c_sentinel) bad_mig = j
+                    end if
+                end do
+            end do
+        end block
+
+        call err_stats_record(err)
+
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,2a1,a,2i6,a,2i6,a,es12.4,a,es12.4)', &
+                'FAIL case ', ic, '  UT=', uplo, trans, &
+                '  nk=', n, k, '  lda/ldc=', lda, ldc, &
+                '  err=', err, '  tol=', tol
+        end if
+        if (bad_ov /= 0) sentinel_fails = sentinel_fails + 1
+        if (bad_mig /= 0) sentinel_fails = sentinel_fails + 1
+
+        deallocate(A, C0, C_ov, C_mig)
+    end do
+
+    print '(a,i0,a,i0,a,i0,a,i0)', &
+        'fuzz_${routine}$: ', ncases - fails, '/', ncases, &
+        ' passed; tol_fails=', fails, ' sentinel_fails=', sentinel_fails
+
+    call err_stats_print()
+    if (fails > 0 .or. sentinel_fails > 0) error stop 1
+end program fuzz_${routine}$

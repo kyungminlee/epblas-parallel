@@ -1,0 +1,176 @@
+#! Wall-clock bench — complex SYMM, all SIDE×UPLO × sizes.
+
+program bench_${routine}$
+    use fuzz_util, only: rk, fill_matrix_complex
+    implicit none
+
+    interface
+        subroutine ${routine}$(side, uplo, m, n, alpha, a, lda, b, ldb, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: side, uplo
+            integer,   intent(in) :: m, n, lda, ldb, ldc
+            complex(rk), intent(in) :: alpha, beta
+            complex(rk), intent(in) :: a(lda, *), b(ldb, *)
+            complex(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(side, uplo, m, n, alpha, a, lda, b, ldb, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: side, uplo
+            integer,   intent(in) :: m, n, lda, ldb, ldc
+            complex(rk), intent(in) :: alpha, beta
+            complex(rk), intent(in) :: a(lda, *), b(ldb, *)
+            complex(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: iters, warmup, nsizes, i, isd, iup
+    integer, allocatable :: sizes(:)
+    complex(rk), allocatable :: A(:), B(:), C(:), C_init(:)
+    complex(rk) :: alpha, beta
+    real(8) :: t_subject, t_mig
+    character(len=256) :: out_path
+    integer :: ios, jio
+    character(len=1), parameter :: SIDES(2) = ['L', 'R']
+    character(len=1), parameter :: UPLOS(2) = ['L', 'U']
+
+    iters  = read_int_env('BLAS_BENCH_ITERS',  2)
+    warmup = read_int_env('BLAS_BENCH_WARMUP', 1)
+    call read_sizes(sizes)
+    nsizes = size(sizes)
+    call get_environment_variable('BLAS_BENCH_OUT', out_path, status=ios)
+    if (ios /= 0 .or. len_trim(out_path) == 0) out_path = 'bench_${routine}$.json'
+
+    alpha = cmplx(0.7_rk, 0.1_rk, rk)
+    beta  = cmplx(0.3_rk, 0.2_rk, rk)
+
+    open(newunit=jio, file=trim(out_path), action='write', status='replace')
+    write(jio, '(a)') '{}'; close(jio)
+
+    print '(a)', 'side uplo    size      subject GF/s   migrated GF/s   speedup'
+    do isd = 1, size(SIDES)
+      do iup = 1, size(UPLOS)
+        do i = 1, nsizes
+            call run_size(SIDES(isd), UPLOS(iup), sizes(i), alpha, beta, iters, warmup, t_subject, t_mig)
+            call emit_console(SIDES(isd), UPLOS(iup), sizes(i), t_subject, t_mig)
+        end do
+      end do
+    end do
+
+contains
+
+    function read_int_env(name, dflt) result(v)
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: dflt
+        integer :: v, ios
+        character(len=64) :: buf
+        v = dflt
+        call get_environment_variable(name, buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then
+            read(buf, *, iostat=ios) v
+            if (ios /= 0) v = dflt
+        end if
+    end function read_int_env
+
+    subroutine read_sizes(arr)
+        integer, allocatable, intent(out) :: arr(:)
+        character(len=256) :: buf
+        integer :: ios, i, j, n, val
+        character(len=32) :: tok
+        call get_environment_variable('BLAS_BENCH_SIZES', buf, status=ios)
+        if (ios /= 0 .or. len_trim(buf) == 0) then; arr = [64, 128, 256, 512]; return; end if
+        n = 1
+        do i = 1, len_trim(buf); if (buf(i:i) == ',') n = n + 1; end do
+        allocate(arr(n))
+        j = 1; tok = ''; n = 0
+        do i = 1, len_trim(buf) + 1
+            if (i > len_trim(buf) .or. buf(i:i) == ',') then
+                read(tok, *, iostat=ios) val
+                if (ios == 0) then; n = n + 1; arr(n) = val; end if
+                tok = ''; j = 1
+            else; tok(j:j) = buf(i:i); j = j + 1; end if
+        end do
+        if (n < size(arr)) arr = arr(1:n)
+    end subroutine read_sizes
+
+    subroutine run_size(side, uplo, s, alpha, beta, iters, warmup, t_subject, t_mig)
+        character, intent(in) :: side, uplo
+        integer, intent(in) :: s, iters, warmup
+        complex(rk), intent(in) :: alpha, beta
+        real(8), intent(out) :: t_subject, t_mig
+        integer :: it
+        real(8), allocatable :: samples_ov(:), samples_mig(:)
+        real(8) :: t0, t1
+
+        allocate(A(s * s), B(s * s), C(s * s), C_init(s * s))
+        allocate(samples_ov(iters), samples_mig(iters))
+        call fill_matrix_complex(A,      s, s, s)
+        call fill_matrix_complex(B,      s, s, s)
+        call fill_matrix_complex(C_init, s, s, s)
+
+        do it = 1, warmup
+            C = C_init
+            call ${routine}$(side, uplo, s, s, alpha, A, s, B, s, beta, C, s)
+            C = C_init
+            call ${routine}$_migrated(side, uplo, s, s, alpha, A, s, B, s, beta, C, s)
+        end do
+        do it = 1, iters
+            C = C_init
+            call cpu_clock(t0)
+            call ${routine}$(side, uplo, s, s, alpha, A, s, B, s, beta, C, s)
+            call cpu_clock(t1)
+            samples_ov(it) = t1 - t0
+            C = C_init
+            call cpu_clock(t0)
+            call ${routine}$_migrated(side, uplo, s, s, alpha, A, s, B, s, beta, C, s)
+            call cpu_clock(t1)
+            samples_mig(it) = t1 - t0
+        end do
+        t_subject  = median(samples_ov)
+        t_mig = median(samples_mig)
+        deallocate(A, B, C, C_init, samples_ov, samples_mig)
+    end subroutine run_size
+
+    subroutine cpu_clock(t)
+        real(8), intent(out) :: t
+        integer(8) :: c, r
+        call system_clock(count=c, count_rate=r)
+        t = real(c, 8) / real(r, 8)
+    end subroutine cpu_clock
+
+    function median(x) result(m)
+        real(8), intent(in) :: x(:)
+        real(8) :: m
+        real(8), allocatable :: y(:)
+        integer :: i, j, n
+        real(8) :: tmp
+        n = size(x); allocate(y(n)); y = x
+        do i = 1, n - 1
+            do j = i + 1, n
+                if (y(j) < y(i)) then; tmp = y(i); y(i) = y(j); y(j) = tmp; end if
+            end do
+        end do
+        if (mod(n, 2) == 1) then; m = y((n + 1) / 2)
+        else; m = 0.5_8 * (y(n / 2) + y(n / 2 + 1)); end if
+    end function median
+
+    function gflops(s, t) result(g)
+        integer, intent(in) :: s
+        real(8), intent(in) :: t
+        real(8) :: g
+        if (t > 0.0_8) then; g = 8.0_8 * real(s, 8)**3 / t / 1.0e9_8
+        else; g = 0.0_8; end if
+    end function gflops
+
+    subroutine emit_console(side, uplo, s, t_subject, t_mig)
+        character, intent(in) :: side, uplo
+        integer, intent(in) :: s
+        real(8), intent(in) :: t_subject, t_mig
+        real(8) :: g_ov, g_mig, speedup
+        g_ov  = gflops(s, t_subject); g_mig = gflops(s, t_mig)
+        if (t_subject > 0.0_8) then; speedup = t_mig / t_subject
+        else; speedup = 0.0_8; end if
+        print '(a1,4x,a1,5x,i6,4x,f12.4,4x,f12.4,4x,f7.2,a)', &
+            side, uplo, s, g_ov, g_mig, speedup, 'x'
+    end subroutine emit_console
+
+end program bench_${routine}$

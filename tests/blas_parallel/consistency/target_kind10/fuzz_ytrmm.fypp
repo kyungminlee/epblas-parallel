@@ -1,0 +1,2 @@
+#:set routine = 'ytrmm'
+#:include 'fuzz_trmm_complex_body.fypp'

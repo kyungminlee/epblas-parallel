@@ -1,0 +1,125 @@
+#! Wall-clock bench — Hermitian HER2 (alpha complex).
+
+program bench_${routine}$
+    use fuzz_util, only: rk, fill_matrix_complex
+    implicit none
+
+    interface
+        subroutine ${routine}$(uplo, n, alpha, x, incx, y, incy, a, lda)
+            import :: rk
+            character, intent(in) :: uplo
+            integer,   intent(in) :: n, lda, incx, incy
+            complex(rk), intent(in) :: alpha
+            complex(rk), intent(in)    :: x(*), y(*)
+            complex(rk), intent(inout) :: a(lda, *)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(uplo, n, alpha, x, incx, y, incy, a, lda)
+            import :: rk
+            character, intent(in) :: uplo
+            integer,   intent(in) :: n, lda, incx, incy
+            complex(rk), intent(in) :: alpha
+            complex(rk), intent(in)    :: x(*), y(*)
+            complex(rk), intent(inout) :: a(lda, *)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: iters, warmup, nsizes, i, iup
+    integer, allocatable :: sizes(:)
+    complex(rk), allocatable :: A(:), X(:), Y(:), A_init(:)
+    complex(rk) :: alpha
+    real(8) :: t_subject, t_mig
+    character(len=1), parameter :: UPLOS(2) = ['L', 'U']
+
+    iters  = read_int_env('BLAS_BENCH_ITERS',  4)
+    warmup = read_int_env('BLAS_BENCH_WARMUP', 1)
+    call read_sizes(sizes); nsizes = size(sizes)
+    alpha = cmplx(0.7_rk, 0.1_rk, rk)
+
+    print '(a)', 'uplo    size      subject GF/s   migrated GF/s   speedup'
+    do iup = 1, size(UPLOS)
+        do i = 1, nsizes
+            call run_size(UPLOS(iup), sizes(i), alpha, iters, warmup, t_subject, t_mig)
+            call emit(UPLOS(iup), sizes(i), t_subject, t_mig)
+        end do
+    end do
+
+contains
+    function read_int_env(name, dflt) result(v)
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: dflt
+        integer :: v, ios
+        character(len=64) :: buf
+        v = dflt; call get_environment_variable(name, buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then; read(buf, *, iostat=ios) v; if (ios /= 0) v = dflt; end if
+    end function
+    subroutine read_sizes(arr)
+        integer, allocatable, intent(out) :: arr(:)
+        character(len=256) :: buf
+        integer :: ios, i, j, n, val
+        character(len=32) :: tok
+        call get_environment_variable('BLAS_BENCH_SIZES', buf, status=ios)
+        if (ios /= 0 .or. len_trim(buf) == 0) then; arr = [128, 256, 512]; return; end if
+        n = 1
+        do i = 1, len_trim(buf); if (buf(i:i) == ',') n = n + 1; end do
+        allocate(arr(n)); j = 1; tok = ''; n = 0
+        do i = 1, len_trim(buf) + 1
+            if (i > len_trim(buf) .or. buf(i:i) == ',') then
+                read(tok, *, iostat=ios) val
+                if (ios == 0) then; n = n + 1; arr(n) = val; end if
+                tok = ''; j = 1
+            else; tok(j:j) = buf(i:i); j = j + 1; end if
+        end do
+        if (n < size(arr)) arr = arr(1:n)
+    end subroutine
+    subroutine run_size(uplo, s, alpha, iters, warmup, t_subject, t_mig)
+        character, intent(in) :: uplo; integer, intent(in) :: s, iters, warmup
+        complex(rk), intent(in) :: alpha
+        real(8), intent(out) :: t_subject, t_mig
+        integer :: it, i
+        real(8), allocatable :: so(:), sm(:)
+        real(8) :: t0, t1
+        allocate(A(s*s), A_init(s*s), X(s), Y(s)); allocate(so(iters), sm(iters))
+        call fill_matrix_complex(A_init, s, s, s); call fill_matrix_complex(X, s, 1, s); call fill_matrix_complex(Y, s, 1, s)
+        do i = 1, s
+            A_init((i - 1) * s + i) = cmplx(real(A_init((i - 1) * s + i), rk), 0.0_rk, rk)
+        end do
+        do it = 1, warmup
+            A = A_init; call ${routine}$(uplo, s, alpha, X, 1, Y, 1, A, s)
+            A = A_init; call ${routine}$_migrated(uplo, s, alpha, X, 1, Y, 1, A, s)
+        end do
+        do it = 1, iters
+            A = A_init; call clk(t0); call ${routine}$(uplo, s, alpha, X, 1, Y, 1, A, s); call clk(t1); so(it) = t1 - t0
+            A = A_init; call clk(t0); call ${routine}$_migrated(uplo, s, alpha, X, 1, Y, 1, A, s); call clk(t1); sm(it) = t1 - t0
+        end do
+        t_subject = med(so); t_mig = med(sm)
+        deallocate(A, A_init, X, Y, so, sm)
+    end subroutine
+    subroutine clk(t)
+        real(8), intent(out) :: t
+        integer(8) :: c, r
+        call system_clock(count=c, count_rate=r)
+        t = real(c, 8) / real(r, 8)
+    end subroutine
+    function med(x) result(m)
+        real(8), intent(in) :: x(:)
+        real(8) :: m
+        real(8), allocatable :: y(:)
+        integer :: i, j, n
+        real(8) :: tmp
+        n = size(x); allocate(y(n)); y = x
+        do i = 1, n - 1
+            do j = i + 1, n
+                if (y(j) < y(i)) then; tmp = y(i); y(i) = y(j); y(j) = tmp; end if
+            end do
+        end do
+        if (mod(n, 2) == 1) then; m = y((n + 1) / 2); else; m = 0.5_8 * (y(n / 2) + y(n / 2 + 1)); end if
+    end function
+    subroutine emit(uplo, s, to, tm)
+        character, intent(in) :: uplo; integer, intent(in) :: s; real(8), intent(in) :: to, tm
+        real(8) :: go, gm, sp
+        go = 8.0_8 * real(s, 8)**2 / to / 1.0e9_8
+        gm = 8.0_8 * real(s, 8)**2 / tm / 1.0e9_8
+        if (to > 0.0_8) then; sp = tm / to; else; sp = 0.0_8; end if
+        print '(a1,5x,i6,4x,f12.4,4x,f12.4,4x,f7.2,a)', uplo, s, go, gm, sp, 'x'
+    end subroutine
+end program bench_${routine}$

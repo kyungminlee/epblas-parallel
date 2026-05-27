@@ -1,0 +1,2 @@
+#:set routine = 'esymv'
+#:include 'bench_symv_real_body.fypp'

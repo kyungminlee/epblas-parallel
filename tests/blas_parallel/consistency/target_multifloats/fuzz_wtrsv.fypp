@@ -1,0 +1,76 @@
+! fuzz_wtrsv — multifloats complex DD triangular solve consistency.
+
+program fuzz_wtrsv
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine wtrsv(uplo, trans, diag, n, a, lda, x, incx)
+            import :: cmplx64x2
+            character, intent(in) :: uplo, trans, diag
+            integer, intent(in) :: n, lda, incx
+            type(cmplx64x2), intent(in) :: a(lda, *)
+            type(cmplx64x2), intent(inout) :: x(*)
+        end subroutine wtrsv
+        subroutine wtrsv_migrated(uplo, trans, diag, n, a, lda, x, incx)
+            import :: cmplx64x2
+            character, intent(in) :: uplo, trans, diag
+            integer, intent(in) :: n, lda, incx
+            type(cmplx64x2), intent(in) :: a(lda, *)
+            type(cmplx64x2), intent(inout) :: x(*)
+        end subroutine wtrsv_migrated
+    end interface
+    integer :: seed, ncases, ic, i, n, lda, incx, lenx_alloc, fails
+    character :: uplo, trans, diag
+    type(cmplx64x2) :: aii
+    type(real64x2)  :: err, tol
+    type(cmplx64x2), allocatable :: A(:), X0(:), X_ov(:), X_mig(:)
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_wtrsv: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 64)
+        call random_number(u); if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if
+        call random_number(u)
+        if (u < 1.0_8/3.0_8) then; trans = 'N'
+        else if (u < 2.0_8/3.0_8) then; trans = 'T'
+        else; trans = 'C'
+        end if
+        call random_number(u); if (u < 0.5_8) then; diag = 'N'; else; diag = 'U'; end if
+        lda = n + rand_pad(); if (lda < 1) lda = 1
+        incx = rand_incx()
+        lenx_alloc = 1 + (n - 1) * abs(incx)
+        allocate(A(lda * n), X0(lenx_alloc), X_ov(lenx_alloc), X_mig(lenx_alloc))
+        call fill_matrix_complex(A, n, n, lda)
+        do i = 1, n
+            aii = A((i - 1) * lda + i)
+            A((i - 1) * lda + i) = aii + cmplx64x2(real64x2(real(n + 1, 8)), real64x2(0.0_8))
+        end do
+        call fill_matrix_complex(X0, lenx_alloc, 1, lenx_alloc); X_ov = X0; X_mig = X0
+        call wtrsv(uplo, trans, diag, n, A, lda, X_ov, incx)
+        call wtrsv_migrated(uplo, trans, diag, n, A, lda, X_mig, incx)
+        block
+            integer :: i
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do i = 1, lenx_alloc
+                a_abs = abs(X_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(X_ov(i) - X_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = real64x2(tiny(1.0_8))
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(8.0_8 * real(n, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then
+            fails = fails + 1
+            print '(a,i0,a,3a1,a,i6,a,i3)', 'FAIL ', ic, ' UTD=', uplo, trans, diag, ' n=', n, ' incx=', incx
+        end if
+        deallocate(A, X0, X_ov, X_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_wtrsv: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

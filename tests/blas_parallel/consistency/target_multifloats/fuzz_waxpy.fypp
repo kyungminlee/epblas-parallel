@@ -1,0 +1,63 @@
+! fuzz_waxpy — multifloats complex DD AXPY consistency.
+program fuzz_waxpy
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine waxpy(n, alpha, x, incx, y, incy)
+            import :: cmplx64x2
+            integer, intent(in) :: n, incx, incy
+            type(cmplx64x2), intent(in) :: alpha
+            type(cmplx64x2), intent(in) :: x(*)
+            type(cmplx64x2), intent(inout) :: y(*)
+        end subroutine waxpy
+        subroutine waxpy_migrated(n, alpha, x, incx, y, incy)
+            import :: cmplx64x2
+            integer, intent(in) :: n, incx, incy
+            type(cmplx64x2), intent(in) :: alpha
+            type(cmplx64x2), intent(in) :: x(*)
+            type(cmplx64x2), intent(inout) :: y(*)
+        end subroutine waxpy_migrated
+    end interface
+    integer :: seed, ncases, ic, n, incx, incy, lenx, leny, fails, i
+    type(cmplx64x2) :: alpha, beta_unused
+    type(real64x2) :: err, tol
+    type(cmplx64x2), allocatable :: X(:), Y0(:), Y_ov(:), Y_mig(:)
+    seed = read_seed(); ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_waxpy: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096)
+        incx = rand_incx(); incy = rand_incx()
+        call rand_alpha_beta_complex(alpha, beta_unused)
+        lenx = 1 + (n - 1) * abs(incx)
+        leny = 1 + (n - 1) * abs(incy)
+        allocate(X(lenx), Y0(leny), Y_ov(leny), Y_mig(leny))
+        call fill_matrix_complex(X, lenx, 1, lenx)
+        call fill_matrix_complex(Y0, leny, 1, leny)
+        Y_ov = Y0; Y_mig = Y0
+        call waxpy(n, alpha, X, incx, Y_ov, incy)
+        call waxpy_migrated(n, alpha, X, incx, Y_mig, incy)
+        block
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do i = 1, leny
+                a_abs = abs(Y_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(Y_ov(i) - Y_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = real64x2(tiny(1.0_8))
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(n, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then
+            fails = fails + 1
+            print '(a,i0,a,3i6)', 'FAIL ', ic, ' n,incx,incy=', n, incx, incy
+        end if
+        deallocate(X, Y0, Y_ov, Y_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_waxpy: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

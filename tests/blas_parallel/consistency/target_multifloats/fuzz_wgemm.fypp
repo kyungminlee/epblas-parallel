@@ -1,0 +1,117 @@
+! fuzz_wgemm — multifloats complex GEMM consistency fuzz.
+
+program fuzz_wgemm
+    use multifloats     ! types + operators
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine wgemm(transa, transb, m, n, k, alpha, a, lda, &
+                         b, ldb, beta, c, ldc)
+            import :: cmplx64x2
+            character, intent(in) :: transa, transb
+            integer,   intent(in) :: m, n, k, lda, ldb, ldc
+            type(cmplx64x2), intent(in) :: alpha, beta
+            type(cmplx64x2), intent(in) :: a(lda, *), b(ldb, *)
+            type(cmplx64x2), intent(inout) :: c(ldc, *)
+        end subroutine wgemm
+        subroutine wgemm_migrated(transa, transb, m, n, k, alpha, a, lda, &
+                                  b, ldb, beta, c, ldc)
+            import :: cmplx64x2
+            character, intent(in) :: transa, transb
+            integer,   intent(in) :: m, n, k, lda, ldb, ldc
+            type(cmplx64x2), intent(in) :: alpha, beta
+            type(cmplx64x2), intent(in) :: a(lda, *), b(ldb, *)
+            type(cmplx64x2), intent(inout) :: c(ldc, *)
+        end subroutine wgemm_migrated
+    end interface
+
+    integer :: seed, ncases, i
+    integer :: m, n, k, lda, ldb, ldc, rows_a, cols_a, rows_b, cols_b
+    integer :: fails, sentinel_fails, bad_ov, bad_mig
+    character :: ta, tb
+    type(cmplx64x2) :: alpha, beta
+    type(real64x2) :: err, tol
+    type(cmplx64x2), allocatable :: A(:), B(:), C0(:), C_ov(:), C_mig(:)
+
+    seed = read_seed()
+    ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_wgemm: seed=', seed, '  cases=', ncases
+    call seed_rng(seed)
+
+    fails = 0
+    sentinel_fails = 0
+    do i = 1, ncases
+        m = rand_int_log(1, 256)
+        n = rand_int_log(1, 256)
+        k = rand_int_log(1, 256)
+        tol = max(real64x2(10.0_8), &
+                  real64x2(4.0_8 * real(k, 8))) * eps
+        ta = rand_trans_complex()
+        tb = rand_trans_complex()
+        call rand_alpha_beta_complex(alpha, beta)
+
+        if (ta == 'N') then
+            rows_a = m; cols_a = k
+        else
+            rows_a = k; cols_a = m
+        end if
+        if (tb == 'N') then
+            rows_b = k; cols_b = n
+        else
+            rows_b = n; cols_b = k
+        end if
+        lda = rows_a + rand_pad()
+        ldb = rows_b + rand_pad()
+        ldc = m      + rand_pad()
+        if (lda < 1) lda = 1
+        if (ldb < 1) ldb = 1
+        if (ldc < 1) ldc = 1
+
+        allocate(A(lda * cols_a))
+        allocate(B(ldb * cols_b))
+        allocate(C0(ldc * n))
+        allocate(C_ov(ldc * n))
+        allocate(C_mig(ldc * n))
+        call fill_matrix_complex(A,  rows_a, cols_a, lda)
+        call fill_matrix_complex(B,  rows_b, cols_b, ldb)
+        call fill_matrix_complex(C0, m,      n,      ldc)
+        C_ov  = C0
+        C_mig = C0
+
+        call wgemm(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_ov,  ldc)
+        call wgemm_migrated(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_mig, ldc)
+        err = max_rel_err_complex(C_ov, C_mig, m, n, ldc)
+        bad_ov  = check_sentinels_complex(C_ov,  m, n, ldc)
+        bad_mig = check_sentinels_complex(C_mig, m, n, ldc)
+
+        call err_stats_record(err%limbs(1))
+
+        if (err > tol) then
+            fails = fails + 1
+            print '(a,i0,a,2a1,a,3i6,a,3i6)', &
+                'FAIL case ', i, '  trans=', ta, tb, &
+                '  mnk=', m, n, k, &
+                '  lda/ldb/ldc=', lda, ldb, ldc
+        end if
+        if (bad_ov /= 0) then
+            sentinel_fails = sentinel_fails + 1
+            print '(a,i0,a,i0)', 'SENTINEL overlay case ', i, &
+                '  bad col=', bad_ov
+        end if
+        if (bad_mig /= 0) then
+            sentinel_fails = sentinel_fails + 1
+            print '(a,i0,a,i0)', 'SENTINEL migrated case ', i, &
+                '  bad col=', bad_mig
+        end if
+
+        deallocate(A, B, C0, C_ov, C_mig)
+    end do
+
+    print '(a,i0,a,i0,a,i0,a,i0)', &
+        'fuzz_wgemm: ', ncases - fails, '/', ncases, &
+        ' passed; tol_fails=', fails, ' sentinel_fails=', sentinel_fails
+    call err_stats_print()
+    if (fails > 0 .or. sentinel_fails > 0) error stop 1
+end program fuzz_wgemm

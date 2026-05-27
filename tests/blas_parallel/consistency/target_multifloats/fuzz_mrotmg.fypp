@@ -1,0 +1,54 @@
+! fuzz_mrotmg — multifloats real DD ROTMG.
+program fuzz_mrotmg
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine mrotmg(d1, d2, x1, y1, param)
+            import :: real64x2
+            type(real64x2), intent(inout) :: d1, d2, x1
+            type(real64x2), intent(in) :: y1
+            type(real64x2), intent(out) :: param(5)
+        end subroutine
+        subroutine mrotmg_migrated(d1, d2, x1, y1, param)
+            import :: real64x2
+            type(real64x2), intent(inout) :: d1, d2, x1
+            type(real64x2), intent(in) :: y1
+            type(real64x2), intent(out) :: param(5)
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, fails, i
+    type(real64x2) :: d1_o, d2_o, x1_o, d1_m, d2_m, x1_m, y1
+    type(real64x2) :: d1_0, d2_0, x1_0, p_o(5), p_m(5), err, tol
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_mrotmg: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        call random_number(u); d1_0 = real64x2(0.5_8 + u)
+        call random_number(u); d2_0 = real64x2(0.5_8 + u)
+        call random_number(u); x1_0 = real64x2(2.0_8 * u - 1.0_8)
+        call random_number(u); y1   = real64x2(2.0_8 * u - 1.0_8)
+        d1_o = d1_0; d2_o = d2_0; x1_o = x1_0
+        d1_m = d1_0; d2_m = d2_0; x1_m = x1_0
+        call mrotmg(d1_o, d2_o, x1_o, y1, p_o)
+        call mrotmg_migrated(d1_m, d2_m, x1_m, y1, p_m)
+        err = real64x2(0.0_8)
+        err = max(err, rel(d1_o, d1_m)); err = max(err, rel(d2_o, d2_m)); err = max(err, rel(x1_o, x1_m))
+        ! Only compare param(1) (flag) — params 2-5 are implementation-defined.
+        err = max(err, rel(p_o(1), p_m(1)))
+        tol = real64x2(100.0_8) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then; fails = fails + 1; print '(a,i0)', 'FAIL ', ic; end if
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_mrotmg: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+contains
+    function rel(x, y) result(r)
+        type(real64x2), intent(in) :: x, y
+        type(real64x2) :: r, d, ay
+        d = abs(x - y); ay = abs(y)
+        if (ay < real64x2(tiny(1.0_8))) then; r = d; else; r = d / ay; end if
+    end function
+end program

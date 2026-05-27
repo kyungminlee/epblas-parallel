@@ -1,0 +1,2 @@
+#:set rk_value = 10
+#:include 'fuzz_util_body.fypp'

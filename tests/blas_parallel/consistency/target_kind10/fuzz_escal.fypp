@@ -1,0 +1,2 @@
+#:set routine = 'escal'
+#:include 'fuzz_scal_real_body.fypp'

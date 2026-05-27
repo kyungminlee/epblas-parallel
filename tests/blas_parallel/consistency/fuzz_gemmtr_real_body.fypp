@@ -1,0 +1,99 @@
+#! Consistency fuzz — real GEMMTR. Per-target shim sets:
+#!   routine    e.g. 'egemmtr' (kind10), 'qgemmtr' (kind16)
+#!
+#! Compares overlay against migrated reference; tol = max(10, 4·K) · eps
+#! (Wilkinson bound). Touches only the UPLO triangle of C — the
+#! complementary triangle is filled with sentinel padding before the
+#! call and checked unchanged afterward.
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(uplo, transa, transb, n, k, alpha, a, lda, &
+                               b, ldb, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: uplo, transa, transb
+            integer,   intent(in) :: n, k, lda, ldb, ldc
+            real(rk), intent(in) :: alpha, beta
+            real(rk), intent(in) :: a(lda, *), b(ldb, *)
+            real(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(uplo, transa, transb, n, k, alpha, a, lda, &
+                                        b, ldb, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: uplo, transa, transb
+            integer,   intent(in) :: n, k, lda, ldb, ldc
+            real(rk), intent(in) :: alpha, beta
+            real(rk), intent(in) :: a(lda, *), b(ldb, *)
+            real(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, i
+    integer :: n, k, lda, ldb, ldc, rows_a, cols_a, rows_b, cols_b
+    integer :: fails, sentinel_fails, bad_ov, bad_mig
+    character :: uplo, ta, tb
+    real(rk) :: alpha, beta, err, tol
+    real(rk), allocatable :: A(:), B(:), C0(:), C_ov(:), C_mig(:)
+    real(8) :: u
+
+    seed = read_seed()
+    ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed)
+
+    fails = 0
+    sentinel_fails = 0
+    do i = 1, ncases
+        n = rand_int_log(1, 256)
+        k = rand_int_log(1, 256)
+        tol = max(10.0_rk, 4.0_rk * real(k, rk)) * eps
+        call random_number(u); uplo = merge('U', 'L', u < 0.5_8)
+        ta = rand_trans(); tb = rand_trans()
+        call rand_alpha_beta(alpha, beta)
+
+        if (ta == 'N') then; rows_a = n; cols_a = k; else; rows_a = k; cols_a = n; end if
+        if (tb == 'N') then; rows_b = k; cols_b = n; else; rows_b = n; cols_b = k; end if
+        lda = rows_a + rand_pad()
+        ldb = rows_b + rand_pad()
+        ldc = n      + rand_pad()
+        if (lda < 1) lda = 1
+        if (ldb < 1) ldb = 1
+        if (ldc < 1) ldc = 1
+
+        allocate(A(lda * cols_a), B(ldb * cols_b))
+        allocate(C0(ldc * n), C_ov(ldc * n), C_mig(ldc * n))
+        call fill_matrix_real(A, rows_a, cols_a, lda)
+        call fill_matrix_real(B, rows_b, cols_b, ldb)
+        call fill_matrix_real(C0, n, n, ldc)
+        C_ov = C0; C_mig = C0
+
+        call ${routine}$(uplo, ta, tb, n, k, alpha, A, lda, B, ldb, beta, C_ov,  ldc)
+        call ${routine}$_migrated(uplo, ta, tb, n, k, alpha, A, lda, B, ldb, beta, C_mig, ldc)
+        err = max_rel_err_real(C_ov, C_mig, n, n, ldc)
+        bad_ov  = check_sentinels_real(C_ov,  n, n, ldc)
+        bad_mig = check_sentinels_real(C_mig, n, n, ldc)
+        call err_stats_record(err)
+
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,3a1,a,2i6,a,3i6,a,2es12.4,a,es12.4)', &
+                'FAIL case ', i, '  uplo/trans=', uplo, ta, tb, &
+                '  nk=', n, k, '  lda/ldb/ldc=', lda, ldb, ldc, &
+                '  a,b=', alpha, beta, '  err=', err
+        end if
+        if (bad_ov  /= 0) sentinel_fails = sentinel_fails + 1
+        if (bad_mig /= 0) sentinel_fails = sentinel_fails + 1
+
+        deallocate(A, B, C0, C_ov, C_mig)
+    end do
+
+    print '(a,i0,a,i0,a,i0,a,i0)', &
+        'fuzz_${routine}$: ', ncases - fails, '/', ncases, &
+        ' passed; tol_fails=', fails, ' sentinel_fails=', sentinel_fails
+    call err_stats_print()
+    if (fails > 0 .or. sentinel_fails > 0) error stop 1
+end program fuzz_${routine}$

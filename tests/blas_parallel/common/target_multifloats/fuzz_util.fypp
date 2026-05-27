@@ -1,0 +1,397 @@
+! fuzz_util — multifloats variant.
+!
+! Hand-written (not generated from the kind10/kind16 body template)
+! because the working type is the derived `type(real64x2)` /
+! `type(cmplx64x2)` from upstream multifloats — not a numeric KIND.
+! Operators are overloaded via the multifloats module. Public name set
+! mirrors the templated kind-N module so drivers can be parameterized
+! purely by `routine` name.
+
+module fuzz_util
+    ! Pull in the type *and* its overloaded operators (==, /=, <, >,
+    ! +, -, *, /, abs, ...). `only: real64x2, cmplx64x2` is too narrow
+    ! — it shadows the user-defined operators we rely on below.
+    use multifloats
+    implicit none
+    private
+
+    public :: read_seed, read_cases, seed_rng
+    public :: rand_int_log, rand_trans, rand_trans_complex
+    public :: rand_alpha_beta, rand_alpha_beta_complex
+    public :: fill_matrix_real, max_rel_err_real, check_sentinels_real
+    public :: fill_matrix_complex, max_rel_err_complex, check_sentinels_complex
+    public :: rand_pad, rand_incx, rand_incx_pos
+    public :: rk, eps, sentinel_re, sentinel_im
+    public :: err_stats_init, err_stats_record, err_stats_print
+
+    real(8), allocatable, save :: err_buf(:)
+    integer, save :: err_count = 0
+
+    ! For multifloats `rk` is meaningless as a KIND parameter but kept
+    ! so driver code parameterized on "rk" still compiles. Drivers use
+    ! `eps` for tolerance, which IS meaningful (DD epsilon).
+    integer, parameter :: rk = 8  ! limb kind, not the DD kind
+
+    ! Double-double effective epsilon ≈ 2^-104.
+    ! Direct structure-constructor (limbs=[hi,lo]) — the dd_from_dp
+    ! interface isn't usable in PARAMETER context.
+    type(real64x2), parameter :: eps = &
+        real64x2(limbs=[2.0_8**(-104), 0.0_8])
+
+    ! Sentinels — same magnitudes as the kind10/kind16 paths.
+    type(real64x2), parameter :: sentinel_re = &
+        real64x2(limbs=[-7.3737373737e+18_8, 0.0_8])
+    type(real64x2), parameter :: sentinel_im = &
+        real64x2(limbs=[ 4.2424242424e+17_8, 0.0_8])
+
+contains
+
+    function read_seed() result(s)
+        integer :: s
+        character(len=32) :: buf
+        integer :: ios, t(8)
+        call get_environment_variable('BLAS_FUZZ_SEED', buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then
+            read(buf, *, iostat=ios) s
+            if (ios == 0) return
+        end if
+        call date_and_time(values=t)
+        s = abs(t(7) * 60000 + t(8) * 1000 + t(6) * 1000000 + t(5) * 36000000)
+        if (s == 0) s = 1
+    end function read_seed
+
+    function read_cases() result(n)
+        integer :: n
+        character(len=32) :: buf
+        integer :: ios
+        call get_environment_variable('BLAS_FUZZ_CASES', buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then
+            read(buf, *, iostat=ios) n
+            if (ios == 0 .and. n > 0) return
+        end if
+        n = 80
+    end function read_cases
+
+    subroutine seed_rng(s)
+        integer, intent(in) :: s
+        integer :: n, i
+        integer, allocatable :: arr(:)
+        call random_seed(size=n)
+        allocate(arr(n))
+        do i = 1, n
+            arr(i) = s + i * 1000003
+        end do
+        call random_seed(put=arr)
+    end subroutine seed_rng
+
+    function rand_int_log(lo, hi) result(k)
+        integer, intent(in) :: lo, hi
+        integer :: k, lo_s, hi_s, off
+        real(8) :: u, t
+        if (hi <= lo) then
+            k = lo; return
+        end if
+        off = 0
+        if (lo < 1) off = 1 - lo
+        lo_s = lo + off
+        hi_s = hi + off
+        call random_number(u)
+        t = log(real(lo_s, 8)) + u * (log(real(hi_s, 8)) - log(real(lo_s, 8)))
+        k = int(exp(t)) - off
+        if (k < lo) k = lo
+        if (k > hi) k = hi
+    end function rand_int_log
+
+    function rand_trans() result(c)
+        character :: c
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.34_8) then
+            c = 'N'
+        else if (u < 0.67_8) then
+            c = 'T'
+        else
+            c = 'C'
+        end if
+    end function rand_trans
+
+    function rand_trans_complex() result(c)
+        character :: c
+        c = rand_trans()
+    end function rand_trans_complex
+
+    subroutine rand_alpha_beta(alpha, beta)
+        type(real64x2), intent(out) :: alpha, beta
+        real(8) :: u, x
+        call random_number(u)
+        if (u < 0.10_8) then
+            alpha = real64x2(0.0_8)
+        else if (u < 0.20_8) then
+            alpha = real64x2(1.0_8)
+        else if (u < 0.30_8) then
+            alpha = real64x2(-1.0_8)
+        else
+            call random_number(x)
+            alpha = real64x2(2.0_8 * x - 1.0_8)
+        end if
+        call random_number(u)
+        if (u < 0.10_8) then
+            beta = real64x2(0.0_8)
+        else if (u < 0.20_8) then
+            beta = real64x2(1.0_8)
+        else if (u < 0.30_8) then
+            beta = real64x2(-1.0_8)
+        else
+            call random_number(x)
+            beta = real64x2(2.0_8 * x - 1.0_8)
+        end if
+    end subroutine rand_alpha_beta
+
+    subroutine rand_alpha_beta_complex(alpha, beta)
+        type(cmplx64x2), intent(out) :: alpha, beta
+        real(8) :: ur, ui, u
+        call random_number(u)
+        if (u < 0.10_8) then
+            alpha = cmplx64x2(real64x2(0.0_8), real64x2(0.0_8))
+        else if (u < 0.20_8) then
+            alpha = cmplx64x2(real64x2(1.0_8), real64x2(0.0_8))
+        else if (u < 0.30_8) then
+            alpha = cmplx64x2(real64x2(-1.0_8), real64x2(0.0_8))
+        else
+            call random_number(ur); call random_number(ui)
+            alpha = cmplx64x2(real64x2(2.0_8*ur-1.0_8), &
+                              real64x2(2.0_8*ui-1.0_8))
+        end if
+        call random_number(u)
+        if (u < 0.10_8) then
+            beta = cmplx64x2(real64x2(0.0_8), real64x2(0.0_8))
+        else if (u < 0.20_8) then
+            beta = cmplx64x2(real64x2(1.0_8), real64x2(0.0_8))
+        else if (u < 0.30_8) then
+            beta = cmplx64x2(real64x2(-1.0_8), real64x2(0.0_8))
+        else
+            call random_number(ur); call random_number(ui)
+            beta = cmplx64x2(real64x2(2.0_8*ur-1.0_8), &
+                             real64x2(2.0_8*ui-1.0_8))
+        end if
+    end subroutine rand_alpha_beta_complex
+
+    subroutine fill_matrix_real(A, m, n, lda)
+        type(real64x2), intent(out) :: A(:)
+        integer, intent(in) :: m, n, lda
+        real(8) :: u
+        integer :: i, j, idx
+        do j = 1, n
+            do i = 1, m
+                idx = (j - 1) * lda + i
+                call random_number(u)
+                A(idx) = real64x2(2.0_8 * u - 1.0_8)
+            end do
+            do i = m + 1, lda
+                idx = (j - 1) * lda + i
+                A(idx) = sentinel_re
+            end do
+        end do
+    end subroutine fill_matrix_real
+
+    function check_sentinels_real(A, m, n, lda) result(bad_col)
+        type(real64x2), intent(in) :: A(:)
+        integer, intent(in) :: m, n, lda
+        integer :: bad_col
+        integer :: i, j, idx
+        bad_col = 0
+        if (lda <= m) return
+        do j = 1, n
+            do i = m + 1, lda
+                idx = (j - 1) * lda + i
+                if (A(idx) /= sentinel_re) then
+                    bad_col = j
+                    return
+                end if
+            end do
+        end do
+    end function check_sentinels_real
+
+    function max_rel_err_real(C_out, C_ref, m, n, ldc) result(err)
+        type(real64x2), intent(in) :: C_out(:), C_ref(:)
+        integer, intent(in) :: m, n, ldc
+        type(real64x2) :: err
+        type(real64x2) :: a, ref_max, diff_max, tiny_val
+        integer :: i, j, idx
+        diff_max = real64x2(0.0_8)
+        ref_max  = real64x2(0.0_8)
+        do j = 1, n
+            do i = 1, m
+                idx = (j - 1) * ldc + i
+                a = abs(C_ref(idx))
+                if (a > ref_max) ref_max = a
+                a = abs(C_out(idx) - C_ref(idx))
+                if (a > diff_max) diff_max = a
+            end do
+        end do
+        tiny_val = real64x2(tiny(1.0_8))
+        if (ref_max < tiny_val) then
+            err = diff_max
+        else
+            err = diff_max / ref_max
+        end if
+    end function max_rel_err_real
+
+    subroutine fill_matrix_complex(A, m, n, lda)
+        type(cmplx64x2), intent(out) :: A(:)
+        integer, intent(in) :: m, n, lda
+        real(8) :: ur, ui
+        integer :: i, j, idx
+        do j = 1, n
+            do i = 1, m
+                idx = (j - 1) * lda + i
+                call random_number(ur); call random_number(ui)
+                A(idx) = cmplx64x2(real64x2(2.0_8*ur-1.0_8), &
+                                   real64x2(2.0_8*ui-1.0_8))
+            end do
+            do i = m + 1, lda
+                idx = (j - 1) * lda + i
+                A(idx) = cmplx64x2(sentinel_re, sentinel_im)
+            end do
+        end do
+    end subroutine fill_matrix_complex
+
+    function check_sentinels_complex(A, m, n, lda) result(bad_col)
+        type(cmplx64x2), intent(in) :: A(:)
+        integer, intent(in) :: m, n, lda
+        integer :: bad_col
+        type(cmplx64x2) :: s
+        integer :: i, j, idx
+        bad_col = 0
+        if (lda <= m) return
+        s = cmplx64x2(sentinel_re, sentinel_im)
+        do j = 1, n
+            do i = m + 1, lda
+                idx = (j - 1) * lda + i
+                if (A(idx)%re /= s%re .or. A(idx)%im /= s%im) then
+                    bad_col = j
+                    return
+                end if
+            end do
+        end do
+    end function check_sentinels_complex
+
+    function max_rel_err_complex(C_out, C_ref, m, n, ldc) result(err)
+        type(cmplx64x2), intent(in) :: C_out(:), C_ref(:)
+        integer, intent(in) :: m, n, ldc
+        type(real64x2) :: err
+        type(real64x2) :: a, ref_max, diff_max, tiny_val
+        type(cmplx64x2) :: diff
+        integer :: i, j, idx
+        diff_max = real64x2(0.0_8)
+        ref_max  = real64x2(0.0_8)
+        do j = 1, n
+            do i = 1, m
+                idx = (j - 1) * ldc + i
+                a = abs(C_ref(idx))
+                if (a > ref_max) ref_max = a
+                diff = C_out(idx) - C_ref(idx)
+                a = abs(diff)
+                if (a > diff_max) diff_max = a
+            end do
+        end do
+        tiny_val = real64x2(tiny(1.0_8))
+        if (ref_max < tiny_val) then
+            err = diff_max
+        else
+            err = diff_max / ref_max
+        end if
+    end function max_rel_err_complex
+
+    function rand_pad() result(p)
+        integer :: p
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.6_8) then
+            p = rand_int_log(0, 4)
+        else if (u < 0.9_8) then
+            p = rand_int_log(5, 32)
+        else
+            p = rand_int_log(33, 128)
+        end if
+    end function rand_pad
+
+    ! Pick a random non-zero stride. Bias toward 1 but reliably hit
+    ! non-unit and negative strides — see kind10/kind16 fuzz_util_body.
+    function rand_incx() result(s)
+        integer :: s
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.5_8) then
+            s = 1
+        else if (u < 0.7_8) then
+            s = 2
+        else if (u < 0.85_8) then
+            s = 3
+        else if (u < 0.95_8) then
+            s = -1
+        else
+            s = -2
+        end if
+    end function rand_incx
+
+    ! Positive-only variant for routines where negative stride is
+    ! invalid per BLAS spec (iamax, norm2/asum).
+    function rand_incx_pos() result(s)
+        integer :: s
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.6_8) then
+            s = 1
+        else if (u < 0.85_8) then
+            s = 2
+        else
+            s = 3
+        end if
+    end function rand_incx_pos
+
+    subroutine err_stats_init(n)
+        integer, intent(in) :: n
+        if (allocated(err_buf)) deallocate(err_buf)
+        allocate(err_buf(max(1, n)))
+        err_count = 0
+    end subroutine err_stats_init
+
+    subroutine err_stats_record(e)
+        real(8), intent(in) :: e
+        if (.not. allocated(err_buf)) return
+        if (err_count >= size(err_buf)) return
+        err_count = err_count + 1
+        err_buf(err_count) = e
+    end subroutine err_stats_record
+
+    subroutine err_stats_print()
+        real(8) :: vmin, vmax, vmed, t
+        integer :: i, j
+        if (.not. allocated(err_buf) .or. err_count == 0) then
+            print '(a)', 'ERR_STATS: n=0'
+            return
+        end if
+        do i = 2, err_count
+            t = err_buf(i)
+            j = i - 1
+            do while (j >= 1)
+                if (err_buf(j) <= t) exit
+                err_buf(j + 1) = err_buf(j)
+                j = j - 1
+            end do
+            err_buf(j + 1) = t
+        end do
+        vmin = err_buf(1)
+        vmax = err_buf(err_count)
+        if (mod(err_count, 2) == 1) then
+            vmed = err_buf((err_count + 1) / 2)
+        else
+            vmed = 0.5_8 * (err_buf(err_count / 2) + err_buf(err_count / 2 + 1))
+        end if
+        print '(a, es14.6, a, es14.6, a, es14.6, a, i0)', &
+            'ERR_STATS: min=', vmin, ' med=', vmed, ' max=', vmax, &
+            ' n=', err_count
+    end subroutine err_stats_print
+
+end module fuzz_util

@@ -1,0 +1,56 @@
+! fuzz_mswap — multifloats real DD SWAP.
+program fuzz_mswap
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine mswap(n, x, incx, y, incy)
+            import :: real64x2
+            integer, intent(in) :: n, incx, incy
+            type(real64x2), intent(inout) :: x(*)
+            type(real64x2), intent(inout) :: y(*)
+        end subroutine
+        subroutine mswap_migrated(n, x, incx, y, incy)
+            import :: real64x2
+            integer, intent(in) :: n, incx, incy
+            type(real64x2), intent(inout) :: x(*)
+            type(real64x2), intent(inout) :: y(*)
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, n, incx, incy, lenx, leny, fails, i
+    type(real64x2) :: err, tol
+    type(real64x2), allocatable :: X0(:), Y0(:), X_ov(:), Y_ov(:), X_mig(:), Y_mig(:)
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_mswap: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096); incx = rand_incx(); incy = rand_incx()
+        lenx = 1 + (n - 1) * abs(incx); leny = 1 + (n - 1) * abs(incy)
+        allocate(X0(lenx), Y0(leny), X_ov(lenx), Y_ov(leny), X_mig(lenx), Y_mig(leny))
+        call fill_matrix_real(X0, lenx, 1, lenx); call fill_matrix_real(Y0, leny, 1, leny)
+        X_ov = X0; Y_ov = Y0; X_mig = X0; Y_mig = Y0
+        call mswap(n, X_ov, incx, Y_ov, incy)
+        call mswap_migrated(n, X_mig, incx, Y_mig, incy)
+        block
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
+            do i = 1, lenx
+                a_abs = abs(X_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(X_ov(i) - X_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            do i = 1, leny
+                a_abs = abs(Y_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(Y_ov(i) - Y_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = real64x2(tiny(1.0_8))
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(n, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then; fails = fails + 1; print '(a,i0,a,3i6)', 'FAIL ', ic, ' n,incx,incy=', n, incx, incy; end if
+        deallocate(X0, Y0, X_ov, Y_ov, X_mig, Y_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_mswap: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

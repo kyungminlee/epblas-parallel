@@ -1,0 +1,2 @@
+#:set routine = 'qspr2'
+#:include 'bench_spr2_body.fypp'

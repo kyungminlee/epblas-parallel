@@ -1,0 +1,2 @@
+#:set routine = 'xcopy'
+#:include 'fuzz_copyswap_complex_body.fypp'

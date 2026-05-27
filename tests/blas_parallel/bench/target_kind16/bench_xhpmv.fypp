@@ -1,0 +1,2 @@
+#:set routine = 'xhpmv'
+#:include 'bench_hpmv_body.fypp'

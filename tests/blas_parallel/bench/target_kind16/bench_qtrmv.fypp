@@ -1,0 +1,2 @@
+#:set routine = 'qtrmv'
+#:include 'bench_trmv_real_body.fypp'

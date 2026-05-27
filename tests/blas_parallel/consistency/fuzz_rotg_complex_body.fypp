@@ -1,0 +1,63 @@
+#! Consistency fuzz — complex ROTG: a inout (complex), b in (complex),
+#! c out (real), s out (complex).
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+    interface
+        subroutine ${routine}$(a, b, c, s)
+            import :: rk
+            complex(rk), intent(inout) :: a
+            complex(rk), intent(in) :: b
+            real(rk), intent(out) :: c
+            complex(rk), intent(out) :: s
+        end subroutine
+        subroutine ${routine}$_migrated(a, b, c, s)
+            import :: rk
+            complex(rk), intent(inout) :: a
+            complex(rk), intent(in) :: b
+            real(rk), intent(out) :: c
+            complex(rk), intent(out) :: s
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, fails
+    complex(rk) :: a0, b, a_ov, a_mig, s_ov, s_mig
+    real(rk) :: c_ov, c_mig, err, tol
+    real(8) :: ur, ui
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        call random_number(ur); call random_number(ui)
+        a0 = cmplx(real(2.0_8*ur-1.0_8, rk), real(2.0_8*ui-1.0_8, rk), rk)
+        call random_number(ur); call random_number(ui)
+        b = cmplx(real(2.0_8*ur-1.0_8, rk), real(2.0_8*ui-1.0_8, rk), rk)
+        a_ov = a0; a_mig = a0
+        call ${routine}$(a_ov, b, c_ov, s_ov)
+        call ${routine}$_migrated(a_mig, b, c_mig, s_mig)
+        err = max(crel(a_ov, a_mig), rrel(c_ov, c_mig), crel(s_ov, s_mig))
+        tol = 100.0_rk * eps
+        call err_stats_record(err)
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,es12.4)', 'FAIL ', ic, ' err=', err
+        end if
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+contains
+    function rrel(x, y) result(r)
+        real(rk), intent(in) :: x, y
+        real(rk) :: r, dx
+        dx = min(abs(x - y), abs(x + y))
+        if (abs(y) < tiny(1.0_rk)) then; r = dx
+        else; r = dx / abs(y); end if
+    end function
+    function crel(x, y) result(r)
+        complex(rk), intent(in) :: x, y
+        real(rk) :: r, dx
+        dx = min(abs(x - y), abs(x + y))
+        if (abs(y) < tiny(1.0_rk)) then; r = dx
+        else; r = dx / abs(y); end if
+    end function
+end program

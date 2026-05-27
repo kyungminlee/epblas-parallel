@@ -1,0 +1,51 @@
+! fuzz_mrotg — multifloats real DD ROTG.
+program fuzz_mrotg
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        subroutine mrotg(a, b, c, s)
+            import :: real64x2
+            type(real64x2), intent(inout) :: a, b
+            type(real64x2), intent(out) :: c, s
+        end subroutine
+        subroutine mrotg_migrated(a, b, c, s)
+            import :: real64x2
+            type(real64x2), intent(inout) :: a, b
+            type(real64x2), intent(out) :: c, s
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, fails
+    type(real64x2) :: a0, b0, a_o, b_o, c_o, s_o, a_m, b_m, c_m, s_m, err, tol
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_mrotg: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        call random_number(u); a0 = real64x2(2.0_8 * u - 1.0_8)
+        call random_number(u); b0 = real64x2(2.0_8 * u - 1.0_8)
+        a_o = a0; b_o = b0; a_m = a0; b_m = b0
+        call mrotg(a_o, b_o, c_o, s_o)
+        call mrotg_migrated(a_m, b_m, c_m, s_m)
+        err = real64x2(0.0_8)
+        err = max(err, rel(a_o, a_m)); err = max(err, rel(b_o, b_m))
+        err = max(err, rel(c_o, c_m)); err = max(err, rel(s_o, s_m))
+        tol = real64x2(100.0_8) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then; fails = fails + 1; print '(a,i0)', 'FAIL ', ic; end if
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_mrotg: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+contains
+    function rel(x, y) result(r)
+        type(real64x2), intent(in) :: x, y
+        type(real64x2) :: r, d, ay
+        block; type(real64x2) :: d1, d2
+        d1 = abs(x - y); d2 = abs(x + y)
+        if (d1 < d2) then; d = d1; else; d = d2; end if
+        ay = abs(y)
+        if (ay < real64x2(tiny(1.0_8))) then; r = d; else; r = d / ay; end if
+        end block
+    end function
+end program

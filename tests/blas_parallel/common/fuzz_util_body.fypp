@@ -1,0 +1,386 @@
+#! Shared utilities module body — parameterized by target kind.
+#!
+#! Per-target shim must set:
+#!   rk_value     integer literal for the working KIND (e.g. 10, 16)
+#!
+#! Public names are target-agnostic (fill_matrix_real, max_rel_err_complex,
+#! …) so fuzz drivers don't need to know which kind they're running on.
+
+module fuzz_util
+    implicit none
+    private
+    public :: read_seed, read_cases, seed_rng
+    public :: rand_int_log, rand_trans, rand_trans_complex
+    public :: rand_alpha_beta, rand_alpha_beta_complex
+    public :: fill_matrix_real, max_rel_err_real, check_sentinels_real
+    public :: fill_matrix_complex, max_rel_err_complex, check_sentinels_complex
+    public :: rand_pad, rand_incx, rand_incx_pos
+    public :: rk, eps, sentinel_re, sentinel_im
+    public :: err_stats_init, err_stats_record, err_stats_print
+
+    integer, parameter :: rk = ${rk_value}$
+    real(rk), allocatable, save :: err_buf(:)
+    integer, save :: err_count = 0
+    real(rk), parameter :: eps = epsilon(1.0_rk)
+
+    ! Magic values planted in matrix padding rows (i > m). Any kernel
+    ! that writes past row m gets caught by check_sentinels_*. Values
+    ! are deliberately non-tiny / non-typical so even a wild stray
+    ! write is obvious. NaN would be cleaner but trips FP exceptions
+    ! on some flag combinations — sentinels stay as concrete numbers.
+    real(rk), parameter :: sentinel_re = -7.3737373737e+18_rk
+    real(rk), parameter :: sentinel_im =  4.2424242424e+17_rk
+
+contains
+
+    function read_seed() result(s)
+        integer :: s
+        character(len=32) :: buf
+        integer :: ios, t(8)
+        call get_environment_variable('BLAS_FUZZ_SEED', buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then
+            read(buf, *, iostat=ios) s
+            if (ios == 0) return
+        end if
+        call date_and_time(values=t)
+        s = abs(t(7) * 60000 + t(8) * 1000 + t(6) * 1000000 + t(5) * 36000000)
+        if (s == 0) s = 1
+    end function read_seed
+
+    function read_cases() result(n)
+        integer :: n
+        character(len=32) :: buf
+        integer :: ios
+        call get_environment_variable('BLAS_FUZZ_CASES', buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then
+            read(buf, *, iostat=ios) n
+            if (ios == 0 .and. n > 0) return
+        end if
+        n = 80
+    end function read_cases
+
+    subroutine seed_rng(s)
+        integer, intent(in) :: s
+        integer :: n, i
+        integer, allocatable :: arr(:)
+        call random_seed(size=n)
+        allocate(arr(n))
+        do i = 1, n
+            arr(i) = s + i * 1000003
+        end do
+        call random_seed(put=arr)
+    end subroutine seed_rng
+
+    ! Log-uniform integer in [lo, hi]. Emphasizes small sizes (edge
+    ! cases) AND samples large ones. Handles lo == 0 by shifting:
+    ! sample in [1, hi-lo+1] then subtract.
+    function rand_int_log(lo, hi) result(k)
+        integer, intent(in) :: lo, hi
+        integer :: k, lo_s, hi_s, off
+        real(8) :: u, t
+        if (hi <= lo) then
+            k = lo; return
+        end if
+        off = 0
+        if (lo < 1) off = 1 - lo
+        lo_s = lo + off
+        hi_s = hi + off
+        call random_number(u)
+        t = log(real(lo_s, 8)) + u * (log(real(hi_s, 8)) - log(real(lo_s, 8)))
+        k = int(exp(t)) - off
+        if (k < lo) k = lo
+        if (k > hi) k = hi
+    end function rand_int_log
+
+    function rand_trans() result(c)
+        character :: c
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.34_8) then
+            c = 'N'
+        else if (u < 0.67_8) then
+            c = 'T'
+        else
+            c = 'C'  ! same as 'T' for real types — exercises code path
+        end if
+    end function rand_trans
+
+    function rand_trans_complex() result(c)
+        character :: c
+        c = rand_trans()
+    end function rand_trans_complex
+
+    subroutine rand_alpha_beta(alpha, beta)
+        real(rk), intent(out) :: alpha, beta
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.10_8) then
+            alpha = 0.0_rk
+        else if (u < 0.20_8) then
+            alpha = 1.0_rk
+        else if (u < 0.30_8) then
+            alpha = -1.0_rk
+        else
+            call random_number(u)
+            alpha = real(2.0_8 * u - 1.0_8, rk)
+        end if
+        call random_number(u)
+        if (u < 0.10_8) then
+            beta = 0.0_rk
+        else if (u < 0.20_8) then
+            beta = 1.0_rk
+        else if (u < 0.30_8) then
+            beta = -1.0_rk
+        else
+            call random_number(u)
+            beta = real(2.0_8 * u - 1.0_8, rk)
+        end if
+    end subroutine rand_alpha_beta
+
+    subroutine rand_alpha_beta_complex(alpha, beta)
+        complex(rk), intent(out) :: alpha, beta
+        real(8) :: ur, ui, u
+        call random_number(u)
+        if (u < 0.10_8) then
+            alpha = (0.0_rk, 0.0_rk)
+        else if (u < 0.20_8) then
+            alpha = (1.0_rk, 0.0_rk)
+        else if (u < 0.30_8) then
+            alpha = (-1.0_rk, 0.0_rk)
+        else
+            call random_number(ur); call random_number(ui)
+            alpha = cmplx(real(2.0_8*ur-1.0_8, rk), &
+                          real(2.0_8*ui-1.0_8, rk), rk)
+        end if
+        call random_number(u)
+        if (u < 0.10_8) then
+            beta = (0.0_rk, 0.0_rk)
+        else if (u < 0.20_8) then
+            beta = (1.0_rk, 0.0_rk)
+        else if (u < 0.30_8) then
+            beta = (-1.0_rk, 0.0_rk)
+        else
+            call random_number(ur); call random_number(ui)
+            beta = cmplx(real(2.0_8*ur-1.0_8, rk), &
+                         real(2.0_8*ui-1.0_8, rk), rk)
+        end if
+    end subroutine rand_alpha_beta_complex
+
+    subroutine fill_matrix_real(A, m, n, lda)
+        real(rk), intent(out) :: A(:)
+        integer, intent(in) :: m, n, lda
+        real(8) :: u
+        integer :: i, j, idx
+        do j = 1, n
+            do i = 1, m
+                idx = (j - 1) * lda + i
+                call random_number(u)
+                A(idx) = real(2.0_8 * u - 1.0_8, rk)
+            end do
+            do i = m + 1, lda
+                idx = (j - 1) * lda + i
+                A(idx) = sentinel_re
+            end do
+        end do
+    end subroutine fill_matrix_real
+
+    function check_sentinels_real(A, m, n, lda) result(bad_col)
+        real(rk), intent(in) :: A(:)
+        integer, intent(in) :: m, n, lda
+        integer :: bad_col
+        integer :: i, j, idx
+        bad_col = 0
+        if (lda <= m) return
+        do j = 1, n
+            do i = m + 1, lda
+                idx = (j - 1) * lda + i
+                if (A(idx) /= sentinel_re) then
+                    bad_col = j
+                    return
+                end if
+            end do
+        end do
+    end function check_sentinels_real
+
+    function max_rel_err_real(C_out, C_ref, m, n, ldc) result(err)
+        real(rk), intent(in) :: C_out(:), C_ref(:)
+        integer, intent(in) :: m, n, ldc
+        real(rk) :: err
+        real(rk) :: a, ref_max, diff_max
+        integer :: i, j, idx
+        diff_max = 0.0_rk
+        ref_max  = 0.0_rk
+        do j = 1, n
+            do i = 1, m
+                idx = (j - 1) * ldc + i
+                a = abs(C_ref(idx))
+                if (a > ref_max) ref_max = a
+                a = abs(C_out(idx) - C_ref(idx))
+                if (a > diff_max) diff_max = a
+            end do
+        end do
+        if (ref_max < tiny(1.0_rk)) then
+            err = diff_max
+        else
+            err = diff_max / ref_max
+        end if
+    end function max_rel_err_real
+
+    subroutine fill_matrix_complex(A, m, n, lda)
+        complex(rk), intent(out) :: A(:)
+        integer, intent(in) :: m, n, lda
+        real(8) :: ur, ui
+        integer :: i, j, idx
+        do j = 1, n
+            do i = 1, m
+                idx = (j - 1) * lda + i
+                call random_number(ur); call random_number(ui)
+                A(idx) = cmplx(real(2.0_8*ur-1.0_8, rk), &
+                               real(2.0_8*ui-1.0_8, rk), rk)
+            end do
+            do i = m + 1, lda
+                idx = (j - 1) * lda + i
+                A(idx) = cmplx(sentinel_re, sentinel_im, rk)
+            end do
+        end do
+    end subroutine fill_matrix_complex
+
+    function check_sentinels_complex(A, m, n, lda) result(bad_col)
+        complex(rk), intent(in) :: A(:)
+        integer, intent(in) :: m, n, lda
+        integer :: bad_col
+        complex(rk) :: s
+        integer :: i, j, idx
+        bad_col = 0
+        if (lda <= m) return
+        s = cmplx(sentinel_re, sentinel_im, rk)
+        do j = 1, n
+            do i = m + 1, lda
+                idx = (j - 1) * lda + i
+                if (A(idx) /= s) then
+                    bad_col = j
+                    return
+                end if
+            end do
+        end do
+    end function check_sentinels_complex
+
+    function max_rel_err_complex(C_out, C_ref, m, n, ldc) result(err)
+        complex(rk), intent(in) :: C_out(:), C_ref(:)
+        integer, intent(in) :: m, n, ldc
+        real(rk) :: err
+        real(rk) :: a, ref_max, diff_max
+        integer :: i, j, idx
+        diff_max = 0.0_rk
+        ref_max  = 0.0_rk
+        do j = 1, n
+            do i = 1, m
+                idx = (j - 1) * ldc + i
+                a = abs(C_ref(idx))
+                if (a > ref_max) ref_max = a
+                a = abs(C_out(idx) - C_ref(idx))
+                if (a > diff_max) diff_max = a
+            end do
+        end do
+        if (ref_max < tiny(1.0_rk)) then
+            err = diff_max
+        else
+            err = diff_max / ref_max
+        end if
+    end function max_rel_err_complex
+
+    function rand_pad() result(p)
+        integer :: p
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.6_8) then
+            p = rand_int_log(0, 4)
+        else if (u < 0.9_8) then
+            p = rand_int_log(5, 32)
+        else
+            p = rand_int_log(33, 128)
+        end if
+    end function rand_pad
+
+    ! Pick a random non-zero stride. Bias toward 1 (most common in
+    ! practice) but reliably hit non-unit and negative strides, which
+    ! exercise the general-stride fallback paths.
+    function rand_incx() result(s)
+        integer :: s
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.5_8) then
+            s = 1
+        else if (u < 0.7_8) then
+            s = 2
+        else if (u < 0.85_8) then
+            s = 3
+        else if (u < 0.95_8) then
+            s = -1
+        else
+            s = -2
+        end if
+    end function rand_incx
+
+    ! Positive-only variant for routines where BLAS spec forbids
+    ! negative stride (iamax, norm2/asum). Same distribution shape as
+    ! rand_incx() but folded onto |inc|.
+    function rand_incx_pos() result(s)
+        integer :: s
+        real(8) :: u
+        call random_number(u)
+        if (u < 0.6_8) then
+            s = 1
+        else if (u < 0.85_8) then
+            s = 2
+        else
+            s = 3
+        end if
+    end function rand_incx_pos
+
+    subroutine err_stats_init(n)
+        integer, intent(in) :: n
+        if (allocated(err_buf)) deallocate(err_buf)
+        allocate(err_buf(max(1, n)))
+        err_count = 0
+    end subroutine err_stats_init
+
+    subroutine err_stats_record(e)
+        real(rk), intent(in) :: e
+        if (.not. allocated(err_buf)) return
+        if (err_count >= size(err_buf)) return
+        err_count = err_count + 1
+        err_buf(err_count) = e
+    end subroutine err_stats_record
+
+    subroutine err_stats_print()
+        real(rk) :: vmin, vmax, vmed, t
+        integer :: i, j
+        if (.not. allocated(err_buf) .or. err_count == 0) then
+            print '(a)', 'ERR_STATS: n=0'
+            return
+        end if
+        ! Insertion sort over err_count entries — n is small (≤ a few k).
+        do i = 2, err_count
+            t = err_buf(i)
+            j = i - 1
+            do while (j >= 1)
+                if (err_buf(j) <= t) exit
+                err_buf(j + 1) = err_buf(j)
+                j = j - 1
+            end do
+            err_buf(j + 1) = t
+        end do
+        vmin = err_buf(1)
+        vmax = err_buf(err_count)
+        if (mod(err_count, 2) == 1) then
+            vmed = err_buf((err_count + 1) / 2)
+        else
+            vmed = 0.5_rk * (err_buf(err_count / 2) + err_buf(err_count / 2 + 1))
+        end if
+        print '(a, es14.6, a, es14.6, a, es14.6, a, i0)', &
+            'ERR_STATS: min=', vmin, ' med=', vmed, ' max=', vmax, &
+            ' n=', err_count
+    end subroutine err_stats_print
+
+end module fuzz_util

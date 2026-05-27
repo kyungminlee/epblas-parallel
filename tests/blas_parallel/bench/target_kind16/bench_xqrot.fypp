@@ -1,0 +1,2 @@
+#:set routine = 'xqrot'
+#:include 'bench_rot_mixed_body.fypp'

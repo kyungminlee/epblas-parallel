@@ -1,0 +1,3 @@
+#:set routine = 'qswap'
+#:set flop_per_n = 4
+#:include 'bench_copyswap_real_body.fypp'

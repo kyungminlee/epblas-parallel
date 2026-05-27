@@ -1,0 +1,2 @@
+#:set routine = 'qnrm2'
+#:include 'bench_norm_real_body.fypp'

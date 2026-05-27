@@ -1,0 +1,2 @@
+#:set routine = 'qgemm'
+#:include 'bench_gemm_real_body.fypp'

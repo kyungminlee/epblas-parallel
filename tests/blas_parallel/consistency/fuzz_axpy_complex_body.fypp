@@ -1,0 +1,66 @@
+#! Consistency fuzz — complex AXPY: y := alpha*x + y.
+#!   routine    e.g. 'yaxpy' (kind10), 'xaxpy' (kind16)
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(n, alpha, x, incx, y, incy)
+            import :: rk
+            integer, intent(in) :: n, incx, incy
+            complex(rk), intent(in) :: alpha
+            complex(rk), intent(in) :: x(*)
+            complex(rk), intent(inout) :: y(*)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(n, alpha, x, incx, y, incy)
+            import :: rk
+            integer, intent(in) :: n, incx, incy
+            complex(rk), intent(in) :: alpha
+            complex(rk), intent(in) :: x(*)
+            complex(rk), intent(inout) :: y(*)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, ic, n, incx, incy, lenx, leny, fails
+    complex(rk) :: alpha, beta_unused
+    real(rk) :: err, tol
+    complex(rk), allocatable :: X(:), Y0(:), Y_ov(:), Y_mig(:)
+
+    seed = read_seed(); ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096)
+        incx = rand_incx(); incy = rand_incx()
+        call rand_alpha_beta_complex(alpha, beta_unused)
+        tol = max(10.0_rk, 4.0_rk * real(n, rk)) * eps
+
+        lenx = 1 + (n - 1) * abs(incx)
+        leny = 1 + (n - 1) * abs(incy)
+        allocate(X(lenx), Y0(leny), Y_ov(leny), Y_mig(leny))
+        call fill_matrix_complex(X, lenx, 1, lenx)
+        call fill_matrix_complex(Y0, leny, 1, leny)
+        Y_ov = Y0; Y_mig = Y0
+
+        call ${routine}$(n, alpha, X, incx, Y_ov, incy)
+        call ${routine}$_migrated(n, alpha, X, incx, Y_mig, incy)
+        err = max_rel_err_complex(Y_ov, Y_mig, leny, 1, leny)
+        call err_stats_record(err)
+
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,3i6,a,es12.4)', 'FAIL ', ic, ' n,incx,incy=', &
+                n, incx, incy, ' err=', err
+        end if
+        deallocate(X, Y0, Y_ov, Y_mig)
+    end do
+
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, &
+        ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+
+end program fuzz_${routine}$

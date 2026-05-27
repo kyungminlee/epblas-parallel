@@ -1,0 +1,45 @@
+#! Consistency fuzz — mixed NRM2/ASUM: complex x → real result.
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+    interface
+        function ${routine}$(n, x, incx) result(r)
+            import :: rk
+            integer, intent(in) :: n, incx
+            complex(rk), intent(in) :: x(*)
+            real(rk) :: r
+        end function
+        function ${routine}$_migrated(n, x, incx) result(r)
+            import :: rk
+            integer, intent(in) :: n, incx
+            complex(rk), intent(in) :: x(*)
+            real(rk) :: r
+        end function
+    end interface
+    integer :: seed, ncases, ic, n, incx, lenx, fails
+    real(rk) :: r_ov, r_mig, err, tol
+    complex(rk), allocatable :: X(:)
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096); incx = rand_incx_pos()
+        tol = max(20.0_rk, 8.0_rk * real(n, rk)) * eps
+        lenx = 1 + (n - 1) * abs(incx)
+        allocate(X(lenx))
+        call fill_matrix_complex(X, lenx, 1, lenx)
+        r_ov  = ${routine}$(n, X, incx)
+        r_mig = ${routine}$_migrated(n, X, incx)
+        if (abs(r_mig) < tiny(1.0_rk)) then; err = abs(r_ov - r_mig)
+        else; err = abs(r_ov - r_mig) / abs(r_mig); end if
+        call err_stats_record(err)
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,2i6,a,es12.4)', 'FAIL ', ic, ' n,incx=', n, incx, ' err=', err
+        end if
+        deallocate(X)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program

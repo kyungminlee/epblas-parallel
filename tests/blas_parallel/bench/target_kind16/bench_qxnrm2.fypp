@@ -1,0 +1,2 @@
+#:set routine = 'qxnrm2'
+#:include 'bench_norm_mixed_body.fypp'

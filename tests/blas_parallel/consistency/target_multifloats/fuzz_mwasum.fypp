@@ -1,0 +1,54 @@
+! fuzz_mwasum — multifloats NRM2/ASUM.
+program fuzz_mwasum
+    use multifloats
+    use fuzz_util
+    implicit none
+    interface
+        function mwasum(n, x, incx) result(r)
+            import :: real64x2, cmplx64x2
+            integer, intent(in) :: n, incx
+            type(cmplx64x2), intent(in) :: x(*)
+            type(real64x2) :: r
+        end function
+        function mwasum_migrated(n, x, incx) result(r)
+            import :: real64x2, cmplx64x2
+            integer, intent(in) :: n, incx
+            type(cmplx64x2), intent(in) :: x(*)
+            type(real64x2) :: r
+        end function
+    end interface
+    integer :: seed, ncases, ic, n, incx, lenx, fails
+    type(real64x2) :: r_ov, r_mig, err, tol
+    type(cmplx64x2), allocatable :: X(:)
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_mwasum: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096); incx = pick_pos()
+        lenx = 1 + (n - 1) * abs(incx)
+        allocate(X(lenx))
+        call fill_matrix_complex(X, lenx, 1, lenx)
+        r_ov  = mwasum(n, X, incx)
+        r_mig = mwasum_migrated(n, X, incx)
+        block
+            type(real64x2) :: am, dm, tv
+            am = abs(r_mig); dm = abs(r_ov - r_mig); tv = real64x2(tiny(1.0_8))
+            if (am < tv) then; err = dm; else; err = dm / am; end if
+        end block
+        tol = max(real64x2(20.0_8), real64x2(8.0_8 * real(n, 8))) * eps
+        call err_stats_record(err%limbs(1))
+        if (err > tol) then; fails = fails + 1; print '(a,i0,a,2i6)', 'FAIL ', ic, ' n,incx=', n, incx; end if
+        deallocate(X)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_mwasum: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+contains
+    function pick_pos() result(k)
+        integer :: k; real(8) :: u
+        call random_number(u)
+        if (u < 0.7_8) then; k = 1
+        else if (u < 0.9_8) then; k = 2
+        else; k = 3; end if
+    end function
+end program

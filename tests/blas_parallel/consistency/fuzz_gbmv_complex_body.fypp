@@ -1,0 +1,88 @@
+#! Consistency fuzz driver — complex GBMV.
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(trans, m, n, kl, ku, alpha, a, lda, x, incx, beta, y, incy)
+            import :: rk
+            character, intent(in) :: trans
+            integer,   intent(in) :: m, n, kl, ku, lda, incx, incy
+            complex(rk), intent(in)    :: alpha, beta
+            complex(rk), intent(in)    :: a(lda, *), x(*)
+            complex(rk), intent(inout) :: y(*)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(trans, m, n, kl, ku, alpha, a, lda, x, incx, beta, y, incy)
+            import :: rk
+            character, intent(in) :: trans
+            integer,   intent(in) :: m, n, kl, ku, lda, incx, incy
+            complex(rk), intent(in)    :: alpha, beta
+            complex(rk), intent(in)    :: a(lda, *), x(*)
+            complex(rk), intent(inout) :: y(*)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, ic, m, n, kl, ku, lda, lenx, leny, fails
+    integer :: incx, incy, lenx_alloc, leny_alloc
+    character :: trans
+    complex(rk) :: alpha, beta
+    real(rk) :: err, tol
+    complex(rk), allocatable :: A(:), X(:), Y0(:), Y_ov(:), Y_mig(:)
+    real(8) :: u
+
+    seed = read_seed(); ncases = read_cases()
+
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        m = rand_int_log(1, 128)
+        n = rand_int_log(1, 128)
+        kl = rand_int_log(0, min(m - 1, 8)); if (kl < 0) kl = 0
+        ku = rand_int_log(0, min(n - 1, 8)); if (ku < 0) ku = 0
+        tol = max(10.0_rk, 4.0_rk * real(max(m, n), rk)) * eps
+        call random_number(u)
+        if (u < 1.0_8 / 3.0_8) then; trans = 'N'
+        else if (u < 2.0_8 / 3.0_8) then; trans = 'T'
+        else; trans = 'C'
+        end if
+        call rand_alpha_beta_complex(alpha, beta)
+        if (trans == 'N') then; lenx = n; leny = m
+        else;                   lenx = m; leny = n
+        end if
+        lda = (kl + ku + 1) + rand_pad()
+        incx = rand_incx(); incy = rand_incx()
+        lenx_alloc = 1 + (lenx - 1) * abs(incx)
+        leny_alloc = 1 + (leny - 1) * abs(incy)
+        allocate(A(lda * n), X(lenx_alloc), Y0(leny_alloc), Y_ov(leny_alloc), Y_mig(leny_alloc))
+        call fill_matrix_complex(A, kl + ku + 1, n, lda)
+        call fill_matrix_complex(X, lenx_alloc, 1, lenx_alloc)
+        call fill_matrix_complex(Y0, leny_alloc, 1, leny_alloc)
+        Y_ov = Y0; Y_mig = Y0
+        call ${routine}$(trans, m, n, kl, ku, alpha, A, lda, X, incx, beta, Y_ov, incy)
+        call ${routine}$_migrated(trans, m, n, kl, ku, alpha, A, lda, X, incx, beta, Y_mig, incy)
+        block
+            integer :: i
+            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            ref_max = 0.0_rk; diff_max = 0.0_rk
+            do i = 1, leny_alloc
+                a_abs = abs(Y_mig(i)); if (a_abs > ref_max) ref_max = a_abs
+                d_abs = abs(Y_ov(i) - Y_mig(i)); if (d_abs > diff_max) diff_max = d_abs
+            end do
+            tiny_val = tiny(1.0_rk)
+            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+        end block
+        call err_stats_record(err)
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,a1,a,2i6,a,2i4,a,i3,a,i3,a,es12.4)', &
+                'FAIL ', ic, ' T=', trans, ' mn=', m, n, ' klu=', kl, ku, &
+                ' incx=', incx, ' incy=', incy, ' err=', err
+        end if
+        deallocate(A, X, Y0, Y_ov, Y_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program fuzz_${routine}$

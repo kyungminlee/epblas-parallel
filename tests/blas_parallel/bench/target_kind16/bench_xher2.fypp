@@ -1,0 +1,2 @@
+#:set routine = 'xher2'
+#:include 'bench_her2_body.fypp'

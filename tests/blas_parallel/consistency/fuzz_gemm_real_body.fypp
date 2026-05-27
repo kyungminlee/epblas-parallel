@@ -1,0 +1,130 @@
+#! Consistency fuzz driver — real GEMM, parameterized by routine name.
+#!
+#! Per-target shim sets:
+#!   routine    e.g. 'egemm' (kind10), 'qgemm' (kind16), 'mgemm' (mf)
+#!
+#! Iterates random shapes/transposes/strides/alpha-beta combos,
+#! calling both <routine>_ (overlay via composite) and
+#! <routine>_migrated_ (renamed migrated archive), then asserts
+#! max_rel_err ≤ max(10, 4*K) * eps (Wilkinson bound).
+
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+
+    interface
+        subroutine ${routine}$(transa, transb, m, n, k, alpha, a, lda, &
+                         b, ldb, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: transa, transb
+            integer,   intent(in) :: m, n, k, lda, ldb, ldc
+            real(rk), intent(in) :: alpha, beta
+            real(rk), intent(in) :: a(lda, *), b(ldb, *)
+            real(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$
+        subroutine ${routine}$_migrated(transa, transb, m, n, k, alpha, a, lda, &
+                                  b, ldb, beta, c, ldc)
+            import :: rk
+            character, intent(in) :: transa, transb
+            integer,   intent(in) :: m, n, k, lda, ldb, ldc
+            real(rk), intent(in) :: alpha, beta
+            real(rk), intent(in) :: a(lda, *), b(ldb, *)
+            real(rk), intent(inout) :: c(ldc, *)
+        end subroutine ${routine}$_migrated
+    end interface
+
+    integer :: seed, ncases, i
+    integer :: m, n, k, lda, ldb, ldc, rows_a, cols_a, rows_b, cols_b
+    integer :: fails, sentinel_fails, bad_ov, bad_mig
+    character :: ta, tb
+    real(rk) :: alpha, beta, err, tol
+    real(rk), allocatable :: A(:), B(:), C0(:), C_ov(:), C_mig(:)
+
+    seed = read_seed()
+    ncases = read_cases()
+    call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed)
+
+    fails = 0
+    sentinel_fails = 0
+    do i = 1, ncases
+        m = rand_int_log(1, 256)
+        n = rand_int_log(1, 256)
+        k = rand_int_log(1, 256)
+        tol = max(10.0_rk, 4.0_rk * real(k, rk)) * eps
+        ta = rand_trans()
+        tb = rand_trans()
+        call rand_alpha_beta(alpha, beta)
+
+        if (ta == 'N') then
+            rows_a = m; cols_a = k
+        else
+            rows_a = k; cols_a = m
+        end if
+        if (tb == 'N') then
+            rows_b = k; cols_b = n
+        else
+            rows_b = n; cols_b = k
+        end if
+        lda = rows_a + rand_pad()
+        ldb = rows_b + rand_pad()
+        ldc = m      + rand_pad()
+        if (lda < 1) lda = 1
+        if (ldb < 1) ldb = 1
+        if (ldc < 1) ldc = 1
+
+        allocate(A(lda * cols_a))
+        allocate(B(ldb * cols_b))
+        allocate(C0(ldc * n))
+        allocate(C_ov(ldc * n))
+        allocate(C_mig(ldc * n))
+        call fill_matrix_real(A,  rows_a, cols_a, lda)
+        call fill_matrix_real(B,  rows_b, cols_b, ldb)
+        call fill_matrix_real(C0, m,      n,      ldc)
+        C_ov  = C0
+        C_mig = C0
+
+        call ${routine}$(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_ov,  ldc)
+        call ${routine}$_migrated(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_mig, ldc)
+        err = max_rel_err_real(C_ov, C_mig, m, n, ldc)
+        bad_ov  = check_sentinels_real(C_ov,  m, n, ldc)
+        bad_mig = check_sentinels_real(C_mig, m, n, ldc)
+
+        call err_stats_record(err)
+
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,2a1,a,3i6,a,3i6,a,2es12.4,a,es12.4)', &
+                'FAIL case ', i, '  trans=', ta, tb, &
+                '  mnk=', m, n, k, &
+                '  lda/ldb/ldc=', lda, ldb, ldc, &
+                '  a,b=', alpha, beta, '  err=', err
+        end if
+        if (bad_ov /= 0) then
+            sentinel_fails = sentinel_fails + 1
+            print '(a,i0,a,2a1,a,3i6,a,3i6,a,i0)', &
+                'SENTINEL overlay case ', i, '  trans=', ta, tb, &
+                '  mnk=', m, n, k, &
+                '  lda/ldb/ldc=', lda, ldb, ldc, &
+                '  bad col=', bad_ov
+        end if
+        if (bad_mig /= 0) then
+            sentinel_fails = sentinel_fails + 1
+            print '(a,i0,a,2a1,a,3i6,a,3i6,a,i0)', &
+                'SENTINEL migrated case ', i, '  trans=', ta, tb, &
+                '  mnk=', m, n, k, &
+                '  lda/ldb/ldc=', lda, ldb, ldc, &
+                '  bad col=', bad_mig
+        end if
+
+        deallocate(A, B, C0, C_ov, C_mig)
+    end do
+
+    print '(a,i0,a,i0,a,i0,a,i0)', &
+        'fuzz_${routine}$: ', ncases - fails, '/', ncases, &
+        ' passed; tol_fails=', fails, ' sentinel_fails=', sentinel_fails
+
+    call err_stats_print()
+    if (fails > 0 .or. sentinel_fails > 0) error stop 1
+end program fuzz_${routine}$

@@ -1,0 +1,2 @@
+#:set routine = 'qasum'
+#:include 'bench_norm_real_body.fypp'

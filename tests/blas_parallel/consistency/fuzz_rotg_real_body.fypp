@@ -1,0 +1,52 @@
+#! Consistency fuzz — real ROTG: generate Givens rotation. (a, b, c, s).
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+    interface
+        subroutine ${routine}$(a, b, c, s)
+            import :: rk
+            real(rk), intent(inout) :: a, b
+            real(rk), intent(out) :: c, s
+        end subroutine
+        subroutine ${routine}$_migrated(a, b, c, s)
+            import :: rk
+            real(rk), intent(inout) :: a, b
+            real(rk), intent(out) :: c, s
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, fails
+    real(rk) :: a0, b0, a_ov, b_ov, c_ov, s_ov, a_mig, b_mig, c_mig, s_mig
+    real(rk) :: err, tol
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        call random_number(u); a0 = real(2.0_8 * u - 1.0_8, rk)
+        call random_number(u); b0 = real(2.0_8 * u - 1.0_8, rk)
+        a_ov = a0; b_ov = b0; a_mig = a0; b_mig = b0
+        call ${routine}$(a_ov, b_ov, c_ov, s_ov)
+        call ${routine}$_migrated(a_mig, b_mig, c_mig, s_mig)
+        err = max(rel(a_ov, a_mig), rel(b_ov, b_mig), rel(c_ov, c_mig), rel(s_ov, s_mig))
+        tol = 100.0_rk * eps
+        call err_stats_record(err)
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,2es12.4,a,es12.4)', 'FAIL ', ic, ' a,b=', a0, b0, ' err=', err
+        end if
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+contains
+    function rel(x, y) result(r)
+        ! ROTG sign convention varies between implementations: (c, s, r, z)
+        ! and (-c, -s, -r, z) describe the same rotation. Compare absolute
+        ! values to be implementation-agnostic.
+        real(rk), intent(in) :: x, y
+        real(rk) :: r, dx
+        dx = min(abs(x - y), abs(x + y))
+        if (abs(y) < tiny(1.0_rk)) then; r = dx
+        else; r = dx / abs(y); end if
+    end function
+end program

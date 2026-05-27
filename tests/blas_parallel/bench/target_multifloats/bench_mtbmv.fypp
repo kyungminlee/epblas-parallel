@@ -1,0 +1,108 @@
+! bench_mtbmv — multifloats real DD triangular band.
+
+program bench_mtbmv
+    use multifloats
+    use fuzz_util, only: fill_matrix_real
+    implicit none
+    interface
+        subroutine mtbmv(uplo, trans, diag, n, k, a, lda, x, incx)
+            import :: real64x2
+            character, intent(in) :: uplo, trans, diag
+            integer, intent(in) :: n, k, lda, incx
+            type(real64x2), intent(in) :: a(lda, *)
+            type(real64x2), intent(inout) :: x(*)
+        end subroutine mtbmv
+        subroutine mtbmv_migrated(uplo, trans, diag, n, k, a, lda, x, incx)
+            import :: real64x2
+            character, intent(in) :: uplo, trans, diag
+            integer, intent(in) :: n, k, lda, incx
+            type(real64x2), intent(in) :: a(lda, *)
+            type(real64x2), intent(inout) :: x(*)
+        end subroutine mtbmv_migrated
+    end interface
+    integer :: iters, warmup, nsizes, i, itr, kband
+    integer, allocatable :: sizes(:)
+    type(real64x2), allocatable :: A(:), X(:), X_init(:)
+    real(8) :: t_subject, t_mig
+    character(len=1), parameter :: TRANSES(2) = ['N', 'T']
+    iters = read_int_env('BLAS_BENCH_ITERS', 4); warmup = read_int_env('BLAS_BENCH_WARMUP', 1)
+    kband = read_int_env('BLAS_BENCH_BAND_K', 32); call read_sizes(sizes); nsizes = size(sizes)
+    print '(a)', 'trans    size      subject GF/s   migrated GF/s   speedup'
+    do itr = 1, 2; do i = 1, nsizes
+        call run_size(TRANSES(itr), sizes(i), kband, iters, warmup, t_subject, t_mig)
+        call emit(TRANSES(itr), sizes(i), kband, t_subject, t_mig)
+    end do; end do
+contains
+    function read_int_env(name, dflt) result(v)
+        character(len=*), intent(in) :: name; integer, intent(in) :: dflt; integer :: v, ios
+        character(len=64) :: buf
+        v = dflt; call get_environment_variable(name, buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then; read(buf, *, iostat=ios) v; if (ios /= 0) v = dflt; end if
+    end function
+    subroutine read_sizes(arr)
+        integer, allocatable, intent(out) :: arr(:); character(len=256) :: buf
+        integer :: ios, i, j, n, val; character(len=32) :: tok
+        call get_environment_variable('BLAS_BENCH_SIZES', buf, status=ios)
+        if (ios /= 0 .or. len_trim(buf) == 0) then; arr = [128, 256, 512, 1024]; return; end if
+        n = 1; do i = 1, len_trim(buf); if (buf(i:i) == ',') n = n + 1; end do
+        allocate(arr(n)); j = 1; tok = ''; n = 0
+        do i = 1, len_trim(buf) + 1
+            if (i > len_trim(buf) .or. buf(i:i) == ',') then
+                read(tok, *, iostat=ios) val
+                if (ios == 0) then; n = n + 1; arr(n) = val; end if
+                tok = ''; j = 1
+            else; tok(j:j) = buf(i:i); j = j + 1; end if
+        end do
+        if (n < size(arr)) arr = arr(1:n)
+    end subroutine
+    subroutine clk(t)
+        real(8), intent(out) :: t; integer(8) :: c, r
+        call system_clock(count=c, count_rate=r); t = real(c, 8) / real(r, 8)
+    end subroutine
+    function med(x) result(m)
+        real(8), intent(in) :: x(:); real(8) :: m; real(8), allocatable :: y(:)
+        integer :: i, j, n; real(8) :: tmp
+        n = size(x); allocate(y(n)); y = x
+        do i = 1, n - 1; do j = i + 1, n; if (y(j) < y(i)) then; tmp = y(i); y(i) = y(j); y(j) = tmp; end if; end do; end do
+        if (mod(n, 2) == 1) then; m = y((n + 1) / 2); else; m = 0.5_8 * (y(n / 2) + y(n / 2 + 1)); end if
+    end function
+    subroutine run_size(trans, s, k, iters, warmup, t_subject, t_mig)
+        character, intent(in) :: trans; integer, intent(in) :: s, k, iters, warmup
+        real(8), intent(out) :: t_subject, t_mig
+        integer :: it, kk, lda, ii, idx
+        real(8), allocatable :: so(:), sm(:); real(8) :: t0, t1
+        kk = min(k, s - 1); if (kk < 0) kk = 0
+        lda = kk + 1
+        allocate(A(lda * s), X(s), X_init(s)); allocate(so(iters), sm(iters))
+        call fill_matrix_real(A, lda, s, lda)
+        ! Boost diagonal (banded U: row k+1).
+        do ii = 1, s
+            idx = (ii - 1) * lda + (kk + 1)
+            A(idx) = A(idx) + real64x2(real(s + 1, 8))
+        end do
+        call fill_matrix_real(X_init, s, 1, s)
+        do it = 1, warmup
+            X = X_init; call mtbmv('U', trans, 'N', s, kk, A, lda, X, 1)
+            X = X_init; call mtbmv_migrated('U', trans, 'N', s, kk, A, lda, X, 1)
+        end do
+        do it = 1, iters
+            X = X_init; call clk(t0)
+            call mtbmv('U', trans, 'N', s, kk, A, lda, X, 1)
+            call clk(t1); so(it) = t1 - t0
+            X = X_init; call clk(t0)
+            call mtbmv_migrated('U', trans, 'N', s, kk, A, lda, X, 1)
+            call clk(t1); sm(it) = t1 - t0
+        end do
+        t_subject = med(so); t_mig = med(sm)
+        deallocate(A, X, X_init, so, sm)
+    end subroutine
+    subroutine emit(trans, s, k, to, tm)
+        character, intent(in) :: trans; integer, intent(in) :: s, k; real(8), intent(in) :: to, tm
+        real(8) :: go, gm, sp, flops
+        flops = 2.0_8 * real(s, 8) * real(k + 1, 8)
+        if (to > 0.0_8) then; go = flops / to / 1.0e9_8; else; go = 0.0_8; end if
+        if (tm > 0.0_8) then; gm = flops / tm / 1.0e9_8; else; gm = 0.0_8; end if
+        if (to > 0.0_8) then; sp = tm / to; else; sp = 0.0_8; end if
+        print '(a1,5x,i6,4x,f12.4,4x,f12.4,4x,f7.2,a)', trans, s, go, gm, sp, 'x'
+    end subroutine
+end program

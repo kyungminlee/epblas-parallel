@@ -1,0 +1,49 @@
+#! Consistency fuzz — real ROT (plane rotation, real c/s).
+program fuzz_${routine}$
+    use fuzz_util
+    implicit none
+    interface
+        subroutine ${routine}$(n, x, incx, y, incy, c, s)
+            import :: rk
+            integer, intent(in) :: n, incx, incy
+            real(rk), intent(inout) :: x(*), y(*)
+            real(rk), intent(in) :: c, s
+        end subroutine
+        subroutine ${routine}$_migrated(n, x, incx, y, incy, c, s)
+            import :: rk
+            integer, intent(in) :: n, incx, incy
+            real(rk), intent(inout) :: x(*), y(*)
+            real(rk), intent(in) :: c, s
+        end subroutine
+    end interface
+    integer :: seed, ncases, ic, n, incx, incy, lenx, leny, fails
+    real(rk) :: c, s, theta, err, tol
+    real(rk), allocatable :: X0(:), Y0(:), X_ov(:), Y_ov(:), X_mig(:), Y_mig(:)
+    real(8) :: u
+    seed = read_seed(); ncases = read_cases(); call err_stats_init(ncases)
+    print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
+    call seed_rng(seed); fails = 0
+    do ic = 1, ncases
+        n = rand_int_log(1, 4096); incx = rand_incx(); incy = rand_incx()
+        call random_number(u); theta = real(6.28318_8 * u, rk)
+        c = cos(theta); s = sin(theta)
+        tol = max(20.0_rk, 8.0_rk * real(n, rk)) * eps
+        lenx = 1 + (n - 1) * abs(incx); leny = 1 + (n - 1) * abs(incy)
+        allocate(X0(lenx), Y0(leny), X_ov(lenx), Y_ov(leny), X_mig(lenx), Y_mig(leny))
+        call fill_matrix_real(X0, lenx, 1, lenx); call fill_matrix_real(Y0, leny, 1, leny)
+        X_ov = X0; Y_ov = Y0; X_mig = X0; Y_mig = Y0
+        call ${routine}$(n, X_ov, incx, Y_ov, incy, c, s)
+        call ${routine}$_migrated(n, X_mig, incx, Y_mig, incy, c, s)
+        err = max(max_rel_err_real(X_ov, X_mig, lenx, 1, lenx), &
+                  max_rel_err_real(Y_ov, Y_mig, leny, 1, leny))
+        call err_stats_record(err)
+        if (err > tol .or. err /= err) then
+            fails = fails + 1
+            print '(a,i0,a,3i6,a,es12.4)', 'FAIL ', ic, ' n,incx,incy=', n, incx, incy, ' err=', err
+        end if
+        deallocate(X0, Y0, X_ov, Y_ov, X_mig, Y_mig)
+    end do
+    print '(a,i0,a,i0,a,i0)', 'fuzz_${routine}$: ', ncases - fails, '/', ncases, ' passed; tol_fails=', fails
+    call err_stats_print()
+    if (fails > 0) error stop 1
+end program
