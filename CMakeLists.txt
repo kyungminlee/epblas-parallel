@@ -107,6 +107,66 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
     message(STATUS "composite: epparablas::${_composite} = WHOLE_ARCHIVE(${_overlay}) → ${_serial}")
 endforeach()
 
+# ── Install + export ──────────────────────────────────────────────
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+# Collect every installable target across the built-target set:
+# overlay archives (parallel + epopenblas) + composite INTERFACEs.
+# Excludes the `_migrated` IMPORTED archives — they're build-tree
+# only (test consumption), never installed.
+set(_epparablas_install_targets "")
+foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
+    set(_prefix "${EPPARABLAS_PREFIX_${_target}}")
+    foreach(_t
+            ${_prefix}blas_parallel
+            ${_prefix}blas_epopenblas
+            ${_prefix}blas)  # composite INTERFACE
+        if(TARGET ${_t})
+            list(APPEND _epparablas_install_targets ${_t})
+        endif()
+    endforeach()
+endforeach()
+
+if(_epparablas_install_targets)
+    install(TARGETS ${_epparablas_install_targets}
+        EXPORT epparablasTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+    install(EXPORT epparablasTargets
+        NAMESPACE epparablas::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epparablas
+    )
+
+    # Build the find_dependency() block for the migrator packages
+    # this configure linked against. Composites import
+    # `epla::<prefix>blas`, so each one needs the matching package
+    # find_dependency-d when the consumer does find_package(epparablas).
+    set(EPPARABLAS_FIND_DEPENDENCY_BLOCK "")
+    foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
+        set(_prefix "${EPPARABLAS_PREFIX_${_target}}")
+        string(APPEND EPPARABLAS_FIND_DEPENDENCY_BLOCK
+            "find_dependency(${_prefix}blas)\n")
+    endforeach()
+
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/epparablasConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/epparablasConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epparablas
+    )
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/epparablasConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/epparablasConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/epparablasConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epparablas
+    )
+endif()
+
 # Overlay test suite. Needs Fortran (the consistency / fuzz / bench
 # drivers are .fypp-templated Fortran) and the fypp executable.
 option(BUILD_TESTING "Build the overlay test suite (needs Fortran + fypp)" ON)
@@ -118,4 +178,3 @@ if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-# Install/export lands in step 8.
