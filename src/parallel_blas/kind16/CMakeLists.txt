@@ -102,6 +102,7 @@ set(PARALLEL_BLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
     "BLAS routines provided by the parallel overlay for this target")
 
 add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels})
+add_library(epparablas::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
 
 target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE c_std_99)
 target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE

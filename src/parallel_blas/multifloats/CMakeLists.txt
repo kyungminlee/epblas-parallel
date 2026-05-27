@@ -106,6 +106,7 @@ set(PARALLEL_BLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
     "BLAS routines provided by the parallel overlay for this target")
 
 add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels})
+add_library(epparablas::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
 
 # C++17 for std::aligned_alloc + multifloats's header requirements.
 target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE cxx_std_17)

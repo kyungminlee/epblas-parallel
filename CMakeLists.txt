@@ -8,7 +8,15 @@ cmake_minimum_required(VERSION 3.25)
 
 project(epparablas
     VERSION 0.1.0
-    LANGUAGES C CXX)
+    LANGUAGES C CXX Fortran)
+
+# Fortran is enabled at project() time (not behind BUILD_TESTING) because
+# the migrator's per-target Config.cmake files (eblasConfig.cmake, ...)
+# derive a compiler tag from CMAKE_Fortran_COMPILER_ID at find_package
+# time — with Fortran inactive that tag is empty, every find_package
+# silently fails, and discovery reports zero targets.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(FortranCompiler)
 
 # Baked-in (target, prefix) table. Adding a fourth target is a
 # coordinated change touching both repos; see CONTEXT.md §"Discovery".
@@ -100,11 +108,17 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
         target_link_libraries(${_composite} INTERFACE OpenMP::OpenMP_C)
     endif()
 
+    # Use the namespaced alias inside $<LINK_LIBRARY:...>. install(EXPORT)
+    # does NOT introspect generator-expression bodies — it copies them
+    # verbatim. The bare target name `${_overlay}` would survive into the
+    # installed Targets file and downstream linkers would try `-lqblas_parallel`
+    # against the system search path. The `epparablas::` form resolves to
+    # the IMPORTED target the export installs alongside the composite.
     target_link_libraries(${_composite} INTERFACE
-        "$<LINK_LIBRARY:WHOLE_ARCHIVE,${_overlay}>")
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,epparablas::${_overlay}>")
     target_link_libraries(${_composite} INTERFACE ${_serial})
 
-    message(STATUS "composite: epparablas::${_composite} = WHOLE_ARCHIVE(${_overlay}) → ${_serial}")
+    message(STATUS "composite: epparablas::${_composite} = WHOLE_ARCHIVE(epparablas::${_overlay}) → ${_serial}")
 endforeach()
 
 # ── Install + export ──────────────────────────────────────────────
@@ -167,13 +181,11 @@ if(_epparablas_install_targets)
     )
 endif()
 
-# Overlay test suite. Needs Fortran (the consistency / fuzz / bench
-# drivers are .fypp-templated Fortran) and the fypp executable.
-option(BUILD_TESTING "Build the overlay test suite (needs Fortran + fypp)" ON)
+# Overlay test suite. Needs the fypp executable on PATH (the
+# consistency / fuzz / bench drivers are .fypp-templated Fortran).
+# Fortran itself is already enabled at the top of this file.
+option(BUILD_TESTING "Build the overlay test suite (needs fypp)" ON)
 if(BUILD_TESTING)
-    enable_language(Fortran)
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-    include(FortranCompiler)
     enable_testing()
     add_subdirectory(tests)
 endif()

@@ -118,6 +118,7 @@ set(EPOPENBLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
     "BLAS routines provided by the epopenblas overlay for this target")
 
 add_library(${LIB_PREFIX}blas_epopenblas STATIC ${_kernels} ${_helpers})
+add_library(epparablas::${LIB_PREFIX}blas_epopenblas ALIAS ${LIB_PREFIX}blas_epopenblas)
 
 target_include_directories(${LIB_PREFIX}blas_epopenblas PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common)
