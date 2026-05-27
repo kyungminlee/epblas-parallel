@@ -1,0 +1,2 @@
+#:set routine = 'ydotc'
+#:include 'bench_dot_complex_body.fypp'

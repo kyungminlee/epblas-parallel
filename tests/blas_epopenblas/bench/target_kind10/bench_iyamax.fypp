@@ -1,0 +1,2 @@
+#:set routine = 'iyamax'
+#:include 'bench_iamax_complex_body.fypp'

@@ -24,3 +24,4 @@ function(add_fypp_source out_var shim_path body_dir)
 endfunction()
 
 add_subdirectory(blas_parallel)
+add_subdirectory(blas_epopenblas)

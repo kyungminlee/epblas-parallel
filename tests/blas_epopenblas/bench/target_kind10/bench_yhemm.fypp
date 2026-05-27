@@ -1,0 +1,2 @@
+#:set routine = 'yhemm'
+#:include 'bench_hemm_body.fypp'

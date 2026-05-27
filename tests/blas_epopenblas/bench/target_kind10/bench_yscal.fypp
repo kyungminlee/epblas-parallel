@@ -1,0 +1,2 @@
+#:set routine = 'yscal'
+#:include 'bench_scal_complex_body.fypp'

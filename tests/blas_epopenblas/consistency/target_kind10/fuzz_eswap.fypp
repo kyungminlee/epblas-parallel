@@ -1,0 +1,2 @@
+#:set routine = 'eswap'
+#:include 'fuzz_copyswap_real_body.fypp'

@@ -1,0 +1,174 @@
+/*
+ * esyr — kind10 port of OpenBLAS dsyr.  Symmetric rank-1 update.
+ *
+ *   A := alpha * x * x^T + A     (A is N x N symmetric)
+ *
+ * Mirror of OpenBLAS interface/syr.c.  Stores only the half indicated
+ * by UPLO; the other half is untouched.  Per BLAS reference:
+ *   UPLO='U': for j=0..n-1, for i=0..j: a[i,j] += alpha*x[i]*x[j]
+ *   UPLO='L': for j=0..n-1, for i=j..n-1: a[i,j] += alpha*x[i]*x[j]
+ *
+ * Threaded path mirrors driver/level2/syr_thread.c — sqrt-balanced
+ * contiguous partition (mask=7, min-width 16) on columns. Each thread
+ * writes a disjoint column stripe of A; no reduction needed.
+ *
+ * UPPER stripes are reverse-mapped (small-width stripes placed at the
+ * BOTTOM of the column range, where columns are heaviest) so the per-stripe
+ * triangular work is roughly equal. LOWER is forward-mapped (small-width
+ * stripes at the top, where LOWER columns are heaviest).
+ *
+ * Fortran ABI:  subroutine esyr(uplo, n, alpha, x, incx, a, lda)
+ */
+
+#include <stddef.h>
+#include <ctype.h>
+#include <math.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+typedef long double T;
+
+#define MULTI_THREAD_MINIMAL 16384
+#define MAX_PARTITION_CPUS   256
+
+#define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
+
+/* Build sqrt-balanced contiguous column-stripe partition for syr-class
+ * triangular work. Stripes 0..num_cpu-1 are laid out so the FIRST stripe
+ * has the smallest width (placed where columns are heaviest):
+ *   UPPER: stripe 0 = [n - w_0, n)            — bottom of column range
+ *   LOWER: stripe 0 = [0, w_0)                — top of column range
+ *
+ * Returns num_cpu used; fills m_from[] and m_to[] for each stripe. */
+static int syr_partition(int upper, ptrdiff_t n, int nthreads,
+                         int mask, int min_width,
+                         ptrdiff_t *m_from, ptrdiff_t *m_to)
+{
+    ptrdiff_t w[MAX_PARTITION_CPUS];
+    int num_cpu = 0;
+    double dnum = (double)n * (double)n / (double)nthreads;
+    ptrdiff_t i = 0;
+    while (i < n) {
+        ptrdiff_t width;
+        if (nthreads - num_cpu > 1) {
+            double di = (double)(n - i);
+            double rad = di * di - dnum;
+            if (rad > 0.0) width = (ptrdiff_t)(-sqrt(rad) + di);
+            else           width = n - i;
+            width = (width + mask) & ~(ptrdiff_t)mask;
+            if (width < min_width) width = min_width;
+            if (width > n - i)     width = n - i;
+        } else {
+            width = n - i;
+        }
+        w[num_cpu] = width;
+        num_cpu++;
+        i += width;
+        if (num_cpu >= MAX_PARTITION_CPUS) break;
+    }
+    if (!upper) {
+        ptrdiff_t cum = 0;
+        for (int k = 0; k < num_cpu; ++k) {
+            m_from[k] = cum;
+            cum += w[k];
+            m_to[k] = cum;
+        }
+    } else {
+        ptrdiff_t cum = n;
+        for (int k = 0; k < num_cpu; ++k) {
+            m_to[k] = cum;
+            cum -= w[k];
+            m_from[k] = cum;
+        }
+    }
+    return num_cpu;
+}
+
+void esyr_(const char *UPLO, const int *N, const T *ALPHA,
+           const T *x, const int *INCX, T *a, const int *LDA,
+           size_t uplo_len)
+{
+    (void)uplo_len;
+    ptrdiff_t n    = (ptrdiff_t)(*N);
+    ptrdiff_t incx = (ptrdiff_t)(*INCX);
+    ptrdiff_t lda  = (ptrdiff_t)(*LDA);
+    T alpha = *ALPHA;
+
+    if (n == 0 || alpha == 0.0L) return;
+
+    int upper = (toupper((unsigned char)*UPLO) == 'U');
+
+    if (incx < 0) x -= (n - 1) * incx;
+
+    if (incx == 1) {
+#ifdef _OPENMP
+        int nthreads = 1;
+        if (n * n > MULTI_THREAD_MINIMAL) nthreads = omp_get_max_threads();
+        if (nthreads > MAX_PARTITION_CPUS) nthreads = MAX_PARTITION_CPUS;
+        if (nthreads > 1) {
+            ptrdiff_t mf[MAX_PARTITION_CPUS], mt[MAX_PARTITION_CPUS];
+            int num_cpu = syr_partition(upper, n, nthreads, 7, 16, mf, mt);
+            if (num_cpu > 1) {
+                #pragma omp parallel num_threads(num_cpu)
+                {
+                    int t = omp_get_thread_num();
+                    ptrdiff_t m_from = mf[t];
+                    ptrdiff_t m_to   = mt[t];
+                    if (upper) {
+                        for (ptrdiff_t j = m_from; j < m_to; ++j) {
+                            T tj = alpha * x[j];
+                            if (tj == 0.0L) continue;
+                            T *aj = &A_(0, j);
+                            for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += tj * x[i];
+                        }
+                    } else {
+                        for (ptrdiff_t j = m_from; j < m_to; ++j) {
+                            T tj = alpha * x[j];
+                            if (tj == 0.0L) continue;
+                            T *aj = &A_(0, j);
+                            for (ptrdiff_t i = j; i < n; ++i) aj[i] += tj * x[i];
+                        }
+                    }
+                }
+                return;
+            }
+        }
+#endif
+        if (upper) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                T t = alpha * x[j];
+                if (t == 0.0L) continue;
+                T *aj = &A_(0, j);
+                for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += t * x[i];
+            }
+        } else {
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                T t = alpha * x[j];
+                if (t == 0.0L) continue;
+                T *aj = &A_(0, j);
+                for (ptrdiff_t i = j; i < n; ++i) aj[i] += t * x[i];
+            }
+        }
+    } else {
+        if (upper) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                T t = alpha * x[j * incx];
+                if (t == 0.0L) continue;
+                T *aj = &A_(0, j);
+                ptrdiff_t ix = 0;
+                for (ptrdiff_t i = 0; i <= j; ++i) { aj[i] += t * x[ix]; ix += incx; }
+            }
+        } else {
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                T t = alpha * x[j * incx];
+                if (t == 0.0L) continue;
+                T *aj = &A_(0, j);
+                ptrdiff_t ix = j * incx;
+                for (ptrdiff_t i = j; i < n; ++i) { aj[i] += t * x[ix]; ix += incx; }
+            }
+        }
+    }
+}
+
+#undef A_

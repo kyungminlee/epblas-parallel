@@ -1,0 +1,2 @@
+#:set routine = 'eaxpy'
+#:include 'bench_axpy_real_body.fypp'

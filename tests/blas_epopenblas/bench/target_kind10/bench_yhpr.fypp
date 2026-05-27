@@ -1,0 +1,2 @@
+#:set routine = 'yhpr'
+#:include 'bench_hpr_body.fypp'

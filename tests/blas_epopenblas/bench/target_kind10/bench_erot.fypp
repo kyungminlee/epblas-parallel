@@ -1,0 +1,2 @@
+#:set routine = 'erot'
+#:include 'bench_rot_real_body.fypp'

@@ -1,0 +1,2 @@
+#:set routine = 'egemv'
+#:include 'bench_gemv_real_body.fypp'

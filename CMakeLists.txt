@@ -68,6 +68,7 @@ if("multifloats" IN_LIST EPPARABLAS_BUILT_TARGETS)
 endif()
 
 add_subdirectory(src/parallel_blas)
+add_subdirectory(src/epopenblas)
 
 # ── Composite INTERFACE targets ───────────────────────────────────
 # epparablas::{e,q,m}blas links the overlay archive *before* the

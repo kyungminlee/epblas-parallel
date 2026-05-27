@@ -1,0 +1,2 @@
+#:set routine = 'espr2'
+#:include 'bench_spr2_body.fypp'

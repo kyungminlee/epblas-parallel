@@ -1,0 +1,3 @@
+#:set routine = 'ycopy'
+#:set flop_per_n = 4
+#:include 'bench_copyswap_complex_body.fypp'

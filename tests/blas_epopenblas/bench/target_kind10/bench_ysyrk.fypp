@@ -1,0 +1,2 @@
+#:set routine = 'ysyrk'
+#:include 'bench_syrk_complex_body.fypp'
