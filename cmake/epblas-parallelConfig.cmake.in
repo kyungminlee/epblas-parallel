@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# For each target this build linked against, the corresponding
+# eplinalg package is a hard dependency: the composite target
+# `epblas-parallel::<prefix>blas` resolves to overlay-WHOLE_ARCHIVE
+# followed by `eplinalg::<prefix>blas` from the eplinalg install.
+@EPBLAS_PARALLEL_FIND_DEPENDENCY_BLOCK@
+
+# OpenMP is an interface dep of every composite (libgomp lands in
+# the consumer's final link).
+find_dependency(OpenMP COMPONENTS C)
+
+include("${CMAKE_CURRENT_LIST_DIR}/epblas-parallelTargets.cmake")

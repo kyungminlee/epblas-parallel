@@ -9,7 +9,7 @@
  *
  * No blocking / no xgemm trailing update: at kind16, every op lowers
  * to a libquadmath call so blocking adds dispatch overhead without
- * accelerating the arithmetic. See doc/parallel-blas-design.md §10.
+ * accelerating the arithmetic. See doc/design.md §10.
  *
  * TRANSA='C' is handled as a distinct case from 'T' (conjugate vs
  * plain transpose).

@@ -98,11 +98,11 @@ foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.c$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
-set(PARALLEL_BLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
+set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
     "BLAS routines provided by the parallel overlay for this target")
 
 add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels})
-add_library(epparablas::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
+add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
 
 target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE c_std_99)
 target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
@@ -110,9 +110,9 @@ target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
     -ffp-contract=fast
     -fcx-fortran-rules  # see note in kind10/CMakeLists.txt
 )
-if(NOT "${PARALLEL_BLAS_MARCH}" STREQUAL "")
+if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
     target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-        -march=${PARALLEL_BLAS_MARCH})
+        -march=${EPBLAS_PARALLEL_MARCH})
 endif()
 
 # Quadmath provides __float128 arithmetic + the complex helpers

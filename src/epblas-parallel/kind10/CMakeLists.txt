@@ -7,10 +7,10 @@
 # (produced by the objcopy rename in step 0b). This proves the
 # Fortran-ABI C boundary end-to-end before any real kernel work.
 #
-# Linking model: see doc/parallel-blas/design.md §1. When
-# PARALLEL_BLAS=ON, the public `${LIB_PREFIX}blas` target is rewired
-# into an INTERFACE composite that links `_parallel` before `_serial`
-# so overlay symbols win. This file builds the `_parallel` half only.
+# Linking model: see doc/design.md §1. The top-level CMakeLists.txt
+# wraps this archive in an INTERFACE composite that links `_parallel`
+# WHOLE_ARCHIVE before the serial migrated archive so overlay symbols
+# win. This file builds the `_parallel` half only.
 
 set(_kernels
     egemm.c
@@ -106,11 +106,11 @@ foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.c$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
-set(PARALLEL_BLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
+set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
     "BLAS routines provided by the parallel overlay for this target")
 
 add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels})
-add_library(epparablas::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
+add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
 
 target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE c_std_99)
 target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
@@ -123,10 +123,10 @@ target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
     # behind migrated until this flag landed).
     -fcx-fortran-rules
 )
-# -march comes from src/parallel_blas/CMakeLists.txt (shared knob).
-if(NOT "${PARALLEL_BLAS_MARCH}" STREQUAL "")
+# -march comes from src/epblas-parallel/CMakeLists.txt (shared knob).
+if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
     target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-        -march=${PARALLEL_BLAS_MARCH})
+        -march=${EPBLAS_PARALLEL_MARCH})
 endif()
 
 # OpenMP comes in at step 4. Wire it now so the per-kernel #pragmas

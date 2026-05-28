@@ -23,5 +23,5 @@ function(add_fypp_source out_var shim_path body_dir)
     set(${out_var} ${_out} PARENT_SCOPE)
 endfunction()
 
-add_subdirectory(blas_parallel)
-add_subdirectory(blas_epopenblas)
+add_subdirectory(epblas-parallel)
+add_subdirectory(epblas-openblas)

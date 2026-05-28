@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Run every blas_parallel (parallel-blas overlay) perf_* executable in
-# the epparablas build tree at OMP=1, pinned to P-core 0, and append
+# Run every blas_parallel (epblas-parallel overlay) perf_* executable in
+# the epblas-parallel build tree at OMP=1, pinned to P-core 0, and append
 # the structured output to a TSV.
 #
-# TSV columns: target routine key size iters parallel_blas_GFs migrated_GFs ratio
-#   parallel_blas_GFs = the C parallel-blas overlay's GF/s for this row
+# TSV columns: target routine key size iters epblas_parallel_GFs migrated_GFs ratio
+#   epblas_parallel_GFs = the C epblas-parallel overlay's GF/s for this row
 #   migrated_GFs       = the migrated Fortran reference's GF/s for this row
-#   ratio              = parallel_blas_GFs / migrated_GFs
+#   ratio              = epblas_parallel_GFs / migrated_GFs
 #
-# Scope: parallel-blas overlay only. epopenblas comparisons live under
+# Scope: epblas-parallel overlay only. epblas-openblas comparisons live under
 # reports/cmp5/ (see reports/cmp5/run_cmp5.sh).
 #
 # Usage:
 #   scripts/run_perf_sweep.sh [BUILD_DIR]
-#     BUILD_DIR defaults to ./build (the epparablas top-level build dir).
+#     BUILD_DIR defaults to ./build (the epblas-parallel top-level build dir).
 #     Inside it, perf_* executables for every built target live under
-#     tests/blas_parallel/ — distinguished by their prefix (e=kind10,
+#     tests/epblas-parallel/ — distinguished by their prefix (e=kind10,
 #     q=kind16, m=multifloats).
 #
 # Env knobs:
@@ -26,9 +26,9 @@
 set -u
 
 BUILD_DIR="${1:-./build}"
-TDIR="$BUILD_DIR/tests/blas_parallel"
+TDIR="$BUILD_DIR/tests/epblas-parallel"
 if [[ ! -d "$TDIR" ]]; then
-    echo "[fatal] no test dir at $TDIR — pass the epparablas build dir as \$1" >&2
+    echo "[fatal] no test dir at $TDIR — pass the epblas-parallel build dir as \$1" >&2
     exit 1
 fi
 
@@ -42,7 +42,7 @@ LOG="$OUTDIR/perf_sweep.log"
 : > "$TSV"
 : > "$LOG"
 
-echo -e "target\troutine\tkey\tsize\titers\tparallel_blas_GFs\tmigrated_GFs\tratio" >> "$TSV"
+echo -e "target\troutine\tkey\tsize\titers\tepblas_parallel_GFs\tmigrated_GFs\tratio" >> "$TSV"
 
 for target in e q m; do
     case "$target" in

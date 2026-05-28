@@ -1,16 +1,14 @@
 /*
- * yscal — kind10 port of OpenBLAS zscal.  x := alpha*x, alpha complex.
+ * yescal — kind10 port of OpenBLAS zdscal.  x := alpha*x, alpha REAL.
  *
- * NETLIB bail: incx <= 0 is a no-op (matches blas/src/yscal.f and
+ * NETLIB bail: incx <= 0 is a no-op (matches blas/src/yescal.f and
  * OpenBLAS interface/scal.c).
  *
- * Kernel shape: manual __real__/__imag__ expansion with the imag-part
- * products written as `xi*ar + xr*ai` (X.im term first). gcc emits x87
- * products in source order; this order matches the value already on
- * top of the x87 stack after the first store, saving one `fxch` per
- * iter vs the natural `xr*ai + xi*ar` form (15 insns / 2 fxch → 14
- * insns / 1 fxch). Borrowed from parallel_blas/kind10/yscal.c —
- * matches gfortran's ZSCAL codegen instruction-for-instruction.
+ * Kernel shape: treat each complex element as two consecutive long
+ * doubles and walk by 2 in a pointer-incrementing loop with the two
+ * fmuls written explicitly.  Borrowed from epblas-parallel/kind10/yescal.c
+ * — gives the compiler a tight 2-fmul-per-iter body instead of a
+ * 2N-iteration single-fmul loop that may or may not get unrolled.
  */
 #include <stddef.h>
 #ifdef _OPENMP
@@ -22,35 +20,32 @@ typedef long double T;
 
 #define MULTI_THREAD_MINIMAL 10000
 
-static void scal_kernel(ptrdiff_t n, T ar, T ai, T *base, ptrdiff_t incx)
+static void scal_kernel(ptrdiff_t n, T alpha, T *base, ptrdiff_t incx)
 {
     if (incx == 1) {
         T *p = base;
         T *e = p + 2 * n;
         for (; p < e; p += 2) {
-            const T xr = p[0], xi = p[1];
-            p[0] = xr * ar - xi * ai;
-            p[1] = xi * ar + xr * ai;
+            p[0] *= alpha;
+            p[1] *= alpha;
         }
         return;
     }
     /* incx > 0 only (NETLIB bails on incx <= 0). */
     for (ptrdiff_t i = 0; i < n; ++i) {
         T *p = base + 2 * i * incx;
-        const T xr = p[0], xi = p[1];
-        p[0] = xr * ar - xi * ai;
-        p[1] = xi * ar + xr * ai;
+        p[0] *= alpha;
+        p[1] *= alpha;
     }
 }
 
-void yscal_(const int *N, const C *ALPHA, C *x, const int *INCX)
+void yescal_(const int *N, const T *ALPHA, C *x, const int *INCX)
 {
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);
     if (n <= 0 || incx <= 0) return;
-    const T ar = __real__ *ALPHA;
-    const T ai = __imag__ *ALPHA;
-    if (ar == 1.0L && ai == 0.0L) return;
+    T alpha = *ALPHA;
+    if (alpha == 1.0L) return;
 
     T *base = (T *)x;
 
@@ -67,12 +62,12 @@ void yscal_(const int *N, const C *ALPHA, C *x, const int *INCX)
                 ptrdiff_t end   = start + chunk;
                 if (end > n) end = n;
                 if (start < end)
-                    scal_kernel(end - start, ar, ai,
+                    scal_kernel(end - start, alpha,
                                 base + 2 * start * incx, incx);
             }
             return;
         }
     }
 #endif
-    scal_kernel(n, ar, ai, base, incx);
+    scal_kernel(n, alpha, base, incx);
 }

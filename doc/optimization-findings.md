@@ -1,7 +1,7 @@
 # Parallel BLAS overlay — optimization findings
 
 Date: 2026-05-15
-Branch: `parallel-blas`
+Branch: `epblas-parallel`
 Hardware: Intel i3-1315U (Raptor Lake-U, Alder Lake-derived; 2P+4E cores, P-core L1d=48 KB, L2=1.25 MB, L3=10 MB shared)
 
 This document records what was tried, what worked, and what didn't, while tuning the GEMM overlays. It complements [`design.md`](design.md) (the design doc). Read this when you're about to "obviously" optimize a kernel — many of the obvious moves have already been tried and rejected on bench.
@@ -173,7 +173,7 @@ When chasing a perf gap, follow this order:
    kernel-codegen gaps.** The fypp-generated Fortran bench can manufacture
    5–10% phantom gaps from binary layout alone — when the linker spreads
    overlay's kernel ~100 KB from migrated's, iTLB churn on each call
-   eats ~5–10% throughput. The `tests/blas_parallel/perf/target_<name>/perf_*.c`
+   eats ~5–10% throughput. The `tests/epblas-parallel/perf/target_<name>/perf_*.c`
    harness (CMake wires `-ffunction-sections -Wl,--gc-sections` per
    executable) collapses overlay's footprint to the same few KB as
    migrated and reports honest GF/s. Procedure: if the Fortran bench
@@ -387,7 +387,7 @@ At small N where the actual FP work is microseconds, this single call was 10–1
 
 ### Fix
 
-Cache the value in a relaxed-atomic static. New header at `src/parallel_blas/common/blas_omp.h`:
+Cache the value in a relaxed-atomic static. New header at `src/epblas-parallel/common/blas_omp.h`:
 
 ```c
 static inline int blas_omp_max_threads(void)
@@ -1242,7 +1242,7 @@ harness.
 
 ### How to get honest numbers
 
-`tests/blas_parallel/perf/target_<name>/perf_*.c` — C harness with:
+`tests/epblas-parallel/perf/target_<name>/perf_*.c` — C harness with:
 - Direct extern calls (no Fortran interface block)
 - Aligned `aligned_alloc(64)` for A, X, Y
 - Block timing (one clock pair per N calls — no per-call timer noise)
@@ -3290,7 +3290,7 @@ win on L-branch unit-stride (esymv L N=256 went from 0.949 → 1.00+).
 Strided cases stayed at the Addendum 22 ceiling — that gap is in the
 outer-loop setup, not in the inner.
 
-Committed as `parallel-blas: esymv/qsymv strided — increment-based ix/iy`.
+Committed as `epblas-parallel: esymv/qsymv strided — increment-based ix/iy`.
 
 ### easum was mis-classified as bandwidth-bound
 
@@ -3773,7 +3773,7 @@ mmap-heavy.
 
 ### Port
 
-`src/parallel_blas/kind10/esyrk.c` rewritten — ~700 LOC. New
+`src/epblas-parallel/kind10/esyrk.c` rewritten — ~700 LOC. New
 pieces:
 
 - `pack_A_panel` / `pack_B_panel`: identical-pattern packers

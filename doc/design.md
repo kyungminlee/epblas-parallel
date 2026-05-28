@@ -1,7 +1,7 @@
 # Hand-written parallel BLAS overlay — design & phased plan
 
 Date: 2026-05-13  
-Branch: `parallel-blas`
+Branch: `epblas-parallel`
 
 This document specifies the plan for a hand-written, thread-parallel
 overlay BLAS for the extended-precision targets (`kind10`, `kind16`,
@@ -45,7 +45,7 @@ The overlay archive still builds and is exercised by its own
 consistency / fuzz / bench tests, but no downstream consumer links
 it. This mode exists for A/B'ing end-to-end performance.
 
-The overlay source lives at `src/parallel_blas/<target>/` in the
+The overlay source lives at `src/epblas-parallel/<target>/` in the
 project repo and is staged into the unified build tree by
 `migrator stage`.
 
@@ -112,14 +112,15 @@ Each phase only lands once fuzz + bench are green on the previous one.
 
 ## 3. Build integration
 
-- Source tree: `src/parallel_blas/<target>/{egemm.c, etrsm.c, ...}` plus
-  `src/parallel_blas/<target>/CMakeLists.txt` that defines the static
+- Source tree: `src/epblas-parallel/<target>/{egemm.c, etrsm.c, ...}` plus
+  `src/epblas-parallel/<target>/CMakeLists.txt` that defines the static
   archive `${LIB_PREFIX}blas_parallel`.
-- Top-level `src/parallel_blas/CMakeLists.txt` gates on
+- Top-level `src/epblas-parallel/CMakeLists.txt` gates on
   `option(PARALLEL_BLAS)` and dispatches to the per-target subdir.
-- `cmake/CMakeLists.txt` adds `add_subdirectory(parallel_blas)` if the
-  staged tree contains it.
-- `migrator stage` copies `src/parallel_blas/` into the staging dir
+- The top-level `CMakeLists.txt` adds `add_subdirectory(src/epblas-parallel)`
+  unconditionally when at least one target's per-precision package is
+  discoverable on `CMAKE_PREFIX_PATH`.
+- `migrator stage` copies `src/epblas-parallel/` into the staging dir
   (one-line addition to `cmd_stage` in `src/migrator/__main__.py`).
 - Compile flags: `-O3 -fopenmp -march=native -ffp-contract=fast`
   (env-overridable per kernel for the bench autotune step).
@@ -130,7 +131,7 @@ Two test layers, both always-on whenever `PARALLEL_BLAS=ON`.
 
 ### 4.1 Consistency suite — **new, primary**
 
-`tests/blas_parallel/consistency/` — one driver per routine.
+`tests/epblas-parallel/consistency/` — one driver per routine.
 
 - Calls both `egemm_` (overlay) and `egemm_migrated_` (renamed migrated).
 - Compares result matrices/vectors in `REAL(KIND=10)` (same precision
@@ -148,7 +149,7 @@ the parallel kernel introduces relative to the Netlib quad oracle.
 
 ### 4.3 Fuzz harness — **new**
 
-`tests/blas_parallel/fuzz/`. Per routine, parameterized:
+`tests/epblas-parallel/fuzz/`. Per routine, parameterized:
 
 - Random `M, N, K` mixing edges {0, 1, 2, MR-1, MR, MR+1, 2·MR, ...}
   with mid (32–256) and tail (≥KC, ≥MC, log-distributed).
@@ -170,7 +171,7 @@ thread count is within 10 ulp of every other (not bit-exact).
 
 ## 5. Benchmark harness — **new**
 
-`tests/blas_parallel/bench/`. Per routine:
+`tests/epblas-parallel/bench/`. Per routine:
 
 - Geometric size sweep (e.g. GEMM: 64, 128, 256, 512, 1024, 2048).
 - Warm-up + N timed iterations; report median GFLOP/s, min, max.
@@ -212,9 +213,9 @@ multifloats if available. OMP outside as before.
 
 | step | deliverable                                                                            | gate |
 |------|----------------------------------------------------------------------------------------|------|
-| **0**  | C build plumbing: `src/parallel_blas/` skeleton, `PARALLEL_BLAS` option, passthrough stub for `egemm_` | builds clean; existing 1125 unaffected when `PARALLEL_BLAS=OFF` |
+| **0**  | C build plumbing: `src/epblas-parallel/` skeleton, `PARALLEL_BLAS` option, passthrough stub for `egemm_` | builds clean; existing 1125 unaffected when `PARALLEL_BLAS=OFF` |
 | **0b** | `objcopy --redefine-syms` step that emits `lib${LIB_PREFIX}blas_migrated.a`; first test exe links both | passthrough call lands in migrated impl |
-| **0c** | `cmd_stage` copies `src/parallel_blas/` into staging                                   | `migrator stage` produces a self-contained tree |
+| **0c** | `cmd_stage` copies `src/epblas-parallel/` into staging                                   | `migrator stage` produces a self-contained tree |
 | **0d** | Composite rewiring of `${LIB_PREFIX}blas` (rename existing target → `_serial`, add INTERFACE shim) under `PARALLEL_BLAS=ON` | `${LIB_PREFIX}lapack` links unchanged, downstream consumers transparently pick up the overlay |
 | 1     | Fuzz harness for `egemm` (runs against the migrated archive only — validates the harness itself) | finds zero false positives on migrated-vs-migrated |
 | 2     | Bench harness for `egemm` (baseline numbers committed)                                 | reproducible GFLOP/s for migrated baseline |
@@ -226,7 +227,7 @@ multifloats if available. OMP outside as before.
 | 8     | Port to `kind16`                                                                       | reuse harness 1:1 |
 | 9     | Port to `multifloats`                                                                  | reuse harness 1:1 |
 
-Phases 1–4 stay on branch `parallel-blas`; merge to `develop` only
+Phases 1–4 stay on branch `epblas-parallel`; merge to `develop` only
 after step 5 lands and is green.
 
 ## 8. Tolerance & determinism
@@ -243,7 +244,7 @@ after step 5 lands and is green.
 
 | item                  | default                                                           |
 |-----------------------|-------------------------------------------------------------------|
-| branch                | `parallel-blas`; merge to `develop` after step 5                  |
+| branch                | `epblas-parallel`; merge to `develop` after step 5                  |
 | bench iterations      | 5 timed + 1 warm-up; fuzz fast=500, nightly=50000                 |
 | determinism           | 10 ulp rel err; not bit-exact                                     |
 | overlay packaging     | separate `lib*blas_parallel.a`; opt-in via `PARALLEL_BLAS=ON`     |
@@ -408,7 +409,7 @@ double per ymm = 4 parallel DD values). The error-free transforms
 embarrassingly parallel across lanes — no horizontal reductions,
 no cross-lane dependencies.
 
-Implementation in `src/parallel_blas/multifloats/mgemm_simd_kernel.h`:
+Implementation in `src/epblas-parallel/multifloats/mgemm_simd_kernel.h`:
 
   twoprod(a, b) → (p, e):  p = a*b, e = fma(a, b, -p)   /* exact */
   twosum(a, b)  → (s, e):  6-op variant
@@ -567,7 +568,7 @@ inlining the bodies into the hot loop would save the call overhead.
 Vendored gcc's `libgcc/soft-fp/` template headers under
 `external/libgcc-softfp/`. Wrote `static inline
 __attribute__((always_inline))` wrappers `qmul`, `qadd`, `qsub` in
-`src/parallel_blas/kind16/qmath_inline.h`. Gated on
+`src/epblas-parallel/kind16/qmath_inline.h`. Gated on
 `-DQBLAS_INLINE_SOFTFP=ON`. Verified the expansion lands in the
 binary: `qgemm_._omp_fn.0` body grew from ~250 to ~5000
 instructions (correct: each `qmul` is ~700 insns, each `qadd` is
@@ -738,7 +739,7 @@ wins 1.9–2× (kind16) and 7–10× (multifloats) per combo, with
 
 ## 11. References
 
-- Project memory: [project-parallel-blas-design](../../../.claude/projects/-home-kyungminlee-Code-fortran-migrator/memory/project_parallel_blas_design.md)
+- Project memory: [project-epblas-parallel-design](../../../.claude/projects/-home-kyungminlee-Code-fortran-migrator/memory/project_parallel_blas_design.md)
 - Goto, K., van de Geijn, R. — *Anatomy of High-Performance Matrix
   Multiplication* (ACM TOMS, 2008). Source of the
   MC/KC/NC + pack-A / pack-B layout.

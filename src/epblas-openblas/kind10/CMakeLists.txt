@@ -1,13 +1,14 @@
-# epopenblas — kind10 (REAL(KIND=10) / 80-bit long double).
+# epblas-openblas — kind10 (REAL(KIND=10) / 80-bit long double).
 #
 # OpenBLAS D and Z source ports, retyped to long double / _Complex long double.
-# Builds a STATIC archive `${LIB_PREFIX}blas_epopenblas` consumed only by
-# tests/blas_epopenblas/. NOT wired into the public ${LIB_PREFIX}blas composite.
+# Builds a STATIC archive `${LIB_PREFIX}blas_openblas` consumed only by
+# tests/epblas-openblas/. NOT wired into the public
+# `epblas-parallel::${LIB_PREFIX}blas` composite.
 #
 # Adding a routine:
 #   1. Drop the ported source into this directory, e.g. eaxpy.c
 #   2. Append the filename to _kernels below.
-#   3. The matching tests/blas_epopenblas/.../target_kind10/ shim picks it up
+#   3. The matching tests/epblas-openblas/.../target_kind10/ shim picks it up
 #      automatically — see CHECKLIST.md for the per-routine status table.
 
 set(_kernels
@@ -100,44 +101,52 @@ set(_kernels
 # the real path and the matching zgemm_*.c for the complex path). These
 # contribute symbols to the archive but are not Fortran-callable, so
 # they're listed separately from `_kernels` and NOT included in
-# `EPOPENBLAS_OVERLAY_ROUTINES`.
+# `EPBLAS_OPENBLAS_OVERLAY_ROUTINES`.
 set(_helpers
     ../common/eblas_l3_real.c
     ../common/eblas_l3_complex.c
 )
 
-# Publish the overlay-covered routine set so the BLAS section in
-# cmake/CMakeLists.txt knows which symbols to objcopy-rename in the
-# matching `${LIB_PREFIX}blas_epopenblas_migrated` archive.
+# Publish the overlay-covered routine set so the driver in
+# src/epblas-openblas/CMakeLists.txt knows which symbols to objcopy-rename
+# in the matching `${LIB_PREFIX}blas_openblas_migrated` archive.
 set(_routines "")
 foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.c$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
-set(EPOPENBLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
-    "BLAS routines provided by the epopenblas overlay for this target")
+set(EPBLAS_OPENBLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
+    "BLAS routines provided by the epblas-openblas overlay for this target")
 
-add_library(${LIB_PREFIX}blas_epopenblas STATIC ${_kernels} ${_helpers})
-add_library(epparablas::${LIB_PREFIX}blas_epopenblas ALIAS ${LIB_PREFIX}blas_epopenblas)
+add_library(${LIB_PREFIX}blas_openblas STATIC ${_kernels} ${_helpers})
+add_library(epblas-openblas::${LIB_PREFIX}blas_openblas ALIAS ${LIB_PREFIX}blas_openblas)
 
-target_include_directories(${LIB_PREFIX}blas_epopenblas PRIVATE
+# Consumer-facing target name is bare `${LIB_PREFIX}blas` — the
+# `epblas-openblas::` namespace already disambiguates from the parallel
+# package's composite. Internal target name keeps the `_openblas`
+# suffix because CMake requires per-project target uniqueness and the
+# parallel package's composite target is named `${LIB_PREFIX}blas`.
+set_target_properties(${LIB_PREFIX}blas_openblas PROPERTIES
+    EXPORT_NAME ${LIB_PREFIX}blas)
+
+target_include_directories(${LIB_PREFIX}blas_openblas PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 
-target_compile_features(${LIB_PREFIX}blas_epopenblas PRIVATE c_std_99)
-target_compile_options(${LIB_PREFIX}blas_epopenblas PRIVATE
+target_compile_features(${LIB_PREFIX}blas_openblas PRIVATE c_std_99)
+target_compile_options(${LIB_PREFIX}blas_openblas PRIVATE
     -O3
     -ffp-contract=fast
     # Fortran-style complex arithmetic — skip the NaN/Inf branch checks
     # that GCC otherwise emits in __mulxc3/__divxc3.
     -fcx-fortran-rules
 )
-if(NOT "${EPOPENBLAS_MARCH}" STREQUAL "")
-    target_compile_options(${LIB_PREFIX}blas_epopenblas PRIVATE
-        -march=${EPOPENBLAS_MARCH})
+if(NOT "${EPBLAS_OPENBLAS_MARCH}" STREQUAL "")
+    target_compile_options(${LIB_PREFIX}blas_openblas PRIVATE
+        -march=${EPBLAS_OPENBLAS_MARCH})
 endif()
 
 if(OpenMP_C_FOUND)
-    target_link_libraries(${LIB_PREFIX}blas_epopenblas PUBLIC OpenMP::OpenMP_C)
+    target_link_libraries(${LIB_PREFIX}blas_openblas PUBLIC OpenMP::OpenMP_C)
 endif()
 # enrm2 / eynrm2 / erotg / yrotg pull in sqrtl + ldexpl from libm.
-target_link_libraries(${LIB_PREFIX}blas_epopenblas PUBLIC m)
+target_link_libraries(${LIB_PREFIX}blas_openblas PUBLIC m)

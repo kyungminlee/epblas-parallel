@@ -1,15 +1,14 @@
 # Hand-written parallel BLAS overlay — multi-target driver.
 #
-# For each target in EPPARABLAS_BUILT_TARGETS (set by the top-level
-# CMakeLists after find_package'ing the migrator's per-target
-# packages), this file sets LIB_PREFIX and add_subdirectory's the
-# matching per-target subdir, which produces a STATIC archive
+# For each target in EPBLAS_PARALLEL_BUILT_TARGETS (set by the top-level
+# CMakeLists after find_package'ing the eplinalg per-target packages),
+# this file sets LIB_PREFIX and add_subdirectory's the matching
+# per-target subdir, which produces a STATIC archive
 # `${LIB_PREFIX}blas_parallel`.
 #
-# Per-target subdirs are unchanged from when they lived inside
-# fortran-migrator/src/parallel_blas/<target>/ — they still read
-# ${LIB_PREFIX} from outer scope and publish their overlay-routines
-# list via the PARALLEL_BLAS_OVERLAY_ROUTINES CACHE INTERNAL var.
+# Per-target subdirs read ${LIB_PREFIX} from outer scope and publish
+# their overlay-routines list via the EPBLAS_PARALLEL_OVERLAY_ROUTINES
+# CACHE INTERNAL var.
 #
 # The composite INTERFACE target that links overlay-before-serial
 # is defined in the top-level CMakeLists.
@@ -20,43 +19,43 @@ find_package(OpenMP COMPONENTS C CXX)
 
 # Shared knob across per-target subdirs. Passed verbatim to
 # -march=<value> for the overlay kernels.
-set(PARALLEL_BLAS_MARCH "native" CACHE STRING
+set(EPBLAS_PARALLEL_MARCH "native" CACHE STRING
     "value passed to -march for parallel BLAS kernels (empty to disable)")
 
-foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
-    set(LIB_PREFIX "${EPPARABLAS_PREFIX_${_target}}")
+foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
+    set(LIB_PREFIX "${EPBLAS_PARALLEL_PREFIX_${_target}}")
     set(_per_target_dir ${CMAKE_CURRENT_SOURCE_DIR}/${_target})
     if(NOT IS_DIRECTORY ${_per_target_dir})
-        message(STATUS "parallel_blas: no kernels for target '${_target}' "
+        message(STATUS "epblas-parallel: no kernels for target '${_target}' "
                        "at ${_per_target_dir} — skipping")
         continue()
     endif()
-    message(STATUS "parallel_blas: building ${LIB_PREFIX}blas_parallel "
+    message(STATUS "epblas-parallel: building ${LIB_PREFIX}blas_parallel "
                    "(target ${_target}) from ${_per_target_dir}")
-    add_subdirectory(${_per_target_dir} parallel_blas_${_target})
+    add_subdirectory(${_per_target_dir} epblas_parallel_${_target})
 
     # Capture the per-target overlay-routine list. Each per-target
-    # subdir publishes PARALLEL_BLAS_OVERLAY_ROUTINES (CACHE INTERNAL)
+    # subdir publishes EPBLAS_PARALLEL_OVERLAY_ROUTINES (CACHE INTERNAL)
     # — that single global gets overwritten on each iteration, so we
-    # save a per-target copy here for tests/blas_parallel to consume.
-    set(EPPARABLAS_OVERLAY_ROUTINES_${_target}
-        "${PARALLEL_BLAS_OVERLAY_ROUTINES}" CACHE INTERNAL
+    # save a per-target copy here for tests/epblas-parallel to consume.
+    set(EPBLAS_PARALLEL_OVERLAY_ROUTINES_${_target}
+        "${EPBLAS_PARALLEL_OVERLAY_ROUTINES}" CACHE INTERNAL
         "Parallel-BLAS overlay routine names for target ${_target}")
 
     # ── Renamed migrated archive for overlay consistency tests ────
-    # `lib${LIB_PREFIX}blas_migrated.a` is the imported serial migrator
-    # archive (epla::${LIB_PREFIX}blas) with overlay-covered routines
+    # `lib${LIB_PREFIX}blas_migrated.a` is the imported serial eplinalg
+    # archive (eplinalg::${LIB_PREFIX}blas) with overlay-covered routines
     # renamed `<prefix><routine>_` → `<prefix><routine>_migrated_` via
     # objcopy --redefine-syms. Lets a single test binary link both the
     # composite (overlay's egemm_) AND the renamed archive
     # (egemm_migrated_) and diff them at REAL(KIND=10/16/MF).
     #
-    # Used only by tests/blas_parallel/. Not installed.
-    if(PARALLEL_BLAS_OVERLAY_ROUTINES)
+    # Used only by tests/epblas-parallel/. Not installed.
+    if(EPBLAS_PARALLEL_OVERLAY_ROUTINES)
         set(_redef_file
             ${CMAKE_CURRENT_BINARY_DIR}/${LIB_PREFIX}blas_migrated.redef)
         set(_redef_content "")
-        foreach(_r ${PARALLEL_BLAS_OVERLAY_ROUTINES})
+        foreach(_r ${EPBLAS_PARALLEL_OVERLAY_ROUTINES})
             string(APPEND _redef_content "${_r}_ ${_r}_migrated_\n")
         endforeach()
         file(GENERATE OUTPUT ${_redef_file} CONTENT "${_redef_content}")
@@ -66,7 +65,7 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
         add_custom_command(
             OUTPUT ${_migrated_archive}
             COMMAND ${CMAKE_OBJCOPY} --redefine-syms=${_redef_file}
-                    $<TARGET_FILE:epla::${LIB_PREFIX}blas>
+                    $<TARGET_FILE:eplinalg::${LIB_PREFIX}blas>
                     ${_migrated_archive}
             DEPENDS ${_redef_file}
             COMMENT "objcopy: emitting lib${LIB_PREFIX}blas_migrated.a"

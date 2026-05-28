@@ -13,8 +13,8 @@
  * is well below the per-call BLAS overhead, so the cache wasn't pulling
  * its weight anyway.
  */
-#ifndef PARALLEL_BLAS_BLAS_OMP_H
-#define PARALLEL_BLAS_BLAS_OMP_H
+#ifndef EPBLAS_PARALLEL_BLAS_OMP_H
+#define EPBLAS_PARALLEL_BLAS_OMP_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,4 +34,4 @@ static inline int blas_omp_max_threads(void) { return 1; }
 }
 #endif
 
-#endif /* PARALLEL_BLAS_BLAS_OMP_H */
+#endif /* EPBLAS_PARALLEL_BLAS_OMP_H */

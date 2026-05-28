@@ -1,14 +1,14 @@
 # Parallel BLAS overlay test suite — multi-target driver.
 #
-# Per target in EPPARABLAS_BUILT_TARGETS we generate:
+# Per target in EPBLAS_PARALLEL_BUILT_TARGETS we generate:
 #   common/target_<name>/fuzz_util.fypp        → fuzz_util.f90 (per-target shim)
 #   consistency/target_<name>/fuzz_*.fypp      → fuzz drivers (overlay vs migrated)
 #   bench/target_<name>/bench_*.fypp           → Fortran benches
 #   perf/target_<name>/perf_*.c|.cpp           → C/C++ perf harnesses
 #
-# Each test binary links the composite `epparablas::<prefix>blas`
+# Each test binary links the composite `epblas-parallel::<prefix>blas`
 # (overlay-before-serial) AND the renamed `_migrated` archive
-# (`<prefix>blas_migrated` — produced by src/parallel_blas/) so a
+# (`<prefix>blas_migrated` — produced by src/epblas-parallel/) so a
 # single driver can call both `egemm_` and `egemm_migrated_` and
 # diff them.
 
@@ -19,8 +19,8 @@ if(TARGET multifloatsf)
     set(_have_multifloats_f TRUE)
 endif()
 
-foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
-    set(LIB_PREFIX "${EPPARABLAS_PREFIX_${_target}}")
+foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
+    set(LIB_PREFIX "${EPBLAS_PARALLEL_PREFIX_${_target}}")
     set(_overlay_archive "${LIB_PREFIX}blas_parallel")
     set(_migrated_archive "${LIB_PREFIX}blas_migrated")
     set(_composite "${LIB_PREFIX}blas")
@@ -71,8 +71,8 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
                 ${_fuzz_common}
                 ${_composite}
                 ${_migrated_archive})
-            add_test(NAME blas_parallel_${_name} COMMAND ${_name})
-            set_tests_properties(blas_parallel_${_name} PROPERTIES
+            add_test(NAME epblas_parallel_${_name} COMMAND ${_name})
+            set_tests_properties(epblas_parallel_${_name} PROPERTIES
                 ENVIRONMENT "BLAS_FUZZ_CASES=200")
         endforeach()
     endif()
@@ -91,9 +91,9 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
                 ${_composite}
                 ${_migrated_archive})
             file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports)
-            add_test(NAME blas_parallel_${_name} COMMAND ${_name}
+            add_test(NAME epblas_parallel_${_name} COMMAND ${_name}
                      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports)
-            set_tests_properties(blas_parallel_${_name}
+            set_tests_properties(epblas_parallel_${_name}
                 PROPERTIES LABELS "bench")
         endforeach()
     endif()
@@ -118,8 +118,8 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
                 -ffunction-sections -fdata-sections)
             target_link_options(${_name} PRIVATE
                 LINKER:--gc-sections)
-            add_test(NAME blas_parallel_${_name} COMMAND ${_name})
-            set_tests_properties(blas_parallel_${_name}
+            add_test(NAME epblas_parallel_${_name} COMMAND ${_name})
+            set_tests_properties(epblas_parallel_${_name}
                 PROPERTIES LABELS "perf")
         endforeach()
     endif()

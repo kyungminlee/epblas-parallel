@@ -1,12 +1,12 @@
-# epopenblas overlay test suite — multi-target driver.
+# epblas-openblas overlay test suite — multi-target driver.
 #
-# Per target in EPPARABLAS_BUILT_TARGETS that has an epopenblas
+# Per target in EPBLAS_PARALLEL_BUILT_TARGETS that has an epblas-openblas
 # kernel set, we build consistency / bench / perf executables that
-# compare the epopenblas overlay archive against the
-# `<prefix>blas_epopenblas_migrated` renamed-migrated archive (also
-# produced by src/epopenblas/).
+# compare the epblas-openblas overlay archive against the
+# `<prefix>blas_openblas_migrated` renamed-migrated archive (also
+# produced by src/epblas-openblas/).
 #
-# Body .fypp templates are REUSED from tests/blas_parallel/ — same
+# Body .fypp templates are REUSED from tests/epblas-parallel/ — same
 # Fortran ABI, parameterized by overlay-archive symbol name only.
 # Per-target shims live here:
 #   common/target_<name>/fuzz_util.fypp
@@ -18,15 +18,15 @@ if(TARGET multifloatsf)
     set(_have_multifloats_f TRUE)
 endif()
 
-foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
-    set(LIB_PREFIX "${EPPARABLAS_PREFIX_${_target}}")
-    set(_overlay_archive "${LIB_PREFIX}blas_epopenblas")
-    set(_migrated_archive "${LIB_PREFIX}blas_epopenblas_migrated")
+foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
+    set(LIB_PREFIX "${EPBLAS_PARALLEL_PREFIX_${_target}}")
+    set(_overlay_archive "${LIB_PREFIX}blas_openblas")
+    set(_migrated_archive "${LIB_PREFIX}blas_openblas_migrated")
     set(_overlay_routines
-        "${EPPARABLAS_EPOPENBLAS_OVERLAY_ROUTINES_${_target}}")
+        "${EPBLAS_OPENBLAS_OVERLAY_ROUTINES_${_target}}")
 
     if(NOT TARGET ${_overlay_archive} OR NOT TARGET ${_migrated_archive})
-        message(STATUS "tests/blas_epopenblas: overlay or _migrated absent "
+        message(STATUS "tests/epblas-openblas: overlay or _migrated absent "
                        "for target '${_target}' — skipping")
         continue()
     endif()
@@ -34,7 +34,7 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
     set(_common_target_dir
         ${CMAKE_CURRENT_SOURCE_DIR}/common/target_${_target})
     if(NOT IS_DIRECTORY ${_common_target_dir})
-        message(STATUS "tests/blas_epopenblas: no fuzz_util shim for target "
+        message(STATUS "tests/epblas-openblas: no fuzz_util shim for target "
                        "'${_target}' — skipping")
         continue()
     endif()
@@ -44,20 +44,20 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
     set(_bench_target_dir
         ${CMAKE_CURRENT_SOURCE_DIR}/bench/target_${_target})
 
-    # Body .fypp templates live in tests/blas_parallel/ (same Fortran
+    # Body .fypp templates live in tests/epblas-parallel/ (same Fortran
     # ABI, nothing references "parallel" specifically).
     set(_parallel_common_body
-        ${CMAKE_CURRENT_SOURCE_DIR}/../blas_parallel/common)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../epblas-parallel/common)
     set(_parallel_consist_body
-        ${CMAKE_CURRENT_SOURCE_DIR}/../blas_parallel/consistency)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../epblas-parallel/consistency)
     set(_parallel_bench_body
-        ${CMAKE_CURRENT_SOURCE_DIR}/../blas_parallel/bench)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../epblas-parallel/bench)
 
     # Per-target fuzz_util library.
     add_fypp_source(_fuzz_util_src
         ${_common_target_dir}/fuzz_util.fypp
         ${_parallel_common_body})
-    set(_fuzz_common ${LIB_PREFIX}blas_epopenblas_fuzz_common)
+    set(_fuzz_common ${LIB_PREFIX}blas_openblas_fuzz_common)
     add_library(${_fuzz_common} STATIC ${_fuzz_util_src})
     fortran_module_layout(${_fuzz_common})
     if("${_target}" STREQUAL "multifloats" AND _have_multifloats_f)
@@ -79,10 +79,10 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
                 ${_fuzz_common}
                 ${_overlay_archive}
                 ${_migrated_archive})
-            add_test(NAME blas_epopenblas_${_name} COMMAND ep_${_name})
-            set_tests_properties(blas_epopenblas_${_name} PROPERTIES
+            add_test(NAME epblas_openblas_${_name} COMMAND ep_${_name})
+            set_tests_properties(epblas_openblas_${_name} PROPERTIES
                 ENVIRONMENT "BLAS_FUZZ_CASES=200"
-                LABELS "epopenblas-fuzz")
+                LABELS "epblas-openblas-fuzz")
         endforeach()
     endif()
 
@@ -98,25 +98,25 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
                 ${_fuzz_common}
                 ${_overlay_archive}
                 ${_migrated_archive})
-            file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epopenblas)
+            file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
             foreach(_threads 1 4)
-                set(_test_name blas_epopenblas_${_name}_omp${_threads})
+                set(_test_name epblas_openblas_${_name}_omp${_threads})
                 set(_json
-                    ${CMAKE_BINARY_DIR}/reports/epopenblas/${_name}_omp${_threads}.json)
+                    ${CMAKE_BINARY_DIR}/reports/epblas-openblas/${_name}_omp${_threads}.json)
                 add_test(NAME ${_test_name} COMMAND ep_${_name}
-                         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epopenblas)
+                         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
                 set_tests_properties(${_test_name} PROPERTIES
                     ENVIRONMENT "OMP_NUM_THREADS=${_threads};BLAS_BENCH_OUT=${_json}"
-                    LABELS "epopenblas-bench;epopenblas-bench-omp${_threads}")
+                    LABELS "epblas-openblas-bench;epblas-openblas-bench-omp${_threads}")
             endforeach()
         endforeach()
     endif()
 
-    # C perf harnesses — reused from tests/blas_parallel/perf/target_<T>/,
-    # built only for routines that are in the epopenblas overlay set
+    # C perf harnesses — reused from tests/epblas-parallel/perf/target_<T>/,
+    # built only for routines that are in the epblas-openblas overlay set
     # so the link succeeds without dragging in unported symbols.
     set(_perf_target_dir
-        ${CMAKE_CURRENT_SOURCE_DIR}/../blas_parallel/perf/target_${_target})
+        ${CMAKE_CURRENT_SOURCE_DIR}/../epblas-parallel/perf/target_${_target})
     if(IS_DIRECTORY ${_perf_target_dir} AND _overlay_routines)
         foreach(_r ${_overlay_routines})
             set(_perf_src ${_perf_target_dir}/perf_${_r}.c)
@@ -140,16 +140,16 @@ foreach(_target IN LISTS EPPARABLAS_BUILT_TARGETS)
             target_compile_options(ep_${_name} PRIVATE
                 -ffunction-sections -fdata-sections)
             target_link_options(ep_${_name} PRIVATE LINKER:--gc-sections)
-            file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epopenblas)
+            file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
             foreach(_threads 1 4)
-                set(_test_name blas_epopenblas_${_name}_omp${_threads})
+                set(_test_name epblas_openblas_${_name}_omp${_threads})
                 set(_json
-                    ${CMAKE_BINARY_DIR}/reports/epopenblas/${_name}_omp${_threads}.json)
+                    ${CMAKE_BINARY_DIR}/reports/epblas-openblas/${_name}_omp${_threads}.json)
                 add_test(NAME ${_test_name} COMMAND ep_${_name}
-                         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epopenblas)
+                         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
                 set_tests_properties(${_test_name} PROPERTIES
                     ENVIRONMENT "OMP_NUM_THREADS=${_threads};BLAS_PERF_JSON=${_json}"
-                    LABELS "epopenblas-perf;epopenblas-perf-omp${_threads}")
+                    LABELS "epblas-openblas-perf;epblas-openblas-perf-omp${_threads}")
             endforeach()
         endforeach()
     endif()

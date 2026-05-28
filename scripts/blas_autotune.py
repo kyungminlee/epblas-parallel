@@ -11,9 +11,9 @@ Usage:
         [--routine gemm] [--size 1024] [--threads 4]
 
 Examples:
-    python scripts/blas_autotune.py /path/to/epparablas/build --target kind10
-    python scripts/blas_autotune.py /path/to/epparablas/build --target kind16 --size 512
-    python scripts/blas_autotune.py /path/to/epparablas/build --target multifloats --size 256
+    python scripts/blas_autotune.py /path/to/epblas-parallel/build --target kind10
+    python scripts/blas_autotune.py /path/to/epblas-parallel/build --target kind16 --size 512
+    python scripts/blas_autotune.py /path/to/epblas-parallel/build --target multifloats --size 256
 
 Output: <build-dir>/reports/autotune_<target>_<routine>.json
 """
@@ -45,7 +45,7 @@ NC_GRID = [128, 256, 384, 512]
 
 def run_one(bench: Path, env_prefix: str, mc: int, kc: int, nc: int,
             size: int, threads: int, iters: int) -> float | None:
-    """Run bench at (mc, kc, nc); return subject (parallel-blas) GFLOP/s (or None on failure)."""
+    """Run bench at (mc, kc, nc); return subject (epblas-parallel) GFLOP/s (or None on failure)."""
     env = os.environ.copy()
     env[f"{env_prefix}_MC"] = str(mc)
     env[f"{env_prefix}_KC"] = str(kc)
@@ -73,7 +73,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("build_dir", type=Path,
-                   help="CMake build dir (e.g. /path/to/epparablas/build)")
+                   help="CMake build dir (e.g. /path/to/epblas-parallel/build)")
     p.add_argument("--target", required=True, choices=list(PREFIXES))
     p.add_argument("--routine", default="gemm",
                    help="routine family to tune (default: gemm)")

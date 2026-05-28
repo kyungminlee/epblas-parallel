@@ -7,7 +7,7 @@
  * stay header-only so each translation unit picks up only what it actually
  * uses; --gc-sections drops the rest.
  *
- * "Subject" here means whichever C overlay (epopenblas OR parallel-blas)
+ * "Subject" here means whichever C overlay (epblas-openblas OR epblas-parallel)
  * is linked into the binary — perf_*.c sources are overlay-agnostic.
  *
  * Env knobs:
@@ -106,7 +106,7 @@ static inline void perf_print_header(void) {
     /* Single line printed once per binary. Format chosen so a downstream
      * Python aggregator can split on whitespace. */
     /* "subject_GFs" = GF/s of the C-overlay routine under test in this
-     * binary (epopenblas OR parallel-blas, depending on which archive was
+     * binary (epblas-openblas OR epblas-parallel, depending on which archive was
      * linked — perf_*.c sources are overlay-agnostic). */
     printf("# routine            key      size    iters   subject_GFs   migrated_GFs   mig/subject\n");
 }
@@ -128,7 +128,7 @@ static inline void perf_emit(const char *routine, const char *key, int size,
  * Caller writes to BLAS_PERF_JSON in append mode if set.
  *
  * JSON keys:
- *   t_subject, gflops_subject  — C overlay (epopenblas OR parallel-blas; varies
+ *   t_subject, gflops_subject  — C overlay (epblas-openblas OR epblas-parallel; varies
  *                                by which archive is linked into the binary)
  *   t_mg, gflops_mg            — migrated Fortran reference
  *   ratio                      — subject GF/s ÷ migrated GF/s

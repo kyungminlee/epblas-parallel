@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Aggregate reports/perf_sweep.tsv into a Markdown summary.
 
-Per-routine: median (parallel-blas / migrated) ratio over all (key, size)
-cells, plus min/max. Highlights cells with ratio < 0.95× (parallel-blas
-slower than migrated) or > 1.10× (parallel-blas faster) — useful for
+Per-routine: median (epblas-parallel / migrated) ratio over all (key, size)
+cells, plus min/max. Highlights cells with ratio < 0.95× (epblas-parallel
+slower than migrated) or > 1.10× (epblas-parallel faster) — useful for
 spotting where the C harness's honest measurement differs from prior
 Fortran-bench reports.
 
-Scope: parallel-blas overlay vs migrated Fortran reference (epopenblas not
+Scope: epblas-parallel overlay vs migrated Fortran reference (epblas-openblas not
 covered by this sweep — see `reports/cmp5/` for that comparison).
 
 Usage:
@@ -39,7 +39,7 @@ def main():
             try:
                 r['size'] = int(r['size'])
                 r['iters'] = int(r['iters'])
-                r['parallel_blas_GFs'] = float(r['parallel_blas_GFs'])
+                r['epblas_parallel_GFs'] = float(r['epblas_parallel_GFs'])
                 r['migrated_GFs'] = float(r['migrated_GFs'])
                 r['ratio'] = float(r['ratio'])
             except (ValueError, KeyError) as e:
@@ -56,15 +56,15 @@ def main():
         by_routine[(r['target'], r['routine'])].append(r)
 
     out = []
-    out.append('# parallel-blas overlay vs migrated Fortran — C perf harness sweep (OMP=1)')
+    out.append('# epblas-parallel overlay vs migrated Fortran — C perf harness sweep (OMP=1)')
     out.append('')
     out.append(f'Source: `{tsv}` ({len(rows)} cells, {len(by_routine)} routines)')
     out.append('')
-    out.append('Ratio column: `parallel-blas GF/s ÷ migrated GF/s` (>1 = parallel-blas wins).')
+    out.append('Ratio column: `epblas-parallel GF/s ÷ migrated GF/s` (>1 = epblas-parallel wins).')
     out.append('')
     out.append('Methodology:')
     out.append('- Kernel-isolated C harness with `-ffunction-sections -Wl,--gc-sections`')
-    out.append('  (per findings doc Addendum 14 — collapses parallel-blas overlay\'s symbol')
+    out.append('  (per findings doc Addendum 14 — collapses epblas-parallel overlay\'s symbol')
     out.append('  footprint to a few KB so iTLB churn doesn\'t inflate the gap).')
     out.append('- `taskset -c 0 OMP_NUM_THREADS=1` on Intel i3-1315U P-core.')
     out.append('- Per-routine summary shows median ratio over all (key, size) cells.')

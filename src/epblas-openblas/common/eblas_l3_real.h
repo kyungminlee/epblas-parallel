@@ -114,10 +114,10 @@ void eblas_egemm_beta(ptrdiff_t m, ptrdiff_t n,
 
 /* ── Env-var block-size overrides ────────────────────────────────────
  *
- * Read once into static cache. Names match the parallel_blas overlay's
+ * Read once into static cache. Names match the epblas-parallel overlay's
  * pattern (EBLAS_MC, EBLAS_KC, EBLAS_NC) so the same tuning env
  * controls both overlays — these are runtime block-size knobs, not
- * portage of the parallel_blas implementation.
+ * portage of the epblas-parallel implementation.
  *
  * Returns the effective (MC, KC, NC) values for this process.
  */

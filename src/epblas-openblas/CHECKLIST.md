@@ -1,10 +1,10 @@
-# epopenblas — OpenBLAS D/Z port to kind10 (REAL/COMPLEX(KIND=10))
+# epblas-openblas — OpenBLAS D/Z port to kind10 (REAL/COMPLEX(KIND=10))
 
 Direct ports of OpenBLAS double-precision (D) real and double-complex (Z)
 sources, retyped to 80-bit long double / `_Complex long double`. Builds a
-separate static archive `${LIB_PREFIX}blas_epopenblas` (not wired into the
-public `${LIB_PREFIX}blas` composite). Tested standalone against the
-migrated baseline via `tests/blas_epopenblas/`.
+separate static archive `${LIB_PREFIX}blas_openblas` (not wired into the
+public `epblas-parallel::${LIB_PREFIX}blas` composite). Tested standalone
+against the migrated baseline via `tests/epblas-openblas/`.
 
 Naming map (project convention, matches `blas/src/`):
 - `d*`  (double real)             → `e*`
@@ -25,7 +25,7 @@ Per row:
 - **status** — `todo` / `wip` / `done`
 - **smoke** — fuzz passes, bench builds: `n` / `y`
 - **bench-omp1**, **bench-omp4** — most recent GFLOPS overlay vs migrated
-- **par>ep (omp1/omp4)** — peak `parallel-blas / epopenblas` overlay ratio at OMP=1 and OMP=4, from the 4-variant sweep in `reports/cmp5/cmp5.tsv`. `—` means within the 10% noise floor at that OMP level (par-blas not meaningfully faster). A value like `1.51× / 2.15×` is the worst (key, size) row for that routine — i.e. the (key, size) at which parallel-blas most outperforms this epopenblas port. `n/d` = no bench data (timed out). `n/a` = no comparable bench (algorithm diverges from OpenBLAS, e.g. Blue's nrm2, or scalar O(1)).
+- **par>ep (omp1/omp4)** — peak `epblas-parallel / epblas-openblas` overlay ratio at OMP=1 and OMP=4, from the 4-variant sweep in `reports/cmp5/cmp5.tsv`. `—` means within the 10% noise floor at that OMP level (epblas-parallel not meaningfully faster). A value like `1.51× / 2.15×` is the worst (key, size) row for that routine — i.e. the (key, size) at which epblas-parallel most outperforms this epblas-openblas port. `n/d` = no bench data (timed out). `n/a` = no comparable bench (algorithm diverges from OpenBLAS, e.g. Blue's nrm2, or scalar O(1)).
 
 **`faithful` column:**
 - `yes` — algorithm + threading mirror OpenBLAS (interface + kernel + thread driver structure all ported; OMP replaces blas_queue but matches the partitioning/reduction shape).

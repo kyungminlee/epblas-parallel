@@ -102,11 +102,11 @@ foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.cpp$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
-set(PARALLEL_BLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
+set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
     "BLAS routines provided by the parallel overlay for this target")
 
 add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels})
-add_library(epparablas::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
+add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
 
 # C++17 for std::aligned_alloc + multifloats's header requirements.
 target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE cxx_std_17)
@@ -117,9 +117,9 @@ target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
     # =fast — fast lets the compiler fold across statements.
     -ffp-contract=on
 )
-if(NOT "${PARALLEL_BLAS_MARCH}" STREQUAL "")
+if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
     target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-        -march=${PARALLEL_BLAS_MARCH})
+        -march=${EPBLAS_PARALLEL_MARCH})
 endif()
 
 # multifloats C library provides adddd / muldd / fmadd / cmuldd / ...
