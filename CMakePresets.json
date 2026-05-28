@@ -27,5 +27,95 @@
             "name": "linux",
             "configurePreset": "linux"
         }
+    ],
+
+    "testPresets": [
+        {
+            "name": "_linux-base",
+            "hidden": true,
+            "configurePreset": "linux",
+            "output": {"outputOnFailure": true},
+            "execution": {"jobs": 8, "timeout": 300}
+        },
+        {
+            "name": "fuzz",
+            "description": "Run only fuzz/consistency tests (~15s; the correctness gate).",
+            "inherits": "_linux-base",
+            "filter": {"include": {"label": "fuzz"}}
+        },
+        {
+            "name": "bench",
+            "description": "Run the per-routine Fortran bench drivers (minutes).",
+            "inherits": "_linux-base",
+            "filter": {"include": {"label": "bench"}}
+        },
+        {
+            "name": "perf",
+            "description": "Run the C perf harnesses (slow; per-binary timeout 300s).",
+            "inherits": "_linux-base",
+            "execution": {"jobs": 1, "timeout": 1800},
+            "filter": {"include": {"label": "perf"}}
+        },
+        {
+            "name": "sweep",
+            "description": "Run the cmp5 + perf-sweep shell drivers (hours).",
+            "inherits": "_linux-base",
+            "execution": {"jobs": 1, "timeout": 7200},
+            "filter": {"include": {"label": "sweep"}}
+        },
+        {
+            "name": "e2e",
+            "description": "Run everything: fuzz + bench + perf + sweep.",
+            "inherits": "_linux-base",
+            "execution": {"jobs": 1, "timeout": 7200}
+        }
+    ],
+
+    "workflowPresets": [
+        {
+            "name": "fuzz",
+            "description": "configure -> build -> fuzz tests. The everyday correctness gate.",
+            "steps": [
+                {"type": "configure", "name": "linux"},
+                {"type": "build",     "name": "linux"},
+                {"type": "test",      "name": "fuzz"}
+            ]
+        },
+        {
+            "name": "bench",
+            "description": "configure -> build -> bench tests.",
+            "steps": [
+                {"type": "configure", "name": "linux"},
+                {"type": "build",     "name": "linux"},
+                {"type": "test",      "name": "bench"}
+            ]
+        },
+        {
+            "name": "perf",
+            "description": "configure -> build -> per-routine perf harnesses.",
+            "steps": [
+                {"type": "configure", "name": "linux"},
+                {"type": "build",     "name": "linux"},
+                {"type": "test",      "name": "perf"}
+            ]
+        },
+        {
+            "name": "sweep",
+            "description": "configure -> build -> cmp5 + perf-sweep shell drivers.",
+            "steps": [
+                {"type": "configure", "name": "linux"},
+                {"type": "build",     "name": "linux"},
+                {"type": "test",      "name": "sweep"}
+            ]
+        },
+        {
+            "name": "e2e",
+            "description": "configure -> build -> everything (fuzz + bench + perf + sweep). Overnight run.",
+            "steps": [
+                {"type": "configure", "name": "linux"},
+                {"type": "build",     "name": "linux"},
+                {"type": "test",      "name": "e2e"}
+            ]
+        }
     ]
 }

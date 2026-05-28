@@ -87,7 +87,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
                 eplinalg::blas)
             add_test(NAME epblas_parallel_${_name} COMMAND ${_name})
             set_tests_properties(epblas_parallel_${_name} PROPERTIES
-                ENVIRONMENT "BLAS_FUZZ_CASES=200")
+                ENVIRONMENT "BLAS_FUZZ_CASES=200"
+                LABELS "fuzz")
         endforeach()
     endif()
 

@@ -94,7 +94,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
             add_test(NAME epblas_openblas_${_name} COMMAND ep_${_name})
             set_tests_properties(epblas_openblas_${_name} PROPERTIES
                 ENVIRONMENT "BLAS_FUZZ_CASES=200"
-                LABELS "epblas-openblas-fuzz")
+                LABELS "fuzz;epblas-openblas-fuzz")
         endforeach()
     endif()
 
@@ -120,7 +120,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
                          WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
                 set_tests_properties(${_test_name} PROPERTIES
                     ENVIRONMENT "OMP_NUM_THREADS=${_threads};BLAS_BENCH_OUT=${_json}"
-                    LABELS "epblas-openblas-bench;epblas-openblas-bench-omp${_threads}")
+                    LABELS "bench;epblas-openblas-bench;epblas-openblas-bench-omp${_threads}")
             endforeach()
         endforeach()
     endif()
@@ -163,7 +163,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
                          WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
                 set_tests_properties(${_test_name} PROPERTIES
                     ENVIRONMENT "OMP_NUM_THREADS=${_threads};BLAS_PERF_JSON=${_json}"
-                    LABELS "epblas-openblas-perf;epblas-openblas-perf-omp${_threads}")
+                    LABELS "perf;epblas-openblas-perf;epblas-openblas-perf-omp${_threads}")
             endforeach()
         endforeach()
     endif()

@@ -79,3 +79,21 @@ endforeach()
 
 add_subdirectory(epblas-parallel)
 add_subdirectory(epblas-openblas)
+
+# ── End-to-end perf sweeps (label `sweep`, ~30 min–hours) ─────────
+# Registered as ctest tests so the `sweep` and `e2e` workflow presets
+# can pull them in. Default `ctest` invocations should exclude
+# `-L sweep` (or use `--preset fuzz`) — they're long-running.
+add_test(NAME cmp5_sweep
+    COMMAND bash ${PROJECT_SOURCE_DIR}/reports/cmp5/run_cmp5.sh)
+set_tests_properties(cmp5_sweep PROPERTIES
+    ENVIRONMENT "STAGE_E=${PROJECT_BINARY_DIR}"
+    LABELS "sweep"
+    TIMEOUT 7200)
+
+add_test(NAME perf_sweep
+    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/run_perf_sweep.sh
+            ${PROJECT_BINARY_DIR})
+set_tests_properties(perf_sweep PROPERTIES
+    LABELS "sweep"
+    TIMEOUT 7200)
