@@ -18,7 +18,7 @@ if(TARGET multifloatsf)
     set(_have_multifloats_f TRUE)
 endif()
 
-foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
+foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     set(LIB_PREFIX "${EPBLAS_PARALLEL_PREFIX_${_target}}")
     set(_overlay_archive "${LIB_PREFIX}blas_openblas")
     set(_migrated_archive "${LIB_PREFIX}blas_openblas_migrated")
@@ -59,15 +59,26 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
         ${_parallel_common_body})
     set(_fuzz_common ${LIB_PREFIX}blas_openblas_fuzz_common)
     add_library(${_fuzz_common} STATIC ${_fuzz_util_src})
-    fortran_module_layout(${_fuzz_common})
+    # Per-target module dir — see the matching block in
+    # tests/epblas-parallel/CMakeLists.txt for rationale.
+    set(_fuzz_moddir ${CMAKE_CURRENT_BINARY_DIR}/fmod/${_target})
+    set_target_properties(${_fuzz_common} PROPERTIES
+        Fortran_MODULE_DIRECTORY ${_fuzz_moddir})
+    target_include_directories(${_fuzz_common} PUBLIC ${_fuzz_moddir})
     if("${_target}" STREQUAL "multifloats" AND _have_multifloats_f)
         target_link_libraries(${_fuzz_common} PUBLIC
             $<BUILD_INTERFACE:multifloatsf>)
     endif()
 
     # Consistency tests — overlay vs renamed-migrated diff.
-    # No `blas` link: lsame_/xerbla_ come from _migrated (which is
-    # the full serial archive with only overlay routines renamed).
+    # `eplinalg::blas` supplies lsame_/xerbla_. Both `_overlay_archive`
+    # and `_migrated_archive` reference them as U-symbols — the
+    # objcopied `_migrated_archive` is the per-precision
+    # `eplinalg::eblas` archive with overlay routines renamed, and the
+    # per-precision archive never carried lsame_/xerbla_. Those live
+    # in the separate std-precision `eplinalg::blas`, transitively
+    # available via the `eblas` Config's find_dependency on
+    # eplinalgStdBlas.
     if(IS_DIRECTORY ${_consist_target_dir})
         file(GLOB _consist_shims CONFIGURE_DEPENDS
             ${_consist_target_dir}/fuzz_*.fypp)
@@ -78,7 +89,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
             target_link_libraries(ep_${_name} PRIVATE
                 ${_fuzz_common}
                 ${_overlay_archive}
-                ${_migrated_archive})
+                ${_migrated_archive}
+                eplinalg::blas)
             add_test(NAME epblas_openblas_${_name} COMMAND ep_${_name})
             set_tests_properties(epblas_openblas_${_name} PROPERTIES
                 ENVIRONMENT "BLAS_FUZZ_CASES=200"
@@ -97,7 +109,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
             target_link_libraries(ep_${_name} PRIVATE
                 ${_fuzz_common}
                 ${_overlay_archive}
-                ${_migrated_archive})
+                ${_migrated_archive}
+                eplinalg::blas)
             file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
             foreach(_threads 1 4)
                 set(_test_name epblas_openblas_${_name}_omp${_threads})
@@ -136,7 +149,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
             add_executable(ep_${_name} ${_perf_src})
             target_link_libraries(ep_${_name} PRIVATE
                 ${_overlay_archive}
-                ${_migrated_archive})
+                ${_migrated_archive}
+                eplinalg::blas)
             target_compile_options(ep_${_name} PRIVATE
                 -ffunction-sections -fdata-sections)
             target_link_options(ep_${_name} PRIVATE LINKER:--gc-sections)

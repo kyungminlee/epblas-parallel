@@ -1,16 +1,22 @@
 # Parallel BLAS overlay test suite — multi-target driver.
 #
-# Per target in EPBLAS_PARALLEL_BUILT_TARGETS we generate:
+# Per target in EPBLAS_PARALLEL_TESTABLE_TARGETS we generate:
 #   common/target_<name>/fuzz_util.fypp        → fuzz_util.f90 (per-target shim)
 #   consistency/target_<name>/fuzz_*.fypp      → fuzz drivers (overlay vs migrated)
 #   bench/target_<name>/bench_*.fypp           → Fortran benches
 #   perf/target_<name>/perf_*.c|.cpp           → C/C++ perf harnesses
 #
 # Each test binary links the composite `epblas-parallel::<prefix>blas`
-# (overlay-before-serial) AND the renamed `_migrated` archive
-# (`<prefix>blas_migrated` — produced by src/epblas-parallel/) so a
+# (WHOLE_ARCHIVE-wrapped overlay) AND the renamed `_migrated` archive
+# (`<prefix>blas_migrated` — produced by tests/CMakeLists.txt) so a
 # single driver can call both `egemm_` and `egemm_migrated_` and
 # diff them.
+#
+# `eplinalg::blas` supplies lsame_/xerbla_: the migrated archive is
+# the per-precision eplinalg archive (with overlay routines renamed)
+# and references them as U-symbols; the production composite no
+# longer drags eplinalg::blas in transitively, so the link line lists
+# it explicitly.
 
 # multifloats brings in the Fortran-side module needed by the
 # multifloats target's fuzz_util.
@@ -19,7 +25,7 @@ if(TARGET multifloatsf)
     set(_have_multifloats_f TRUE)
 endif()
 
-foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
+foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     set(LIB_PREFIX "${EPBLAS_PARALLEL_PREFIX_${_target}}")
     set(_overlay_archive "${LIB_PREFIX}blas_parallel")
     set(_migrated_archive "${LIB_PREFIX}blas_migrated")
@@ -52,7 +58,14 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
         ${CMAKE_CURRENT_SOURCE_DIR}/common)
     set(_fuzz_common ${LIB_PREFIX}blas_parallel_fuzz_common)
     add_library(${_fuzz_common} STATIC ${_fuzz_util_src})
-    fortran_module_layout(${_fuzz_common})
+    # Each fuzz_common library defines a module named `fuzz_util` —
+    # they MUST land in separate dirs or the per-target .mod files
+    # race to overwrite each other under the shared layout
+    # `fortran_module_layout` would otherwise install.
+    set(_fuzz_moddir ${CMAKE_CURRENT_BINARY_DIR}/fmod/${_target})
+    set_target_properties(${_fuzz_common} PROPERTIES
+        Fortran_MODULE_DIRECTORY ${_fuzz_moddir})
+    target_include_directories(${_fuzz_common} PUBLIC ${_fuzz_moddir})
     if("${_target}" STREQUAL "multifloats" AND _have_multifloats_f)
         target_link_libraries(${_fuzz_common} PUBLIC
             $<BUILD_INTERFACE:multifloatsf>)
@@ -70,7 +83,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
             target_link_libraries(${_name} PRIVATE
                 ${_fuzz_common}
                 ${_composite}
-                ${_migrated_archive})
+                ${_migrated_archive}
+                eplinalg::blas)
             add_test(NAME epblas_parallel_${_name} COMMAND ${_name})
             set_tests_properties(epblas_parallel_${_name} PROPERTIES
                 ENVIRONMENT "BLAS_FUZZ_CASES=200")
@@ -89,7 +103,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
             target_link_libraries(${_name} PRIVATE
                 ${_fuzz_common}
                 ${_composite}
-                ${_migrated_archive})
+                ${_migrated_archive}
+                eplinalg::blas)
             file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports)
             add_test(NAME epblas_parallel_${_name} COMMAND ${_name}
                      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports)
@@ -113,7 +128,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
             add_executable(${_name} ${_p})
             target_link_libraries(${_name} PRIVATE
                 ${_composite}
-                ${_migrated_archive})
+                ${_migrated_archive}
+                eplinalg::blas)
             target_compile_options(${_name} PRIVATE
                 -ffunction-sections -fdata-sections)
             target_link_options(${_name} PRIVATE
