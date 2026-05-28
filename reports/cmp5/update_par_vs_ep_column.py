@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update the existing `par>ep (omp1/omp4)` column in src/epopenblas/CHECKLIST.md.
+"""Update the existing `par>ep (omp1/omp4)` column in src/epblas-openblas/CHECKLIST.md.
 
 Unlike `insert_par_vs_ep_column.py` (which adds a brand-new column), this
 script REPLACES the cell contents in the column, leaving everything else
@@ -19,9 +19,9 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-ROOT = Path("/home/kyungminlee/code/fortran-migrator")
+ROOT = Path(__file__).resolve().parents[2]
 CMP = ROOT / "reports/cmp5/cmp5.tsv"
-CHK = ROOT / "src/epopenblas/CHECKLIST.md"
+CHK = ROOT / "src/epblas-openblas/CHECKLIST.md"
 
 THRESH = 1.10
 NA_ROUTINES = {"enrm2", "eynrm2", "ecabs1"}

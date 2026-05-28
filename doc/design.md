@@ -739,7 +739,6 @@ wins 1.9–2× (kind16) and 7–10× (multifloats) per combo, with
 
 ## 11. References
 
-- Project memory: [project-epblas-parallel-design](../../../.claude/projects/-home-kyungminlee-Code-fortran-migrator/memory/project_parallel_blas_design.md)
 - Goto, K., van de Geijn, R. — *Anatomy of High-Performance Matrix
   Multiplication* (ACM TOMS, 2008). Source of the
   MC/KC/NC + pack-A / pack-B layout.

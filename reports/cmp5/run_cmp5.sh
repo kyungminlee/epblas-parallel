@@ -15,18 +15,19 @@
 #
 # Usage: bash reports/cmp5/run_cmp5.sh
 # Env:
-#   STAGE_E       stage-e build dir (default /tmp/fortran-migrator/stage-e/build)
+#   STAGE_E       build dir holding both tests/epblas-openblas and
+#                 tests/epblas-parallel (default <repo>/build)
 #   TIMEOUT       per-binary wall-clock cap in seconds (default 300)
 #   BLAS_PERF_ITERS  iters knob forwarded to the perf binaries (default 200)
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-STAGE_E="${STAGE_E:-/tmp/fortran-migrator/stage-e/build}"
+STAGE_E="${STAGE_E:-${HERE}/../../build}"
 TIMEOUT="${TIMEOUT:-300}"
 export BLAS_PERF_ITERS="${BLAS_PERF_ITERS:-200}"
 
-EP_DIR="${STAGE_E}/tests/blas_epopenblas"
-PAR_DIR="${STAGE_E}/tests/blas_parallel"
+EP_DIR="${STAGE_E}/tests/epblas-openblas"
+PAR_DIR="${STAGE_E}/tests/epblas-parallel"
 
 RAW="${HERE}/cmp5_raw.tsv"
 LOG="${HERE}/cmp5.log"

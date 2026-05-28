@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Insert a `par>ep` column into src/epopenblas/CHECKLIST.md.
+"""Insert a `par>ep` column into src/epblas-openblas/CHECKLIST.md.
 
 For each routine row in each table, look up the peak par-blas / epopenblas
 ratio at OMP=1 and OMP=4 (from reports/cmp5/cmp5.tsv) and emit a cell of
@@ -11,9 +11,9 @@ import csv
 from collections import defaultdict
 from pathlib import Path
 
-ROOT = Path("/home/kyungminlee/code/fortran-migrator")
+ROOT = Path(__file__).resolve().parents[2]
 CMP = ROOT / "reports/cmp5/cmp5.tsv"
-CHK = ROOT / "src/epopenblas/CHECKLIST.md"
+CHK = ROOT / "src/epblas-openblas/CHECKLIST.md"
 
 THRESH = 1.10
 NEW_HEADER = "par>ep (omp1/omp4)"
