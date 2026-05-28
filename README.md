@@ -70,14 +70,50 @@ cmake --build /tmp/stage-q/build -j8
 cmake --install /tmp/stage-q/build --prefix /opt/eplinalg-q
 ```
 
-Configure pointing at every install prefix you want exercised:
+Then point `CMAKE_PREFIX_PATH` at every install prefix you want exercised
+and pick the workflow preset matching the cadence you want.
+
+### Workflow presets
+
+`CMakePresets.json` ships five `cmake --workflow` chains
+(configure → build → ctest with a label filter):
+
+| Preset     | Tests run                                            | Wall-clock                |
+|------------|------------------------------------------------------|---------------------------|
+| `fuzz`     | All fuzz / consistency drivers (the correctness gate) | ~15 s                     |
+| `bench`    | Fortran `bench_*` drivers (OMP=1, OMP=4)             | minutes                   |
+| `perf`     | C `perf_*` harnesses (jobs=1, 1800 s/test cap)       | tens of minutes per slice |
+| `sweep`    | `cmp5_sweep` + `perf_sweep` shell drivers            | hours                     |
+| `e2e`      | Everything above                                     | overnight                 |
+
+Everyday loop:
+
+```bash
+CMAKE_PREFIX_PATH=/opt/eplinalg-q cmake --workflow --preset fuzz
+```
+
+The fuzz workflow is the correctness gate — run it after every code
+change. Re-run a slice without rebuilding via the matching `ctest`
+preset:
+
+```bash
+ctest --preset fuzz       # re-runs label=fuzz only
+ctest --preset perf -N    # dry-run: list what would be run
+```
+
+`perf` and `sweep` are gated as their own presets so the everyday
+`fuzz` run stays cheap. The `sweep` preset bundles
+`reports/cmp5/run_cmp5.sh` (the cmp5 4-variant sweep — epopenblas vs
+parallel-blas at OMP=1 and OMP=4) and `scripts/run_perf_sweep.sh`
+(parallel-overlay perf sweep). Outputs land under `reports/`.
+
+Build-only (skip the workflow chaining):
 
 ```bash
 cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH=/opt/eplinalg-q  # or /opt/eplinalg-e;/opt/eplinalg-q;/opt/eplinalg-m
 cmake --build build -j8
-ctest --test-dir build
 ```
 
 The configure log reports which targets are testable:
