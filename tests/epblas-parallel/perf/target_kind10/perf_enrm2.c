@@ -1,0 +1,63 @@
+/* Kernel-isolated C perf harness for enrm2 (overlay vs migrated).
+ * Built per-executable with -ffunction-sections / --gc-sections.
+ *
+ * Real L1 reduction: sqrt(sum x_i^2). Both overlay and migrated baseline
+ * use Blue's three-accumulator scaled algorithm — kernel shapes differ
+ * from OpenBLAS's scaled-SSQ, but the per-element work is comparable
+ * (mul + add + scale checks).
+ */
+#include "../perf_common.h"
+
+#include <complex.h>
+#ifdef __cplusplus
+#define BLAS_EXTERN extern "C"
+#else
+#define BLAS_EXTERN extern
+#endif
+typedef long double R10;
+typedef _Complex long double C10;
+#define R10_FROM(d) ((R10)(d))
+#define C10_FROM(re, im) ((R10)(re) + 1.0iL * (R10)(im))
+static inline R10 Tr_from_d(double d) { return (R10)d; }
+static inline C10 Tc_from_d(double d) { return (C10)d; }
+
+
+BLAS_EXTERN R10 enrm2_(const int *, const R10 *, const int *);
+BLAS_EXTERN R10 enrm2_migrated_(const int *, const R10 *, const int *);
+
+static void run_one(int N, int iters, int warmup) {
+    int one = 1;
+    R10 r;
+    R10 *X = (R10 *)perf_aligned_alloc(64, (size_t)N * sizeof(R10));
+    for (int i = 0; i < N; ++i) { int s = 0; X[i] = R10_FROM(perf_fill_double(i, s)); }
+    for (int r2 = 0; r2 < warmup; ++r2) {
+        r = enrm2_(&N, X, &one);
+        r = enrm2_migrated_(&N, X, &one);
+    }
+    double t0 = perf_now_s();
+    for (int it = 0; it < iters; ++it) r = enrm2_(&N, X, &one);
+    double t1 = perf_now_s();
+    double t_subject = (t1 - t0) / (iters ? iters : 1);
+    t0 = perf_now_s();
+    for (int it = 0; it < iters; ++it) r = enrm2_migrated_(&N, X, &one);
+    t1 = perf_now_s();
+    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    /* per-element work: 1 mul + 1 add (sqrt is O(1) tail). */
+    double flops = 2.0 * (double)N;
+    perf_emit("enrm2", "-", N, iters, flops, t_subject, t_mg);
+    perf_emit_json("enrm2", "-", N, iters, flops, t_subject, t_mg);
+    if ((double)(*((double*)&r)) == -123e30) { free(X); return; }
+    free(X);
+}
+
+static const int default_sizes[] = {64, 128, 256, 512, 1024, 2048, 4096, 16384, 65536};
+int main(void) {
+    int iters  = perf_env_int("BLAS_PERF_ITERS",  200);
+    int warmup = perf_env_int("BLAS_PERF_WARMUP", 20);
+    int sizes[32];
+    int n = perf_parse_sizes(default_sizes,
+        (int)(sizeof(default_sizes)/sizeof(default_sizes[0])), sizes, 32);
+    perf_print_header();
+    for (int i = 0; i < n; ++i) run_one(sizes[i], iters, warmup);
+    return 0;
+}

@@ -1,0 +1,90 @@
+#! Wall-clock bench — complex scalar |Re(z)| + |Im(z)| (CABS1). Each call
+#! is ~5 ns, so the bench loops REPS times per measurement (rotg-family
+#! shape). Reported "size" is the loop count; FLOPs proxy = 3 per call
+#! (abs + abs + add).
+
+program bench_${routine}$
+    use fuzz_util, only: rk
+    implicit none
+    interface
+        function ${routine}$(z) result(r)
+            import :: rk
+            complex(rk), intent(in) :: z
+            real(rk) :: r
+        end function
+        function ${routine}$_migrated(z) result(r)
+            import :: rk
+            complex(rk), intent(in) :: z
+            real(rk) :: r
+        end function
+    end interface
+    integer :: iters, nsizes, i
+    integer, allocatable :: sizes(:)
+    real(8) :: t_subject, t_mig
+    iters = read_int_env('BLAS_BENCH_ITERS', 4)
+    call read_sizes(sizes); nsizes = size(sizes)
+    print '(a)', '   REPS      subject GF/s   migrated GF/s   speedup'
+    do i = 1, nsizes
+        call run_size(sizes(i), iters, t_subject, t_mig); call emit(sizes(i), t_subject, t_mig)
+    end do
+contains
+    function read_int_env(name, dflt) result(v)
+        character(len=*), intent(in) :: name; integer, intent(in) :: dflt; integer :: v, ios; character(len=64) :: buf
+        v = dflt; call get_environment_variable(name, buf, status=ios)
+        if (ios == 0 .and. len_trim(buf) > 0) then; read(buf, *, iostat=ios) v; if (ios /= 0) v = dflt; end if
+    end function
+    subroutine read_sizes(arr)
+        integer, allocatable, intent(out) :: arr(:)
+        character(len=256) :: buf
+        integer :: ios, i, j, n, val
+        character(len=32) :: tok
+        call get_environment_variable('BLAS_BENCH_SIZES', buf, status=ios)
+        if (ios /= 0 .or. len_trim(buf) == 0) then; arr = [10000]; return; end if
+        n = 1
+        do i = 1, len_trim(buf); if (buf(i:i) == ',') n = n + 1; end do
+        allocate(arr(n)); j = 1; tok = ''; n = 0
+        do i = 1, len_trim(buf) + 1
+            if (i > len_trim(buf) .or. buf(i:i) == ',') then
+                read(tok, *, iostat=ios) val; if (ios == 0) then; n = n + 1; arr(n) = val; end if; tok = ''; j = 1
+            else; tok(j:j) = buf(i:i); j = j + 1; end if
+        end do
+        if (n < size(arr)) arr = arr(1:n)
+    end subroutine
+    subroutine run_size(reps, iters, t_subject, t_mig)
+        integer, intent(in) :: reps, iters; real(8), intent(out) :: t_subject, t_mig
+        integer :: it, k; real(8), allocatable :: so(:), sm(:); real(8) :: t0, t1
+        complex(rk) :: z; real(rk) :: r, acc
+        allocate(so(iters), sm(iters))
+        ! Varied (Re, Im) so |Re|+|Im| does real work each call.
+        acc = 0.0_rk
+        do k = 1, reps; z = cmplx(real(k, rk), real(-k - 1, rk), rk); r = ${routine}$(z); acc = acc + r; end do
+        do k = 1, reps; z = cmplx(real(k, rk), real(-k - 1, rk), rk); r = ${routine}$_migrated(z); acc = acc + r; end do
+        do it = 1, iters
+            call clk(t0)
+            do k = 1, reps; z = cmplx(real(k, rk), real(-k - 1, rk), rk); r = ${routine}$(z); acc = acc + r; end do
+            call clk(t1); so(it) = t1 - t0
+            call clk(t0)
+            do k = 1, reps; z = cmplx(real(k, rk), real(-k - 1, rk), rk); r = ${routine}$_migrated(z); acc = acc + r; end do
+            call clk(t1); sm(it) = t1 - t0
+        end do
+        t_subject = med(so); t_mig = med(sm); deallocate(so, sm)
+        ! Sink so the optimizer doesn't drop the loops.
+        if (acc == 1.234e9_rk) print *, acc
+    end subroutine
+    subroutine clk(t)
+        real(8), intent(out) :: t; integer(8) :: c, r
+        call system_clock(count=c, count_rate=r); t = real(c, 8) / real(r, 8)
+    end subroutine
+    function med(x) result(m)
+        real(8), intent(in) :: x(:); real(8) :: m; real(8), allocatable :: y(:); integer :: i, j, n; real(8) :: tmp
+        n = size(x); allocate(y(n)); y = x
+        do i = 1, n - 1; do j = i + 1, n; if (y(j) < y(i)) then; tmp = y(i); y(i) = y(j); y(j) = tmp; end if; end do; end do
+        if (mod(n, 2) == 1) then; m = y((n + 1) / 2); else; m = 0.5_8 * (y(n / 2) + y(n / 2 + 1)); end if
+    end function
+    subroutine emit(reps, to, tm)
+        integer, intent(in) :: reps; real(8), intent(in) :: to, tm; real(8) :: go, gm, sp
+        go = 3.0_8 * real(reps, 8) / to / 1.0e9_8; gm = 3.0_8 * real(reps, 8) / tm / 1.0e9_8
+        if (to > 0.0_8) then; sp = tm / to; else; sp = 0.0_8; end if
+        print '(i8,4x,f12.4,4x,f12.4,4x,f7.2,a)', reps, go, gm, sp, 'x'
+    end subroutine
+end program bench_${routine}$
