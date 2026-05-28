@@ -177,7 +177,7 @@ def run_bench_one(bdir: Path, routine: str, size: int, iters: int,
                   omp: int) -> list[tuple[float, float]] | None:
     """Run the bench and parse stdout. Returns list of
     (epblas-parallel GF/s, migrated GF/s) rows, or None on failure."""
-    exe = bdir / "tests" / "blas_parallel" / f"bench_{routine}"
+    exe = bdir / "tests" / "epblas-parallel" / f"bench_{routine}"
     if not exe.exists():
         return None
     out = bdir / f"bench_{routine}_omp{omp}.json"
@@ -237,7 +237,7 @@ def _digits(err: float) -> str:
 
 def run_fuzz(bdir: Path, routine: str) -> str:
     """Run fuzz binary, parse ERR_STATS, return 'min/med/max' as digits."""
-    exe = bdir / "tests" / "blas_parallel" / f"fuzz_{routine}"
+    exe = bdir / "tests" / "epblas-parallel" / f"fuzz_{routine}"
     if not exe.exists():
         return PLACEHOLDER
     try:
@@ -287,7 +287,6 @@ def main():
         # Bench binaries are all under one cmake target named 'bench_<r>'.
         bench_targets = []
         for r in routines:
-            exe = bdir / "tests" / "blas_parallel" / f"bench_{r}"
             shim = next(stage_root.glob(f"stage-{target}/tests/epblas-parallel/bench/target_*/bench_{r}.fypp"), None)
             if shim is not None:
                 bench_targets.append(f"bench_{r}")

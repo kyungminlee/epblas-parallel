@@ -115,8 +115,7 @@ foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.c$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
-set(EPBLAS_OPENBLAS_OVERLAY_ROUTINES "${_routines}" CACHE INTERNAL
-    "BLAS routines provided by the epblas-openblas overlay for this target")
+set(EPBLAS_OPENBLAS_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
 add_library(${LIB_PREFIX}blas_openblas STATIC ${_kernels} ${_helpers})
 add_library(epblas-openblas::${LIB_PREFIX}blas_openblas ALIAS ${LIB_PREFIX}blas_openblas)

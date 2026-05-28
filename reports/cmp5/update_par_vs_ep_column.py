@@ -16,6 +16,7 @@ For each routine row, the cell becomes:
 """
 import csv
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -72,6 +73,12 @@ def cell_width(header_line, col_idx):
 
 def main():
     omp1, omp4, seen = load_ratios()
+    # Empty / stale cmp5.tsv → seen is empty → every cell becomes "n/d".
+    # Refuse to mutate; the user almost certainly forgot to re-run the
+    # sweep before this script.
+    if not seen:
+        sys.exit(f"{CMP} has no rows — refusing to overwrite column "
+                 f"(run run_cmp5.sh + aggregate.py first)")
     src = CHK.read_text().splitlines(keepends=False)
     out = []
 

@@ -36,12 +36,17 @@ LOG="${HERE}/cmp5.log"
 : > "$LOG"
 echo -e "run_id\trun_binary\tomp\ttaskset\troutine\tkey\tsize\titers\tsubject_GFs\tmigrated_GFs" >> "$RAW"
 
+if [[ ! -d "$EP_DIR" ]]; then
+    echo "[fatal] $EP_DIR missing (build dir not configured?)" | tee -a "$LOG" >&2
+    exit 1
+fi
+
 # Collect routine names — both halves must implement the same set, so use
 # the epopenblas binary list as the source of truth and only run a
 # parallel-blas binary if it exists with the same routine name.
 mapfile -t ep_bins < <(find "$EP_DIR" -maxdepth 1 -type f -executable -name "ep_perf_*" | sort)
 if (( ${#ep_bins[@]} == 0 )); then
-    echo "[fatal] no ep_perf_* executables under $EP_DIR" >&2 | tee -a "$LOG"
+    echo "[fatal] no ep_perf_* executables under $EP_DIR" | tee -a "$LOG" >&2
     exit 1
 fi
 
@@ -63,19 +68,24 @@ run_one() {
     local iters="$BLAS_PERF_ITERS"
     if is_l3 "$routine"; then iters=10; fi
     echo "[run] $run_id/$routine iters=$iters" >&2
-    if OMP_NUM_THREADS="$omp" BLAS_PERF_ITERS="$iters" \
+    if ! OMP_NUM_THREADS="$omp" BLAS_PERF_ITERS="$iters" \
            timeout "$TIMEOUT" taskset -c 0 "$bin" \
            > "$TMP" 2>>"$LOG"; then
-        :
-    else
+        # Timeout or crash. $TMP may contain a header + a few rows
+        # before the hang; ingesting them yields "fast at small N,
+        # missing at large N" data — easy to misread as a perf
+        # finding. Drop the partial output and skip aggregation.
         echo "[fail] $run_id/$routine exit=$?" >> "$LOG"
+        rm -f "$TMP"
+        return
     fi
     awk -v rid="$run_id" -v tag="$run_bin_tag" -v omp="$omp" '
         /^#/ {next}
         NF >= 6 {
-            gsub(/x$/, "", $7);
             # perf binary stdout cols: routine key size iters subject_GFs migrated_GFs ratio
-            # (subject = epopenblas or parallel-blas — read from rid)
+            # (subject = epopenblas or parallel-blas — read from rid).
+            # $7 (ratio) is dropped — kept for human readability of
+            # the perf binary stdout but not aggregated here.
             printf "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
                 rid, tag, omp, 0, $1, $2, $3, $4, $5, $6;
         }' "$TMP" >> "$RAW"
