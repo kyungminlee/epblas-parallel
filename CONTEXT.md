@@ -95,13 +95,16 @@ baked into the package name (`eblas` for kind10, `qblas` for kind16,
 **`eplinalg` is per-target, this repo is multi-target.** Each
 `migrator stage --target T` in eplinalg produces one target's install
 prefix. This repo configures *once* and builds overlays + composites
-for **every** target whose eplinalg install is discoverable on
-`CMAKE_PREFIX_PATH`. Targets whose eplinalg install is absent are
-silently skipped — best-effort across the target set. The shipped
-`epblas-parallel` and `epblas-openblas` packages export the targets
-that were actually built (`epblas-parallel::eblas` for kind10,
-`epblas-parallel::qblas` for kind16, `epblas-parallel::mblas` for
-multifloats; openblas is kind10-only at present).
+for **every** target whose `src/epblas-parallel/<target>/` directory
+exists (production build, no eplinalg required). With
+`-DBUILD_TESTING=ON` the test suite additionally requires the
+matching `eplinalg::<prefix>blas` per-target package to be on
+`CMAKE_PREFIX_PATH` — targets missing it configure without tests
+(best-effort across the target set). The shipped `epblas-parallel`
+and `epblas-openblas` packages export the targets that were actually
+built (`epblas-parallel::eblas` for kind10, `epblas-parallel::qblas`
+for kind16, `epblas-parallel::mblas` for multifloats; openblas is
+kind10-only at present).
 
 | Package | Exports | Role |
 |---|---|---|
@@ -162,22 +165,27 @@ internal source dirs that aren't overlay kernels.
 ### Discovery is baked in
 
 The top-level `CMakeLists.txt` hardcodes the full `{kind10→eblas,
-kind16→qblas, multifloats→mblas}` table and enumerates targets by
-doing `find_package(eblas QUIET)`, `find_package(qblas QUIET)`,
-`find_package(mblas QUIET)`. `eplinalg` exports **no extra metadata**
-in its installed Configs to support this — the contract surface
-between the two projects is exactly the package names and the
-imported-target archives, nothing more.
+kind16→qblas, multifloats→mblas}` table. Production discovery is
+src-dir-existence: a target is built iff
+`src/epblas-parallel/<target>/` exists (the `multifloats` target also
+respects `-DEPBLAS_PARALLEL_BUILD_multifloats=OFF`). The eplinalg
+per-target package (`eblas` / `qblas` / `mblas`) is only `find_package`'d
+later, behind `if(BUILD_TESTING)` — it is a test/bench-only dependency.
+`eplinalg` exports **no extra metadata** in its installed Configs to
+support this — the contract surface between the two projects, in test
+mode, is exactly the package names and the imported-target archives,
+nothing more.
 
 _Implication:_ adding a new precision target (e.g. `kind20`) is a
 coordinated change touching both repos.
 
 **composite**:
 The `epblas-parallel::eblas` INTERFACE target (and `qblas`, `mblas`).
-Links `epblas-parallel::eblas_parallel` *before* `eplinalg::eblas`
-so overlay symbols shadow serial symbols at final link (gfortran
-name-mangling parity). The link-order invariant is owned by this
-INTERFACE; consumers never reproduce it.
+`WHOLE_ARCHIVE`-wraps the overlay archive
+(`epblas-parallel::eblas_parallel`). No serial baseline behind: the
+overlay targets 100% coverage of the `eplinalg::eblas` surface, so the
+composite is a drop-in replacement. A routine the overlay does not
+cover surfaces as an honest link error rather than a silent fallback.
 
 ## Out of scope for `eplinalg` after the split
 
@@ -194,17 +202,8 @@ pipeline docs). Anything else — hand-written kernels, ported
 kernels, overlay tests, overlay perf tooling, overlay docs —
 moves.
 
-Concrete consequences:
-
-- `eplinalg`'s `eblas` target collapses to the plain serial archive
-  (today's `${LIB_PREFIX}blas_serial`). The `_serial` / `_migrated`
-  suffix gymnastics and the historical `PARALLEL_BLAS` option leave
-  `eplinalg` entirely.
-- `eplinalg`'s installed packages namespace their imported targets
-  under `eplinalg::` (overriding the per-project default).
-- `eplinalg`'s own LAPACK/ScaLAPACK/MUMPS test binaries link the
-  serial BLAS only. End-to-end overlay coverage lives in this repo's
-  tests.
-- The stage-time copy in `src/migrator/__main__.py` that used to drop
-  `parallel_blas/` and `epopenblas/` into the staging tree is
-  deleted; `eplinalg` no longer references either overlay.
+For the split-time changes inside `eplinalg` itself (collapsing its
+`eblas` target, the `eplinalg::` namespace, removal of the
+overlay-staging hook), see the eplinalg repo's own changelog and
+ADRs. `docs/adr/0001-public-cmake-api-after-split.md` here covers
+the public-API consequences relevant to this repo's consumers.

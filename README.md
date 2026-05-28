@@ -12,8 +12,8 @@ as **separate CMake packages**:
 - **`epblas-parallel`** (the primary; same name as this repo) — production
   overlay. C/C++/OpenMP kernels for every routine, all three targets
   (`kind10`, `kind16`, `multifloats`). Ships the per-precision composite
-  `epblas-parallel::{e,q,m}blas` (overlay + serial baseline). See
-  `doc/design.md`.
+  `epblas-parallel::{e,q,m}blas` as a drop-in replacement for
+  `eplinalg::{e,q,m}blas`. See `doc/design.md`.
 - **`epblas-openblas`** — experimental reference library. OpenBLAS D/Z
   port to extended precision, kind10 only. Used purely as an A/B
   comparison subject against `epblas-parallel` and the migrated baseline.
@@ -23,18 +23,42 @@ public-API decisions, see `CONTEXT.md` and `docs/adr/0001-public-cmake-api-after
 
 ## Prerequisites
 
+### Production build (`-DBUILD_TESTING=OFF`)
+
 - A C / C++ compiler with OpenMP (`libgomp` via gcc is fine).
-- A Fortran compiler (`gfortran`) **if** you build the test suite
-  (`BUILD_TESTING=ON`, default). The drivers are `.fypp`-templated
-  Fortran.
-- `fypp` on `PATH` for the same reason.
-- `eplinalg` installed for at least one target. Each install must be
-  reachable via `CMAKE_PREFIX_PATH` at configure time.
+- A Fortran compiler — enabled at project() time even when
+  `BUILD_TESTING=OFF` (the configure-time tag-derivation used by
+  eplinalg-style packages assumes a working Fortran toolchain).
 - For the `multifloats` target only: an internet connection at
   configure time (or a local `MULTIFLOATS_DIR`). This repo fetches the
-  `multifloats` C/Fortran library via `FetchContent`.
+  `multifloats` C/Fortran library via `FetchContent`. Pass
+  `-DEPBLAS_PARALLEL_BUILD_multifloats=OFF` to skip.
 
-## Quick start
+### Additional, for the test / bench suite (`-DBUILD_TESTING=ON`, default)
+
+- `fypp` on `PATH` — the consistency / fuzz / bench drivers are
+  `.fypp`-templated Fortran.
+- `eplinalg` installed for each target you want exercised. Tests A/B
+  the overlay against eplinalg's migrated baseline. Each install must
+  be reachable via `CMAKE_PREFIX_PATH` at configure time. A target
+  with no eplinalg install configures cleanly but contributes no tests.
+
+## Quick start (production)
+
+```bash
+# In epblas-parallel/:
+cmake -S . -B build-prod \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=OFF
+cmake --build build-prod -j8
+```
+
+This produces, for every target whose `src/epblas-parallel/<target>/`
+directory exists, the static archive `{e,q,m}blas_parallel.a` plus the
+INTERFACE composite `epblas-parallel::{e,q,m}blas`. No `eplinalg`
+install is consulted.
+
+## Running the tests / bench
 
 Install `eplinalg` for one or more targets:
 
@@ -46,11 +70,9 @@ cmake --build /tmp/stage-q/build -j8
 cmake --install /tmp/stage-q/build --prefix /opt/eplinalg-q
 ```
 
-Configure this repo pointing at every install prefix you want
-overlays for:
+Configure pointing at every install prefix you want exercised:
 
 ```bash
-# In epblas-parallel/:
 cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH=/opt/eplinalg-q  # or /opt/eplinalg-e;/opt/eplinalg-q;/opt/eplinalg-m
@@ -58,16 +80,16 @@ cmake --build build -j8
 ctest --test-dir build
 ```
 
-The configure log reports which targets it found:
+The configure log reports which targets are testable:
 
 ```
--- epblas-parallel: found qblas (target kind16) — overlay will build
--- epblas-parallel: eblas not found — skipping target kind10
--- epblas-parallel: mblas not found — skipping target multifloats
+-- epblas-parallel: building target kind16
+-- epblas-parallel: tests enabled for target kind16 (qblas found)
+-- epblas-parallel: eblas not on CMAKE_PREFIX_PATH — tests for kind10 disabled
 ```
 
-Targets without a corresponding eplinalg install are silently skipped
-— best-effort across the target set.
+Tests/bench A/B against eplinalg's migrated baseline; the production
+build does not link it.
 
 ## Consuming from a downstream CMake project
 
@@ -78,12 +100,12 @@ add_executable(myapp main.f90)
 target_link_libraries(myapp PRIVATE epblas-parallel::qblas)  # kind16, with overlay
 ```
 
-`epblas-parallel::<prefix>blas` is an INTERFACE composite that links
-the overlay archive *before* eplinalg's serial archive
-(`eplinalg::<prefix>blas`), so overlay symbols shadow serial symbols
-at final link. `find_package(epblas-parallel)` brings in
-`find_dependency` on each eplinalg package this build linked against
-— you don't need to do those yourself.
+`epblas-parallel::<prefix>blas` is an INTERFACE composite that
+WHOLE_ARCHIVE-wraps the overlay archive. The overlay covers the full
+`eplinalg::<prefix>blas` surface, so the composite is a drop-in
+replacement. `find_package(epblas-parallel)` does not chase any
+eplinalg package — production consumers do not need eplinalg
+installed.
 
 To use the plain serial migrated BLAS instead, depend on eplinalg's
 package directly: `find_package(qblas); target_link_libraries(myapp PRIVATE eplinalg::qblas)`.

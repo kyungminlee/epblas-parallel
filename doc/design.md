@@ -1,5 +1,22 @@
 # Hand-written parallel BLAS overlay — design & phased plan
 
+> **STATUS — read this first.** §§1-9 below are the original
+> pre-split planning doc (May 2026). They describe machinery that no
+> longer exists in this repo: a `PARALLEL_BLAS` cmake option, an
+> in-tree migrator stage, and a single-package composite gated by
+> that option. The architecture that actually shipped is the
+> two-package split documented in `../CONTEXT.md` and
+> `../docs/adr/0001-public-cmake-api-after-split.md` — read those
+> for current truth. As of CLEANUP-20260528 the composite
+> `epblas-parallel::<prefix>blas` no longer links the serial
+> baseline behind the overlay either: the overlay targets 100%
+> coverage and the composite is a WHOLE_ARCHIVE wrap of the overlay
+> alone. A routine not in the overlay surfaces as a link error
+> rather than the prior silent serial fallback. Coverage state per
+> target as of this change: kind10 — full; kind16 — full;
+> multifloats — full. **§10 (perf record) below is still live** and
+> remains the canonical performance log.
+
 Date: 2026-05-13  
 Branch: `epblas-parallel`
 
