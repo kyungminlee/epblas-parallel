@@ -1,7 +1,7 @@
 # epblas-parallel
 
 Hand-written extended-precision BLAS overlays for the
-[eplinalg](../fortran-migrator/) stack.
+[eplinalg](../eplinalg/) stack.
 
 `eplinalg` produces serial extended-precision archives by mechanical
 type-rewrite of Netlib BLAS/LAPACK source — correct but unblocked and
