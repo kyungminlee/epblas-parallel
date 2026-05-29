@@ -48,16 +48,23 @@ program fuzz_${routine}$
         AP_ov = AP0; AP_mig = AP0
         call ${routine}$(uplo, n, alpha, X, incx, AP_ov)
         call ${routine}$_migrated(uplo, n, alpha, X, incx, AP_mig)
+        ! Denominator is max(ref_max, op_norm) — op_norm is the
+        ! Wilkinson-style upper bound on |A_new| for SPR; using it as
+        ! a floor keeps relative error meaningful when α·x·xᵀ and A₀
+        ! cancel and ref_max collapses below operand scale.
         block
             integer :: i
-            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            real(rk) :: ref_max, diff_max, a_abs, d_abs
+            real(rk) :: a0_max, x_max, op_norm
+            a0_max = maxval(abs(AP0(1 : np)))
+            x_max  = maxval(abs(X(1 : lenx)))
+            op_norm = abs(alpha) * x_max * x_max + a0_max
             ref_max = 0.0_rk; diff_max = 0.0_rk
             do i = 1, np
                 a_abs = abs(AP_mig(i)); if (a_abs > ref_max) ref_max = a_abs
                 d_abs = abs(AP_ov(i) - AP_mig(i)); if (d_abs > diff_max) diff_max = d_abs
             end do
-            tiny_val = tiny(1.0_rk)
-            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+            err = diff_max / max(ref_max, op_norm, tiny(1.0_rk))
         end block
         call err_stats_record(err)
         if (err > tol .or. err /= err) then

@@ -70,9 +70,20 @@ program fuzz_${routine}$
         call ${routine}$(trans, m, n, alpha, A, lda, X, incx, beta, Y_ov,  incy)
         call ${routine}$_migrated(trans, m, n, alpha, A, lda, X, incx, beta, Y_mig, incy)
 
+        ! Denominator is max(ref_max, op_norm) — op_norm is the
+        ! Wilkinson-style upper bound on |y_new| for GEMV; using it as
+        ! a floor keeps relative error meaningful when α·A·x and β·y₀
+        ! cancel and ref_max collapses below operand scale.
         block
-            integer :: i
-            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            integer :: i, k_eff
+            real(rk) :: ref_max, diff_max, a_abs, d_abs
+            real(rk) :: a_max, x_max, y0_max, op_norm
+            if (trans == 'N') then; k_eff = n; else; k_eff = m; end if
+            a_max  = maxval(abs(A(1 : lda * n)))
+            x_max  = maxval(abs(X(1 : lenx_alloc)))
+            y0_max = maxval(abs(Y0(1 : leny_alloc)))
+            op_norm = abs(alpha) * real(k_eff, rk) * a_max * x_max &
+                    + abs(beta)  * y0_max
             ref_max = 0.0_rk; diff_max = 0.0_rk
             do i = 1, leny_alloc
                 a_abs = abs(Y_mig(i))
@@ -80,10 +91,7 @@ program fuzz_${routine}$
                 d_abs = abs(Y_ov(i) - Y_mig(i))
                 if (d_abs > diff_max) diff_max = d_abs
             end do
-            tiny_val = tiny(1.0_rk)
-            if (ref_max < tiny_val) then; err = diff_max
-            else;                          err = diff_max / ref_max
-            end if
+            err = diff_max / max(ref_max, op_norm, tiny(1.0_rk))
         end block
 
         call err_stats_record(err)

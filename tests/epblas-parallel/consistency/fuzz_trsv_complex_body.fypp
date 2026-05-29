@@ -68,10 +68,19 @@ program fuzz_${routine}$
         call ${routine}$(uplo, trans, diag, n, A, lda, X_ov,  incx)
         call ${routine}$_migrated(uplo, trans, diag, n, A, lda, X_mig, incx)
 
+        ! Denominator is max(ref_max, op_norm) — op_norm is the
+        ! Wilkinson-style upper bound on |x_new| for TRSV (A is its
+        ! own scale factor); using it as a floor keeps relative error
+        ! meaningful when A⁻¹·x cancels and ref_max collapses below
+        ! operand scale.
         block
             integer :: i
-            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            real(rk) :: ref_max, diff_max, a_abs, d_abs
+            real(rk) :: a_max, x0_max, op_norm
             complex(rk) :: dz
+            a_max  = maxval(abs(A(1 : lda * n)))
+            x0_max = maxval(abs(X0(1 : lenx)))
+            op_norm = a_max * x0_max * real(n, rk)
             ref_max = 0.0_rk; diff_max = 0.0_rk
             ! Non-strided positions retain X0 in both arrays so they
             ! compare equal; only the strided positions are modified.
@@ -82,10 +91,7 @@ program fuzz_${routine}$
                 d_abs = abs(dz)
                 if (d_abs > diff_max) diff_max = d_abs
             end do
-            tiny_val = tiny(1.0_rk)
-            if (ref_max < tiny_val) then; err = diff_max
-            else;                          err = diff_max / ref_max
-            end if
+            err = diff_max / max(ref_max, op_norm, tiny(1.0_rk))
         end block
 
         call err_stats_record(err)

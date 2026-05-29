@@ -91,10 +91,19 @@ program fuzz_${routine}$
         call ${routine}$(uplo, trans, n, k, alpha, A, lda, beta, C_ov,  ldc)
         call ${routine}$_migrated(uplo, trans, n, k, alpha, A, lda, beta, C_mig, ldc)
 
-        ! Compare only the UPLO triangle.
+        ! Compare only the UPLO triangle. Denominator is max(ref_max,
+        ! op_norm) — op_norm is the Wilkinson-style upper bound on
+        ! |C_new| for SYRK; using it as a floor keeps relative error
+        ! meaningful when α·Σ A² and β·C₀ cancel and ref_max collapses
+        ! below operand scale.
         block
             integer :: i, j, idx
-            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            real(rk) :: ref_max, diff_max, a_abs, d_abs
+            real(rk) :: a_max, c0_max, op_norm
+            a_max  = maxval(abs(A(1 : lda * cols_a)))
+            c0_max = maxval(abs(C0(1 : ldc * n)))
+            op_norm = abs(alpha) * real(k, rk) * a_max * a_max &
+                    + abs(beta)  * c0_max
             ref_max  = 0.0_rk
             diff_max = 0.0_rk
             do j = 1, n
@@ -109,10 +118,7 @@ program fuzz_${routine}$
                     end if
                 end do
             end do
-            tiny_val = tiny(1.0_rk)
-            if (ref_max < tiny_val) then; err = diff_max
-            else;                          err = diff_max / ref_max
-            end if
+            err = diff_max / max(ref_max, op_norm, tiny(1.0_rk))
         end block
         bad_ov  = check_sentinels_real(C_ov,  n, n, ldc)
         bad_mig = check_sentinels_real(C_mig, n, n, ldc)

@@ -49,9 +49,18 @@ program fuzz_${routine}$
         A_ov = A0; A_mig = A0
         call ${routine}$(uplo, n, alpha, X, incx, Y, incy, A_ov, lda)
         call ${routine}$_migrated(uplo, n, alpha, X, incx, Y, incy, A_mig, lda)
+        ! Denominator is max(ref_max, op_norm) — op_norm is the
+        ! Wilkinson-style upper bound on |A_new| for SYR2; using it as
+        ! a floor keeps relative error meaningful when α·(x·yᵀ+y·xᵀ)
+        ! and A₀ cancel and ref_max collapses below operand scale.
         block
             integer :: i, j, idx
-            real(rk) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            real(rk) :: ref_max, diff_max, a_abs, d_abs
+            real(rk) :: a0_max, x_max, y_max, op_norm
+            a0_max = maxval(abs(A0(1 : lda * n)))
+            x_max  = maxval(abs(X(1 : lenx)))
+            y_max  = maxval(abs(Y(1 : leny)))
+            op_norm = 2.0_rk * abs(alpha) * x_max * y_max + a0_max
             ref_max = 0.0_rk; diff_max = 0.0_rk
             do j = 1, n
                 do i = 1, n
@@ -62,8 +71,7 @@ program fuzz_${routine}$
                     end if
                 end do
             end do
-            tiny_val = tiny(1.0_rk)
-            if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
+            err = diff_max / max(ref_max, op_norm, tiny(1.0_rk))
         end block
         call err_stats_record(err)
         if (err > tol .or. err /= err) then
