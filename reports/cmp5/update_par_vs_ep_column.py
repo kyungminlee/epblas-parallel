@@ -15,14 +15,18 @@ For each routine row, the cell becomes:
 - ""             status==todo (no data expected yet)
 """
 import csv
-import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from columns import SUBJECTS
+
 ROOT = Path(__file__).resolve().parents[2]
 CMP = ROOT / "reports/cmp5/cmp5.tsv"
 CHK = ROOT / "src/epblas-openblas/CHECKLIST.md"
+
+EP1, EP4, P1, P4 = SUBJECTS
 
 THRESH = 1.10
 NA_ROUTINES = {"enrm2", "eynrm2", "ecabs1"}
@@ -41,8 +45,8 @@ def load_ratios():
     omp1, omp4, seen = defaultdict(float), defaultdict(float), set()
     for r in csv.DictReader(CMP.open(), delimiter="\t"):
         rt = r["routine"]; seen.add(rt)
-        ep1 = pf(r["epopenblas-omp1"]); p1 = pf(r["parallel-blas-omp1"])
-        ep4 = pf(r["epopenblas-omp4"]); p4 = pf(r["parallel-blas-omp4"])
+        ep1 = pf(r[EP1.tsv_col]); p1 = pf(r[P1.tsv_col])
+        ep4 = pf(r[EP4.tsv_col]); p4 = pf(r[P4.tsv_col])
         if ep1 and p1: omp1[rt] = max(omp1[rt], p1 / ep1)
         if ep4 and p4: omp4[rt] = max(omp4[rt], p4 / ep4)
     return omp1, omp4, seen

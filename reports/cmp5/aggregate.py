@@ -23,22 +23,14 @@ that the migrated_ symbol's timing is stable across runs (it should be —
 `_serial` contains no OpenMP).
 """
 import csv
-import sys
 from collections import defaultdict
 from pathlib import Path
+
+from columns import ALL_TSV_COLS, MIG_COLS, MIGRATED_COL, RUNID_TO_MIG, SUBJECTS
 
 
 RAW = Path(__file__).parent / "cmp5_raw.tsv"
 OUT = Path(__file__).parent / "cmp5.tsv"
-
-VARIANTS = ["epopenblas-omp1", "epopenblas-omp4",
-            "parallel-blas-omp1", "parallel-blas-omp4"]
-MIG_KEYS = {
-    "epopenblas-omp1":     "mig_ep_omp1",
-    "epopenblas-omp4":     "mig_ep_omp4",
-    "parallel-blas-omp1":  "mig_par_omp1",
-    "parallel-blas-omp4":  "mig_par_omp4",
-}
 
 
 def main():
@@ -50,39 +42,27 @@ def main():
             key = (row["routine"], row["key"], int(row["size"]))
             run = row["run_id"]
             subject[key][run] = float(row["subject_GFs"])
-            migrated[key][MIG_KEYS[run]] = float(row["migrated_GFs"])
+            migrated[key][RUNID_TO_MIG[run]] = float(row["migrated_GFs"])
 
     rows = []
     for k in sorted(subject):
         routine, ks, size = k
         o = subject[k]
         m = migrated[k]
-        rows.append({
-            "routine": routine,
-            "key": ks,
-            "size": size,
-            "epopenblas-omp1":    o.get("epopenblas-omp1", ""),
-            "epopenblas-omp4":    o.get("epopenblas-omp4", ""),
-            "parallel-blas-omp1": o.get("parallel-blas-omp1", ""),
-            "parallel-blas-omp4": o.get("parallel-blas-omp4", ""),
-            "migrated-serial":    m.get("mig_par_omp1", ""),
-            "mig_par_omp1": m.get("mig_par_omp1", ""),
-            "mig_par_omp4": m.get("mig_par_omp4", ""),
-            "mig_ep_omp1":  m.get("mig_ep_omp1",  ""),
-            "mig_ep_omp4":  m.get("mig_ep_omp4",  ""),
-        })
+        row = {"routine": routine, "key": ks, "size": size}
+        for v in SUBJECTS:
+            row[v.tsv_col] = o.get(v.tsv_col, "")
+        row[MIGRATED_COL] = m.get("mig_par_omp1", "")
+        for c in MIG_COLS:
+            row[c] = m.get(c, "")
+        rows.append(row)
 
-    cols = ["routine", "key", "size",
-            "epopenblas-omp1", "epopenblas-omp4",
-            "parallel-blas-omp1", "parallel-blas-omp4",
-            "migrated-serial",
-            "mig_par_omp1", "mig_par_omp4", "mig_ep_omp1", "mig_ep_omp4"]
     with OUT.open("w") as f:
-        w = csv.DictWriter(f, fieldnames=cols, delimiter="\t")
+        w = csv.DictWriter(f, fieldnames=list(ALL_TSV_COLS), delimiter="\t")
         w.writeheader()
         for r in rows:
             w.writerow({c: (f"{r[c]:.4f}" if isinstance(r[c], float) else r[c])
-                        for c in cols})
+                        for c in ALL_TSV_COLS})
     print(f"wrote {OUT}  ({len(rows)} rows)")
 
 

@@ -12,10 +12,13 @@ import csv
 from collections import defaultdict
 from pathlib import Path
 
+from columns import SUBJECTS
+
 HERE = Path(__file__).parent
 CMP = HERE / "cmp5.tsv"
 OUT = HERE / "par_wins.md"
 THRESH = 1.10
+EP1, EP4, P1, P4 = SUBJECTS
 
 
 def pf(x):
@@ -32,8 +35,8 @@ def main():
     omp1 = []  # (ratio, routine, key, size, ep, par)
     omp4 = []
     for r in rows:
-        ep1 = pf(r["epopenblas-omp1"]);    p1 = pf(r["parallel-blas-omp1"])
-        ep4 = pf(r["epopenblas-omp4"]);    p4 = pf(r["parallel-blas-omp4"])
+        ep1 = pf(r[EP1.tsv_col]);    p1 = pf(r[P1.tsv_col])
+        ep4 = pf(r[EP4.tsv_col]);    p4 = pf(r[P4.tsv_col])
         if ep1 and p1 and p1 / ep1 >= THRESH:
             omp1.append((p1/ep1, r["routine"], r["key"], int(r["size"]), ep1, p1))
         if ep4 and p4 and p4 / ep4 >= THRESH:

@@ -14,25 +14,16 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import median
 
+from columns import MIG_COLS, MIGRATED_COL, MIGRATED_LABEL, SUBJECTS
+
 
 HERE = Path(__file__).parent
 CMP = HERE / "cmp5.tsv"
 OUT = HERE / "cmp5_summary.md"
 
-# TSV column name → user-facing display name. The aggregator preserves the
-# historical "epopenblas / parallel-blas / migrated-serial" column names in
-# cmp5.tsv; the report uses the shorter, friendlier eplinalg/parallel/openblas
-# vocabulary that matches how we talk about the three implementations.
-LABELS = {
-    "epopenblas-omp1":    "openblas-omp1",
-    "epopenblas-omp4":    "openblas-omp4",
-    "parallel-blas-omp1": "parallel-omp1",
-    "parallel-blas-omp4": "parallel-omp4",
-    "migrated-serial":    "eplinalg-omp1",
-}
-EP1, EP4 = LABELS["epopenblas-omp1"],    LABELS["epopenblas-omp4"]
-P1,  P4  = LABELS["parallel-blas-omp1"], LABELS["parallel-blas-omp4"]
-MIG      = LABELS["migrated-serial"]
+# Named handles into SUBJECTS for the pair-specific ratio columns (omp4/omp1).
+EP1, EP4, P1, P4 = SUBJECTS
+MIG_LABEL = MIGRATED_LABEL
 
 
 def pf(x):
@@ -53,13 +44,13 @@ def main():
         by_routine[r["routine"]].append(r)
 
     out = []
-    out.append(f"# 5-way comparison: {EP1.split('-')[0]} / {P1.split('-')[0]} / {MIG.split('-')[0]} — kind10 (REAL/COMPLEX(KIND=10))")
+    out.append(f"# 5-way comparison: {EP1.label.split('-')[0]} / {P1.label.split('-')[0]} / {MIG_LABEL.split('-')[0]} — kind10 (REAL/COMPLEX(KIND=10))")
     out.append("")
     out.append(f"- Source: `reports/cmp5/cmp5.tsv` ({len(rows)} (routine,key,size) rows over {len(by_routine)} routines)")
-    out.append(f"- Five variants: `{EP1}` and `{EP4}` (epblas-openblas overlay), `{P1}` and `{P4}` (epblas-parallel overlay), and `{MIG}` (Fortran reference, serial baseline).")
+    out.append(f"- Five variants: `{EP1.label}` and `{EP4.label}` (epblas-openblas overlay), `{P1.label}` and `{P4.label}` (epblas-parallel overlay), and `{MIG_LABEL}` (Fortran reference, serial baseline).")
     out.append("- All four overlay binaries link the SAME `tests/epblas-parallel/perf/target_kind10/perf_<r>.c` source — only the C-overlay symbol differs.")
     out.append("- Same `BLAS_PERF_{ITERS,WARMUP,INCX,INCY}=200/20/1/1`; per-routine default sizes; pinned via `taskset` (P-cores 0 or 0..3).")
-    out.append(f"- `{MIG}` = migrated_GFs from the `{P1}` run; `mig_*` columns are sanity readings of the same migrated `_serial` symbol from each of the four runs (expected to be ~equal since `_serial` contains no OpenMP).")
+    out.append(f"- `{MIG_LABEL}` = migrated_GFs from the `{P1.label}` run; `mig_*` columns are sanity readings of the same migrated `_serial` symbol from each of the four runs (expected to be ~equal since `_serial` contains no OpenMP).")
     out.append("")
 
     # 1. migrated drift sanity check.
@@ -69,7 +60,7 @@ def main():
     out.append("")
     drifts = []
     for r in rows:
-        mig = [pf(r[c]) for c in ("mig_par_omp1", "mig_par_omp4", "mig_ep_omp1", "mig_ep_omp4")]
+        mig = [pf(r[c]) for c in MIG_COLS]
         mig = [m for m in mig if m and m > 0]
         if len(mig) < 4:
             continue
@@ -92,20 +83,22 @@ def main():
     out.append("")
     out.append(f"Columns: routine, then median GF/s for each of the 5 variants, then OMP=4/OMP=1 speedup for each C overlay.")
     out.append("")
-    out.append(f"| routine | {EP1} | {EP4} | {P1} | {P4} | {MIG} | ep4/ep1 | par4/par1 |")
+    out.append(f"| routine | {EP1.label} | {EP4.label} | {P1.label} | {P4.label} | {MIG_LABEL} | ep4/ep1 | par4/par1 |")
     out.append( "|---------|--------------:|--------------:|--------------:|--------------:|--------------:|--------:|----------:|")
     for routine in sorted(by_routine):
         rr = by_routine[routine]
-        ep1 = [pf(r["epopenblas-omp1"])    for r in rr]; ep1 = [v for v in ep1 if v]
-        ep4 = [pf(r["epopenblas-omp4"])    for r in rr]; ep4 = [v for v in ep4 if v]
-        p1  = [pf(r["parallel-blas-omp1"]) for r in rr]; p1  = [v for v in p1  if v]
-        p4  = [pf(r["parallel-blas-omp4"]) for r in rr]; p4  = [v for v in p4  if v]
-        mig = [pf(r["migrated-serial"])    for r in rr]; mig = [v for v in mig if v]
-        if not (ep1 and ep4 and p1 and p4 and mig):
+        cols = {v.tsv_col: [pf(r[v.tsv_col]) for r in rr] for v in SUBJECTS}
+        cols = {k: [x for x in vs if x] for k, vs in cols.items()}
+        mig = [v for v in (pf(r[MIGRATED_COL]) for r in rr) if v]
+        if not (all(cols.values()) and mig):
             continue
-        m_ep1 = median(ep1); m_ep4 = median(ep4)
-        m_p1 = median(p1);   m_p4 = median(p4);  m_mig = median(mig)
-        out.append(f"| {routine} | {m_ep1:.3f} | {m_ep4:.3f} | {m_p1:.3f} | {m_p4:.3f} | {m_mig:.3f} | {m_ep4/m_ep1:.2f}× | {m_p4/m_p1:.2f}× |")
+        m = {k: median(vs) for k, vs in cols.items()}
+        m_mig = median(mig)
+        out.append(
+            f"| {routine} | {m[EP1.tsv_col]:.3f} | {m[EP4.tsv_col]:.3f} "
+            f"| {m[P1.tsv_col]:.3f} | {m[P4.tsv_col]:.3f} | {m_mig:.3f} "
+            f"| {m[EP4.tsv_col]/m[EP1.tsv_col]:.2f}× | {m[P4.tsv_col]/m[P1.tsv_col]:.2f}× |"
+        )
 
     out.append("")
 
@@ -120,7 +113,7 @@ def main():
     out.append("")
     out.append("For each routine, the row at the largest N actually measured. Useful for cases where a serial-OK overlay regresses only at large N (or vice versa).")
     out.append("")
-    out.append(f"| routine | key | N | {EP1} | {EP4} | {P1} | {P4} | {MIG} | ep1/mig | par1/mig | par4/mig |")
+    out.append(f"| routine | key | N | {EP1.label} | {EP4.label} | {P1.label} | {P4.label} | {MIG_LABEL} | ep1/mig | par1/mig | par4/mig |")
     out.append( "|---------|-----|--:|--------------:|--------------:|--------------:|--------------:|--------------:|--------:|---------:|---------:|")
     for routine in sorted(big_n_routines):
         rr = big_n_routines[routine]
@@ -130,11 +123,12 @@ def main():
         cands = [r for n, r in rr if n == n_max]
         cands.sort(key=lambda r: r["key"])
         r = cands[0]
-        ep1 = pf(r["epopenblas-omp1"]); ep4 = pf(r["epopenblas-omp4"])
-        p1 = pf(r["parallel-blas-omp1"]); p4 = pf(r["parallel-blas-omp4"])
-        mig = pf(r["migrated-serial"])
-        if not (ep1 and ep4 and p1 and p4 and mig):
+        vals = {v.tsv_col: pf(r[v.tsv_col]) for v in SUBJECTS}
+        mig = pf(r[MIGRATED_COL])
+        if not (all(vals.values()) and mig):
             continue
+        ep1, ep4 = vals[EP1.tsv_col], vals[EP4.tsv_col]
+        p1,  p4  = vals[P1.tsv_col],  vals[P4.tsv_col]
         out.append(
             f"| {routine} | {r['key']} | {n_max} | {ep1:.3f} | {ep4:.3f} | {p1:.3f} | {p4:.3f} | {mig:.3f} "
             f"| {ep1/mig:.2f}× | {p1/mig:.2f}× | {p4/mig:.2f}× |"

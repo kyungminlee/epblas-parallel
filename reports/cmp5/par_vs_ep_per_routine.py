@@ -7,8 +7,11 @@ import csv
 from collections import defaultdict
 from pathlib import Path
 
+from columns import SUBJECTS
+
 CMP = Path(__file__).parent / "cmp5.tsv"
 THRESH = 1.10
+EP1, EP4, P1, P4 = SUBJECTS
 
 
 def pf(x):
@@ -26,8 +29,8 @@ by_rt_4_n = defaultdict(int)
 
 for r in csv.DictReader(CMP.open(), delimiter="\t"):
     rt = r["routine"]
-    ep1 = pf(r["epopenblas-omp1"]);    p1 = pf(r["parallel-blas-omp1"])
-    ep4 = pf(r["epopenblas-omp4"]);    p4 = pf(r["parallel-blas-omp4"])
+    ep1 = pf(r[EP1.tsv_col]);    p1 = pf(r[P1.tsv_col])
+    ep4 = pf(r[EP4.tsv_col]);    p4 = pf(r[P4.tsv_col])
     if ep1 and p1:
         ratio = p1 / ep1
         if ratio >= THRESH:

@@ -8,12 +8,18 @@ the 1.10× noise floor it becomes "—"; if both are below it the whole
 cell is "—". Routines that timed out (no rows in cmp5.tsv) get "n/d".
 """
 import csv
+import sys
 from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from columns import SUBJECTS
 
 ROOT = Path(__file__).resolve().parents[2]
 CMP = ROOT / "reports/cmp5/cmp5.tsv"
 CHK = ROOT / "src/epblas-openblas/CHECKLIST.md"
+
+EP1, EP4, P1, P4 = SUBJECTS
 
 THRESH = 1.10
 NEW_HEADER = "par>ep (omp1/omp4)"
@@ -35,8 +41,8 @@ def load_ratios():
     for r in csv.DictReader(CMP.open(), delimiter="\t"):
         rt = r["routine"]
         seen.add(rt)
-        ep1 = pf(r["epopenblas-omp1"]); p1 = pf(r["parallel-blas-omp1"])
-        ep4 = pf(r["epopenblas-omp4"]); p4 = pf(r["parallel-blas-omp4"])
+        ep1 = pf(r[EP1.tsv_col]); p1 = pf(r[P1.tsv_col])
+        ep4 = pf(r[EP4.tsv_col]); p4 = pf(r[P4.tsv_col])
         if ep1 and p1:
             omp1_max[rt] = max(omp1_max[rt], p1 / ep1)
         if ep4 and p4:
