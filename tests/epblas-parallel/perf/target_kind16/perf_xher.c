@@ -29,37 +29,21 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     Q16 alpha = Q16_FROM(0.7);
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
-    X16 *A  = (X16 *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(X16));
-    X16 *Ai = (X16 *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(X16));
-    X16 *X  = (X16 *)perf_aligned_alloc(64, lenx * sizeof(X16));
-    for (size_t i = 0; i < (size_t)N*N; ++i) { int s = 2; Ai[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < lenx; ++i)      { int s = 3; X[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(A, Ai, (size_t)N * (size_t)N * sizeof(X16));
+    const size_t NNelt = (size_t)N * (size_t)N;
+    X16 *A  = PERF_ALLOC(X16, NNelt);
+    X16 *Ai = PERF_ALLOC(X16, NNelt);
+    X16 *X  = PERF_ALLOC(X16, lenx);
+    PERF_FILL_C(X16, Ai, NNelt, 2);
+    PERF_FILL_C(X16, X,  lenx, 3);
+    PERF_RESET(A, Ai, NNelt, X16);
     for (int r = 0; r < warmup; ++r) {
-        xher_(&uplo, &N, &alpha, X, &incx, A, &N, 1);
-        memcpy(A, Ai, (size_t)N * (size_t)N * sizeof(X16));
-        xher_migrated_(&uplo, &N, &alpha, X, &incx, A, &N, 1);
-        memcpy(A, Ai, (size_t)N * (size_t)N * sizeof(X16));
+        xher_(&uplo, &N, &alpha, X, &incx, A, &N, 1);          PERF_RESET(A, Ai, NNelt, X16);
+        xher_migrated_(&uplo, &N, &alpha, X, &incx, A, &N, 1); PERF_RESET(A, Ai, NNelt, X16);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        xher_(&uplo, &N, &alpha, X, &incx, A, &N, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(A, Ai, (size_t)N * (size_t)N * sizeof(X16));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        xher_migrated_(&uplo, &N, &alpha, X, &incx, A, &N, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(A, Ai, (size_t)N * (size_t)N * sizeof(X16));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(A, Ai, NNelt, X16), xher_(&uplo, &N, &alpha, X, &incx, A, &N, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(A, Ai, NNelt, X16), xher_migrated_(&uplo, &N, &alpha, X, &incx, A, &N, 1));
     double flops = 4.0 * (double)N * (double)N;
     char key[16];
     if (incx == 1) {
@@ -67,8 +51,7 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     } else {
         snprintf(key, sizeof(key), "%c/x%d", uplo, incx);
     }
-    perf_emit("xher", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("xher", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xher", key, N, iters, flops, t_subject, t_mg);
     free(A); free(Ai); free(X);
 }
 

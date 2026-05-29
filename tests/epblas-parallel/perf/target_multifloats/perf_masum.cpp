@@ -30,23 +30,17 @@ BLAS_EXTERN MFR masum_migrated_(const int *, const MFR *, const int *);
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     MFR r;
-    MFR *X = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = MFR_FROM(perf_fill_double(i, s)); }
+    MFR *X = PERF_ALLOC(MFR, N);
+    PERF_FILL_R(MFR, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {
         r = masum_(&N, X, &one);
         r = masum_migrated_(&N, X, &one);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = masum_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = masum_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = masum_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r = masum_migrated_(&N, X, &one));
     double flops = 1.0 * (double)N;
-    perf_emit("masum", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("masum", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("masum", "-", N, iters, flops, t_subject, t_mg);
     if ((double)(*((double*)&r)) == -123e30) { free(X); return; }
     free(X);
 }

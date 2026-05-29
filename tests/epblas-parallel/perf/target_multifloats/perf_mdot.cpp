@@ -39,33 +39,19 @@ static inline void sink_T(const MFR *p) {
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     MFR r;
-    MFR *X = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    MFR *Y = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = MFR_FROM(perf_fill_double(i, s)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Y[i] = MFR_FROM(perf_fill_double(i, s)); }
+    MFR *X = PERF_ALLOC(MFR, N);
+    MFR *Y = PERF_ALLOC(MFR, N);
+    PERF_FILL_R(MFR, X, N, 0);
+    PERF_FILL_R(MFR, Y, N, 1);
     for (int r2 = 0; r2 < warmup; ++r2) {
-        r = mdot_(&N, X, &one, Y, &one); sink_T(&r);
+        r = mdot_(&N, X, &one, Y, &one);          sink_T(&r);
         r = mdot_migrated_(&N, X, &one, Y, &one); sink_T(&r);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        r = mdot_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        r = mdot_migrated_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
-
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = mdot_(&N, X, &one, Y, &one); sink_T(&r));
+    PERF_TIME(t_mg,      iters, r = mdot_migrated_(&N, X, &one, Y, &one); sink_T(&r));
     double flops = 2.0 * (double)N;
-    perf_emit("mdot", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("mdot", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mdot", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y);
 }
 

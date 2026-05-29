@@ -32,22 +32,12 @@ static void run_one(int iters, int warmup) {
         R10 a = A, b = B; erotg_(&a, &b, &C, &S);
         a = A; b = B; erotg_migrated_(&a, &b, &C, &S);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        R10 a = A, b = B; erotg_(&a, &b, &C, &S);
-    }
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        R10 a = A, b = B; erotg_migrated_(&a, &b, &C, &S);
-    }
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, R10 a = A, b = B; erotg_(&a, &b, &C, &S));
+    PERF_TIME(t_mg,      iters, R10 a = A, b = B; erotg_migrated_(&a, &b, &C, &S));
     /* report time per call as "flops" abuse: per-call flop count ~10. */
     double flops = 10.0;
-    perf_emit("erotg", "-", iters, iters, flops, t_subject, t_mg);
-    perf_emit_json("erotg", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("erotg", "-", iters, iters, flops, t_subject, t_mg);
 }
 
 int main(void) {

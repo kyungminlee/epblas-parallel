@@ -33,39 +33,32 @@ BLAS_EXTERN void mgemm_migrated_(const char *, const char *, const int *, const 
 
 static void run_one(char ta, char tb, int M, int N, int K, int iters, int warmup) {
     MFR alpha = MFR_FROM(0.7), beta = MFR_FROM(0.3);
-    MFR *A  = (MFR *)perf_aligned_alloc(64, (size_t)M * (size_t)K * sizeof(MFR));
-    MFR *B  = (MFR *)perf_aligned_alloc(64, (size_t)K * (size_t)N * sizeof(MFR));
-    MFR *C  = (MFR *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(MFR));
-    MFR *Ci = (MFR *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(MFR));
+    const size_t MKelt = (size_t)M * (size_t)K;
+    const size_t KNelt = (size_t)K * (size_t)N;
+    const size_t MNelt = (size_t)M * (size_t)N;
+    MFR *A  = PERF_ALLOC(MFR, MKelt);
+    MFR *B  = PERF_ALLOC(MFR, KNelt);
+    MFR *C  = PERF_ALLOC(MFR, MNelt);
+    MFR *Ci = PERF_ALLOC(MFR, MNelt);
     int lda = M, ldb = K, ldc = M;
-    for (size_t i = 0; i < (size_t)M*K; ++i) { int s = 2; A[i] = MFR_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < (size_t)K*N; ++i) { int s = 3; B[i] = MFR_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < (size_t)M*N; ++i) { int s = 4; Ci[i] = MFR_FROM(perf_fill_double(i, s)); }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFR));
+    PERF_FILL_R(MFR, A,  MKelt, 2);
+    PERF_FILL_R(MFR, B,  KNelt, 3);
+    PERF_FILL_R(MFR, Ci, MNelt, 4);
+    PERF_RESET(C, Ci, MNelt, MFR);
 
     for (int r = 0; r < warmup; ++r) {
-        mgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFR));
-        mgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFR));
+        mgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);          PERF_RESET(C, Ci, MNelt, MFR);
+        mgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1); PERF_RESET(C, Ci, MNelt, MFR);
     }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFR));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        mgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFR));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        mgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(C, Ci, MNelt, MFR);
+    PERF_TIME(t_subject, iters, mgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
+    PERF_RESET(C, Ci, MNelt, MFR);
+    PERF_TIME(t_mg,      iters, mgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
 
     double flops = 2.0 * (double)M * (double)N * (double)K;
     char key[3] = {ta, tb, 0};
-    perf_emit("mgemm", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("mgemm", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mgemm", key, N, iters, flops, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 

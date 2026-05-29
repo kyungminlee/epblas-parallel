@@ -25,23 +25,17 @@ BLAS_EXTERN int iqamax_migrated_(const int *, const Q16 *, const int *);
 
 static void run_one(int N, int iters, int warmup) {
     int one = 1, r = 0;
-    Q16 *X = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = Q16_FROM(perf_fill_double(i, s)); }
+    Q16 *X = PERF_ALLOC(Q16, N);
+    PERF_FILL_R(Q16, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {
         r ^= iqamax_(&N, X, &one);
         r ^= iqamax_migrated_(&N, X, &one);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r ^= iqamax_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r ^= iqamax_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r ^= iqamax_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r ^= iqamax_migrated_(&N, X, &one));
     double flops = 1.0 * (double)N;
-    perf_emit("iqamax", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("iqamax", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("iqamax", "-", N, iters, flops, t_subject, t_mg);
     if (r == -123) { free(X); return; }
     free(X);
 }

@@ -26,23 +26,17 @@ BLAS_EXTERN R10 eynrm2_migrated_(const int *, const C10 *, const int *);
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     R10 r;
-    C10 *X = (C10 *)perf_aligned_alloc(64, (size_t)N * sizeof(C10));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
+    C10 *X = PERF_ALLOC(C10, N);
+    PERF_FILL_C(C10, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {
         r = eynrm2_(&N, X, &one);
         r = eynrm2_migrated_(&N, X, &one);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = eynrm2_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = eynrm2_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = eynrm2_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r = eynrm2_migrated_(&N, X, &one));
     double flops = 4.0 * (double)N;
-    perf_emit("eynrm2", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("eynrm2", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("eynrm2", "-", N, iters, flops, t_subject, t_mg);
     if ((double)(*((double*)&r)) == -123e30) { free(X); return; }
     free(X);
 }

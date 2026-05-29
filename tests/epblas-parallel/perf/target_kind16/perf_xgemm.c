@@ -29,39 +29,32 @@ BLAS_EXTERN void xgemm_migrated_(const char *, const char *, const int *, const 
 
 static void run_one(char ta, char tb, int M, int N, int K, int iters, int warmup) {
     X16 alpha = X16_FROM(0.7, 0.0), beta = X16_FROM(0.3, 0.0);
-    X16 *A  = (X16 *)perf_aligned_alloc(64, (size_t)M * (size_t)K * sizeof(X16));
-    X16 *B  = (X16 *)perf_aligned_alloc(64, (size_t)K * (size_t)N * sizeof(X16));
-    X16 *C  = (X16 *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(X16));
-    X16 *Ci = (X16 *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(X16));
+    const size_t MKelt = (size_t)M * (size_t)K;
+    const size_t KNelt = (size_t)K * (size_t)N;
+    const size_t MNelt = (size_t)M * (size_t)N;
+    X16 *A  = PERF_ALLOC(X16, MKelt);
+    X16 *B  = PERF_ALLOC(X16, KNelt);
+    X16 *C  = PERF_ALLOC(X16, MNelt);
+    X16 *Ci = PERF_ALLOC(X16, MNelt);
     int lda = M, ldb = K, ldc = M;
-    for (size_t i = 0; i < (size_t)M*K; ++i) { int s = 2; A[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < (size_t)K*N; ++i) { int s = 3; B[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < (size_t)M*N; ++i) { int s = 4; Ci[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(X16));
+    PERF_FILL_C(X16, A,  MKelt, 2);
+    PERF_FILL_C(X16, B,  KNelt, 3);
+    PERF_FILL_C(X16, Ci, MNelt, 4);
+    PERF_RESET(C, Ci, MNelt, X16);
 
     for (int r = 0; r < warmup; ++r) {
-        xgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(X16));
-        xgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(X16));
+        xgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);          PERF_RESET(C, Ci, MNelt, X16);
+        xgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1); PERF_RESET(C, Ci, MNelt, X16);
     }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(X16));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        xgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(X16));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        xgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(C, Ci, MNelt, X16);
+    PERF_TIME(t_subject, iters, xgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
+    PERF_RESET(C, Ci, MNelt, X16);
+    PERF_TIME(t_mg,      iters, xgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
 
     double flops = 8.0 * (double)M * (double)N * (double)K;
     char key[3] = {ta, tb, 0};
-    perf_emit("xgemm", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("xgemm", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xgemm", key, N, iters, flops, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 

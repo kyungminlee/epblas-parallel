@@ -30,36 +30,24 @@ BLAS_EXTERN void waxpy_migrated_(const int *, const MFC *, const MFC *, const in
 static void run_waxpy(int N, int iters, int warmup) {
     int one = 1;
     MFC alpha = MFC_FROM(0.7, 0.0);
-    MFC *X = (MFC *)perf_aligned_alloc(64, (size_t)N * sizeof(MFC));
-    MFC *Y = (MFC *)perf_aligned_alloc(64, (size_t)N * sizeof(MFC));
-    MFC *Yi = (MFC *)perf_aligned_alloc(64, (size_t)N * sizeof(MFC));
-    for (int s = 0; s < 1; ++s) {}
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Yi[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(Y, Yi, (size_t)N * sizeof(MFC));
+    MFC *X  = PERF_ALLOC(MFC, N);
+    MFC *Y  = PERF_ALLOC(MFC, N);
+    MFC *Yi = PERF_ALLOC(MFC, N);
+    PERF_FILL_C(MFC, X,  N, 0);
+    PERF_FILL_C(MFC, Yi, N, 1);
+    PERF_RESET(Y, Yi, N, MFC);
 
     for (int r = 0; r < warmup; ++r) {
-        waxpy_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof(MFC));
-        waxpy_migrated_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof(MFC));
+        waxpy_(&N, &alpha, X, &one, Y, &one);          PERF_RESET(Y, Yi, N, MFC);
+        waxpy_migrated_(&N, &alpha, X, &one, Y, &one); PERF_RESET(Y, Yi, N, MFC);
     }
 
-    memcpy(Y, Yi, (size_t)N * sizeof(MFC));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) waxpy_(&N, &alpha, X, &one, Y, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    memcpy(Y, Yi, (size_t)N * sizeof(MFC));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) waxpy_migrated_(&N, &alpha, X, &one, Y, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, N, MFC); PERF_TIME(t_subject, iters, waxpy_(&N, &alpha, X, &one, Y, &one));
+    PERF_RESET(Y, Yi, N, MFC); PERF_TIME(t_mg,      iters, waxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
     double flops = 8.0 * (double)N;
-    perf_emit("waxpy", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("waxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("waxpy", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

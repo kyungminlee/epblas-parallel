@@ -26,36 +26,24 @@ BLAS_EXTERN void yaxpy_migrated_(const int *, const C10 *, const C10 *, const in
 static void run_yaxpy(int N, int iters, int warmup) {
     int one = 1;
     C10 alpha = C10_FROM(0.7, 0.0);
-    C10 *X = (C10 *)perf_aligned_alloc(64, (size_t)N * sizeof(C10));
-    C10 *Y = (C10 *)perf_aligned_alloc(64, (size_t)N * sizeof(C10));
-    C10 *Yi = (C10 *)perf_aligned_alloc(64, (size_t)N * sizeof(C10));
-    for (int s = 0; s < 1; ++s) {}
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Yi[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(Y, Yi, (size_t)N * sizeof(C10));
+    C10 *X  = PERF_ALLOC(C10, N);
+    C10 *Y  = PERF_ALLOC(C10, N);
+    C10 *Yi = PERF_ALLOC(C10, N);
+    PERF_FILL_C(C10, X,  N, 0);
+    PERF_FILL_C(C10, Yi, N, 1);
+    PERF_RESET(Y, Yi, N, C10);
 
     for (int r = 0; r < warmup; ++r) {
-        yaxpy_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof(C10));
-        yaxpy_migrated_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof(C10));
+        yaxpy_(&N, &alpha, X, &one, Y, &one);          PERF_RESET(Y, Yi, N, C10);
+        yaxpy_migrated_(&N, &alpha, X, &one, Y, &one); PERF_RESET(Y, Yi, N, C10);
     }
 
-    memcpy(Y, Yi, (size_t)N * sizeof(C10));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) yaxpy_(&N, &alpha, X, &one, Y, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    memcpy(Y, Yi, (size_t)N * sizeof(C10));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) yaxpy_migrated_(&N, &alpha, X, &one, Y, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, N, C10); PERF_TIME(t_subject, iters, yaxpy_(&N, &alpha, X, &one, Y, &one));
+    PERF_RESET(Y, Yi, N, C10); PERF_TIME(t_mg,      iters, yaxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
     double flops = 8.0 * (double)N;
-    perf_emit("yaxpy", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("yaxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("yaxpy", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

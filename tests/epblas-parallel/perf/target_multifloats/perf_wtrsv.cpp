@@ -33,42 +33,26 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
                     int iters, int warmup) {
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
-    MFC *A  = (MFC *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(MFC));
-    MFC *X  = (MFC *)perf_aligned_alloc(64, lenx * sizeof(MFC));
-    MFC *Xi = (MFC *)perf_aligned_alloc(64, lenx * sizeof(MFC));
+    const size_t NNelt = (size_t)N * (size_t)N;
+    MFC *A  = PERF_ALLOC(MFC, NNelt);
+    MFC *X  = PERF_ALLOC(MFC, lenx);
+    MFC *Xi = PERF_ALLOC(MFC, lenx);
     /* Diagonally dominant for trsv stability */
-    for (size_t i = 0; i < (size_t)N*N; ++i) { int s = 2; A[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
+    PERF_FILL_C(MFC, A, NNelt, 2);
     for (int i = 0; i < N; ++i) {
         size_t idx = (size_t)i * N + i;
         A[idx] = Tc_from_d((double)(N + 4));
     }
-    for (size_t i = 0; i < lenx; ++i) { int s = 3; Xi[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(X, Xi, lenx * sizeof(MFC));
+    PERF_FILL_C(MFC, Xi, lenx, 3);
+    PERF_RESET(X, Xi, lenx, MFC);
     for (int r = 0; r < warmup; ++r) {
-        wtrsv_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1);
-        memcpy(X, Xi, lenx * sizeof(MFC));
-        wtrsv_migrated_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1);
-        memcpy(X, Xi, lenx * sizeof(MFC));
+        wtrsv_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1);          PERF_RESET(X, Xi, lenx, MFC);
+        wtrsv_migrated_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1); PERF_RESET(X, Xi, lenx, MFC);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        wtrsv_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, lenx * sizeof(MFC));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        wtrsv_migrated_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, lenx * sizeof(MFC));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, lenx, MFC), wtrsv_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, lenx, MFC), wtrsv_migrated_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1));
     double flops = 4.0 * (double)N * (double)N;
     /* Key encodes UPLO/TRANS/DIAG + stride. Examples: "LTN" (incx=1),
      * "LTN/x2" (incx=2), "LTN/x-1" (incx=-1). incx=1 keeps the old
@@ -79,8 +63,7 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     } else {
         snprintf(key, sizeof(key), "%c%c%c/x%d", uplo, trans, diag, incx);
     }
-    perf_emit("wtrsv", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("wtrsv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("wtrsv", key, N, iters, flops, t_subject, t_mg);
     free(A); free(X); free(Xi);
 }
 

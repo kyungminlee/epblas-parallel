@@ -26,23 +26,17 @@ BLAS_EXTERN Q16 qxasum_migrated_(const int *, const X16 *, const int *);
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     Q16 r;
-    X16 *X = (X16 *)perf_aligned_alloc(64, (size_t)N * sizeof(X16));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
+    X16 *X = PERF_ALLOC(X16, N);
+    PERF_FILL_C(X16, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {
         r = qxasum_(&N, X, &one);
         r = qxasum_migrated_(&N, X, &one);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = qxasum_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = qxasum_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = qxasum_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r = qxasum_migrated_(&N, X, &one));
     double flops = 2.0 * (double)N;
-    perf_emit("qxasum", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qxasum", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qxasum", "-", N, iters, flops, t_subject, t_mg);
     if ((double)(*((double*)&r)) == -123e30) { free(X); return; }
     free(X);
 }

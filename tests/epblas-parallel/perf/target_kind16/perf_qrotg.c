@@ -32,22 +32,12 @@ static void run_one(int iters, int warmup) {
         Q16 a = A, b = B; qrotg_(&a, &b, &C, &S);
         a = A; b = B; qrotg_migrated_(&a, &b, &C, &S);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        Q16 a = A, b = B; qrotg_(&a, &b, &C, &S);
-    }
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        Q16 a = A, b = B; qrotg_migrated_(&a, &b, &C, &S);
-    }
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, Q16 a = A, b = B; qrotg_(&a, &b, &C, &S));
+    PERF_TIME(t_mg,      iters, Q16 a = A, b = B; qrotg_migrated_(&a, &b, &C, &S));
     /* report time per call as "flops" abuse: per-call flop count ~10. */
     double flops = 10.0;
-    perf_emit("qrotg", "-", iters, iters, flops, t_subject, t_mg);
-    perf_emit_json("qrotg", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qrotg", "-", iters, iters, flops, t_subject, t_mg);
 }
 
 int main(void) {

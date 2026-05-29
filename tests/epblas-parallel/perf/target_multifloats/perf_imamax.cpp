@@ -29,23 +29,17 @@ BLAS_EXTERN int imamax_migrated_(const int *, const MFR *, const int *);
 
 static void run_one(int N, int iters, int warmup) {
     int one = 1, r = 0;
-    MFR *X = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = MFR_FROM(perf_fill_double(i, s)); }
+    MFR *X = PERF_ALLOC(MFR, N);
+    PERF_FILL_R(MFR, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {
         r ^= imamax_(&N, X, &one);
         r ^= imamax_migrated_(&N, X, &one);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r ^= imamax_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r ^= imamax_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r ^= imamax_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r ^= imamax_migrated_(&N, X, &one));
     double flops = 1.0 * (double)N;
-    perf_emit("imamax", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("imamax", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("imamax", "-", N, iters, flops, t_subject, t_mg);
     if (r == -123) { free(X); return; }
     free(X);
 }

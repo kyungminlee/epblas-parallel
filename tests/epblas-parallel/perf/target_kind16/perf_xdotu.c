@@ -35,33 +35,19 @@ static inline void sink_T(const X16 *p) {
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     X16 r;
-    X16 *X = (X16 *)perf_aligned_alloc(64, (size_t)N * sizeof(X16));
-    X16 *Y = (X16 *)perf_aligned_alloc(64, (size_t)N * sizeof(X16));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Y[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
+    X16 *X = PERF_ALLOC(X16, N);
+    X16 *Y = PERF_ALLOC(X16, N);
+    PERF_FILL_C(X16, X, N, 0);
+    PERF_FILL_C(X16, Y, N, 1);
     for (int r2 = 0; r2 < warmup; ++r2) {
-        r = xdotu_(&N, X, &one, Y, &one); sink_T(&r);
+        r = xdotu_(&N, X, &one, Y, &one);          sink_T(&r);
         r = xdotu_migrated_(&N, X, &one, Y, &one); sink_T(&r);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        r = xdotu_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        r = xdotu_migrated_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
-
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = xdotu_(&N, X, &one, Y, &one); sink_T(&r));
+    PERF_TIME(t_mg,      iters, r = xdotu_migrated_(&N, X, &one, Y, &one); sink_T(&r));
     double flops = 8.0 * (double)N;
-    perf_emit("xdotu", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("xdotu", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xdotu", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y);
 }
 

@@ -25,49 +25,26 @@ BLAS_EXTERN void yswap_migrated_(const int *, C10 *, const int *, C10 *, const i
 
 static void run_yswap(int N, int iters, int warmup) {
     int one = 1;
-    C10 *X = (C10 *)perf_aligned_alloc(64, (size_t)N * sizeof(C10));
-    C10 *Y = (C10 *)perf_aligned_alloc(64, (size_t)N * sizeof(C10));
-    C10 *Xi = (C10 *)perf_aligned_alloc(64, (size_t)N * sizeof(C10));
-    C10 *Yi = (C10 *)perf_aligned_alloc(64, (size_t)N * sizeof(C10));
-    for (int i = 0; i < N; ++i) { int s = 0; Xi[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Yi[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(X, Xi, (size_t)N * sizeof(C10));
-    memcpy(Y, Yi, (size_t)N * sizeof(C10));
+    C10 *X  = PERF_ALLOC(C10, N);
+    C10 *Y  = PERF_ALLOC(C10, N);
+    C10 *Xi = PERF_ALLOC(C10, N);
+    C10 *Yi = PERF_ALLOC(C10, N);
+    PERF_FILL_C(C10, Xi, N, 0);
+    PERF_FILL_C(C10, Yi, N, 1);
+    PERF_RESET(X, Xi, N, C10);
+    PERF_RESET(Y, Yi, N, C10);
     for (int r = 0; r < warmup; ++r) {
-        yswap_(&N, X, &one, Y, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(C10));
-        memcpy(Y, Yi, (size_t)N * sizeof(C10));
-        yswap_migrated_(&N, X, &one, Y, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(C10));
-        memcpy(Y, Yi, (size_t)N * sizeof(C10));
+        yswap_(&N, X, &one, Y, &one);          PERF_RESET(X, Xi, N, C10); PERF_RESET(Y, Yi, N, C10);
+        yswap_migrated_(&N, X, &one, Y, &one); PERF_RESET(X, Xi, N, C10); PERF_RESET(Y, Yi, N, C10);
     }
-    /* Per-call kernel-only timing — keep the reset memcpy OUT of the
-     * timed window so a single-threaded reset doesn't Amdahl-cap the
-     * measured MT scaling at large N. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        yswap_(&N, X, &one, Y, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(C10)); memcpy(Y, Yi, (size_t)N * sizeof(C10));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        yswap_migrated_(&N, X, &one, Y, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(C10)); memcpy(Y, Yi, (size_t)N * sizeof(C10));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window — see PERF_TIME_PER_CALL). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, C10); PERF_RESET(Y, Yi, N, C10), yswap_(&N, X, &one, Y, &one));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, C10); PERF_RESET(Y, Yi, N, C10), yswap_migrated_(&N, X, &one, Y, &one));
     /* Bytes moved per call: copy=2N*sizeof(T), swap=4N*sizeof(T). Report
      * as "flops" for uniform formatting. */
     double flops = 4.0 * (double)N * (double)sizeof(C10);
-    perf_emit("yswap", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("yswap", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("yswap", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

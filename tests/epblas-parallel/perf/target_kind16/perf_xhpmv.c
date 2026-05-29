@@ -32,30 +32,23 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     const size_t leny = (size_t)1 + (size_t)(N - 1) * (size_t)absy;
     size_t AP_LEN = (size_t)N * (size_t)(N + 1) / 2;
-    X16 *AP = (X16 *)perf_aligned_alloc(64, AP_LEN * sizeof(X16));
-    X16 *X  = (X16 *)perf_aligned_alloc(64, lenx * sizeof(X16));
-    X16 *Y  = (X16 *)perf_aligned_alloc(64, leny * sizeof(X16));
-    X16 *Yi = (X16 *)perf_aligned_alloc(64, leny * sizeof(X16));
-    for (size_t i = 0; i < AP_LEN; ++i) { int s = 2; AP[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < lenx; ++i)   { int s = 3; X[i]  = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < leny; ++i)   { int s = 4; Yi[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(Y, Yi, leny * sizeof(X16));
+    X16 *AP = PERF_ALLOC(X16, AP_LEN);
+    X16 *X  = PERF_ALLOC(X16, lenx);
+    X16 *Y  = PERF_ALLOC(X16, leny);
+    X16 *Yi = PERF_ALLOC(X16, leny);
+    PERF_FILL_C(X16, AP, AP_LEN, 2);
+    PERF_FILL_C(X16, X,  lenx, 3);
+    PERF_FILL_C(X16, Yi, leny, 4);
+    PERF_RESET(Y, Yi, leny, X16);
     for (int r = 0; r < warmup; ++r) {
-        xhpmv_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(X16));
-        xhpmv_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(X16));
+        xhpmv_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);          PERF_RESET(Y, Yi, leny, X16);
+        xhpmv_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1); PERF_RESET(Y, Yi, leny, X16);
     }
-    memcpy(Y, Yi, leny * sizeof(X16));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) xhpmv_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(Y, Yi, leny * sizeof(X16));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) xhpmv_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, leny, X16);
+    PERF_TIME(t_subject, iters, xhpmv_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1));
+    PERF_RESET(Y, Yi, leny, X16);
+    PERF_TIME(t_mg,      iters, xhpmv_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1));
     double flops = 8.0 * (double)N * (double)N;
     char key[24];
     if (incx == 1 && incy == 1) {
@@ -67,8 +60,7 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", uplo, incx, incy);
     }
-    perf_emit("xhpmv", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("xhpmv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xhpmv", key, N, iters, flops, t_subject, t_mg);
     free(AP); free(X); free(Y); free(Yi);
 }
 

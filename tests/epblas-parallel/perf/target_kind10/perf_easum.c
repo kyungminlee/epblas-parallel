@@ -26,23 +26,17 @@ BLAS_EXTERN R10 easum_migrated_(const int *, const R10 *, const int *);
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     R10 r;
-    R10 *X = (R10 *)perf_aligned_alloc(64, (size_t)N * sizeof(R10));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = R10_FROM(perf_fill_double(i, s)); }
+    R10 *X = PERF_ALLOC(R10, N);
+    PERF_FILL_R(R10, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {
         r = easum_(&N, X, &one);
         r = easum_migrated_(&N, X, &one);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = easum_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = easum_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = easum_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r = easum_migrated_(&N, X, &one));
     double flops = 1.0 * (double)N;
-    perf_emit("easum", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("easum", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("easum", "-", N, iters, flops, t_subject, t_mg);
     if ((double)(*((double*)&r)) == -123e30) { free(X); return; }
     free(X);
 }

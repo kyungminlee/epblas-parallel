@@ -25,23 +25,17 @@ BLAS_EXTERN int ixamax_migrated_(const int *, const X16 *, const int *);
 
 static void run_one(int N, int iters, int warmup) {
     int one = 1, r = 0;
-    X16 *X = (X16 *)perf_aligned_alloc(64, (size_t)N * sizeof(X16));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
+    X16 *X = PERF_ALLOC(X16, N);
+    PERF_FILL_C(X16, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {
         r ^= ixamax_(&N, X, &one);
         r ^= ixamax_migrated_(&N, X, &one);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r ^= ixamax_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r ^= ixamax_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r ^= ixamax_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r ^= ixamax_migrated_(&N, X, &one));
     double flops = 2.0 * (double)N;
-    perf_emit("ixamax", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("ixamax", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("ixamax", "-", N, iters, flops, t_subject, t_mg);
     if (r == -123) { free(X); return; }
     free(X);
 }

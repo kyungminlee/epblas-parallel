@@ -31,36 +31,30 @@ static void run_one(char trans, int M, int N, int KL, int KU,
                     int incx, int incy, int iters, int warmup) {
     C10 alpha = C10_FROM(0.7, 0.0), beta = C10_FROM(0.3, 0.0);
     int LDA = KL + KU + 1;
-    C10 *A  = (C10 *)perf_aligned_alloc(64, (size_t)LDA * (size_t)N * sizeof(C10));
+    const size_t Aelt = (size_t)LDA * (size_t)N;
+    C10 *A  = PERF_ALLOC(C10, Aelt);
     const int XL = (trans == 'N') ? N : M;
     const int YL = (trans == 'N') ? M : N;
     const int absx = incx < 0 ? -incx : incx;
     const int absy = incy < 0 ? -incy : incy;
     const size_t lenx = (size_t)1 + (size_t)(XL - 1) * (size_t)absx;
     const size_t leny = (size_t)1 + (size_t)(YL - 1) * (size_t)absy;
-    C10 *X  = (C10 *)perf_aligned_alloc(64, lenx * sizeof(C10));
-    C10 *Y  = (C10 *)perf_aligned_alloc(64, leny * sizeof(C10));
-    C10 *Yi = (C10 *)perf_aligned_alloc(64, leny * sizeof(C10));
-    for (size_t i = 0; i < (size_t)LDA*N; ++i) { int s = 2; A[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < lenx; ++i) { int s = 3; X[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < leny; ++i) { int s = 4; Yi[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(Y, Yi, leny * sizeof(C10));
+    C10 *X  = PERF_ALLOC(C10, lenx);
+    C10 *Y  = PERF_ALLOC(C10, leny);
+    C10 *Yi = PERF_ALLOC(C10, leny);
+    PERF_FILL_C(C10, A,  Aelt, 2);
+    PERF_FILL_C(C10, X,  lenx, 3);
+    PERF_FILL_C(C10, Yi, leny, 4);
+    PERF_RESET(Y, Yi, leny, C10);
     for (int r = 0; r < warmup; ++r) {
-        ygbmv_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(C10));
-        ygbmv_migrated_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(C10));
+        ygbmv_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);          PERF_RESET(Y, Yi, leny, C10);
+        ygbmv_migrated_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1); PERF_RESET(Y, Yi, leny, C10);
     }
-    memcpy(Y, Yi, leny * sizeof(C10));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) ygbmv_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(Y, Yi, leny * sizeof(C10));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) ygbmv_migrated_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, leny, C10);
+    PERF_TIME(t_subject, iters, ygbmv_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1));
+    PERF_RESET(Y, Yi, leny, C10);
+    PERF_TIME(t_mg,      iters, ygbmv_migrated_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1));
     double flops = 8.0 * (double)(KL+KU+1) * (double)N;
     char key[24];
     if (incx == 1 && incy == 1) {
@@ -72,8 +66,7 @@ static void run_one(char trans, int M, int N, int KL, int KU,
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", trans, incx, incy);
     }
-    perf_emit("ygbmv", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("ygbmv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("ygbmv", key, N, iters, flops, t_subject, t_mg);
     free(A); free(X); free(Y); free(Yi);
 }
 

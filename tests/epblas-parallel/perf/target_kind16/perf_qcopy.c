@@ -25,49 +25,26 @@ BLAS_EXTERN void qcopy_migrated_(const int *, const Q16 *, const int *, Q16 *, c
 
 static void run_qcopy(int N, int iters, int warmup) {
     int one = 1;
-    Q16 *X = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    Q16 *Y = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    Q16 *Xi = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    Q16 *Yi = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    for (int i = 0; i < N; ++i) { int s = 0; Xi[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Yi[i] = Q16_FROM(perf_fill_double(i, s)); }
-    memcpy(X, Xi, (size_t)N * sizeof(Q16));
-    memcpy(Y, Yi, (size_t)N * sizeof(Q16));
+    Q16 *X  = PERF_ALLOC(Q16, N);
+    Q16 *Y  = PERF_ALLOC(Q16, N);
+    Q16 *Xi = PERF_ALLOC(Q16, N);
+    Q16 *Yi = PERF_ALLOC(Q16, N);
+    PERF_FILL_R(Q16, Xi, N, 0);
+    PERF_FILL_R(Q16, Yi, N, 1);
+    PERF_RESET(X, Xi, N, Q16);
+    PERF_RESET(Y, Yi, N, Q16);
     for (int r = 0; r < warmup; ++r) {
-        qcopy_(&N, X, &one, Y, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(Q16));
-        memcpy(Y, Yi, (size_t)N * sizeof(Q16));
-        qcopy_migrated_(&N, X, &one, Y, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(Q16));
-        memcpy(Y, Yi, (size_t)N * sizeof(Q16));
+        qcopy_(&N, X, &one, Y, &one);          PERF_RESET(Y, Yi, N, Q16);
+        qcopy_migrated_(&N, X, &one, Y, &one); PERF_RESET(Y, Yi, N, Q16);
     }
-    /* Per-call kernel-only timing — keep the reset memcpy OUT of the
-     * timed window so a single-threaded reset doesn't Amdahl-cap the
-     * measured MT scaling at large N. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qcopy_(&N, X, &one, Y, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(Y, Yi, (size_t)N * sizeof(Q16));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qcopy_migrated_(&N, X, &one, Y, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(Y, Yi, (size_t)N * sizeof(Q16));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window — see PERF_TIME_PER_CALL). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(Y, Yi, N, Q16), qcopy_(&N, X, &one, Y, &one));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(Y, Yi, N, Q16), qcopy_migrated_(&N, X, &one, Y, &one));
     /* Bytes moved per call: copy=2N*sizeof(T), swap=4N*sizeof(T). Report
      * as "flops" for uniform formatting. */
     double flops = 2.0 * (double)N * (double)sizeof(Q16);
-    perf_emit("qcopy", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qcopy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qcopy", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

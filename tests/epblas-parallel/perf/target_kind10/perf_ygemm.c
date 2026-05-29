@@ -29,39 +29,32 @@ BLAS_EXTERN void ygemm_migrated_(const char *, const char *, const int *, const 
 
 static void run_one(char ta, char tb, int M, int N, int K, int iters, int warmup) {
     C10 alpha = C10_FROM(0.7, 0.0), beta = C10_FROM(0.3, 0.0);
-    C10 *A  = (C10 *)perf_aligned_alloc(64, (size_t)M * (size_t)K * sizeof(C10));
-    C10 *B  = (C10 *)perf_aligned_alloc(64, (size_t)K * (size_t)N * sizeof(C10));
-    C10 *C  = (C10 *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(C10));
-    C10 *Ci = (C10 *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(C10));
+    const size_t MKelt = (size_t)M * (size_t)K;
+    const size_t KNelt = (size_t)K * (size_t)N;
+    const size_t MNelt = (size_t)M * (size_t)N;
+    C10 *A  = PERF_ALLOC(C10, MKelt);
+    C10 *B  = PERF_ALLOC(C10, KNelt);
+    C10 *C  = PERF_ALLOC(C10, MNelt);
+    C10 *Ci = PERF_ALLOC(C10, MNelt);
     int lda = M, ldb = K, ldc = M;
-    for (size_t i = 0; i < (size_t)M*K; ++i) { int s = 2; A[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < (size_t)K*N; ++i) { int s = 3; B[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < (size_t)M*N; ++i) { int s = 4; Ci[i] = C10_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(C10));
+    PERF_FILL_C(C10, A,  MKelt, 2);
+    PERF_FILL_C(C10, B,  KNelt, 3);
+    PERF_FILL_C(C10, Ci, MNelt, 4);
+    PERF_RESET(C, Ci, MNelt, C10);
 
     for (int r = 0; r < warmup; ++r) {
-        ygemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(C10));
-        ygemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(C10));
+        ygemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);          PERF_RESET(C, Ci, MNelt, C10);
+        ygemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1); PERF_RESET(C, Ci, MNelt, C10);
     }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(C10));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        ygemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(C10));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        ygemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(C, Ci, MNelt, C10);
+    PERF_TIME(t_subject, iters, ygemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
+    PERF_RESET(C, Ci, MNelt, C10);
+    PERF_TIME(t_mg,      iters, ygemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
 
     double flops = 8.0 * (double)M * (double)N * (double)K;
     char key[3] = {ta, tb, 0};
-    perf_emit("ygemm", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("ygemm", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("ygemm", key, N, iters, flops, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 

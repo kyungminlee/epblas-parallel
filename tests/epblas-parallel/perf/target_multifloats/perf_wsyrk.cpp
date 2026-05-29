@@ -35,35 +35,27 @@ static void run_one(char uplo, char trans, int N, int K, int iters, int warmup) 
     MFC alpha = MFC_FROM(0.7, 0.0), beta = MFC_FROM(0.3, 0.0);
     int A_rows = (trans == 'N') ? N : K;
     int A_cols = (trans == 'N') ? K : N;
+    const size_t AAelt = (size_t)A_rows * (size_t)A_cols;
+    const size_t NNelt = (size_t)N * (size_t)N;
     int lda = A_rows, ldc = N;
-    MFC *A  = (MFC *)perf_aligned_alloc(64, (size_t)A_rows * (size_t)A_cols * sizeof(MFC));
-    MFC *C  = (MFC *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(MFC));
-    MFC *Ci = (MFC *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(MFC));
-    for (size_t i = 0; i < (size_t)A_rows*A_cols; ++i) { int s = 2; A[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < (size_t)N*N; ++i)           { int s = 4; Ci[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFC));
+    MFC *A  = PERF_ALLOC(MFC, AAelt);
+    MFC *C  = PERF_ALLOC(MFC, NNelt);
+    MFC *Ci = PERF_ALLOC(MFC, NNelt);
+    PERF_FILL_C(MFC, A,  AAelt, 2);
+    PERF_FILL_C(MFC, Ci, NNelt, 4);
+    PERF_RESET(C, Ci, NNelt, MFC);
     for (int r = 0; r < warmup; ++r) {
-        wsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFC));
-        wsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFC));
+        wsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);          PERF_RESET(C, Ci, NNelt, MFC);
+        wsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1); PERF_RESET(C, Ci, NNelt, MFC);
     }
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFC));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        wsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFC));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        wsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(C, Ci, NNelt, MFC);
+    PERF_TIME(t_subject, iters, wsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1));
+    PERF_RESET(C, Ci, NNelt, MFC);
+    PERF_TIME(t_mg,      iters, wsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1));
     double flops = 4.0 * (double)N * (double)N * (double)K;
     char key[3] = {uplo, trans, 0};
-    perf_emit("wsyrk", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("wsyrk", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("wsyrk", key, N, iters, flops, t_subject, t_mg);
     free(A); free(C); free(Ci);
 }
 

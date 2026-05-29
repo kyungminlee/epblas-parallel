@@ -30,23 +30,17 @@ BLAS_EXTERN MFR mwasum_migrated_(const int *, const MFC *, const int *);
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     MFR r;
-    MFC *X = (MFC *)perf_aligned_alloc(64, (size_t)N * sizeof(MFC));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
+    MFC *X = PERF_ALLOC(MFC, N);
+    PERF_FILL_C(MFC, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {
         r = mwasum_(&N, X, &one);
         r = mwasum_migrated_(&N, X, &one);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = mwasum_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = mwasum_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = mwasum_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r = mwasum_migrated_(&N, X, &one));
     double flops = 2.0 * (double)N;
-    perf_emit("mwasum", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("mwasum", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mwasum", "-", N, iters, flops, t_subject, t_mg);
     if ((double)(*((double*)&r)) == -123e30) { free(X); return; }
     free(X);
 }

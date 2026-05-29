@@ -36,30 +36,23 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     const size_t leny = (size_t)1 + (size_t)(N - 1) * (size_t)absy;
     size_t AP_LEN = (size_t)N * (size_t)(N + 1) / 2;
-    MFR *AP = (MFR *)perf_aligned_alloc(64, AP_LEN * sizeof(MFR));
-    MFR *X  = (MFR *)perf_aligned_alloc(64, lenx * sizeof(MFR));
-    MFR *Y  = (MFR *)perf_aligned_alloc(64, leny * sizeof(MFR));
-    MFR *Yi = (MFR *)perf_aligned_alloc(64, leny * sizeof(MFR));
-    for (size_t i = 0; i < AP_LEN; ++i) { int s = 2; AP[i] = MFR_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < lenx; ++i)   { int s = 3; X[i]  = MFR_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < leny; ++i)   { int s = 4; Yi[i] = MFR_FROM(perf_fill_double(i, s)); }
-    memcpy(Y, Yi, leny * sizeof(MFR));
+    MFR *AP = PERF_ALLOC(MFR, AP_LEN);
+    MFR *X  = PERF_ALLOC(MFR, lenx);
+    MFR *Y  = PERF_ALLOC(MFR, leny);
+    MFR *Yi = PERF_ALLOC(MFR, leny);
+    PERF_FILL_R(MFR, AP, AP_LEN, 2);
+    PERF_FILL_R(MFR, X,  lenx, 3);
+    PERF_FILL_R(MFR, Yi, leny, 4);
+    PERF_RESET(Y, Yi, leny, MFR);
     for (int r = 0; r < warmup; ++r) {
-        mspmv_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(MFR));
-        mspmv_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(MFR));
+        mspmv_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);          PERF_RESET(Y, Yi, leny, MFR);
+        mspmv_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1); PERF_RESET(Y, Yi, leny, MFR);
     }
-    memcpy(Y, Yi, leny * sizeof(MFR));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) mspmv_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(Y, Yi, leny * sizeof(MFR));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) mspmv_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, leny, MFR);
+    PERF_TIME(t_subject, iters, mspmv_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1));
+    PERF_RESET(Y, Yi, leny, MFR);
+    PERF_TIME(t_mg,      iters, mspmv_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1));
     double flops = 2.0 * (double)N * (double)N;
     char key[24];
     if (incx == 1 && incy == 1) {
@@ -71,8 +64,7 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", uplo, incx, incy);
     }
-    perf_emit("mspmv", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("mspmv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mspmv", key, N, iters, flops, t_subject, t_mg);
     free(AP); free(X); free(Y); free(Yi);
 }
 

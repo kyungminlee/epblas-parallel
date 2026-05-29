@@ -29,39 +29,32 @@ BLAS_EXTERN void qgemm_migrated_(const char *, const char *, const int *, const 
 
 static void run_one(char ta, char tb, int M, int N, int K, int iters, int warmup) {
     Q16 alpha = Q16_FROM(0.7), beta = Q16_FROM(0.3);
-    Q16 *A  = (Q16 *)perf_aligned_alloc(64, (size_t)M * (size_t)K * sizeof(Q16));
-    Q16 *B  = (Q16 *)perf_aligned_alloc(64, (size_t)K * (size_t)N * sizeof(Q16));
-    Q16 *C  = (Q16 *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(Q16));
-    Q16 *Ci = (Q16 *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(Q16));
+    const size_t MKelt = (size_t)M * (size_t)K;
+    const size_t KNelt = (size_t)K * (size_t)N;
+    const size_t MNelt = (size_t)M * (size_t)N;
+    Q16 *A  = PERF_ALLOC(Q16, MKelt);
+    Q16 *B  = PERF_ALLOC(Q16, KNelt);
+    Q16 *C  = PERF_ALLOC(Q16, MNelt);
+    Q16 *Ci = PERF_ALLOC(Q16, MNelt);
     int lda = M, ldb = K, ldc = M;
-    for (size_t i = 0; i < (size_t)M*K; ++i) { int s = 2; A[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < (size_t)K*N; ++i) { int s = 3; B[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < (size_t)M*N; ++i) { int s = 4; Ci[i] = Q16_FROM(perf_fill_double(i, s)); }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(Q16));
+    PERF_FILL_R(Q16, A,  MKelt, 2);
+    PERF_FILL_R(Q16, B,  KNelt, 3);
+    PERF_FILL_R(Q16, Ci, MNelt, 4);
+    PERF_RESET(C, Ci, MNelt, Q16);
 
     for (int r = 0; r < warmup; ++r) {
-        qgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(Q16));
-        qgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(Q16));
+        qgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);          PERF_RESET(C, Ci, MNelt, Q16);
+        qgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1); PERF_RESET(C, Ci, MNelt, Q16);
     }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(Q16));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        qgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(Q16));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        qgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(C, Ci, MNelt, Q16);
+    PERF_TIME(t_subject, iters, qgemm_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
+    PERF_RESET(C, Ci, MNelt, Q16);
+    PERF_TIME(t_mg,      iters, qgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
 
     double flops = 2.0 * (double)M * (double)N * (double)K;
     char key[3] = {ta, tb, 0};
-    perf_emit("qgemm", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qgemm", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qgemm", key, N, iters, flops, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 

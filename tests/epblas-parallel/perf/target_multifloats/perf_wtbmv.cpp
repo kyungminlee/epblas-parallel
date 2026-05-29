@@ -34,40 +34,24 @@ static void run_one(char uplo, char trans, char diag, int N, int K, int incx,
     int LDA = K + 1;
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
-    MFC *A  = (MFC *)perf_aligned_alloc(64, (size_t)LDA * (size_t)N * sizeof(MFC));
-    MFC *X  = (MFC *)perf_aligned_alloc(64, lenx * sizeof(MFC));
-    MFC *Xi = (MFC *)perf_aligned_alloc(64, lenx * sizeof(MFC));
-    for (size_t i = 0; i < (size_t)LDA*N; ++i) { int s = 2; A[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
+    const size_t Aelt = (size_t)LDA * (size_t)N;
+    MFC *A  = PERF_ALLOC(MFC, Aelt);
+    MFC *X  = PERF_ALLOC(MFC, lenx);
+    MFC *Xi = PERF_ALLOC(MFC, lenx);
+    PERF_FILL_C(MFC, A, Aelt, 2);
     /* diagonal at known row of band — large to stabilize tbsv */
     int diag_row = (uplo == 'U') ? K : 0;
     for (int j = 0; j < N; ++j) A[(size_t)j * LDA + diag_row] = Tc_from_d((double)(K + 4));
-    for (size_t i = 0; i < lenx; ++i) { int s = 3; Xi[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(X, Xi, lenx * sizeof(MFC));
+    PERF_FILL_C(MFC, Xi, lenx, 3);
+    PERF_RESET(X, Xi, lenx, MFC);
     for (int r = 0; r < warmup; ++r) {
-        wtbmv_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);
-        memcpy(X, Xi, lenx * sizeof(MFC));
-        wtbmv_migrated_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);
-        memcpy(X, Xi, lenx * sizeof(MFC));
+        wtbmv_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);          PERF_RESET(X, Xi, lenx, MFC);
+        wtbmv_migrated_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1); PERF_RESET(X, Xi, lenx, MFC);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        wtbmv_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, lenx * sizeof(MFC));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        wtbmv_migrated_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, lenx * sizeof(MFC));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, lenx, MFC), wtbmv_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, lenx, MFC), wtbmv_migrated_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1));
     double flops = 4.0 * (double)(2*K+1) * (double)N;
     char key[16];
     if (incx == 1) {
@@ -75,8 +59,7 @@ static void run_one(char uplo, char trans, char diag, int N, int K, int incx,
     } else {
         snprintf(key, sizeof(key), "%c%c%c/x%d", uplo, trans, diag, incx);
     }
-    perf_emit("wtbmv", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("wtbmv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("wtbmv", key, N, iters, flops, t_subject, t_mg);
     free(A); free(X); free(Xi);
 }
 

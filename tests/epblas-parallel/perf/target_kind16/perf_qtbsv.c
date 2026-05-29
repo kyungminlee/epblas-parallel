@@ -30,40 +30,24 @@ static void run_one(char uplo, char trans, char diag, int N, int K, int incx,
     int LDA = K + 1;
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
-    Q16 *A  = (Q16 *)perf_aligned_alloc(64, (size_t)LDA * (size_t)N * sizeof(Q16));
-    Q16 *X  = (Q16 *)perf_aligned_alloc(64, lenx * sizeof(Q16));
-    Q16 *Xi = (Q16 *)perf_aligned_alloc(64, lenx * sizeof(Q16));
-    for (size_t i = 0; i < (size_t)LDA*N; ++i) { int s = 2; A[i] = Q16_FROM(perf_fill_double(i, s)); }
+    const size_t Aelt = (size_t)LDA * (size_t)N;
+    Q16 *A  = PERF_ALLOC(Q16, Aelt);
+    Q16 *X  = PERF_ALLOC(Q16, lenx);
+    Q16 *Xi = PERF_ALLOC(Q16, lenx);
+    PERF_FILL_R(Q16, A, Aelt, 2);
     /* diagonal at known row of band — large to stabilize tbsv */
     int diag_row = (uplo == 'U') ? K : 0;
     for (int j = 0; j < N; ++j) A[(size_t)j * LDA + diag_row] = Tr_from_d((double)(K + 4));
-    for (size_t i = 0; i < lenx; ++i) { int s = 3; Xi[i] = Q16_FROM(perf_fill_double(i, s)); }
-    memcpy(X, Xi, lenx * sizeof(Q16));
+    PERF_FILL_R(Q16, Xi, lenx, 3);
+    PERF_RESET(X, Xi, lenx, Q16);
     for (int r = 0; r < warmup; ++r) {
-        qtbsv_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);
-        memcpy(X, Xi, lenx * sizeof(Q16));
-        qtbsv_migrated_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);
-        memcpy(X, Xi, lenx * sizeof(Q16));
+        qtbsv_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);          PERF_RESET(X, Xi, lenx, Q16);
+        qtbsv_migrated_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1); PERF_RESET(X, Xi, lenx, Q16);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qtbsv_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, lenx * sizeof(Q16));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qtbsv_migrated_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, lenx * sizeof(Q16));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, lenx, Q16), qtbsv_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, lenx, Q16), qtbsv_migrated_(&uplo, &trans, &diag, &N, &K, A, &LDA, X, &incx, 1, 1, 1));
     double flops = 1.0 * (double)(2*K+1) * (double)N;
     char key[16];
     if (incx == 1) {
@@ -71,8 +55,7 @@ static void run_one(char uplo, char trans, char diag, int N, int K, int incx,
     } else {
         snprintf(key, sizeof(key), "%c%c%c/x%d", uplo, trans, diag, incx);
     }
-    perf_emit("qtbsv", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qtbsv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qtbsv", key, N, iters, flops, t_subject, t_mg);
     free(A); free(X); free(Xi);
 }
 

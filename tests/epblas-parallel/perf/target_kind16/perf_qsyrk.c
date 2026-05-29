@@ -31,35 +31,27 @@ static void run_one(char uplo, char trans, int N, int K, int iters, int warmup) 
     Q16 alpha = Q16_FROM(0.7), beta = Q16_FROM(0.3);
     int A_rows = (trans == 'N') ? N : K;
     int A_cols = (trans == 'N') ? K : N;
+    const size_t AAelt = (size_t)A_rows * (size_t)A_cols;
+    const size_t NNelt = (size_t)N * (size_t)N;
     int lda = A_rows, ldc = N;
-    Q16 *A  = (Q16 *)perf_aligned_alloc(64, (size_t)A_rows * (size_t)A_cols * sizeof(Q16));
-    Q16 *C  = (Q16 *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(Q16));
-    Q16 *Ci = (Q16 *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(Q16));
-    for (size_t i = 0; i < (size_t)A_rows*A_cols; ++i) { int s = 2; A[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < (size_t)N*N; ++i)           { int s = 4; Ci[i] = Q16_FROM(perf_fill_double(i, s)); }
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(Q16));
+    Q16 *A  = PERF_ALLOC(Q16, AAelt);
+    Q16 *C  = PERF_ALLOC(Q16, NNelt);
+    Q16 *Ci = PERF_ALLOC(Q16, NNelt);
+    PERF_FILL_R(Q16, A,  AAelt, 2);
+    PERF_FILL_R(Q16, Ci, NNelt, 4);
+    PERF_RESET(C, Ci, NNelt, Q16);
     for (int r = 0; r < warmup; ++r) {
-        qsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(Q16));
-        qsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(Q16));
+        qsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);          PERF_RESET(C, Ci, NNelt, Q16);
+        qsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1); PERF_RESET(C, Ci, NNelt, Q16);
     }
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(Q16));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        qsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(Q16));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        qsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(C, Ci, NNelt, Q16);
+    PERF_TIME(t_subject, iters, qsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1));
+    PERF_RESET(C, Ci, NNelt, Q16);
+    PERF_TIME(t_mg,      iters, qsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1));
     double flops = 1.0 * (double)N * (double)N * (double)K;
     char key[3] = {uplo, trans, 0};
-    perf_emit("qsyrk", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qsyrk", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qsyrk", key, N, iters, flops, t_subject, t_mg);
     free(A); free(C); free(Ci);
 }
 

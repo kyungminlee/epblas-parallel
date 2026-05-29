@@ -30,37 +30,20 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     size_t AP_LEN = (size_t)N * (size_t)(N + 1) / 2;
-    Q16 *AP  = (Q16 *)perf_aligned_alloc(64, AP_LEN * sizeof(Q16));
-    Q16 *APi = (Q16 *)perf_aligned_alloc(64, AP_LEN * sizeof(Q16));
-    Q16 *X   = (Q16 *)perf_aligned_alloc(64, lenx * sizeof(Q16));
-    for (size_t i = 0; i < AP_LEN; ++i) { int s = 2; APi[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < lenx; ++i)   { int s = 3; X[i]   = Q16_FROM(perf_fill_double(i, s)); }
-    memcpy(AP, APi, AP_LEN * sizeof(Q16));
+    Q16 *AP  = PERF_ALLOC(Q16, AP_LEN);
+    Q16 *APi = PERF_ALLOC(Q16, AP_LEN);
+    Q16 *X   = PERF_ALLOC(Q16, lenx);
+    PERF_FILL_R(Q16, APi, AP_LEN, 2);
+    PERF_FILL_R(Q16, X,   lenx, 3);
+    PERF_RESET(AP, APi, AP_LEN, Q16);
     for (int r = 0; r < warmup; ++r) {
-        qspr_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        memcpy(AP, APi, AP_LEN * sizeof(Q16));
-        qspr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        memcpy(AP, APi, AP_LEN * sizeof(Q16));
+        qspr_(&uplo, &N, &alpha, X, &incx, AP, 1);          PERF_RESET(AP, APi, AP_LEN, Q16);
+        qspr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1); PERF_RESET(AP, APi, AP_LEN, Q16);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qspr_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(AP, APi, AP_LEN * sizeof(Q16));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qspr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(AP, APi, AP_LEN * sizeof(Q16));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(AP, APi, AP_LEN, Q16), qspr_(&uplo, &N, &alpha, X, &incx, AP, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(AP, APi, AP_LEN, Q16), qspr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1));
     double flops = 1.0 * (double)N * (double)N;
     char key[16];
     if (incx == 1) {
@@ -68,8 +51,7 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     } else {
         snprintf(key, sizeof(key), "%c/x%d", uplo, incx);
     }
-    perf_emit("qspr", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qspr", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qspr", key, N, iters, flops, t_subject, t_mg);
     free(AP); free(APi); free(X);
 }
 

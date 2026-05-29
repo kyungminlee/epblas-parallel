@@ -30,40 +30,20 @@ BLAS_EXTERN void mscal_migrated_(const int *, const MFR *, MFR *, const int *);
 static void run_mscal(int N, int iters, int warmup) {
     int one = 1;
     MFR alpha = MFR_FROM(0.7);
-    MFR *X = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    MFR *Xi = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    for (int i = 0; i < N; ++i) { int s = 0; Xi[i] = MFR_FROM(perf_fill_double(i, s)); }
-    memcpy(X, Xi, (size_t)N * sizeof(MFR));
+    MFR *X  = PERF_ALLOC(MFR, N);
+    MFR *Xi = PERF_ALLOC(MFR, N);
+    PERF_FILL_R(MFR, Xi, N, 0);
+    PERF_RESET(X, Xi, N, MFR);
     for (int r = 0; r < warmup; ++r) {
-        mscal_(&N, &alpha, X, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(MFR));
-        mscal_migrated_(&N, &alpha, X, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(MFR));
+        mscal_(&N, &alpha, X, &one);          PERF_RESET(X, Xi, N, MFR);
+        mscal_migrated_(&N, &alpha, X, &one); PERF_RESET(X, Xi, N, MFR);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of the
-     * timed window so it doesn't Amdahl-mask MT scaling. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        mscal_(&N, &alpha, X, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(MFR));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        mscal_migrated_(&N, &alpha, X, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(MFR));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, MFR), mscal_(&N, &alpha, X, &one));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, MFR), mscal_migrated_(&N, &alpha, X, &one));
     double flops = 1.0 * (double)N;
-    perf_emit("mscal", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("mscal", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mscal", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Xi);
 }
 

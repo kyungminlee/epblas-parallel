@@ -35,33 +35,19 @@ static inline void sink_T(const R10 *p) {
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     R10 r;
-    R10 *X = (R10 *)perf_aligned_alloc(64, (size_t)N * sizeof(R10));
-    R10 *Y = (R10 *)perf_aligned_alloc(64, (size_t)N * sizeof(R10));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = R10_FROM(perf_fill_double(i, s)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Y[i] = R10_FROM(perf_fill_double(i, s)); }
+    R10 *X = PERF_ALLOC(R10, N);
+    R10 *Y = PERF_ALLOC(R10, N);
+    PERF_FILL_R(R10, X, N, 0);
+    PERF_FILL_R(R10, Y, N, 1);
     for (int r2 = 0; r2 < warmup; ++r2) {
-        r = edot_(&N, X, &one, Y, &one); sink_T(&r);
+        r = edot_(&N, X, &one, Y, &one);          sink_T(&r);
         r = edot_migrated_(&N, X, &one, Y, &one); sink_T(&r);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        r = edot_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        r = edot_migrated_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
-
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = edot_(&N, X, &one, Y, &one); sink_T(&r));
+    PERF_TIME(t_mg,      iters, r = edot_migrated_(&N, X, &one, Y, &one); sink_T(&r));
     double flops = 2.0 * (double)N;
-    perf_emit("edot", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("edot", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("edot", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y);
 }
 

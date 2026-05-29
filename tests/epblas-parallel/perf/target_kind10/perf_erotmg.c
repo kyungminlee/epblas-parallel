@@ -32,23 +32,11 @@ static void run_one(int iters, int warmup) {
         d1 = D1; d2 = D2; x1 = X1;
         erotmg_migrated_(&d1, &d2, &x1, &Y1, PARAM);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        R10 d1 = D1, d2 = D2, x1 = X1;
-        erotmg_(&d1, &d2, &x1, &Y1, PARAM);
-    }
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        R10 d1 = D1, d2 = D2, x1 = X1;
-        erotmg_migrated_(&d1, &d2, &x1, &Y1, PARAM);
-    }
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, R10 d1 = D1, d2 = D2, x1 = X1; erotmg_(&d1, &d2, &x1, &Y1, PARAM));
+    PERF_TIME(t_mg,      iters, R10 d1 = D1, d2 = D2, x1 = X1; erotmg_migrated_(&d1, &d2, &x1, &Y1, PARAM));
     double flops = 20.0;
-    perf_emit("erotmg", "-", iters, iters, flops, t_subject, t_mg);
-    perf_emit_json("erotmg", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("erotmg", "-", iters, iters, flops, t_subject, t_mg);
 }
 
 int main(void) {

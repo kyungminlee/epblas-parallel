@@ -30,37 +30,20 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     size_t AP_LEN = (size_t)N * (size_t)(N + 1) / 2;
-    R10 *AP  = (R10 *)perf_aligned_alloc(64, AP_LEN * sizeof(R10));
-    R10 *APi = (R10 *)perf_aligned_alloc(64, AP_LEN * sizeof(R10));
-    R10 *X   = (R10 *)perf_aligned_alloc(64, lenx * sizeof(R10));
-    for (size_t i = 0; i < AP_LEN; ++i) { int s = 2; APi[i] = R10_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < lenx; ++i)   { int s = 3; X[i]   = R10_FROM(perf_fill_double(i, s)); }
-    memcpy(AP, APi, AP_LEN * sizeof(R10));
+    R10 *AP  = PERF_ALLOC(R10, AP_LEN);
+    R10 *APi = PERF_ALLOC(R10, AP_LEN);
+    R10 *X   = PERF_ALLOC(R10, lenx);
+    PERF_FILL_R(R10, APi, AP_LEN, 2);
+    PERF_FILL_R(R10, X,   lenx, 3);
+    PERF_RESET(AP, APi, AP_LEN, R10);
     for (int r = 0; r < warmup; ++r) {
-        espr_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        memcpy(AP, APi, AP_LEN * sizeof(R10));
-        espr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        memcpy(AP, APi, AP_LEN * sizeof(R10));
+        espr_(&uplo, &N, &alpha, X, &incx, AP, 1);          PERF_RESET(AP, APi, AP_LEN, R10);
+        espr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1); PERF_RESET(AP, APi, AP_LEN, R10);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        espr_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(AP, APi, AP_LEN * sizeof(R10));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        espr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(AP, APi, AP_LEN * sizeof(R10));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(AP, APi, AP_LEN, R10), espr_(&uplo, &N, &alpha, X, &incx, AP, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(AP, APi, AP_LEN, R10), espr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1));
     double flops = 1.0 * (double)N * (double)N;
     char key[16];
     if (incx == 1) {
@@ -68,8 +51,7 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     } else {
         snprintf(key, sizeof(key), "%c/x%d", uplo, incx);
     }
-    perf_emit("espr", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("espr", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("espr", key, N, iters, flops, t_subject, t_mg);
     free(AP); free(APi); free(X);
 }
 

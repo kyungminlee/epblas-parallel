@@ -31,41 +31,24 @@ static void run_one(int M, int N, int incx, int incy, int iters, int warmup) {
     const int absy = incy < 0 ? -incy : incy;
     const size_t lenx = (size_t)1 + (size_t)(M - 1) * (size_t)absx;
     const size_t leny = (size_t)1 + (size_t)(N - 1) * (size_t)absy;
-    Q16 *A  = (Q16 *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(Q16));
-    Q16 *Ai = (Q16 *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(Q16));
-    Q16 *X  = (Q16 *)perf_aligned_alloc(64, lenx * sizeof(Q16));
-    Q16 *Y  = (Q16 *)perf_aligned_alloc(64, leny * sizeof(Q16));
-    for (size_t i = 0; i < (size_t)M*N; ++i) { int s = 2; Ai[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < lenx; ++i)       { int s = 3; X[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < leny; ++i)       { int s = 4; Y[i] = Q16_FROM(perf_fill_double(i, s)); }
-    memcpy(A, Ai, (size_t)M * (size_t)N * sizeof(Q16));
+    const size_t MNelt = (size_t)M * (size_t)N;
+    Q16 *A  = PERF_ALLOC(Q16, MNelt);
+    Q16 *Ai = PERF_ALLOC(Q16, MNelt);
+    Q16 *X  = PERF_ALLOC(Q16, lenx);
+    Q16 *Y  = PERF_ALLOC(Q16, leny);
+    PERF_FILL_R(Q16, Ai, MNelt, 2);
+    PERF_FILL_R(Q16, X,  lenx, 3);
+    PERF_FILL_R(Q16, Y,  leny, 4);
+    PERF_RESET(A, Ai, MNelt, Q16);
 
     for (int r = 0; r < warmup; ++r) {
-        qger_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M);
-        memcpy(A, Ai, (size_t)M * (size_t)N * sizeof(Q16));
-        qger_migrated_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M);
-        memcpy(A, Ai, (size_t)M * (size_t)N * sizeof(Q16));
+        qger_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M);          PERF_RESET(A, Ai, MNelt, Q16);
+        qger_migrated_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M); PERF_RESET(A, Ai, MNelt, Q16);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qger_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(A, Ai, (size_t)M * (size_t)N * sizeof(Q16));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qger_migrated_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(A, Ai, (size_t)M * (size_t)N * sizeof(Q16));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(A, Ai, MNelt, Q16), qger_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(A, Ai, MNelt, Q16), qger_migrated_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M));
 
     double flops = 2.0 * (double)M * (double)N;
     char key[24];
@@ -78,8 +61,7 @@ static void run_one(int M, int N, int incx, int incy, int iters, int warmup) {
     } else {
         snprintf(key, sizeof(key), "x%d/y%d", incx, incy);
     }
-    perf_emit("qger", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qger", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qger", key, N, iters, flops, t_subject, t_mg);
     free(A); free(Ai); free(X); free(Y);
 }
 

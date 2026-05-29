@@ -30,40 +30,20 @@ BLAS_EXTERN void wmscal_migrated_(const int *, const MFR *, MFC *, const int *);
 static void run_wmscal(int N, int iters, int warmup) {
     int one = 1;
     MFR alpha = MFR_FROM(0.7);
-    MFC *X = (MFC *)perf_aligned_alloc(64, (size_t)N * sizeof(MFC));
-    MFC *Xi = (MFC *)perf_aligned_alloc(64, (size_t)N * sizeof(MFC));
-    for (int i = 0; i < N; ++i) { int s = 0; Xi[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(X, Xi, (size_t)N * sizeof(MFC));
+    MFC *X  = PERF_ALLOC(MFC, N);
+    MFC *Xi = PERF_ALLOC(MFC, N);
+    PERF_FILL_C(MFC, Xi, N, 0);
+    PERF_RESET(X, Xi, N, MFC);
     for (int r = 0; r < warmup; ++r) {
-        wmscal_(&N, &alpha, X, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(MFC));
-        wmscal_migrated_(&N, &alpha, X, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(MFC));
+        wmscal_(&N, &alpha, X, &one);          PERF_RESET(X, Xi, N, MFC);
+        wmscal_migrated_(&N, &alpha, X, &one); PERF_RESET(X, Xi, N, MFC);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of the
-     * timed window so it doesn't Amdahl-mask MT scaling. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        wmscal_(&N, &alpha, X, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(MFC));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        wmscal_migrated_(&N, &alpha, X, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(MFC));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, MFC), wmscal_(&N, &alpha, X, &one));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, MFC), wmscal_migrated_(&N, &alpha, X, &one));
     double flops = 6.0 * (double)N;
-    perf_emit("wmscal", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("wmscal", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("wmscal", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Xi);
 }
 

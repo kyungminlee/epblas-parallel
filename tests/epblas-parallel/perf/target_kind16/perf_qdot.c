@@ -35,33 +35,19 @@ static inline void sink_T(const Q16 *p) {
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     Q16 r;
-    Q16 *X = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    Q16 *Y = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Y[i] = Q16_FROM(perf_fill_double(i, s)); }
+    Q16 *X = PERF_ALLOC(Q16, N);
+    Q16 *Y = PERF_ALLOC(Q16, N);
+    PERF_FILL_R(Q16, X, N, 0);
+    PERF_FILL_R(Q16, Y, N, 1);
     for (int r2 = 0; r2 < warmup; ++r2) {
-        r = qdot_(&N, X, &one, Y, &one); sink_T(&r);
+        r = qdot_(&N, X, &one, Y, &one);          sink_T(&r);
         r = qdot_migrated_(&N, X, &one, Y, &one); sink_T(&r);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        r = qdot_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {
-        r = qdot_migrated_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
-
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = qdot_(&N, X, &one, Y, &one); sink_T(&r));
+    PERF_TIME(t_mg,      iters, r = qdot_migrated_(&N, X, &one, Y, &one); sink_T(&r));
     double flops = 2.0 * (double)N;
-    perf_emit("qdot", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qdot", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qdot", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y);
 }
 

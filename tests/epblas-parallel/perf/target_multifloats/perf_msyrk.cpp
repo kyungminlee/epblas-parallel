@@ -35,35 +35,27 @@ static void run_one(char uplo, char trans, int N, int K, int iters, int warmup) 
     MFR alpha = MFR_FROM(0.7), beta = MFR_FROM(0.3);
     int A_rows = (trans == 'N') ? N : K;
     int A_cols = (trans == 'N') ? K : N;
+    const size_t AAelt = (size_t)A_rows * (size_t)A_cols;
+    const size_t NNelt = (size_t)N * (size_t)N;
     int lda = A_rows, ldc = N;
-    MFR *A  = (MFR *)perf_aligned_alloc(64, (size_t)A_rows * (size_t)A_cols * sizeof(MFR));
-    MFR *C  = (MFR *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(MFR));
-    MFR *Ci = (MFR *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(MFR));
-    for (size_t i = 0; i < (size_t)A_rows*A_cols; ++i) { int s = 2; A[i] = MFR_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < (size_t)N*N; ++i)           { int s = 4; Ci[i] = MFR_FROM(perf_fill_double(i, s)); }
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFR));
+    MFR *A  = PERF_ALLOC(MFR, AAelt);
+    MFR *C  = PERF_ALLOC(MFR, NNelt);
+    MFR *Ci = PERF_ALLOC(MFR, NNelt);
+    PERF_FILL_R(MFR, A,  AAelt, 2);
+    PERF_FILL_R(MFR, Ci, NNelt, 4);
+    PERF_RESET(C, Ci, NNelt, MFR);
     for (int r = 0; r < warmup; ++r) {
-        msyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFR));
-        msyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFR));
+        msyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);          PERF_RESET(C, Ci, NNelt, MFR);
+        msyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1); PERF_RESET(C, Ci, NNelt, MFR);
     }
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFR));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        msyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(C, Ci, (size_t)N * (size_t)N * sizeof(MFR));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        msyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(C, Ci, NNelt, MFR);
+    PERF_TIME(t_subject, iters, msyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1));
+    PERF_RESET(C, Ci, NNelt, MFR);
+    PERF_TIME(t_mg,      iters, msyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1));
     double flops = 1.0 * (double)N * (double)N * (double)K;
     char key[3] = {uplo, trans, 0};
-    perf_emit("msyrk", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("msyrk", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("msyrk", key, N, iters, flops, t_subject, t_mg);
     free(A); free(C); free(Ci);
 }
 

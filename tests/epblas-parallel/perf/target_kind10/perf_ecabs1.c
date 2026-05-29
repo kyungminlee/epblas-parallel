@@ -30,18 +30,12 @@ static void run_one(int iters, int warmup) {
         acc += ecabs1_(&Z);
         acc += ecabs1_migrated_(&Z);
     }
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) acc += ecabs1_(&Z);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) acc += ecabs1_migrated_(&Z);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, acc += ecabs1_(&Z));
+    PERF_TIME(t_mg,      iters, acc += ecabs1_migrated_(&Z));
     /* per-call proxy: 2 abs + 1 add */
     double flops = 3.0;
-    perf_emit("ecabs1", "-", iters, iters, flops, t_subject, t_mg);
-    perf_emit_json("ecabs1", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("ecabs1", "-", iters, iters, flops, t_subject, t_mg);
     if ((double)(*((double*)&acc)) == -123e30) return;
 }
 

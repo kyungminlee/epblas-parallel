@@ -34,37 +34,29 @@ BLAS_EXTERN void wsymm_migrated_(const char *, const char *, const int *, const 
 static void run_one(char side, char uplo, int M, int N, int iters, int warmup) {
     MFC alpha = MFC_FROM(0.7, 0.0), beta = MFC_FROM(0.3, 0.0);
     int Asz = (side == 'L') ? M : N;
-    MFC *A  = (MFC *)perf_aligned_alloc(64, (size_t)Asz * (size_t)Asz * sizeof(MFC));
-    MFC *B  = (MFC *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(MFC));
-    MFC *C  = (MFC *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(MFC));
-    MFC *Ci = (MFC *)perf_aligned_alloc(64, (size_t)M * (size_t)N * sizeof(MFC));
+    const size_t AAelt = (size_t)Asz * (size_t)Asz;
+    const size_t MNelt = (size_t)M * (size_t)N;
+    MFC *A  = PERF_ALLOC(MFC, AAelt);
+    MFC *B  = PERF_ALLOC(MFC, MNelt);
+    MFC *C  = PERF_ALLOC(MFC, MNelt);
+    MFC *Ci = PERF_ALLOC(MFC, MNelt);
     int lda = Asz, ldb = M, ldc = M;
-    for (size_t i = 0; i < (size_t)Asz*Asz; ++i) { int s = 2; A[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < (size_t)M*N; ++i)     { int s = 3; B[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < (size_t)M*N; ++i)     { int s = 4; Ci[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFC));
+    PERF_FILL_C(MFC, A,  AAelt, 2);
+    PERF_FILL_C(MFC, B,  MNelt, 3);
+    PERF_FILL_C(MFC, Ci, MNelt, 4);
+    PERF_RESET(C, Ci, MNelt, MFC);
     for (int r = 0; r < warmup; ++r) {
-        wsymm_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFC));
-        wsymm_migrated_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-        memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFC));
+        wsymm_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);          PERF_RESET(C, Ci, MNelt, MFC);
+        wsymm_migrated_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1); PERF_RESET(C, Ci, MNelt, MFC);
     }
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFC));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        wsymm_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(C, Ci, (size_t)M * (size_t)N * sizeof(MFC));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it)
-        wsymm_migrated_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(C, Ci, MNelt, MFC);
+    PERF_TIME(t_subject, iters, wsymm_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
+    PERF_RESET(C, Ci, MNelt, MFC);
+    PERF_TIME(t_mg,      iters, wsymm_migrated_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
     double flops = 8.0 * (double)M * (double)M * (double)N;
     char key[3] = {side, uplo, 0};
-    perf_emit("wsymm", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("wsymm", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("wsymm", key, N, iters, flops, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 

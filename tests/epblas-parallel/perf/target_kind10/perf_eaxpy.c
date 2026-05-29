@@ -26,36 +26,24 @@ BLAS_EXTERN void eaxpy_migrated_(const int *, const R10 *, const R10 *, const in
 static void run_eaxpy(int N, int iters, int warmup) {
     int one = 1;
     R10 alpha = R10_FROM(0.7);
-    R10 *X = (R10 *)perf_aligned_alloc(64, (size_t)N * sizeof(R10));
-    R10 *Y = (R10 *)perf_aligned_alloc(64, (size_t)N * sizeof(R10));
-    R10 *Yi = (R10 *)perf_aligned_alloc(64, (size_t)N * sizeof(R10));
-    for (int s = 0; s < 1; ++s) {}
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = R10_FROM(perf_fill_double(i, s)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Yi[i] = R10_FROM(perf_fill_double(i, s)); }
-    memcpy(Y, Yi, (size_t)N * sizeof(R10));
+    R10 *X  = PERF_ALLOC(R10, N);
+    R10 *Y  = PERF_ALLOC(R10, N);
+    R10 *Yi = PERF_ALLOC(R10, N);
+    PERF_FILL_R(R10, X,  N, 0);
+    PERF_FILL_R(R10, Yi, N, 1);
+    PERF_RESET(Y, Yi, N, R10);
 
     for (int r = 0; r < warmup; ++r) {
-        eaxpy_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof(R10));
-        eaxpy_migrated_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof(R10));
+        eaxpy_(&N, &alpha, X, &one, Y, &one);          PERF_RESET(Y, Yi, N, R10);
+        eaxpy_migrated_(&N, &alpha, X, &one, Y, &one); PERF_RESET(Y, Yi, N, R10);
     }
 
-    memcpy(Y, Yi, (size_t)N * sizeof(R10));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) eaxpy_(&N, &alpha, X, &one, Y, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    memcpy(Y, Yi, (size_t)N * sizeof(R10));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) eaxpy_migrated_(&N, &alpha, X, &one, Y, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, N, R10); PERF_TIME(t_subject, iters, eaxpy_(&N, &alpha, X, &one, Y, &one));
+    PERF_RESET(Y, Yi, N, R10); PERF_TIME(t_mg,      iters, eaxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
     double flops = 2.0 * (double)N;
-    perf_emit("eaxpy", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("eaxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("eaxpy", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

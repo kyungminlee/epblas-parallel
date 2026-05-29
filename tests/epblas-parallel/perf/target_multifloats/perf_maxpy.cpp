@@ -30,36 +30,24 @@ BLAS_EXTERN void maxpy_migrated_(const int *, const MFR *, const MFR *, const in
 static void run_maxpy(int N, int iters, int warmup) {
     int one = 1;
     MFR alpha = MFR_FROM(0.7);
-    MFR *X = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    MFR *Y = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    MFR *Yi = (MFR *)perf_aligned_alloc(64, (size_t)N * sizeof(MFR));
-    for (int s = 0; s < 1; ++s) {}
-    for (int i = 0; i < N; ++i) { int s = 0; X[i] = MFR_FROM(perf_fill_double(i, s)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Yi[i] = MFR_FROM(perf_fill_double(i, s)); }
-    memcpy(Y, Yi, (size_t)N * sizeof(MFR));
+    MFR *X  = PERF_ALLOC(MFR, N);
+    MFR *Y  = PERF_ALLOC(MFR, N);
+    MFR *Yi = PERF_ALLOC(MFR, N);
+    PERF_FILL_R(MFR, X,  N, 0);
+    PERF_FILL_R(MFR, Yi, N, 1);
+    PERF_RESET(Y, Yi, N, MFR);
 
     for (int r = 0; r < warmup; ++r) {
-        maxpy_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof(MFR));
-        maxpy_migrated_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof(MFR));
+        maxpy_(&N, &alpha, X, &one, Y, &one);          PERF_RESET(Y, Yi, N, MFR);
+        maxpy_migrated_(&N, &alpha, X, &one, Y, &one); PERF_RESET(Y, Yi, N, MFR);
     }
 
-    memcpy(Y, Yi, (size_t)N * sizeof(MFR));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) maxpy_(&N, &alpha, X, &one, Y, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    memcpy(Y, Yi, (size_t)N * sizeof(MFR));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) maxpy_migrated_(&N, &alpha, X, &one, Y, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, N, MFR); PERF_TIME(t_subject, iters, maxpy_(&N, &alpha, X, &one, Y, &one));
+    PERF_RESET(Y, Yi, N, MFR); PERF_TIME(t_mg,      iters, maxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
     double flops = 2.0 * (double)N;
-    perf_emit("maxpy", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("maxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("maxpy", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

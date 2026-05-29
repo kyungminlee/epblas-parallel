@@ -28,44 +28,24 @@ BLAS_EXTERN void qrot_migrated_(const int *, Q16 *, const int *, Q16 *, const in
 static void run_one(int N, int iters, int warmup) {
     int one = 1;
     Q16 c_ = Q16_FROM(0.7), s_ = Q16_FROM(0.3);
-    Q16 *X = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    Q16 *Y = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    Q16 *Xi = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    Q16 *Yi = (Q16 *)perf_aligned_alloc(64, (size_t)N * sizeof(Q16));
-    for (int i = 0; i < N; ++i) { int s = 0; Xi[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (int i = 0; i < N; ++i) { int s = 1; Yi[i] = Q16_FROM(perf_fill_double(i, s)); }
-    memcpy(X, Xi, (size_t)N * sizeof(Q16));
-    memcpy(Y, Yi, (size_t)N * sizeof(Q16));
+    Q16 *X  = PERF_ALLOC(Q16, N);
+    Q16 *Y  = PERF_ALLOC(Q16, N);
+    Q16 *Xi = PERF_ALLOC(Q16, N);
+    Q16 *Yi = PERF_ALLOC(Q16, N);
+    PERF_FILL_R(Q16, Xi, N, 0);
+    PERF_FILL_R(Q16, Yi, N, 1);
+    PERF_RESET(X, Xi, N, Q16);
+    PERF_RESET(Y, Yi, N, Q16);
     for (int r = 0; r < warmup; ++r) {
-        qrot_(&N, X, &one, Y, &one, &c_, &s_);
-        memcpy(X, Xi, (size_t)N * sizeof(Q16)); memcpy(Y, Yi, (size_t)N * sizeof(Q16));
-        qrot_migrated_(&N, X, &one, Y, &one, &c_, &s_);
-        memcpy(X, Xi, (size_t)N * sizeof(Q16)); memcpy(Y, Yi, (size_t)N * sizeof(Q16));
+        qrot_(&N, X, &one, Y, &one, &c_, &s_);          PERF_RESET(X, Xi, N, Q16); PERF_RESET(Y, Yi, N, Q16);
+        qrot_migrated_(&N, X, &one, Y, &one, &c_, &s_); PERF_RESET(X, Xi, N, Q16); PERF_RESET(Y, Yi, N, Q16);
     }
-    /* Per-call kernel-only timing — keep memcpy resets out of the
-     * timed window so they don't Amdahl-mask MT scaling. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qrot_(&N, X, &one, Y, &one, &c_, &s_);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(Q16)); memcpy(Y, Yi, (size_t)N * sizeof(Q16));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        qrot_migrated_(&N, X, &one, Y, &one, &c_, &s_);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(Q16)); memcpy(Y, Yi, (size_t)N * sizeof(Q16));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, Q16); PERF_RESET(Y, Yi, N, Q16), qrot_(&N, X, &one, Y, &one, &c_, &s_));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, Q16); PERF_RESET(Y, Yi, N, Q16), qrot_migrated_(&N, X, &one, Y, &one, &c_, &s_));
     double flops = 6.0 * (double)N;
-    perf_emit("qrot", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qrot", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qrot", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

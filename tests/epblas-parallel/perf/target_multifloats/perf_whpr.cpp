@@ -34,37 +34,20 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     size_t AP_LEN = (size_t)N * (size_t)(N + 1) / 2;
-    MFC *AP  = (MFC *)perf_aligned_alloc(64, AP_LEN * sizeof(MFC));
-    MFC *APi = (MFC *)perf_aligned_alloc(64, AP_LEN * sizeof(MFC));
-    MFC *X   = (MFC *)perf_aligned_alloc(64, lenx * sizeof(MFC));
-    for (size_t i = 0; i < AP_LEN; ++i) { int s = 2; APi[i] = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    for (size_t i = 0; i < lenx; ++i)   { int s = 3; X[i]   = MFC_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(AP, APi, AP_LEN * sizeof(MFC));
+    MFC *AP  = PERF_ALLOC(MFC, AP_LEN);
+    MFC *APi = PERF_ALLOC(MFC, AP_LEN);
+    MFC *X   = PERF_ALLOC(MFC, lenx);
+    PERF_FILL_C(MFC, APi, AP_LEN, 2);
+    PERF_FILL_C(MFC, X,   lenx, 3);
+    PERF_RESET(AP, APi, AP_LEN, MFC);
     for (int r = 0; r < warmup; ++r) {
-        whpr_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        memcpy(AP, APi, AP_LEN * sizeof(MFC));
-        whpr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        memcpy(AP, APi, AP_LEN * sizeof(MFC));
+        whpr_(&uplo, &N, &alpha, X, &incx, AP, 1);          PERF_RESET(AP, APi, AP_LEN, MFC);
+        whpr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1); PERF_RESET(AP, APi, AP_LEN, MFC);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        whpr_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(AP, APi, AP_LEN * sizeof(MFC));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        whpr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(AP, APi, AP_LEN * sizeof(MFC));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(AP, APi, AP_LEN, MFC), whpr_(&uplo, &N, &alpha, X, &incx, AP, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(AP, APi, AP_LEN, MFC), whpr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1));
     double flops = 4.0 * (double)N * (double)N;
     char key[16];
     if (incx == 1) {
@@ -72,8 +55,7 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     } else {
         snprintf(key, sizeof(key), "%c/x%d", uplo, incx);
     }
-    perf_emit("whpr", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("whpr", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("whpr", key, N, iters, flops, t_subject, t_mg);
     free(AP); free(APi); free(X);
 }
 

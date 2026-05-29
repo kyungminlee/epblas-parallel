@@ -35,36 +35,30 @@ static void run_one(char trans, int M, int N, int KL, int KU,
                     int incx, int incy, int iters, int warmup) {
     MFR alpha = MFR_FROM(0.7), beta = MFR_FROM(0.3);
     int LDA = KL + KU + 1;
-    MFR *A  = (MFR *)perf_aligned_alloc(64, (size_t)LDA * (size_t)N * sizeof(MFR));
+    const size_t Aelt = (size_t)LDA * (size_t)N;
+    MFR *A  = PERF_ALLOC(MFR, Aelt);
     const int XL = (trans == 'N') ? N : M;
     const int YL = (trans == 'N') ? M : N;
     const int absx = incx < 0 ? -incx : incx;
     const int absy = incy < 0 ? -incy : incy;
     const size_t lenx = (size_t)1 + (size_t)(XL - 1) * (size_t)absx;
     const size_t leny = (size_t)1 + (size_t)(YL - 1) * (size_t)absy;
-    MFR *X  = (MFR *)perf_aligned_alloc(64, lenx * sizeof(MFR));
-    MFR *Y  = (MFR *)perf_aligned_alloc(64, leny * sizeof(MFR));
-    MFR *Yi = (MFR *)perf_aligned_alloc(64, leny * sizeof(MFR));
-    for (size_t i = 0; i < (size_t)LDA*N; ++i) { int s = 2; A[i] = MFR_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < lenx; ++i) { int s = 3; X[i] = MFR_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < leny; ++i) { int s = 4; Yi[i] = MFR_FROM(perf_fill_double(i, s)); }
-    memcpy(Y, Yi, leny * sizeof(MFR));
+    MFR *X  = PERF_ALLOC(MFR, lenx);
+    MFR *Y  = PERF_ALLOC(MFR, leny);
+    MFR *Yi = PERF_ALLOC(MFR, leny);
+    PERF_FILL_R(MFR, A,  Aelt, 2);
+    PERF_FILL_R(MFR, X,  lenx, 3);
+    PERF_FILL_R(MFR, Yi, leny, 4);
+    PERF_RESET(Y, Yi, leny, MFR);
     for (int r = 0; r < warmup; ++r) {
-        mgbmv_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(MFR));
-        mgbmv_migrated_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(MFR));
+        mgbmv_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);          PERF_RESET(Y, Yi, leny, MFR);
+        mgbmv_migrated_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1); PERF_RESET(Y, Yi, leny, MFR);
     }
-    memcpy(Y, Yi, leny * sizeof(MFR));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) mgbmv_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(Y, Yi, leny * sizeof(MFR));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) mgbmv_migrated_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, leny, MFR);
+    PERF_TIME(t_subject, iters, mgbmv_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1));
+    PERF_RESET(Y, Yi, leny, MFR);
+    PERF_TIME(t_mg,      iters, mgbmv_migrated_(&trans, &M, &N, &KL, &KU, &alpha, A, &LDA, X, &incx, &beta, Y, &incy, 1));
     double flops = 2.0 * (double)(KL+KU+1) * (double)N;
     char key[24];
     if (incx == 1 && incy == 1) {
@@ -76,8 +70,7 @@ static void run_one(char trans, int M, int N, int KL, int KU,
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", trans, incx, incy);
     }
-    perf_emit("mgbmv", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("mgbmv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mgbmv", key, N, iters, flops, t_subject, t_mg);
     free(A); free(X); free(Y); free(Yi);
 }
 

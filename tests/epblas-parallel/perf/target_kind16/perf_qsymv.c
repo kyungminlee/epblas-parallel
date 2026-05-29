@@ -31,30 +31,24 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     const int absy = incy < 0 ? -incy : incy;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     const size_t leny = (size_t)1 + (size_t)(N - 1) * (size_t)absy;
-    Q16 *A  = (Q16 *)perf_aligned_alloc(64, (size_t)N * (size_t)N * sizeof(Q16));
-    Q16 *X  = (Q16 *)perf_aligned_alloc(64, lenx * sizeof(Q16));
-    Q16 *Y  = (Q16 *)perf_aligned_alloc(64, leny * sizeof(Q16));
-    Q16 *Yi = (Q16 *)perf_aligned_alloc(64, leny * sizeof(Q16));
-    for (size_t i = 0; i < (size_t)N*N; ++i) { int s = 2; A[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < lenx; ++i)      { int s = 3; X[i] = Q16_FROM(perf_fill_double(i, s)); }
-    for (size_t i = 0; i < leny; ++i)      { int s = 4; Yi[i] = Q16_FROM(perf_fill_double(i, s)); }
-    memcpy(Y, Yi, leny * sizeof(Q16));
+    const size_t NNelt = (size_t)N * (size_t)N;
+    Q16 *A  = PERF_ALLOC(Q16, NNelt);
+    Q16 *X  = PERF_ALLOC(Q16, lenx);
+    Q16 *Y  = PERF_ALLOC(Q16, leny);
+    Q16 *Yi = PERF_ALLOC(Q16, leny);
+    PERF_FILL_R(Q16, A,  NNelt, 2);
+    PERF_FILL_R(Q16, X,  lenx, 3);
+    PERF_FILL_R(Q16, Yi, leny, 4);
+    PERF_RESET(Y, Yi, leny, Q16);
     for (int r = 0; r < warmup; ++r) {
-        qsymv_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(Q16));
-        qsymv_migrated_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof(Q16));
+        qsymv_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1);          PERF_RESET(Y, Yi, leny, Q16);
+        qsymv_migrated_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1); PERF_RESET(Y, Yi, leny, Q16);
     }
-    memcpy(Y, Yi, leny * sizeof(Q16));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) qsymv_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(Y, Yi, leny * sizeof(Q16));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) qsymv_migrated_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, leny, Q16);
+    PERF_TIME(t_subject, iters, qsymv_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1));
+    PERF_RESET(Y, Yi, leny, Q16);
+    PERF_TIME(t_mg,      iters, qsymv_migrated_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1));
     double flops = 2.0 * (double)N * (double)N;
     char key[24];
     if (incx == 1 && incy == 1) {
@@ -66,8 +60,7 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", uplo, incx, incy);
     }
-    perf_emit("qsymv", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("qsymv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qsymv", key, N, iters, flops, t_subject, t_mg);
     free(A); free(X); free(Y); free(Yi);
 }
 

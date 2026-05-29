@@ -26,40 +26,20 @@ BLAS_EXTERN void xscal_migrated_(const int *, const X16 *, X16 *, const int *);
 static void run_xscal(int N, int iters, int warmup) {
     int one = 1;
     X16 alpha = X16_FROM(0.7, 0.0);
-    X16 *X = (X16 *)perf_aligned_alloc(64, (size_t)N * sizeof(X16));
-    X16 *Xi = (X16 *)perf_aligned_alloc(64, (size_t)N * sizeof(X16));
-    for (int i = 0; i < N; ++i) { int s = 0; Xi[i] = X16_FROM(perf_fill_double(i, s), perf_fill_double(i, s + 131)); }
-    memcpy(X, Xi, (size_t)N * sizeof(X16));
+    X16 *X  = PERF_ALLOC(X16, N);
+    X16 *Xi = PERF_ALLOC(X16, N);
+    PERF_FILL_C(X16, Xi, N, 0);
+    PERF_RESET(X, Xi, N, X16);
     for (int r = 0; r < warmup; ++r) {
-        xscal_(&N, &alpha, X, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(X16));
-        xscal_migrated_(&N, &alpha, X, &one);
-        memcpy(X, Xi, (size_t)N * sizeof(X16));
+        xscal_(&N, &alpha, X, &one);          PERF_RESET(X, Xi, N, X16);
+        xscal_migrated_(&N, &alpha, X, &one); PERF_RESET(X, Xi, N, X16);
     }
-    /* Per-call kernel-only timing — keep memcpy reset out of the
-     * timed window so it doesn't Amdahl-mask MT scaling. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        xscal_(&N, &alpha, X, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(X16));
-    }
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {
-        double a = perf_now_s();
-        xscal_migrated_(&N, &alpha, X, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof(X16));
-    }
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, X16), xscal_(&N, &alpha, X, &one));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, X16), xscal_migrated_(&N, &alpha, X, &one));
     double flops = 6.0 * (double)N;
-    perf_emit("xscal", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("xscal", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xscal", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Xi);
 }
 
