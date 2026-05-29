@@ -60,15 +60,32 @@ if(NOT EPBLAS_PARALLEL_BUILT_TARGETS)
 endif()
 
 # multifloats is the upstream double-double library; the parallel
-# overlay for the multifloats target compiles its C++ kernels
-# against the `multifloats` target. Fetched the same way the
-# migrator did — same upstream, same tag floor.
+# overlay for the multifloats target compiles its C++ kernels against
+# the `multifloats` target.
 #
-# Wrapped in a function so the BUILD_TESTING / MULTIFLOATS_BUILD_BENCH
-# overrides stay function-scoped — a plain directory-scope `set()`
-# would shadow the cache value of BUILD_TESTING for the rest of this
-# CMakeLists.txt and silently disable the overlay test suite even when
-# the user passed -DBUILD_TESTING=ON.
+# Two paths into the build, picked by EPBLAS_PARALLEL_USE_SYSTEM_MULTIFLOATS:
+#
+#   OFF (default) — fetch + build from source (the original behavior).
+#     Either point -DMULTIFLOATS_DIR at a local checkout, or fall
+#     through to FetchContent at the pinned tag. The resulting archive
+#     + headers + multifloatsConfig.cmake are bundled into our install
+#     tree so the release tarball is self-contained.
+#
+#   ON — `find_package(multifloats CONFIG REQUIRED)` consumes an
+#     already-installed multifloats. We do NOT bundle it; the consumer
+#     of our release tarball must provide multifloats on their own
+#     CMAKE_PREFIX_PATH at find_package(epblas-parallel) time. Use
+#     this when CI / a host install already provides multifloats and
+#     re-fetching it is wasted work.
+option(EPBLAS_PARALLEL_USE_SYSTEM_MULTIFLOATS
+    "Consume multifloats via find_package() instead of FetchContent"
+    OFF)
+
+# OFF path. Wrapped in a function so the BUILD_TESTING /
+# MULTIFLOATS_BUILD_BENCH overrides stay function-scoped — a plain
+# directory-scope `set()` would shadow the cache value of BUILD_TESTING
+# for the rest of this CMakeLists.txt and silently disable the overlay
+# test suite even when the user passed -DBUILD_TESTING=ON.
 function(_epblas_add_multifloats_subdir)
     set(BUILD_TESTING OFF)
     set(MULTIFLOATS_BUILD_BENCH OFF)
@@ -92,10 +109,49 @@ function(_epblas_add_multifloats_subdir)
             ${multifloats_fetch_SOURCE_DIR}
             ${CMAKE_CURRENT_BINARY_DIR}/_mf EXCLUDE_FROM_ALL)
     endif()
+
+    # add_subdirectory(... EXCLUDE_FROM_ALL) excludes multifloats from
+    # the default build (good — keeps its tests/benches and the
+    # Fortran-bindings multifloatsf out of `make all`) but also drops
+    # the subdir's `cmake_install.cmake` from the parent install
+    # script, which would leave consumers with a broken
+    # `find_package(multifloats)` that mblas_parallel's
+    # INTERFACE_LINK_LIBRARIES depends on. Re-chain just the C/C++
+    # library's install script — the multifloats library archive +
+    # headers + multifloatsConfig.cmake land in our install tree, while
+    # the Fortran sibling (multifloatsf) and tests/benches stay out.
+    install(SCRIPT ${CMAKE_CURRENT_BINARY_DIR}/_mf/src/cmake_install.cmake)
+endfunction()
+
+# ON path.
+function(_epblas_use_system_multifloats)
+    find_package(multifloats CONFIG REQUIRED)
+    message(STATUS "epblas-parallel: using system multifloats "
+                   "(${multifloats_DIR}) — no bundled copy in the install tree")
+
+    # find_package's IMPORTED target is directory-scoped by default and
+    # would be invisible to src/epblas-parallel/multifloats/CMakeLists.txt
+    # (consumed from a sibling directory). Promote to GLOBAL so the link
+    # `target_link_libraries(mblas_parallel PUBLIC multifloats)` resolves
+    # regardless of which subdir consumes it.
+    set_target_properties(multifloats::multifloats PROPERTIES IMPORTED_GLOBAL TRUE)
+
+    # The overlay kernels' link line uses the bare name `multifloats`
+    # (matches the add_subdirectory case, where no namespace alias
+    # exists in the build tree). Provide the alias here so the same
+    # source compiles under either path; install(EXPORT) substitutes
+    # the namespaced form in the emitted Targets file automatically.
+    if(NOT TARGET multifloats)
+        add_library(multifloats ALIAS multifloats::multifloats)
+    endif()
 endfunction()
 
 if("multifloats" IN_LIST EPBLAS_PARALLEL_BUILT_TARGETS)
-    _epblas_add_multifloats_subdir()
+    if(EPBLAS_PARALLEL_USE_SYSTEM_MULTIFLOATS)
+        _epblas_use_system_multifloats()
+    else()
+        _epblas_add_multifloats_subdir()
+    endif()
 endif()
 
 add_subdirectory(src/epblas-parallel)
@@ -143,14 +199,22 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
 endforeach()
 
 # ── Install + export ──────────────────────────────────────────────
-include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
-
-# Build two packages out of one configure:
+#
+# Library files and the per-package Targets export are tagged by
+# FORTRAN_COMPILER_TAG (e.g. `libeblas_parallel-gfortran-15.a`,
+# `epblas-parallelTargets-gfortran-15.cmake`) so installs built with
+# different compilers can coexist in the same prefix. The hand-written
+# Config.cmake.in files detect the consuming project's compiler tag at
+# `find_package()` time and load the matching Targets file — same
+# convention as eplinalg's `fortran_install_library`.
+#
+# Builds two packages out of one configure:
 #   epblas-parallel — composite INTERFACEs + raw overlay archives
 #   epblas-openblas — raw openblas-derived reference archives
 # Excludes the `_migrated` IMPORTED archives from both — they're
 # build-tree-only (test consumption), never installed.
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 set(_epblas_parallel_install_targets "")
 set(_epblas_openblas_install_targets "")
@@ -166,13 +230,29 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
     endif()
 endforeach()
 
+# Tag the archive OUTPUT_NAME with the compiler tag. INTERFACE targets
+# (the composites) don't have an output file, so the rename only
+# applies to STATIC/SHARED archives.
+function(_epblas_tag_outputs)
+    foreach(_t IN LISTS ARGV)
+        get_target_property(_type ${_t} TYPE)
+        if(NOT _type STREQUAL "INTERFACE_LIBRARY")
+            set_target_properties(${_t} PROPERTIES
+                OUTPUT_NAME "${_t}-${FORTRAN_COMPILER_TAG}")
+        endif()
+    endforeach()
+endfunction()
+
 if(_epblas_parallel_install_targets)
+    _epblas_tag_outputs(${_epblas_parallel_install_targets})
+
     install(TARGETS ${_epblas_parallel_install_targets}
         EXPORT epblas-parallelTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
     install(EXPORT epblas-parallelTargets
+        FILE epblas-parallelTargets-${FORTRAN_COMPILER_TAG}.cmake
         NAMESPACE epblas-parallel::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epblas-parallel
     )
@@ -182,8 +262,14 @@ if(_epblas_parallel_install_targets)
     # multifloats's C++ kernels PUBLIC-link OpenMP::OpenMP_CXX, so its
     # IMPORTED target must exist on the consumer side.
     set(EPBLAS_PARALLEL_OPENMP_COMPONENTS "C")
+    set(EPBLAS_PARALLEL_EXTRA_DEPENDENCIES "")
     if("multifloats" IN_LIST EPBLAS_PARALLEL_BUILT_TARGETS)
         string(APPEND EPBLAS_PARALLEL_OPENMP_COMPONENTS " CXX")
+        # mblas_parallel PUBLIC-links multifloats::multifloats; the
+        # IMPORTED target must exist on the consumer side or the
+        # Targets file fails to load. multifloats is installed
+        # alongside (see _epblas_add_multifloats_subdir above).
+        set(EPBLAS_PARALLEL_EXTRA_DEPENDENCIES "find_dependency(multifloats)")
     endif()
 
     configure_package_config_file(
@@ -191,25 +277,22 @@ if(_epblas_parallel_install_targets)
         ${CMAKE_CURRENT_BINARY_DIR}/epblas-parallelConfig.cmake
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epblas-parallel
     )
-    write_basic_package_version_file(
-        ${CMAKE_CURRENT_BINARY_DIR}/epblas-parallelConfigVersion.cmake
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMajorVersion
-    )
     install(FILES
         ${CMAKE_CURRENT_BINARY_DIR}/epblas-parallelConfig.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/epblas-parallelConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epblas-parallel
     )
 endif()
 
 if(_epblas_openblas_install_targets)
+    _epblas_tag_outputs(${_epblas_openblas_install_targets})
+
     install(TARGETS ${_epblas_openblas_install_targets}
         EXPORT epblas-openblasTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
     install(EXPORT epblas-openblasTargets
+        FILE epblas-openblasTargets-${FORTRAN_COMPILER_TAG}.cmake
         NAMESPACE epblas-openblas::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epblas-openblas
     )
@@ -219,14 +302,8 @@ if(_epblas_openblas_install_targets)
         ${CMAKE_CURRENT_BINARY_DIR}/epblas-openblasConfig.cmake
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epblas-openblas
     )
-    write_basic_package_version_file(
-        ${CMAKE_CURRENT_BINARY_DIR}/epblas-openblasConfigVersion.cmake
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMajorVersion
-    )
     install(FILES
         ${CMAKE_CURRENT_BINARY_DIR}/epblas-openblasConfig.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/epblas-openblasConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epblas-openblas
     )
 endif()

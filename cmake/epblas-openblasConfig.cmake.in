@@ -1,9 +1,75 @@
 @PACKAGE_INIT@
 
-# epblas-openblas ships standalone OpenBLAS-derived reference archives
+# epblas-openblas Config.cmake
+#
+# Ships standalone OpenBLAS-derived reference archives
 # (`epblas-openblas::{e,q,m}blas`) used for A/B comparisons against the
 # eplinalg migrated baseline. The archives do NOT link `eplinalg::*` at
 # install time — they are raw archives, no composite — so no
 # find_dependency() on per-precision eplinalg packages is needed.
+#
+# Library files are tagged by Fortran compiler family + ABI version
+# (e.g. `libeblas_openblas-gfortran-15.a`,
+# `epblas-openblasTargets-gfortran-15.cmake`) so installs built with
+# different compilers can coexist under one prefix. The detection
+# block below re-derives the consumer's compiler tag and loads the
+# matching Targets file. Same convention as eplinalg's
+# `fortran_install_library`.
 
-include("${CMAKE_CURRENT_LIST_DIR}/epblas-openblasTargets.cmake")
+# --- Derive consumer's Fortran compiler family + ABI version tag ---
+set(_FC_consumer_family "")
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+    set(_FC_consumer_family "gfortran")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+    set(_FC_consumer_family "intel")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+    set(_FC_consumer_family "intel")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "LLVMFlang")
+    set(_FC_consumer_family "flang")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Flang")
+    set(_FC_consumer_family "flang-classic")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+    set(_FC_consumer_family "nvhpc")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NAG")
+    set(_FC_consumer_family "nag")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+    set(_FC_consumer_family "cray")
+else()
+    set(_FC_consumer_family "${CMAKE_Fortran_COMPILER_ID}")
+    string(TOLOWER "${_FC_consumer_family}" _FC_consumer_family)
+endif()
+
+if(_FC_consumer_family STREQUAL "gfortran" OR _FC_consumer_family STREQUAL "flang")
+    string(REGEX MATCH "^([0-9]+)" _FC_abi_version "${CMAKE_Fortran_COMPILER_VERSION}")
+elseif(_FC_consumer_family STREQUAL "intel")
+    string(REGEX MATCH "^([0-9]+\\.[0-9]+)" _FC_abi_version "${CMAKE_Fortran_COMPILER_VERSION}")
+else()
+    set(_FC_abi_version "${CMAKE_Fortran_COMPILER_VERSION}")
+endif()
+set(_FC_consumer_tag "${_FC_consumer_family}-${_FC_abi_version}")
+
+set(_FC_targets_file "${CMAKE_CURRENT_LIST_DIR}/epblas-openblasTargets-${_FC_consumer_tag}.cmake")
+
+if(NOT EXISTS "${_FC_targets_file}")
+    file(GLOB _FC_available "${CMAKE_CURRENT_LIST_DIR}/epblas-openblasTargets-*.cmake")
+    set(_FC_available_names "")
+    foreach(_FC_f IN LISTS _FC_available)
+        get_filename_component(_FC_fname "${_FC_f}" NAME)
+        list(APPEND _FC_available_names "${_FC_fname}")
+    endforeach()
+    list(JOIN _FC_available_names ", " _FC_available_list)
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+        "epblas-openblas: no pre-built library for tag '${_FC_consumer_tag}'. Available: [${_FC_available_list}]")
+    return()
+endif()
+
+include("${_FC_targets_file}")
+
+unset(_FC_consumer_family)
+unset(_FC_abi_version)
+unset(_FC_consumer_tag)
+unset(_FC_targets_file)
+unset(_FC_available)
+unset(_FC_available_names)
+unset(_FC_available_list)
