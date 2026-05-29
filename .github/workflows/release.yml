@@ -10,7 +10,7 @@ on:
         description: 'Version tag (e.g. v0.1.0)'
         required: false
       eplinalg_tag:
-        description: 'eplinalg release tag for the test slot (default: latest)'
+        description: 'eplinalg release tag for the test slot (overrides the pinned default)'
         required: false
 
 concurrency:
@@ -45,7 +45,7 @@ jobs:
           - { name: gfortran-15, fc: gfortran-15, cc: gcc-15, cxx: g++-15, pkg: gcc-15 g++-15 gfortran-15 }
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install GCC (gfortran)
         run: |
@@ -102,11 +102,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ inputs.eplinalg_tag }}"
-          if [ -z "$TAG" ]; then
-            TAG=$(gh release view --repo kyungminlee/eplinalg \
-                                  --json tagName -q .tagName)
-          fi
+          # Pinned to the eplinalg release we tested against. Bump on
+          # every epblas-parallel release that ships against a newer
+          # eplinalg — keeps the test slot reproducible and surfaces
+          # the dependency in PR review.
+          TAG="${{ inputs.eplinalg_tag || 'v0.4.1' }}"
           echo "eplinalg tag: $TAG"
 
           mkdir -p ${{ github.workspace }}/eplinalg-install
@@ -142,7 +142,7 @@ jobs:
 
       - name: Upload ctest log on failure
         if: failure() && env.IS_TEST_SLOT == 'true'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ctest-${{ matrix.compiler.name }}-LastTest
           path: |
@@ -161,7 +161,7 @@ jobs:
           echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARCHIVE }}
           path: ${{ env.ARCHIVE }}.tar.gz
@@ -174,7 +174,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: artifacts/
           pattern: 'epblas-parallel-*-linux-x86_64'
@@ -208,7 +208,7 @@ jobs:
           ls -lh "release/${ARCHIVE}.tar.gz"
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release/*.tar.gz
           generate_release_notes: true
