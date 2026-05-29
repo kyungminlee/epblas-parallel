@@ -1,10 +1,8 @@
-/* Kernel-isolated C perf harness for eynrm2 (overlay vs migrated).
- * Built per-executable with -ffunction-sections / --gc-sections.
+/* GENERATED-BY-gen_perf_harnesses — do not edit by hand; regenerate via
+ *   python3 scripts/gen_perf_harnesses.py
  *
- * Real Euclidean norm of a complex vector — Blue's three-accumulator
- * scaled sum-of-squares applied to Re and Im independently. Same
- * |x|+|y|-style per-element work as eyasum but with mul+add (not abs)
- * and a single sqrt tail.
+ * Kernel-isolated C perf harness for eynrm2 (overlay vs migrated).
+ * Built per-executable with -ffunction-sections / --gc-sections.
  */
 #include "../perf_common.h"
 
@@ -42,7 +40,6 @@ static void run_one(int N, int iters, int warmup) {
     for (int it = 0; it < iters; ++it) r = eynrm2_migrated_(&N, X, &one);
     t1 = perf_now_s();
     double t_mg = (t1 - t0) / (iters ? iters : 1);
-    /* per-element: 2 mul + 2 add (Re^2 + Im^2 + running sum). */
     double flops = 4.0 * (double)N;
     perf_emit("eynrm2", "-", N, iters, flops, t_subject, t_mg);
     perf_emit_json("eynrm2", "-", N, iters, flops, t_subject, t_mg);

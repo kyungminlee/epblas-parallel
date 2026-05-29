@@ -1,10 +1,8 @@
-/* Kernel-isolated C perf harness for enrm2 (overlay vs migrated).
- * Built per-executable with -ffunction-sections / --gc-sections.
+/* GENERATED-BY-gen_perf_harnesses — do not edit by hand; regenerate via
+ *   python3 scripts/gen_perf_harnesses.py
  *
- * Real L1 reduction: sqrt(sum x_i^2). Both overlay and migrated baseline
- * use Blue's three-accumulator scaled algorithm — kernel shapes differ
- * from OpenBLAS's scaled-SSQ, but the per-element work is comparable
- * (mul + add + scale checks).
+ * Kernel-isolated C perf harness for enrm2 (overlay vs migrated).
+ * Built per-executable with -ffunction-sections / --gc-sections.
  */
 #include "../perf_common.h"
 
@@ -42,7 +40,6 @@ static void run_one(int N, int iters, int warmup) {
     for (int it = 0; it < iters; ++it) r = enrm2_migrated_(&N, X, &one);
     t1 = perf_now_s();
     double t_mg = (t1 - t0) / (iters ? iters : 1);
-    /* per-element work: 1 mul + 1 add (sqrt is O(1) tail). */
     double flops = 2.0 * (double)N;
     perf_emit("enrm2", "-", N, iters, flops, t_subject, t_mg);
     perf_emit_json("enrm2", "-", N, iters, flops, t_subject, t_mg);

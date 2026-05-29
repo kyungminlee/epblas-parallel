@@ -1,9 +1,8 @@
-/* Kernel-isolated C perf harness for ecabs1 (overlay vs migrated).
- * Built per-executable with -ffunction-sections / --gc-sections.
+/* GENERATED-BY-gen_perf_harnesses — do not edit by hand; regenerate via
+ *   python3 scripts/gen_perf_harnesses.py
  *
- * Scalar: each call is one complex argument → |Re(z)| + |Im(z)|. Same
- * looped-call shape as perf_erotg.c — N is unused, iters is the loop
- * count, and "flops" is the per-call proxy (3: abs + abs + add).
+ * Kernel-isolated C perf harness for ecabs1 (overlay vs migrated).
+ * Built per-executable with -ffunction-sections / --gc-sections.
  */
 #include "../perf_common.h"
 
@@ -25,7 +24,7 @@ BLAS_EXTERN R10 ecabs1_(const C10 *);
 BLAS_EXTERN R10 ecabs1_migrated_(const C10 *);
 
 static void run_one(int iters, int warmup) {
-    C10 Z = C10_FROM(0.7, -1.3);
+    C10 Z = C10_FROM(0.7, 0.0);
     R10 acc = Tr_from_d(0.0);
     for (int r = 0; r < warmup; ++r) {
         acc += ecabs1_(&Z);
