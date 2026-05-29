@@ -107,3 +107,11 @@ for ep_bin in "${ep_bins[@]}"; do
 done
 
 echo "wrote $RAW; log $LOG"
+
+# Aggregation + summary tail: these are part of the pipeline, not a separate
+# step. Per-binary timeouts above are tolerated (partial data still aggregates);
+# python failures here are fatal — there's no useful "partially aggregated"
+# state to leave on disk.
+python3 "${HERE}/aggregate.py" || { echo "[fatal] aggregate.py failed" >&2; exit 1; }
+python3 "${HERE}/summarize.py" || { echo "[fatal] summarize.py failed" >&2; exit 1; }
+python3 "${HERE}/par_wins.py"  || { echo "[fatal] par_wins.py failed"  >&2; exit 1; }

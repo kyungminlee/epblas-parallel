@@ -19,6 +19,21 @@ HERE = Path(__file__).parent
 CMP = HERE / "cmp5.tsv"
 OUT = HERE / "cmp5_summary.md"
 
+# TSV column name → user-facing display name. The aggregator preserves the
+# historical "epopenblas / parallel-blas / migrated-serial" column names in
+# cmp5.tsv; the report uses the shorter, friendlier eplinalg/parallel/openblas
+# vocabulary that matches how we talk about the three implementations.
+LABELS = {
+    "epopenblas-omp1":    "openblas-omp1",
+    "epopenblas-omp4":    "openblas-omp4",
+    "parallel-blas-omp1": "parallel-omp1",
+    "parallel-blas-omp4": "parallel-omp4",
+    "migrated-serial":    "eplinalg-omp1",
+}
+EP1, EP4 = LABELS["epopenblas-omp1"],    LABELS["epopenblas-omp4"]
+P1,  P4  = LABELS["parallel-blas-omp1"], LABELS["parallel-blas-omp4"]
+MIG      = LABELS["migrated-serial"]
+
 
 def pf(x):
     try:
@@ -38,13 +53,13 @@ def main():
         by_routine[r["routine"]].append(r)
 
     out = []
-    out.append("# 5-way comparison: epopenblas / parallel-blas / migrated — kind10 (REAL/COMPLEX(KIND=10))")
+    out.append(f"# 5-way comparison: {EP1.split('-')[0]} / {P1.split('-')[0]} / {MIG.split('-')[0]} — kind10 (REAL/COMPLEX(KIND=10))")
     out.append("")
     out.append(f"- Source: `reports/cmp5/cmp5.tsv` ({len(rows)} (routine,key,size) rows over {len(by_routine)} routines)")
-    out.append("- Five variants: epopenblas (overlay) at OMP=1 and OMP=4, parallel-blas (overlay) at OMP=1 and OMP=4, and migrated (Fortran reference, serial baseline).")
-    out.append("- All four overlay binaries link the SAME `tests/blas_parallel/perf/target_kind10/perf_<r>.c` source — only the C-overlay symbol differs.")
+    out.append(f"- Five variants: `{EP1}` and `{EP4}` (epblas-openblas overlay), `{P1}` and `{P4}` (epblas-parallel overlay), and `{MIG}` (Fortran reference, serial baseline).")
+    out.append("- All four overlay binaries link the SAME `tests/epblas-parallel/perf/target_kind10/perf_<r>.c` source — only the C-overlay symbol differs.")
     out.append("- Same `BLAS_PERF_{ITERS,WARMUP,INCX,INCY}=200/20/1/1`; per-routine default sizes; pinned via `taskset` (P-cores 0 or 0..3).")
-    out.append("- migrated-serial = migrated_GFs from the parallel-blas-omp1 run; mig_* columns are sanity readings of the same migrated `_serial` symbol from each of the four runs (expected to be ~equal since `_serial` contains no OpenMP).")
+    out.append(f"- `{MIG}` = migrated_GFs from the `{P1}` run; `mig_*` columns are sanity readings of the same migrated `_serial` symbol from each of the four runs (expected to be ~equal since `_serial` contains no OpenMP).")
     out.append("")
 
     # 1. migrated drift sanity check.
@@ -75,10 +90,10 @@ def main():
     # 2. Per-routine median GF/s across all (key, size).
     out.append("## Per-routine medians (GF/s) — across all (key, size)")
     out.append("")
-    out.append("Columns: routine, then median GF/s for each of the 5 variants (`ep` = epopenblas, `par` = parallel-blas, `mig` = migrated Fortran reference), then OMP=4/OMP=1 speedup for each C overlay.")
+    out.append(f"Columns: routine, then median GF/s for each of the 5 variants, then OMP=4/OMP=1 speedup for each C overlay.")
     out.append("")
-    out.append("| routine | ep-omp1 | ep-omp4 | par-omp1 | par-omp4 | mig-serial | ep4/ep1 | par4/par1 |")
-    out.append("|---------|--------:|--------:|---------:|---------:|-----------:|--------:|----------:|")
+    out.append(f"| routine | {EP1} | {EP4} | {P1} | {P4} | {MIG} | ep4/ep1 | par4/par1 |")
+    out.append( "|---------|--------------:|--------------:|--------------:|--------------:|--------------:|--------:|----------:|")
     for routine in sorted(by_routine):
         rr = by_routine[routine]
         ep1 = [pf(r["epopenblas-omp1"])    for r in rr]; ep1 = [v for v in ep1 if v]
@@ -105,8 +120,8 @@ def main():
     out.append("")
     out.append("For each routine, the row at the largest N actually measured. Useful for cases where a serial-OK overlay regresses only at large N (or vice versa).")
     out.append("")
-    out.append("| routine | key | N | ep-omp1 | ep-omp4 | par-omp1 | par-omp4 | mig-serial | ep1/mig | par1/mig | par4/mig |")
-    out.append("|---------|-----|--:|--------:|--------:|---------:|---------:|-----------:|--------:|---------:|---------:|")
+    out.append(f"| routine | key | N | {EP1} | {EP4} | {P1} | {P4} | {MIG} | ep1/mig | par1/mig | par4/mig |")
+    out.append( "|---------|-----|--:|--------------:|--------------:|--------------:|--------------:|--------------:|--------:|---------:|---------:|")
     for routine in sorted(big_n_routines):
         rr = big_n_routines[routine]
         n_max = max(n for n, _ in rr)
