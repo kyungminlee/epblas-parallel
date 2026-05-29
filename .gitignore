@@ -11,3 +11,10 @@ compile_commands.json
 # Editor / OS
 *.swp
 .DS_Store
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+
+# Local cmp5 run logs (transient stdout captures)
+reports/cmp5/run_cmp5.stdout.log
