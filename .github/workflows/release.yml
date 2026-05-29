@@ -1,0 +1,287 @@
+name: Release Libraries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag (e.g. v0.1.0)'
+        required: false
+      eplinalg_tag:
+        description: 'eplinalg release tag for the test slot (default: latest)'
+        required: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Build matrix: compiler (all 3 targets build per configure) ───
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # The gfortran-15 slot also runs ctest as the release workflow's
+      # one correctness signal. We pick gfortran-15 because it's the
+      # newer of the two and exercises the same compiler tag that
+      # eplinalg's own release matrix tests against. The test slot
+      # pulls the matching kind10 / kind16 / multifloats eplinalg
+      # archives so all three overlay targets contribute to ctest -L
+      # fuzz. Extending coverage to gfortran-12 is a known follow-up.
+      IS_TEST_SLOT: ${{ matrix.compiler.name == 'gfortran-15' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # v0.1.0 release matrix: gfortran-only. Intel ifx and LLVM
+        # Flang need targeted fixes for the OpenMP C runtime + the
+        # C99 `_Complex long double` intrinsics the overlay kernels
+        # use before they can be promoted. Tracked as a follow-up.
+        compiler:
+          - { name: gfortran-12, fc: gfortran-12, cc: gcc-12, cxx: g++-12, pkg: gcc-12 g++-12 gfortran-12 }
+          - { name: gfortran-15, fc: gfortran-15, cc: gcc-15, cxx: g++-15, pkg: gcc-15 g++-15 gfortran-15 }
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install GCC (gfortran)
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.compiler.pkg }}
+
+      - name: Install fypp
+        # multifloats's overlay kernels are emitted from .fypp templates,
+        # and the overlay test drivers are .fypp-templated Fortran — so
+        # fypp is needed both for production multifloats builds and for
+        # the test slot.
+        run: pipx install fypp
+
+      # ── Test slot: pull eplinalg + set up Intel MPI ────────────────
+      # Mirrors eplinalg's own release workflow: intelmpi is the
+      # canonical MPI for the migrated stack, so the matching
+      # `<target>-<compiler>-intelmpi-linux-x86_64.tar.gz` archives
+      # carry the BLAS Configs we link against here.
+      - name: Install Intel MPI (test slot only)
+        if: env.IS_TEST_SLOT == 'true'
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+          sudo apt-get install -y intel-oneapi-mpi-devel
+
+      # Source Intel oneAPI's setvars.sh once and forward the resulting
+      # environment to subsequent steps via $GITHUB_ENV instead of
+      # re-sourcing it inside every cmake invocation. Only vars that
+      # setvars.sh actually adds/changes are forwarded. Matches
+      # eplinalg's release workflow.
+      - name: Setup Intel oneAPI environment (test slot only)
+        if: env.IS_TEST_SLOT == 'true'
+        run: |
+          env | sort > /tmp/env.before
+          source /opt/intel/oneapi/setvars.sh > /dev/null
+          env | sort > /tmp/env.after
+          comm -13 /tmp/env.before /tmp/env.after >> "$GITHUB_ENV"
+
+      - name: Setup Intel MPI compiler shims (test slot only)
+        if: env.IS_TEST_SLOT == 'true'
+        run: |
+          {
+            echo "I_MPI_F90=${{ matrix.compiler.fc }}"
+            echo "I_MPI_CC=${{ matrix.compiler.cc }}"
+            echo "I_MPI_CXX=${{ matrix.compiler.cxx }}"
+          } >> "$GITHUB_ENV"
+
+      - name: Download eplinalg release (test slot only)
+        if: env.IS_TEST_SLOT == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.eplinalg_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release view --repo kyungminlee/eplinalg \
+                                  --json tagName -q .tagName)
+          fi
+          echo "eplinalg tag: $TAG"
+
+          mkdir -p ${{ github.workspace }}/eplinalg-install
+          for target in kind10 kind16 multifloats; do
+            ARCH="${target}-${{ matrix.compiler.name }}-intelmpi-linux-x86_64.tar.gz"
+            gh release download --repo kyungminlee/eplinalg "$TAG" \
+                --pattern "$ARCH" --dir .
+            tar xzf "$ARCH" -C ${{ github.workspace }}/eplinalg-install
+            rm "$ARCH"
+          done
+          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/eplinalg-install${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" \
+            >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_Fortran_COMPILER=${{ matrix.compiler.fc }} \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler.cxx }} \
+            -DBUILD_TESTING=${{ env.IS_TEST_SLOT == 'true' && 'ON' || 'OFF' }} \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run ctest (fuzz)
+        # `-L fuzz` is the everyday correctness gate (~15s per target)
+        # per CMakePresets.json. Heavier presets (bench / perf / sweep)
+        # take minutes-to-hours and don't belong in the release loop.
+        if: env.IS_TEST_SLOT == 'true'
+        run: ctest --test-dir build -j$(nproc) --output-on-failure -L fuzz
+
+      - name: Upload ctest log on failure
+        if: failure() && env.IS_TEST_SLOT == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: ctest-${{ matrix.compiler.name }}-LastTest
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
+          retention-days: 7
+
+      - name: Install
+        run: cmake --install build
+
+      - name: Package
+        run: |
+          cd install
+          ARCHIVE="epblas-parallel-${{ matrix.compiler.name }}-linux-x86_64"
+          tar czf ${{ github.workspace }}/${ARCHIVE}.tar.gz .
+          echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}.tar.gz
+          retention-days: 7
+
+  # ── Create GitHub Release ────────────────────────────────────────
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts/
+          pattern: 'epblas-parallel-*-linux-x86_64'
+
+      - name: Collect tarballs
+        run: |
+          mkdir -p release
+          find artifacts -name '*.tar.gz' -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Build combined epblas-parallel tarball
+        # Merge every per-compiler tarball into one
+        # ``epblas-parallel-vX.Y.Z-linux-x86_64`` archive that holds all
+        # compilers in a single install tree. Per-compiler tarballs ship
+        # alongside it for consumers who only need one toolchain. Since
+        # every library is tagged with ``-<compiler>`` in its filename
+        # (and the Targets export file is tagged the same way), the
+        # per-tarball extracts don't collide; the only paths that
+        # overlap across tarballs are the per-package Config.cmake
+        # files, which are identical across the same logical
+        # configuration.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE="epblas-parallel-v${VERSION}-linux-x86_64"
+          mkdir -p combined
+          for t in release/*.tar.gz; do
+            echo "  extracting $(basename "$t")"
+            tar -xzf "$t" -C combined
+          done
+          tar -czf "release/${ARCHIVE}.tar.gz" -C combined .
+          ls -lh "release/${ARCHIVE}.tar.gz"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.tar.gz
+          generate_release_notes: true
+          body: |
+            ## epblas-parallel: hand-written extended-precision BLAS overlays
+
+            Pre-built static libraries for Linux x86-64.
+
+            ### Combined archive
+
+            ``epblas-parallel-vX.Y.Z-linux-x86_64.tar.gz`` bundles every
+            per-compiler archive into a single install tree. Every
+            library file is tagged with its compiler tag in the
+            filename (e.g. ``libeblas_parallel-gfortran-15.a``), so all
+            variants coexist without collisions. Extract once and
+            select the variant you want via
+            ``find_package(epblas-parallel)`` — the per-package
+            ``Config.cmake`` picks the matching Targets file by
+            detecting the consumer's Fortran compiler tag.
+
+            Use the per-compiler tarballs when you only need a single
+            variant and want a smaller download.
+
+            ### Packages (per archive)
+
+            | Package | Imported targets | Role |
+            |---------|-----------------|------|
+            | `epblas-parallel` | `epblas-parallel::{e,q,m}blas` (composite, INTERFACE), `epblas-parallel::{e,q,m}blas_parallel` (raw STATIC) | Production OpenMP-parallel overlay. The composite WHOLE_ARCHIVE-wraps the overlay so its symbols win at link time over any chained reference BLAS. |
+            | `epblas-openblas` | `epblas-openblas::eblas` (STATIC, kind10 only) | OpenBLAS-derived reference archive. Never wired into the composite — A/B comparison surface only. |
+
+            ### Targets
+
+            | Target | Description | Library prefix |
+            |--------|-------------|----------------|
+            | `kind10` | 80-bit extended precision (`long double` / `_Complex long double`) | `e` / `y` |
+            | `kind16` | 128-bit quad precision (`__float128`) | `q` / `x` |
+            | `multifloats` | Double-double (`float64x2`) | `m` / `w` |
+
+            ### Compilers
+
+            | Compiler | Tag |
+            |----------|-----|
+            | GCC/gfortran 12 | `gfortran-12` |
+            | GCC/gfortran 15 | `gfortran-15` |
+
+            Intel oneAPI (ifx) and LLVM Flang are not yet covered by
+            the release matrix — the overlay kernels lean on GCC-style
+            `_Complex long double` codegen and the OpenMP C runtime
+            that those toolchains don't yet ship at parity. Tracked as
+            a follow-up.
+
+            ### Installation
+
+            ```bash
+            tar xzf epblas-parallel-v${VERSION}-linux-x86_64.tar.gz -C /usr/local
+            ```
+
+            Consumers reach the overlay via
+            `find_package(epblas-parallel)` + linking
+            `epblas-parallel::eblas` (or `qblas` / `mblas`). The
+            composite already pulls in `OpenMP::OpenMP_C` (and
+            `OpenMP::OpenMP_CXX` when the multifloats target is
+            present) on the consumer's link line.
+
+            The OpenBLAS reference is reached via
+            `find_package(epblas-openblas)` + linking
+            `epblas-openblas::eblas`.
+
+            ### Test slot
+
+            The `gfortran-15` slot additionally runs `ctest -L fuzz`
+            against the matching `eplinalg` release archives (eblas /
+            qblas / mblas, intelmpi flavor — same combo eplinalg's
+            own release uses as its correctness signal). This is the
+            release workflow's only correctness signal — heavier
+            benches and perf sweeps are out of band.
