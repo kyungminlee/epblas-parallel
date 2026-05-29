@@ -6,7 +6,7 @@ def emit_spr_hpr(name: str, ti: TypeInfo, is_c: bool, is_h: bool) -> str:
     T = ti.cmplx_T if is_c else ti.real_T
     Talpha = ti.real_T if is_h else T
     p7 = ti.real_lit_p7 if is_h else (ti.cmplx_lit_p7 if is_c else ti.real_lit_p7)
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     flops = '4.0 * (double)N * (double)N' if is_c else '1.0 * (double)N * (double)N'
     return f'''
 BLAS_EXTERN void {name}_(const char *, const int *, const {Talpha} *,
@@ -19,37 +19,20 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {{
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     size_t AP_LEN = (size_t)N * (size_t)(N + 1) / 2;
-    {T} *AP  = ({T} *)perf_aligned_alloc(64, AP_LEN * sizeof({T}));
-    {T} *APi = ({T} *)perf_aligned_alloc(64, AP_LEN * sizeof({T}));
-    {T} *X   = ({T} *)perf_aligned_alloc(64, lenx * sizeof({T}));
-    for (size_t i = 0; i < AP_LEN; ++i) {{ int s = 2; APi[i] = {fill}; }}
-    for (size_t i = 0; i < lenx; ++i)   {{ int s = 3; X[i]   = {fill}; }}
-    memcpy(AP, APi, AP_LEN * sizeof({T}));
+    {T} *AP  = PERF_ALLOC({T}, AP_LEN);
+    {T} *APi = PERF_ALLOC({T}, AP_LEN);
+    {T} *X   = PERF_ALLOC({T}, lenx);
+    {fill}({T}, APi, AP_LEN, 2);
+    {fill}({T}, X,   lenx, 3);
+    PERF_RESET(AP, APi, AP_LEN, {T});
     for (int r = 0; r < warmup; ++r) {{
-        {name}_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        memcpy(AP, APi, AP_LEN * sizeof({T}));
-        {name}_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        memcpy(AP, APi, AP_LEN * sizeof({T}));
+        {name}_(&uplo, &N, &alpha, X, &incx, AP, 1);          PERF_RESET(AP, APi, AP_LEN, {T});
+        {name}_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1); PERF_RESET(AP, APi, AP_LEN, {T});
     }}
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(AP, APi, AP_LEN * sizeof({T}));
-    }}
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(AP, APi, AP_LEN * sizeof({T}));
-    }}
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(AP, APi, AP_LEN, {T}), {name}_(&uplo, &N, &alpha, X, &incx, AP, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(AP, APi, AP_LEN, {T}), {name}_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1));
     double flops = {flops};
     char key[16];
     if (incx == 1) {{
@@ -57,8 +40,7 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {{
     }} else {{
         snprintf(key, sizeof(key), "%c/x%d", uplo, incx);
     }}
-    perf_emit("{name}", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", key, N, iters, flops, t_subject, t_mg);
     free(AP); free(APi); free(X);
 }}
 
@@ -92,7 +74,7 @@ def emit_spmv_hpmv(name: str, ti: TypeInfo, is_c: bool) -> str:
     T = ti.cmplx_T if is_c else ti.real_T
     p7 = ti.cmplx_lit_p7 if is_c else ti.real_lit_p7
     p3 = ti.cmplx_lit_p3 if is_c else ti.real_lit_p3
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     flops = '8.0 * (double)N * (double)N' if is_c else '2.0 * (double)N * (double)N'
     return f'''
 BLAS_EXTERN void {name}_(const char *, const int *, const {T} *, const {T} *,
@@ -107,30 +89,23 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     const size_t leny = (size_t)1 + (size_t)(N - 1) * (size_t)absy;
     size_t AP_LEN = (size_t)N * (size_t)(N + 1) / 2;
-    {T} *AP = ({T} *)perf_aligned_alloc(64, AP_LEN * sizeof({T}));
-    {T} *X  = ({T} *)perf_aligned_alloc(64, lenx * sizeof({T}));
-    {T} *Y  = ({T} *)perf_aligned_alloc(64, leny * sizeof({T}));
-    {T} *Yi = ({T} *)perf_aligned_alloc(64, leny * sizeof({T}));
-    for (size_t i = 0; i < AP_LEN; ++i) {{ int s = 2; AP[i] = {fill}; }}
-    for (size_t i = 0; i < lenx; ++i)   {{ int s = 3; X[i]  = {fill}; }}
-    for (size_t i = 0; i < leny; ++i)   {{ int s = 4; Yi[i] = {fill}; }}
-    memcpy(Y, Yi, leny * sizeof({T}));
+    {T} *AP = PERF_ALLOC({T}, AP_LEN);
+    {T} *X  = PERF_ALLOC({T}, lenx);
+    {T} *Y  = PERF_ALLOC({T}, leny);
+    {T} *Yi = PERF_ALLOC({T}, leny);
+    {fill}({T}, AP, AP_LEN, 2);
+    {fill}({T}, X,  lenx, 3);
+    {fill}({T}, Yi, leny, 4);
+    PERF_RESET(Y, Yi, leny, {T});
     for (int r = 0; r < warmup; ++r) {{
-        {name}_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof({T}));
-        {name}_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-        memcpy(Y, Yi, leny * sizeof({T}));
+        {name}_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);          PERF_RESET(Y, Yi, leny, {T});
+        {name}_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1); PERF_RESET(Y, Yi, leny, {T});
     }}
-    memcpy(Y, Yi, leny * sizeof({T}));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {name}_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    memcpy(Y, Yi, leny * sizeof({T}));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {name}_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, leny, {T});
+    PERF_TIME(t_subject, iters, {name}_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1));
+    PERF_RESET(Y, Yi, leny, {T});
+    PERF_TIME(t_mg,      iters, {name}_migrated_(&uplo, &N, &alpha, AP, X, &incx, &beta, Y, &incy, 1));
     double flops = {flops};
     char key[24];
     if (incx == 1 && incy == 1) {{
@@ -142,8 +117,7 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     }} else {{
         snprintf(key, sizeof(key), "%c/x%d/y%d", uplo, incx, incy);
     }}
-    perf_emit("{name}", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", key, N, iters, flops, t_subject, t_mg);
     free(AP); free(X); free(Y); free(Yi);
 }}
 
@@ -179,7 +153,7 @@ int main(void) {{
 
 def emit_tpmv_tpsv(name: str, ti: TypeInfo, is_c: bool) -> str:
     T = ti.cmplx_T if is_c else ti.real_T
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     flops = '4.0 * (double)N * (double)N' if is_c else '1.0 * (double)N * (double)N'
     from_d = 'Tc_from_d' if is_c else 'Tr_from_d'
     return f'''
@@ -193,10 +167,10 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     const int absx = incx < 0 ? -incx : incx;
     const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absx;
     size_t AP_LEN = (size_t)N * (size_t)(N + 1) / 2;
-    {T} *AP = ({T} *)perf_aligned_alloc(64, AP_LEN * sizeof({T}));
-    {T} *X  = ({T} *)perf_aligned_alloc(64, lenx * sizeof({T}));
-    {T} *Xi = ({T} *)perf_aligned_alloc(64, lenx * sizeof({T}));
-    for (size_t i = 0; i < AP_LEN; ++i) {{ int s = 2; AP[i] = {fill}; }}
+    {T} *AP = PERF_ALLOC({T}, AP_LEN);
+    {T} *X  = PERF_ALLOC({T}, lenx);
+    {T} *Xi = PERF_ALLOC({T}, lenx);
+    {fill}({T}, AP, AP_LEN, 2);
     /* Force diagonal to ~N for stability of tpsv */
     if (uplo == 'U') {{
         size_t off = 0;
@@ -205,33 +179,16 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
         size_t off = 0;
         for (int j = 0; j < N; ++j) {{ AP[off] = {from_d}((double)(N + 4)); off += (size_t)(N - j); }}
     }}
-    for (size_t i = 0; i < lenx; ++i) {{ int s = 3; Xi[i] = {fill}; }}
-    memcpy(X, Xi, lenx * sizeof({T}));
+    {fill}({T}, Xi, lenx, 3);
+    PERF_RESET(X, Xi, lenx, {T});
     for (int r = 0; r < warmup; ++r) {{
-        {name}_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1);
-        memcpy(X, Xi, lenx * sizeof({T}));
-        {name}_migrated_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1);
-        memcpy(X, Xi, lenx * sizeof({T}));
+        {name}_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1);          PERF_RESET(X, Xi, lenx, {T});
+        {name}_migrated_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1); PERF_RESET(X, Xi, lenx, {T});
     }}
-    /* Per-call kernel-only timing — keep memcpy reset out of timed window. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, lenx * sizeof({T}));
-    }}
-    double t_subject = t_sum / (iters ? iters : 1);
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_migrated_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, lenx * sizeof({T}));
-    }}
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, lenx, {T}), {name}_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, lenx, {T}), {name}_migrated_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1));
     double flops = {flops};
     char key[16];
     if (incx == 1) {{
@@ -239,8 +196,7 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     }} else {{
         snprintf(key, sizeof(key), "%c%c%c/x%d", uplo, trans, diag, incx);
     }}
-    perf_emit("{name}", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", key, N, iters, flops, t_subject, t_mg);
     free(AP); free(X); free(Xi);
 }}
 

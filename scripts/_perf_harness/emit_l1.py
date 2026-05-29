@@ -17,7 +17,7 @@ int main(void) {{
 def emit_axpy(name: str, ti: TypeInfo, is_c: bool) -> str:
     T = ti.cmplx_T if is_c else ti.real_T
     p7 = ti.cmplx_lit_p7 if is_c else ti.real_lit_p7
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     flops = '8.0 * (double)N' if is_c else '2.0 * (double)N'
     return f'''
 BLAS_EXTERN void {name}_(const int *, const {T} *, const {T} *, const int *, {T} *, const int *);
@@ -26,36 +26,24 @@ BLAS_EXTERN void {name}_migrated_(const int *, const {T} *, const {T} *, const i
 static void run_{name}(int N, int iters, int warmup) {{
     int one = 1;
     {T} alpha = {p7};
-    {T} *X = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Y = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Yi = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    for (int s = 0; s < 1; ++s) {{}}
-    for (int i = 0; i < N; ++i) {{ int s = 0; X[i] = {fill}; }}
-    for (int i = 0; i < N; ++i) {{ int s = 1; Yi[i] = {fill}; }}
-    memcpy(Y, Yi, (size_t)N * sizeof({T}));
+    {T} *X  = PERF_ALLOC({T}, N);
+    {T} *Y  = PERF_ALLOC({T}, N);
+    {T} *Yi = PERF_ALLOC({T}, N);
+    {fill}({T}, X,  N, 0);
+    {fill}({T}, Yi, N, 1);
+    PERF_RESET(Y, Yi, N, {T});
 
     for (int r = 0; r < warmup; ++r) {{
-        {name}_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof({T}));
-        {name}_migrated_(&N, &alpha, X, &one, Y, &one);
-        memcpy(Y, Yi, (size_t)N * sizeof({T}));
+        {name}_(&N, &alpha, X, &one, Y, &one);          PERF_RESET(Y, Yi, N, {T});
+        {name}_migrated_(&N, &alpha, X, &one, Y, &one); PERF_RESET(Y, Yi, N, {T});
     }}
 
-    memcpy(Y, Yi, (size_t)N * sizeof({T}));
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {name}_(&N, &alpha, X, &one, Y, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    memcpy(Y, Yi, (size_t)N * sizeof({T}));
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {name}_migrated_(&N, &alpha, X, &one, Y, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_RESET(Y, Yi, N, {T}); PERF_TIME(t_subject, iters, {name}_(&N, &alpha, X, &one, Y, &one));
+    PERF_RESET(Y, Yi, N, {T}); PERF_TIME(t_mg,      iters, {name}_migrated_(&N, &alpha, X, &one, Y, &one));
 
     double flops = {flops};
-    perf_emit("{name}", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }}
 
@@ -64,56 +52,36 @@ static void run_{name}(int N, int iters, int warmup) {{
 
 def emit_copy_swap(name: str, ti: TypeInfo, is_c: bool, swap: bool) -> str:
     T = ti.cmplx_T if is_c else ti.real_T
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
+    # swap=true reads+writes both X and Y; copy is X→Y only (X stays const).
+    reset_iter = (f'PERF_RESET(X, Xi, N, {T}); PERF_RESET(Y, Yi, N, {T})'
+                  if swap else f'PERF_RESET(Y, Yi, N, {T})')
     return f'''
 BLAS_EXTERN void {name}_(const int *, {'const ' if not swap else ''}{T} *, const int *, {T} *, const int *);
 BLAS_EXTERN void {name}_migrated_(const int *, {'const ' if not swap else ''}{T} *, const int *, {T} *, const int *);
 
 static void run_{name}(int N, int iters, int warmup) {{
     int one = 1;
-    {T} *X = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Y = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Xi = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Yi = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    for (int i = 0; i < N; ++i) {{ int s = 0; Xi[i] = {fill}; }}
-    for (int i = 0; i < N; ++i) {{ int s = 1; Yi[i] = {fill}; }}
-    memcpy(X, Xi, (size_t)N * sizeof({T}));
-    memcpy(Y, Yi, (size_t)N * sizeof({T}));
+    {T} *X  = PERF_ALLOC({T}, N);
+    {T} *Y  = PERF_ALLOC({T}, N);
+    {T} *Xi = PERF_ALLOC({T}, N);
+    {T} *Yi = PERF_ALLOC({T}, N);
+    {fill}({T}, Xi, N, 0);
+    {fill}({T}, Yi, N, 1);
+    PERF_RESET(X, Xi, N, {T});
+    PERF_RESET(Y, Yi, N, {T});
     for (int r = 0; r < warmup; ++r) {{
-        {name}_(&N, X, &one, Y, &one);
-        memcpy(X, Xi, (size_t)N * sizeof({T}));
-        memcpy(Y, Yi, (size_t)N * sizeof({T}));
-        {name}_migrated_(&N, X, &one, Y, &one);
-        memcpy(X, Xi, (size_t)N * sizeof({T}));
-        memcpy(Y, Yi, (size_t)N * sizeof({T}));
+        {name}_(&N, X, &one, Y, &one);          {reset_iter};
+        {name}_migrated_(&N, X, &one, Y, &one); {reset_iter};
     }}
-    /* Per-call kernel-only timing — keep the reset memcpy OUT of the
-     * timed window so a single-threaded reset doesn't Amdahl-cap the
-     * measured MT scaling at large N. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_(&N, X, &one, Y, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        {'memcpy(X, Xi, (size_t)N * sizeof(' + T + ')); ' if swap else ''}memcpy(Y, Yi, (size_t)N * sizeof({T}));
-    }}
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_migrated_(&N, X, &one, Y, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        {'memcpy(X, Xi, (size_t)N * sizeof(' + T + ')); ' if swap else ''}memcpy(Y, Yi, (size_t)N * sizeof({T}));
-    }}
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window — see PERF_TIME_PER_CALL). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, {reset_iter}, {name}_(&N, X, &one, Y, &one));
+    PERF_TIME_PER_CALL(t_mg,      iters, {reset_iter}, {name}_migrated_(&N, X, &one, Y, &one));
     /* Bytes moved per call: copy=2N*sizeof(T), swap=4N*sizeof(T). Report
      * as "flops" for uniform formatting. */
     double flops = {'4.0' if swap else '2.0'} * (double)N * (double)sizeof({T});
-    perf_emit("{name}", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }}
 
@@ -125,7 +93,7 @@ def emit_scal(name: str, ti: TypeInfo, is_c: bool, alpha_real: bool) -> str:
     Ta = ti.real_T if alpha_real else T
     p7 = (ti.real_lit_p7 if alpha_real else
           (ti.cmplx_lit_p7 if is_c else ti.real_lit_p7))
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     flops = '6.0 * (double)N' if is_c else '1.0 * (double)N'
     return f'''
 BLAS_EXTERN void {name}_(const int *, const {Ta} *, {T} *, const int *);
@@ -134,40 +102,20 @@ BLAS_EXTERN void {name}_migrated_(const int *, const {Ta} *, {T} *, const int *)
 static void run_{name}(int N, int iters, int warmup) {{
     int one = 1;
     {Ta} alpha = {p7};
-    {T} *X = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Xi = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    for (int i = 0; i < N; ++i) {{ int s = 0; Xi[i] = {fill}; }}
-    memcpy(X, Xi, (size_t)N * sizeof({T}));
+    {T} *X  = PERF_ALLOC({T}, N);
+    {T} *Xi = PERF_ALLOC({T}, N);
+    {fill}({T}, Xi, N, 0);
+    PERF_RESET(X, Xi, N, {T});
     for (int r = 0; r < warmup; ++r) {{
-        {name}_(&N, &alpha, X, &one);
-        memcpy(X, Xi, (size_t)N * sizeof({T}));
-        {name}_migrated_(&N, &alpha, X, &one);
-        memcpy(X, Xi, (size_t)N * sizeof({T}));
+        {name}_(&N, &alpha, X, &one);          PERF_RESET(X, Xi, N, {T});
+        {name}_migrated_(&N, &alpha, X, &one); PERF_RESET(X, Xi, N, {T});
     }}
-    /* Per-call kernel-only timing — keep memcpy reset out of the
-     * timed window so it doesn't Amdahl-mask MT scaling. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_(&N, &alpha, X, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof({T}));
-    }}
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_migrated_(&N, &alpha, X, &one);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof({T}));
-    }}
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, {T}), {name}_(&N, &alpha, X, &one));
+    PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, {T}), {name}_migrated_(&N, &alpha, X, &one));
     double flops = {flops};
-    perf_emit("{name}", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Xi);
 }}
 
@@ -189,7 +137,7 @@ def emit_dot(name: str, ti: TypeInfo, is_c: bool, conjugated: bool) -> str:
     the timed loop. Without this gcc collapses the loop to one call.
     """
     T = ti.cmplx_T if is_c else ti.real_T
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     flops = '8.0 * (double)N' if is_c else '2.0 * (double)N'
     sig = f'const int *, const {T} *, const int *, const {T} *, const int *'
     # Anti-DCE sink: take a few bytes of `r` and XOR into a volatile counter.
@@ -209,33 +157,19 @@ static inline void sink_T(const {T} *p) {{
 static void run_one(int N, int iters, int warmup) {{
     int one = 1;
     {T} r;
-    {T} *X = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Y = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    for (int i = 0; i < N; ++i) {{ int s = 0; X[i] = {fill}; }}
-    for (int i = 0; i < N; ++i) {{ int s = 1; Y[i] = {fill}; }}
+    {T} *X = PERF_ALLOC({T}, N);
+    {T} *Y = PERF_ALLOC({T}, N);
+    {fill}({T}, X, N, 0);
+    {fill}({T}, Y, N, 1);
     for (int r2 = 0; r2 < warmup; ++r2) {{
-        r = {name}_(&N, X, &one, Y, &one); sink_T(&r);
+        r = {name}_(&N, X, &one, Y, &one);          sink_T(&r);
         r = {name}_migrated_(&N, X, &one, Y, &one); sink_T(&r);
     }}
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {{
-        r = {name}_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }}
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {{
-        r = {name}_migrated_(&N, X, &one, Y, &one);
-        sink_T(&r);
-    }}
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
-
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = {name}_(&N, X, &one, Y, &one); sink_T(&r));
+    PERF_TIME(t_mg,      iters, r = {name}_migrated_(&N, X, &one, Y, &one); sink_T(&r));
     double flops = {flops};
-    perf_emit("{name}", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y);
 }}
 
@@ -252,7 +186,7 @@ def emit_l1_reduce(name: str, ti: TypeInfo, is_c: bool,
     """
     T = ti.cmplx_T if is_c else ti.real_T
     R = ti.real_T
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     fpe = flops_per_elem_real * (2.0 if is_c else 1.0)
     flops = f'{fpe} * (double)N'
     sig = f'const int *, const {T} *, const int *'
@@ -263,23 +197,17 @@ BLAS_EXTERN {R} {name}_migrated_({sig});
 static void run_one(int N, int iters, int warmup) {{
     int one = 1;
     {R} r;
-    {T} *X = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    for (int i = 0; i < N; ++i) {{ int s = 0; X[i] = {fill}; }}
+    {T} *X = PERF_ALLOC({T}, N);
+    {fill}({T}, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {{
         r = {name}_(&N, X, &one);
         r = {name}_migrated_(&N, X, &one);
     }}
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = {name}_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r = {name}_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r = {name}_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r = {name}_migrated_(&N, X, &one));
     double flops = {flops};
-    perf_emit("{name}", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", N, iters, flops, t_subject, t_mg);
     if ((double)(*((double*)&r)) == -123e30) {{ free(X); return; }}
     free(X);
 }}
@@ -288,7 +216,7 @@ static void run_one(int N, int iters, int warmup) {{
 
 def emit_iamax(name: str, ti: TypeInfo, is_c: bool) -> str:
     T = ti.cmplx_T if is_c else ti.real_T
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     flops = '2.0 * (double)N' if is_c else '1.0 * (double)N'
     return f'''
 BLAS_EXTERN int {name}_(const int *, const {T} *, const int *);
@@ -296,23 +224,17 @@ BLAS_EXTERN int {name}_migrated_(const int *, const {T} *, const int *);
 
 static void run_one(int N, int iters, int warmup) {{
     int one = 1, r = 0;
-    {T} *X = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    for (int i = 0; i < N; ++i) {{ int s = 0; X[i] = {fill}; }}
+    {T} *X = PERF_ALLOC({T}, N);
+    {fill}({T}, X, N, 0);
     for (int r2 = 0; r2 < warmup; ++r2) {{
         r ^= {name}_(&N, X, &one);
         r ^= {name}_migrated_(&N, X, &one);
     }}
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r ^= {name}_(&N, X, &one);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) r ^= {name}_migrated_(&N, X, &one);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, r ^= {name}_(&N, X, &one));
+    PERF_TIME(t_mg,      iters, r ^= {name}_migrated_(&N, X, &one));
     double flops = {flops};
-    perf_emit("{name}", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", N, iters, flops, t_subject, t_mg);
     if (r == -123) {{ free(X); return; }}
     free(X);
 }}
@@ -329,8 +251,9 @@ def emit_rot(name: str, ti: TypeInfo, is_c: bool, real_cs: bool) -> str:
     Tcs = ti.real_T if real_cs else T
     p7 = ti.real_lit_p7 if real_cs else (ti.cmplx_lit_p7 if is_c else ti.real_lit_p7)
     p3 = ti.real_lit_p3 if real_cs else (ti.cmplx_lit_p3 if is_c else ti.real_lit_p3)
-    fill = ti.cmplx_fill if is_c else ti.real_fill
+    fill = 'PERF_FILL_C' if is_c else 'PERF_FILL_R'
     flops = '12.0 * (double)N' if is_c else '6.0 * (double)N'
+    reset_iter = f'PERF_RESET(X, Xi, N, {T}); PERF_RESET(Y, Yi, N, {T})'
     return f'''
 BLAS_EXTERN void {name}_(const int *, {T} *, const int *, {T} *, const int *,
     const {Tcs} *, const {Tcs} *);
@@ -340,44 +263,24 @@ BLAS_EXTERN void {name}_migrated_(const int *, {T} *, const int *, {T} *, const 
 static void run_one(int N, int iters, int warmup) {{
     int one = 1;
     {Tcs} c_ = {p7}, s_ = {p3};
-    {T} *X = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Y = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Xi = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Yi = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    for (int i = 0; i < N; ++i) {{ int s = 0; Xi[i] = {fill}; }}
-    for (int i = 0; i < N; ++i) {{ int s = 1; Yi[i] = {fill}; }}
-    memcpy(X, Xi, (size_t)N * sizeof({T}));
-    memcpy(Y, Yi, (size_t)N * sizeof({T}));
+    {T} *X  = PERF_ALLOC({T}, N);
+    {T} *Y  = PERF_ALLOC({T}, N);
+    {T} *Xi = PERF_ALLOC({T}, N);
+    {T} *Yi = PERF_ALLOC({T}, N);
+    {fill}({T}, Xi, N, 0);
+    {fill}({T}, Yi, N, 1);
+    PERF_RESET(X, Xi, N, {T});
+    PERF_RESET(Y, Yi, N, {T});
     for (int r = 0; r < warmup; ++r) {{
-        {name}_(&N, X, &one, Y, &one, &c_, &s_);
-        memcpy(X, Xi, (size_t)N * sizeof({T})); memcpy(Y, Yi, (size_t)N * sizeof({T}));
-        {name}_migrated_(&N, X, &one, Y, &one, &c_, &s_);
-        memcpy(X, Xi, (size_t)N * sizeof({T})); memcpy(Y, Yi, (size_t)N * sizeof({T}));
+        {name}_(&N, X, &one, Y, &one, &c_, &s_);          {reset_iter};
+        {name}_migrated_(&N, X, &one, Y, &one, &c_, &s_); {reset_iter};
     }}
-    /* Per-call kernel-only timing — keep memcpy resets out of the
-     * timed window so they don't Amdahl-mask MT scaling. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_(&N, X, &one, Y, &one, &c_, &s_);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof({T})); memcpy(Y, Yi, (size_t)N * sizeof({T}));
-    }}
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_migrated_(&N, X, &one, Y, &one, &c_, &s_);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof({T})); memcpy(Y, Yi, (size_t)N * sizeof({T}));
-    }}
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, {reset_iter}, {name}_(&N, X, &one, Y, &one, &c_, &s_));
+    PERF_TIME_PER_CALL(t_mg,      iters, {reset_iter}, {name}_migrated_(&N, X, &one, Y, &one, &c_, &s_));
     double flops = {flops};
-    perf_emit("{name}", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }}
 
@@ -390,7 +293,7 @@ def emit_rotm(name: str, ti: TypeInfo) -> str:
     """rotm: real-only. PARAM(5)."""
     T = ti.real_T
     p7 = ti.real_lit_p7
-    fill = ti.real_fill
+    reset_iter = f'PERF_RESET(X, Xi, N, {T}); PERF_RESET(Y, Yi, N, {T})'
     return f'''
 BLAS_EXTERN void {name}_(const int *, {T} *, const int *, {T} *, const int *,
     const {T} *);
@@ -401,44 +304,24 @@ static void run_one(int N, int iters, int warmup) {{
     int one = 1;
     {T} PARAM[5] = {{ {p7}, {p7}, {p7}, {p7}, {p7} }};
     PARAM[0] = Tr_from_d(-1.0); /* hflag=-1 → full matrix path */
-    {T} *X = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Y = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Xi = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    {T} *Yi = ({T} *)perf_aligned_alloc(64, (size_t)N * sizeof({T}));
-    for (int i = 0; i < N; ++i) {{ int s = 0; Xi[i] = {fill}; }}
-    for (int i = 0; i < N; ++i) {{ int s = 1; Yi[i] = {fill}; }}
-    memcpy(X, Xi, (size_t)N * sizeof({T}));
-    memcpy(Y, Yi, (size_t)N * sizeof({T}));
+    {T} *X  = PERF_ALLOC({T}, N);
+    {T} *Y  = PERF_ALLOC({T}, N);
+    {T} *Xi = PERF_ALLOC({T}, N);
+    {T} *Yi = PERF_ALLOC({T}, N);
+    PERF_FILL_R({T}, Xi, N, 0);
+    PERF_FILL_R({T}, Yi, N, 1);
+    PERF_RESET(X, Xi, N, {T});
+    PERF_RESET(Y, Yi, N, {T});
     for (int r = 0; r < warmup; ++r) {{
-        {name}_(&N, X, &one, Y, &one, PARAM);
-        memcpy(X, Xi, (size_t)N * sizeof({T})); memcpy(Y, Yi, (size_t)N * sizeof({T}));
-        {name}_migrated_(&N, X, &one, Y, &one, PARAM);
-        memcpy(X, Xi, (size_t)N * sizeof({T})); memcpy(Y, Yi, (size_t)N * sizeof({T}));
+        {name}_(&N, X, &one, Y, &one, PARAM);          {reset_iter};
+        {name}_migrated_(&N, X, &one, Y, &one, PARAM); {reset_iter};
     }}
-    /* Per-call kernel-only timing — keep memcpy resets out of the
-     * timed window so they don't Amdahl-mask MT scaling. */
-    double t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_(&N, X, &one, Y, &one, PARAM);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof({T})); memcpy(Y, Yi, (size_t)N * sizeof({T}));
-    }}
-    double t_subject = t_sum / (iters ? iters : 1);
-
-    t_sum = 0;
-    for (int it = 0; it < iters; ++it) {{
-        double a = perf_now_s();
-        {name}_migrated_(&N, X, &one, Y, &one, PARAM);
-        double b = perf_now_s();
-        t_sum += (b - a);
-        memcpy(X, Xi, (size_t)N * sizeof({T})); memcpy(Y, Yi, (size_t)N * sizeof({T}));
-    }}
-    double t_mg = t_sum / (iters ? iters : 1);
+    /* Per-call timing (reset out of the timed window). */
+    double t_subject, t_mg;
+    PERF_TIME_PER_CALL(t_subject, iters, {reset_iter}, {name}_(&N, X, &one, Y, &one, PARAM));
+    PERF_TIME_PER_CALL(t_mg,      iters, {reset_iter}, {name}_migrated_(&N, X, &one, Y, &one, PARAM));
     double flops = 4.0 * (double)N;
-    perf_emit("{name}", "-", N, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", N, iters, flops, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }}
 
@@ -464,18 +347,12 @@ static void run_one(int iters, int warmup) {{
         acc += {name}_(&Z);
         acc += {name}_migrated_(&Z);
     }}
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) acc += {name}_(&Z);
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) acc += {name}_migrated_(&Z);
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, acc += {name}_(&Z));
+    PERF_TIME(t_mg,      iters, acc += {name}_migrated_(&Z));
     /* per-call proxy: 2 abs + 1 add */
     double flops = 3.0;
-    perf_emit("{name}", "-", iters, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", iters, iters, flops, t_subject, t_mg);
     if ((double)(*((double*)&acc)) == -123e30) return;
 }}
 
@@ -508,22 +385,12 @@ static void run_one(int iters, int warmup) {{
         {Ta} a = A, b = B; {name}_(&a, &b, &C, &S);
         a = A; b = B; {name}_migrated_(&a, &b, &C, &S);
     }}
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {{
-        {Ta} a = A, b = B; {name}_(&a, &b, &C, &S);
-    }}
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {{
-        {Ta} a = A, b = B; {name}_migrated_(&a, &b, &C, &S);
-    }}
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, {Ta} a = A, b = B; {name}_(&a, &b, &C, &S));
+    PERF_TIME(t_mg,      iters, {Ta} a = A, b = B; {name}_migrated_(&a, &b, &C, &S));
     /* report time per call as "flops" abuse: per-call flop count ~10. */
     double flops = 10.0;
-    perf_emit("{name}", "-", iters, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", iters, iters, flops, t_subject, t_mg);
 }}
 
 int main(void) {{
@@ -552,23 +419,11 @@ static void run_one(int iters, int warmup) {{
         d1 = D1; d2 = D2; x1 = X1;
         {name}_migrated_(&d1, &d2, &x1, &Y1, PARAM);
     }}
-    double t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {{
-        {T} d1 = D1, d2 = D2, x1 = X1;
-        {name}_(&d1, &d2, &x1, &Y1, PARAM);
-    }}
-    double t1 = perf_now_s();
-    double t_subject = (t1 - t0) / (iters ? iters : 1);
-    t0 = perf_now_s();
-    for (int it = 0; it < iters; ++it) {{
-        {T} d1 = D1, d2 = D2, x1 = X1;
-        {name}_migrated_(&d1, &d2, &x1, &Y1, PARAM);
-    }}
-    t1 = perf_now_s();
-    double t_mg = (t1 - t0) / (iters ? iters : 1);
+    double t_subject, t_mg;
+    PERF_TIME(t_subject, iters, {T} d1 = D1, d2 = D2, x1 = X1; {name}_(&d1, &d2, &x1, &Y1, PARAM));
+    PERF_TIME(t_mg,      iters, {T} d1 = D1, d2 = D2, x1 = X1; {name}_migrated_(&d1, &d2, &x1, &Y1, PARAM));
     double flops = 20.0;
-    perf_emit("{name}", "-", iters, iters, flops, t_subject, t_mg);
-    perf_emit_json("{name}", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("{name}", "-", iters, iters, flops, t_subject, t_mg);
 }}
 
 int main(void) {{

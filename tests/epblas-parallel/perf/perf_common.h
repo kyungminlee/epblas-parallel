@@ -169,4 +169,68 @@ static inline void *perf_aligned_alloc(size_t align, size_t bytes) {
 } /* extern "C" */
 #endif
 
+/* ---- generated-harness scaffolding ----------------------------------
+ *
+ * Macros used by the perf_*.{c,cpp} files emitted by
+ * scripts/gen_perf_harnesses.py. Each generated harness ran 4–6 copies
+ * of the same alloc / fill / reset / time / emit boilerplate; lifting
+ * the patterns here keeps each run_* body to the parts that actually
+ * differ (BLAS call signature, flop count, key formatting).
+ *
+ * The fill macros use token-paste on T so each target's <T>_FROM (whether
+ * a #define or a static inline) is picked up automatically — keeps these
+ * macros target-agnostic.
+ */
+
+#define PERF_ALLOC(T, n) \
+    ((T *)perf_aligned_alloc(64, (size_t)(n) * sizeof(T)))
+
+#define PERF_FILL_R(T, dst, n, seed) \
+    do { for (size_t _i = 0; _i < (size_t)(n); ++_i) \
+            (dst)[_i] = T##_FROM(perf_fill_double(_i, (seed))); \
+    } while (0)
+
+#define PERF_FILL_C(T, dst, n, seed) \
+    do { for (size_t _i = 0; _i < (size_t)(n); ++_i) \
+            (dst)[_i] = T##_FROM(perf_fill_double(_i, (seed)), \
+                                 perf_fill_double(_i, (seed) + 131)); \
+    } while (0)
+
+#define PERF_RESET(dst, src, n, T) \
+    memcpy((dst), (src), (size_t)(n) * sizeof(T))
+
+/* Time a call. The call expression goes as the trailing variadic args so
+ * its own commas don't get parsed as macro arg separators. */
+#define PERF_TIME(t_out, n_iters, /* call_stmt */ ...) \
+    do { double _t0 = perf_now_s(); \
+         for (int _it = 0; _it < (n_iters); ++_it) { __VA_ARGS__; } \
+         double _t1 = perf_now_s(); \
+         (t_out) = (_t1 - _t0) / ((n_iters) ? (n_iters) : 1); \
+    } while (0)
+
+/* Per-call timing with reset between iters: keeps the reset out of the
+ * timed window so a single-threaded memcpy can't Amdahl-mask multi-threaded
+ * scaling. `reset_stmts` is a statement (possibly compound, e.g.
+ * `PERF_RESET(...); PERF_RESET(...)`); the BLAS call goes as the variadic
+ * tail so its commas don't trip the macro arg parser. */
+#define PERF_TIME_PER_CALL(t_out, n_iters, reset_stmts, /* call_stmt */ ...) \
+    do { double _t_sum = 0; \
+         for (int _it = 0; _it < (n_iters); ++_it) { \
+             double _a = perf_now_s(); __VA_ARGS__; \
+             double _b = perf_now_s(); \
+             _t_sum += (_b - _a); \
+             reset_stmts; \
+         } \
+         (t_out) = _t_sum / ((n_iters) ? (n_iters) : 1); \
+    } while (0)
+
+/* Always pair perf_emit with perf_emit_json — they take the same args
+ * and divergence between them would silently desync JSON from stdout. */
+#define PERF_EMIT(routine, key, size, iters, flops, t_subject, t_mg) \
+    do { perf_emit((routine), (key), (size), (iters), (flops), \
+                   (t_subject), (t_mg)); \
+         perf_emit_json((routine), (key), (size), (iters), (flops), \
+                        (t_subject), (t_mg)); \
+    } while (0)
+
 #endif /* PERF_COMMON_H */
