@@ -1,0 +1,62 @@
+/*
+ * yherk_kernel.h — internal shared declarations for the kind10 complex
+ * (COMPLEX(KIND=10) / _Complex long double) Hermitian rank-k overlay,
+ * split across two translation units:
+ *
+ *   yherk_serial.c   — all the math: the per-diagonal-block worker
+ *                      (yherk_block: beta pre-scale keeping the diagonal
+ *                      real + scalar Hermitian diagonal add + ygemm_serial
+ *                      conjugate-transpose trailing update), the beta-only
+ *                      column scaler, and the pure-serial Fortran-ABI entry
+ *                      `yherk_serial`. No `#pragma omp`.
+ *   yherk_parallel.c — the public Fortran entry `yherk_`: threading only
+ *                      (one `omp parallel for schedule(dynamic,1)` over the
+ *                      diagonal blocks), with an `omp_in_parallel()` guard
+ *                      that delegates to `yherk_serial` when called from
+ *                      inside another routine's parallel region.
+ *
+ * alpha and beta are REAL; the diagonal of C stays real on output. The work
+ * is partitioned by diagonal block (jc): the serial entry walks the blocks
+ * in a plain loop; the parallel driver hands the same per-block worker to a
+ * dynamic-scheduled team (triangular work is uneven, so dynamic balances
+ * better than static). yherk_block runs its trailing update through
+ * ygemm_serial — opening a nested ygemm team would trip the libgomp barrier
+ * wedge (see memory project-etrsm-omp4-wedge).
+ */
+#ifndef EPBLAS_PARALLEL_KIND10_YHERK_KERNEL_H
+#define EPBLAS_PARALLEL_KIND10_YHERK_KERNEL_H
+
+#include <stddef.h>
+#include <complex.h>
+
+typedef _Complex long double yherk_TC;
+typedef long double          yherk_TR;
+
+/* Env-tunable block size (YHERK_NB). */
+int yherk_nb(void);
+
+/* One diagonal block [jc, jc+jb): beta pre-scale of the block's columns
+ * (diagonal kept real), the scalar Hermitian diagonal rank-k add, and the
+ * trailing ygemm_serial conjugate-transpose update against the rest of the
+ * panel. */
+void yherk_block(int jc, int jb, int N, int K, yherk_TR alpha, yherk_TR beta,
+                 const yherk_TC *a, int lda, yherk_TC *c, int ldc,
+                 char UPLO, char TR_c);
+
+/* C := beta*C over the columns [j_start, j_end) keeping the diagonal real —
+ * the alpha==0 / K==0 quick path (and the per-block pre-scale). beta==1
+ * realifies only the diagonal entry. */
+void yherk_beta_scale(int j_start, int j_end, int N, yherk_TR beta,
+                      yherk_TC *c, int ldc, char UPLO);
+
+/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as yherk_. */
+void yherk_serial(
+    const char *uplo, const char *trans,
+    const int *n_, const int *k_,
+    const yherk_TR *alpha_,
+    const yherk_TC *a, const int *lda_,
+    const yherk_TR *beta_,
+    yherk_TC *c, const int *ldc_,
+    size_t uplo_len, size_t trans_len);
+
+#endif /* EPBLAS_PARALLEL_KIND10_YHERK_KERNEL_H */
