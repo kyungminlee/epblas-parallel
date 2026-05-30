@@ -158,15 +158,28 @@ static inline void kernel_2x2(int pb, T alpha,
                               T *restrict C, int ldc)
 {
     T c00 = 0.0L, c01 = 0.0L, c10 = 0.0L, c11 = 0.0L;
-    for (int p = 0; p < pb; ++p) {
-        const T a0 = Ap[(size_t)p * MR + 0];
-        const T a1 = Ap[(size_t)p * MR + 1];
-        const T b0 = Bp[(size_t)p * NR + 0];
-        const T b1 = Bp[(size_t)p * NR + 1];
-        c00 += a0 * b0;
-        c10 += a1 * b0;
-        c01 += a0 * b1;
-        c11 += a1 * b1;
+    /* K-loop unrolled by 4 — mirrors the openblas eblas_egemm_kernel dense
+     * microkernel. Cuts x87 loop overhead on the fp80 inner loop (the ob1
+     * serial edge over a plain rolled loop). MR == NR == 2, so the packed
+     * panels are contiguous in stride-2 per p; walk Ap/Bp by 8 per step.
+     * Each C accumulator stays in strict p-order → bit-identical result. */
+    const T *pa = Ap, *pbb = Bp;
+    int p = 0;
+    for (; p + 4 <= pb; p += 4) {
+        T a0 = pa[0], a1 = pa[1], b0 = pbb[0], b1 = pbb[1];
+        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
+        a0 = pa[2]; a1 = pa[3]; b0 = pbb[2]; b1 = pbb[3];
+        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
+        a0 = pa[4]; a1 = pa[5]; b0 = pbb[4]; b1 = pbb[5];
+        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
+        a0 = pa[6]; a1 = pa[7]; b0 = pbb[6]; b1 = pbb[7];
+        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
+        pa += 8; pbb += 8;
+    }
+    for (; p < pb; ++p) {
+        const T a0 = pa[0], a1 = pa[1], b0 = pbb[0], b1 = pbb[1];
+        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
+        pa += 2; pbb += 2;
     }
     C[0]       += alpha * c00;
     C[1]       += alpha * c10;
