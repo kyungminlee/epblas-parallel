@@ -44,29 +44,45 @@ void yher2_(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= YHER2_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
+        const int use_omp = (N >= YHER2_OMP_MIN && blas_omp_max_threads() > 1
+                             && !omp_in_parallel());
+#else
+        const int use_omp = 0;
 #endif
-        for (int j = 0; j < N; ++j) {
-            const T xj = x[j], yj = y[j];
-            if (xj != ZERO || yj != ZERO) {
-                /* Per Netlib ZHER2:
-                 *   TEMP1 = ALPHA * conj(Y(J))
-                 *   TEMP2 = conj(ALPHA * X(J))
-                 *   A(i,j) += X(i)*TEMP1 + Y(i)*TEMP2
-                 * Diagonal entry stays real. */
-                const T temp1 = alpha * cconj(yj);
-                const T temp2 = cconj(alpha * xj);
-                T *aj = &A_(0, j);
-                if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
-                    aj[j] = __real__ aj[j] + __real__ (x[j] * temp1 + y[j] * temp2);
-                } else {
-                    for (int i = 0; i < j; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
-                    aj[j] = __real__ aj[j] + __real__ (x[j] * temp1 + y[j] * temp2);
-                }
-            }
+        /* Branch on use_omp at C source level (Add-16): `#pragma omp parallel
+         * for if(use_omp)` outlines unconditionally, so at OMP=1 the caller
+         * still pays GOMP_parallel + omp_get_* dispatch. schedule(static, 1)
+         * round-robins the triangular columns (work linear in (N-j) for L,
+         * j for U) for load balance — Rule 49; plain schedule(static) hands
+         * thread 0 the heaviest block.
+         *
+         * Per Netlib ZHER2: TEMP1 = ALPHA·conj(Y(J)), TEMP2 = conj(ALPHA·X(J)),
+         * A(i,j) += X(i)·TEMP1 + Y(i)·TEMP2; diagonal entry stays real. */
+#define YHER2_BODY                                                                  \
+        for (int j = 0; j < N; ++j) {                                               \
+            const T xj = x[j], yj = y[j];                                           \
+            if (xj != ZERO || yj != ZERO) {                                         \
+                const T temp1 = alpha * cconj(yj);                                  \
+                const T temp2 = cconj(alpha * xj);                                  \
+                T *aj = &A_(0, j);                                                  \
+                if (UPLO == 'L') {                                                  \
+                    for (int i = j + 1; i < N; ++i) aj[i] += x[i] * temp1 + y[i] * temp2; \
+                    aj[j] = __real__ aj[j] + __real__ (x[j] * temp1 + y[j] * temp2);\
+                } else {                                                            \
+                    for (int i = 0; i < j; ++i) aj[i] += x[i] * temp1 + y[i] * temp2; \
+                    aj[j] = __real__ aj[j] + __real__ (x[j] * temp1 + y[j] * temp2);\
+                }                                                                   \
+            }                                                                       \
         }
+        if (use_omp) {
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static, 1)
+#endif
+            YHER2_BODY
+        } else {
+            YHER2_BODY
+        }
+#undef YHER2_BODY
     } else {
         int kx = (incx < 0) ? -(N - 1) * incx : 0;
         int ky = (incy < 0) ? -(N - 1) * incy : 0;
