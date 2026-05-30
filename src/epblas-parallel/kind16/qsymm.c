@@ -55,7 +55,7 @@ void qsymm_(
     if (alpha == zero) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const int use_omp = (N >= QSYMM_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= QSYMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) {
@@ -67,7 +67,7 @@ void qsymm_(
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= QSYMM_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= QSYMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (int j = 0; j < N; ++j) {

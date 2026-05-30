@@ -62,7 +62,7 @@ void qsyrk_(
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const int use_omp = (N >= QSYRK_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= QSYRK_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) {
@@ -76,7 +76,7 @@ void qsyrk_(
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= QSYRK_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= QSYRK_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (int j = 0; j < N; ++j) {
