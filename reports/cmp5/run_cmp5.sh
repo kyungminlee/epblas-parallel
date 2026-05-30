@@ -21,12 +21,19 @@
 #                 tests/epblas-parallel (default <repo>/build)
 #   TIMEOUT       per-binary wall-clock cap in seconds (default 300)
 #   BLAS_PERF_ITERS  iters knob forwarded to the perf binaries (default 200)
+#   BLAS_PERF_TIME_BUDGET  per-timing-loop wall cap in seconds forwarded to the
+#                 perf binaries (default 0.3). Each PERF_TIME / PERF_TIME_PER_CALL
+#                 for(iter) loop stops early once it has spent this long, emitting
+#                 a coarse-but-real row with the actual iter count instead of
+#                 running all BLAS_PERF_ITERS. Keeps slow sizes (e.g. ytrsv at
+#                 N=1024) from hanging the binary past TIMEOUT. 0 = unlimited.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 STAGE_E="${STAGE_E:-${HERE}/../../build}"
 TIMEOUT="${TIMEOUT:-300}"
 export BLAS_PERF_ITERS="${BLAS_PERF_ITERS:-200}"
+export BLAS_PERF_TIME_BUDGET="${BLAS_PERF_TIME_BUDGET:-0.3}"
 
 EP_DIR="${STAGE_E}/tests/epblas-openblas"
 PAR_DIR="${STAGE_E}/tests/epblas-parallel"
@@ -76,16 +83,19 @@ run_one() {
     local cpulist="0"
     if (( omp > 1 )); then cpulist="0-$((omp - 1))"; fi
     echo "[run] $run_id/$routine iters=$iters taskset=$cpulist" >&2
-    if ! OMP_NUM_THREADS="$omp" BLAS_PERF_ITERS="$iters" \
-           timeout "$TIMEOUT" taskset -c "$cpulist" "$bin" \
-           > "$TMP" 2>>"$LOG"; then
-        # Timeout or crash. $TMP may contain a header + a few rows
-        # before the hang; ingesting them yields "fast at small N,
-        # missing at large N" data — easy to misread as a perf
-        # finding. Drop the partial output and skip aggregation.
-        echo "[fail] $run_id/$routine exit=$?" >> "$LOG"
-        rm -f "$TMP"
-        return
+    local status=0
+    OMP_NUM_THREADS="$omp" BLAS_PERF_ITERS="$iters" \
+        timeout "$TIMEOUT" taskset -c "$cpulist" "$bin" \
+        > "$TMP" 2>>"$LOG" || status=$?
+    if (( status != 0 )); then
+        # Timeout (124) or crash. With BLAS_PERF_TIME_BUDGET set, every row
+        # already emitted is a real (coarse) measurement: the per-iter budget
+        # truncates each timing loop rather than letting a slow size hang, and
+        # PERF_EMIT runs only after a loop finishes — so partial output is
+        # "fewer tail configs ran", not the old "fast at small N / hung at
+        # large N" artifact. Salvage the emitted rows instead of dropping them.
+        local kept; kept=$(grep -c '^[^#]' "$TMP" 2>/dev/null || true)
+        echo "[partial] $run_id/$routine exit=$status — ingesting $kept emitted rows" >> "$LOG"
     fi
     awk -v rid="$run_id" -v tag="$run_bin_tag" -v omp="$omp" -v ts="$cpulist" '
         /^#/ {next}

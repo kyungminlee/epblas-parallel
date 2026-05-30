@@ -130,6 +130,14 @@ static inline double perf_fill_double(size_t i, int salt) {
 }
 
 static inline void perf_print_header(void) {
+    /* Line-buffer stdout so every PERF_EMIT row is flushed on its newline.
+     * When run_cmp5.sh runs a binary under `timeout` and a slow routine is
+     * SIGTERM-killed at the cap, block-buffered output would be discarded and
+     * the partial-output salvage would lose rows that were already computed
+     * (e.g. ytrsm: all completed configs vanished on kill). Line-buffering
+     * makes each emitted row durable before any kill. Called once per binary,
+     * before the first stdout write, as setvbuf requires. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
     /* Single line printed once per binary. Format chosen so a downstream
      * Python aggregator can split on whitespace. */
     /* "subject_GFs" = GF/s of the C-overlay routine under test in this
