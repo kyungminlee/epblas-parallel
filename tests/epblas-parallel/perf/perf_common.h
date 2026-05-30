@@ -11,11 +11,22 @@
  * is linked into the binary — perf_*.c sources are overlay-agnostic.
  *
  * Env knobs:
- *   BLAS_PERF_SIZES     comma list (default per-shape)
- *   BLAS_PERF_ITERS     timed iters per (shape-key, size)
- *   BLAS_PERF_WARMUP    warmup calls per (shape-key, size)
- *   BLAS_PERF_JSON      write JSON results to this path (append mode)
- *   BLAS_PERF_LABEL     extra label printed alongside routine name
+ *   BLAS_PERF_SIZES        comma list (default per-shape)
+ *   BLAS_PERF_ITERS        timed iters per (shape-key, size)
+ *   BLAS_PERF_WARMUP       warmup calls per (shape-key, size)
+ *   BLAS_PERF_TIME_BUDGET  seconds; wall-time cap per timed loop (0 = unlimited).
+ *                          When a timed loop reaches the budget it stops after
+ *                          the current iteration rather than running the full
+ *                          BLAS_PERF_ITERS — so a slow (routine,size) yields a
+ *                          coarse-but-real number instead of overrunning a
+ *                          harness timeout and being dropped wholesale. Subject
+ *                          and migrated are timed in separate loops, so one
+ *                          (key,size) config can take up to ~2x the budget plus
+ *                          its (unbudgeted) warmup. The emitted `iters` column
+ *                          reports the count actually run (the migrated loop's,
+ *                          since it is timed last), flagging budget-limited rows.
+ *   BLAS_PERF_JSON         write JSON results to this path (append mode)
+ *   BLAS_PERF_LABEL        extra label printed alongside routine name
  */
 #ifndef PERF_COMMON_H
 #define PERF_COMMON_H
@@ -43,6 +54,22 @@ static inline int perf_env_int(const char *name, int dflt) {
     long v = strtol(s, &end, 10);
     if (end == s || v <= 0) return dflt;
     return (int)v;
+}
+
+/* Non-negative seconds from an env var (0 / unset / malformed = dflt). Used
+ * for the BLAS_PERF_TIME_BUDGET wall-time cap. */
+static inline double perf_env_double(const char *name, double dflt) {
+    const char *s = getenv(name);
+    if (!s || !*s) return dflt;
+    char *end;
+    double v = strtod(s, &end);
+    if (end == s || v < 0.0) return dflt;
+    return v;
+}
+
+/* Per-timed-loop wall-time budget in seconds; 0 means unlimited. */
+static inline double perf_time_budget_s(void) {
+    return perf_env_double("BLAS_PERF_TIME_BUDGET", 0.0);
 }
 
 static inline int perf_parse_sizes(const int *defaults, int n_defaults,
@@ -200,12 +227,28 @@ static inline void *perf_aligned_alloc(size_t align, size_t bytes) {
     memcpy((dst), (src), (size_t)(n) * sizeof(T))
 
 /* Time a call. The call expression goes as the trailing variadic args so
- * its own commas don't get parsed as macro arg separators. */
+ * its own commas don't get parsed as macro arg separators.
+ *
+ * BLAS_PERF_TIME_BUDGET caps the loop's wall time: when set, the loop stops
+ * after the iteration that crosses the budget. `n_iters` must be an lvalue —
+ * it is overwritten with the count actually run so the caller emits the true
+ * averaging depth. When the budget is unset the original tight loop runs (no
+ * per-iteration clock read, so the measurement is unperturbed). */
 #define PERF_TIME(t_out, n_iters, /* call_stmt */ ...) \
-    do { double _t0 = perf_now_s(); \
-         for (int _it = 0; _it < (n_iters); ++_it) { __VA_ARGS__; } \
+    do { double _bud = perf_time_budget_s(); \
+         double _t0 = perf_now_s(); int _done = 0; \
+         if (_bud <= 0.0) { \
+             for (int _it = 0; _it < (n_iters); ++_it) { __VA_ARGS__; } \
+             _done = (n_iters); \
+         } else { \
+             for (int _it = 0; _it < (n_iters); ++_it) { \
+                 __VA_ARGS__; ++_done; \
+                 if (perf_now_s() - _t0 >= _bud) break; \
+             } \
+         } \
          double _t1 = perf_now_s(); \
-         (t_out) = (_t1 - _t0) / ((n_iters) ? (n_iters) : 1); \
+         (t_out) = (_t1 - _t0) / (_done ? _done : 1); \
+         (n_iters) = _done; \
     } while (0)
 
 /* Per-call timing with reset between iters: keeps the reset out of the
@@ -213,15 +256,23 @@ static inline void *perf_aligned_alloc(size_t align, size_t bytes) {
  * scaling. `reset_stmts` is a statement (possibly compound, e.g.
  * `PERF_RESET(...); PERF_RESET(...)`); the BLAS call goes as the variadic
  * tail so its commas don't trip the macro arg parser. */
+/* As PERF_TIME, but resets between iters (kept out of the timed sum) and
+ * honours BLAS_PERF_TIME_BUDGET. This variant already reads the clock twice
+ * per iter, so the budget check (against wall time since the loop started,
+ * resets included) costs nothing extra. `n_iters` must be an lvalue — it is
+ * overwritten with the count actually run. */
 #define PERF_TIME_PER_CALL(t_out, n_iters, reset_stmts, /* call_stmt */ ...) \
-    do { double _t_sum = 0; \
+    do { double _bud = perf_time_budget_s(); \
+         double _t_sum = 0, _t_start = perf_now_s(); int _done = 0; \
          for (int _it = 0; _it < (n_iters); ++_it) { \
              double _a = perf_now_s(); __VA_ARGS__; \
              double _b = perf_now_s(); \
-             _t_sum += (_b - _a); \
+             _t_sum += (_b - _a); ++_done; \
+             if (_bud > 0.0 && _b - _t_start >= _bud) break; \
              reset_stmts; \
          } \
-         (t_out) = _t_sum / ((n_iters) ? (n_iters) : 1); \
+         (t_out) = _t_sum / (_done ? _done : 1); \
+         (n_iters) = _done; \
     } while (0)
 
 /* Always pair perf_emit with perf_emit_json — they take the same args
