@@ -2,7 +2,9 @@
 # Run the 4-variant cmp5 perf sweep for kind10:
 #   - epopenblas binaries (ep_perf_*)        at OMP=1 and OMP=4
 #   - parallel-blas binaries (perf_*)        at OMP=1 and OMP=4
-# Pinned to P-core 0. Per-routine wall-clock cap via TIMEOUT env.
+# Pinned to the first OMP cores (P-core 0 at OMP=1, cores 0-3 at OMP=4) so the
+# cooperative L3 kernels get one physical core per thread instead of being
+# oversubscribed onto core 0. Per-routine wall-clock cap via TIMEOUT env.
 #
 # Output: cmp5_raw.tsv (alongside this script) in the format the existing
 # aggregate.py expects:
@@ -67,9 +69,15 @@ run_one() {
     # BLAS_PERF_ITERS=200 to match the prior cmp5 sweep.
     local iters="$BLAS_PERF_ITERS"
     if is_l3 "$routine"; then iters=10; fi
-    echo "[run] $run_id/$routine iters=$iters" >&2
+    # Pin to one physical core per thread: core 0 at OMP=1, cores 0..omp-1
+    # otherwise. Pinning every thread to core 0 oversubscribes the cooperative
+    # L3 kernels' spin barriers and collapses their throughput — the phantom
+    # "esyrk 0.20x" artifact came from exactly that.
+    local cpulist="0"
+    if (( omp > 1 )); then cpulist="0-$((omp - 1))"; fi
+    echo "[run] $run_id/$routine iters=$iters taskset=$cpulist" >&2
     if ! OMP_NUM_THREADS="$omp" BLAS_PERF_ITERS="$iters" \
-           timeout "$TIMEOUT" taskset -c 0 "$bin" \
+           timeout "$TIMEOUT" taskset -c "$cpulist" "$bin" \
            > "$TMP" 2>>"$LOG"; then
         # Timeout or crash. $TMP may contain a header + a few rows
         # before the hang; ingesting them yields "fast at small N,
@@ -79,7 +87,7 @@ run_one() {
         rm -f "$TMP"
         return
     fi
-    awk -v rid="$run_id" -v tag="$run_bin_tag" -v omp="$omp" '
+    awk -v rid="$run_id" -v tag="$run_bin_tag" -v omp="$omp" -v ts="$cpulist" '
         /^#/ {next}
         NF >= 6 {
             # perf binary stdout cols: routine key size iters subject_GFs migrated_GFs ratio
@@ -87,7 +95,7 @@ run_one() {
             # $7 (ratio) is dropped — kept for human readability of
             # the perf binary stdout but not aggregated here.
             printf "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
-                rid, tag, omp, 0, $1, $2, $3, $4, $5, $6;
+                rid, tag, omp, ts, $1, $2, $3, $4, $5, $6;
         }' "$TMP" >> "$RAW"
     rm -f "$TMP"
 }
