@@ -13,7 +13,6 @@
 # win. This file builds the `_parallel` half only.
 
 set(_kernels
-    ygemm.c
     egemmtr.c
     ygemmtr.c
     ytrsm.c
@@ -96,33 +95,37 @@ set(_kernels
     yrotg.c
 )
 
-# egemm and etrsm are each split across two translation units: the public
+# L3 routines are each split across two translation units: the public
 # Fortran entry (parallel driver, *_parallel.c) and an internal
-# single-thread worker (*_serial.c). egemm_serial is reused by the L3
-# routines that call egemm from inside their own parallel region;
-# etrsm_serial is the fully-serial path its own driver delegates to under
-# the omp_in_parallel() nesting guard. Only `egemm`/`etrsm` are
-# Fortran-callable overlay routines — the _serial workers are internal —
-# so these sources are added to the build but NOT name-derived into the
-# routine list (mirrors the openblas overlay's `_helpers`).
+# single-thread worker (*_serial.c). A *_serial worker is (a) reused by the
+# L3 routines that call it from inside their own parallel region (egemm/
+# ygemm trailing updates), and (b) the fully-serial path its own driver
+# delegates to under the omp_in_parallel() nesting guard — opening a nested
+# team would trip the libgomp barrier wedge (memory project-etrsm-omp4-wedge).
+# Only the bare routine names (egemm, ygemm, etrsm, …) are Fortran-callable
+# overlays — the _serial workers are internal — so these sources are added
+# to the build but NOT name-derived into the routine list; the routine names
+# are appended by hand below (mirrors the openblas overlay's `_helpers`).
 set(_split_sources
     egemm_parallel.c
     egemm_serial.c
     etrsm_parallel.c
     etrsm_serial.c
+    ygemm_parallel.c
+    ygemm_serial.c
 )
 
 # Publish the overlay-covered routine names so the BLAS section in
 # cmake/CMakeLists.txt knows what to rename in the consistency archive.
-# Strip the .c suffix from each kernel filename; egemm and etrsm are
-# appended by hand (their file basenames don't match the routine name —
-# see above).
+# Strip the .c suffix from each kernel filename; the split routines
+# (egemm, etrsm, ygemm) are appended by hand (their file basenames don't
+# match the routine name — see above).
 set(_routines "")
 foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.c$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
-list(APPEND _routines egemm etrsm)
+list(APPEND _routines egemm etrsm ygemm)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
 add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_split_sources})
