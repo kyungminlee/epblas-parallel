@@ -16,7 +16,6 @@ set(_kernels
     egemmtr.c
     ygemmtr.c
     etrmm.c
-    ytrmm.c
     esyrk.c
     ysyrk.c
     yherk.c
@@ -114,6 +113,8 @@ set(_split_sources
     ygemm_serial.c
     ytrsm_parallel.c
     ytrsm_serial.c
+    ytrmm_parallel.c
+    ytrmm_serial.c
 )
 
 # Publish the overlay-covered routine names so the BLAS section in
@@ -126,7 +127,7 @@ foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.c$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
-list(APPEND _routines egemm etrsm ygemm ytrsm)
+list(APPEND _routines egemm etrsm ygemm ytrsm ytrmm)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
 add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_split_sources})
