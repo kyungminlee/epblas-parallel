@@ -57,7 +57,7 @@ void xhemm_(
     if (alpha == ZERO) {
         if (beta == ONE) return;
 #ifdef _OPENMP
-        const int use_omp = (N >= XHEMM_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= XHEMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) {
@@ -69,7 +69,7 @@ void xhemm_(
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= XHEMM_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= XHEMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (int j = 0; j < N; ++j) {

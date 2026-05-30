@@ -54,7 +54,7 @@ void xgemmtr_(const char *uplo, const char *transa, const char *transb,
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const int use_omp0 = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp0 = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
         for (int j = 0; j < N; ++j) {
@@ -68,7 +68,7 @@ void xgemmtr_(const char *uplo, const char *transa, const char *transb,
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
     for (int j = 0; j < N; ++j) {
