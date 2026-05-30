@@ -13,7 +13,6 @@
 # win. This file builds the `_parallel` half only.
 
 set(_kernels
-    egemm.c
     ygemm.c
     egemmtr.c
     ygemmtr.c
@@ -98,17 +97,31 @@ set(_kernels
     yrotg.c
 )
 
+# egemm is split across two translation units: the public Fortran entry
+# `egemm_` (parallel driver, egemm_parallel.c) and an internal
+# single-thread worker `egemm_serial` (egemm_serial.c) reused by the L3
+# routines that call egemm from inside their own parallel region. Only
+# `egemm` is a Fortran-callable overlay routine — egemm_serial is
+# internal — so these sources are added to the build but NOT name-derived
+# into the routine list (mirrors the openblas overlay's `_helpers`).
+set(_egemm_sources
+    egemm_parallel.c
+    egemm_serial.c
+)
+
 # Publish the overlay-covered routine names so the BLAS section in
 # cmake/CMakeLists.txt knows what to rename in the consistency archive.
-# Strip the .c suffix from each kernel filename.
+# Strip the .c suffix from each kernel filename; egemm is appended by
+# hand (its file basenames don't match the routine name — see above).
 set(_routines "")
 foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.c$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
+list(APPEND _routines egemm)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
-add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels})
+add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_egemm_sources})
 add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
 
 target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE c_std_99)

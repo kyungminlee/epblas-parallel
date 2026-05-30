@@ -52,9 +52,14 @@ static int trsm_nb(void) {
     return g_nb_trsm;
 }
 
-/* Local egemm declaration (the overlay's own egemm_ — symbol is in
- * our static archive). We call it for trailing-matrix updates. */
-extern void egemm_(
+/* The overlay's single-thread egemm worker (egemm_serial.c). We call it
+ * — not the parallel egemm_ — because every trailing update here runs
+ * inside blocked_dispatch's `omp parallel`; opening egemm's own nested
+ * team is what tripped the libgomp barrier wedge (memory
+ * project-etrsm-omp4-wedge). egemm_ would itself delegate here via its
+ * omp_in_parallel() guard; calling egemm_serial directly makes the
+ * intent explicit and skips the runtime check. */
+extern void egemm_serial(
     const char *transa, const char *transb,
     const int *m, const int *n, const int *k,
     const T *alpha,
@@ -228,7 +233,7 @@ static void blocked_chunk(enum trsm_variant V, int j_start, int j_end,
             const int ib = (M - ic < nb) ? (M - ic) : nb;
             if (ic > 0) {
                 /* B[ic..ic+ib, j_start..j_end] -= A[ic..ic+ib, 0..ic] · B[0..ic, j_start..j_end] */
-                egemm_(NN, NN, &ib, &my_N, &ic, &m_one,
+                egemm_serial(NN, NN, &ib, &my_N, &ic, &m_one,
                        &A_(ic, 0), &lda,
                        B_chunk, &ldb, &one,
                        &B_chunk[ic], &ldb, 1, 1);
@@ -243,7 +248,7 @@ static void blocked_chunk(enum trsm_variant V, int j_start, int j_end,
             const int trailing = M - (ic + ib);
             if (trailing > 0) {
                 const int j0 = ic + ib;
-                egemm_(NN, NN, &ib, &my_N, &trailing, &m_one,
+                egemm_serial(NN, NN, &ib, &my_N, &trailing, &m_one,
                        &A_(ic, j0), &lda,
                        &B_chunk[j0], &ldb, &one,
                        &B_chunk[ic], &ldb, 1, 1);
@@ -259,7 +264,7 @@ static void blocked_chunk(enum trsm_variant V, int j_start, int j_end,
             const int trailing = M - (ic + ib);
             if (trailing > 0) {
                 const int i0 = ic + ib;
-                egemm_(TN, NN, &ib, &my_N, &trailing, &m_one,
+                egemm_serial(TN, NN, &ib, &my_N, &trailing, &m_one,
                        &A_(i0, ic), &lda,
                        &B_chunk[i0], &ldb, &one,
                        &B_chunk[ic], &ldb, 1, 1);
@@ -272,7 +277,7 @@ static void blocked_chunk(enum trsm_variant V, int j_start, int j_end,
         for (int ic = 0; ic < M; ic += nb) {
             const int ib = (M - ic < nb) ? (M - ic) : nb;
             if (ic > 0) {
-                egemm_(TN, NN, &ib, &my_N, &ic, &m_one,
+                egemm_serial(TN, NN, &ib, &my_N, &ic, &m_one,
                        &A_(0, ic), &lda,
                        B_chunk, &ldb, &one,
                        &B_chunk[ic], &ldb, 1, 1);

@@ -1,5 +1,7 @@
 /*
- * egemm — kind10 (REAL(KIND=10), x86-64 80-bit long double) GEMM overlay.
+ * egemm_serial — kind10 (REAL(KIND=10), x86-64 80-bit long double) GEMM,
+ * single-thread. This TU owns ALL of the egemm math; egemm_parallel.c
+ * only orchestrates threads over these same pieces.
  *
  * Structure: GotoBLAS / OpenBLAS — three-level cache blocking
  * (NC × KC × MC), copy-and-conquer packing (op(A), op(B) absorbed into
@@ -26,27 +28,22 @@
  *   EBLAS_MC=64   panel rows
  *   EBLAS_KC=256  panel depth
  *   EBLAS_NC=512  column band per thread
- * Register-tile dims MR=2, NR=2 are compile-time constants.
+ * Register-tile dims MR=2, NR=2 are compile-time constants (EGEMM_MR/NR).
  *
- * Fortran ABI:
- *   - subroutine name lowercased + trailing underscore: `egemm_`
+ * Fortran ABI (egemm_serial mirrors egemm_ exactly):
  *   - scalars passed by pointer
  *   - character args followed by hidden trailing `size_t` lengths
  *   - REAL(KIND=10) ↔ `long double` (x86-64 80-bit extended)
  */
 
-#include <stddef.h>
+#include "egemm_kernel.h"
 #include <stdlib.h>
-#include <string.h>
 #include <ctype.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
-typedef long double T;
+typedef egemm_T T;
 
-#define MR 2
-#define NR 2
+#define MR EGEMM_MR
+#define NR EGEMM_NR
 
 /* ── Block sizes ──────────────────────────────────────────────── */
 
@@ -65,13 +62,43 @@ static void init_blocks(void) {
     g_nc = env_int("EBLAS_NC", 512);
 }
 
-static int trans_code(const char *p, size_t len) {
+int egemm_trans_code(const char *p, size_t len) {
     (void)len;
     char c = (char)toupper((unsigned char)*p);
     return (c == 'C') ? 'T' : c;  /* real: 'C' ≡ 'T' */
 }
 
-static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
+int egemm_round_up(int v, int m) { return ((v + m - 1) / m) * m; }
+
+/*
+ * OpenBLAS-style adaptive MC: when K fits in one panel, grow MC so
+ * MC*KC stays roughly L2-sized (rounded to MR). Helps small-K shapes
+ * where the default MC under-uses cache.
+ */
+void egemm_choose_blocks(int K, int *MC_out, int *KC_out, int *NC_out) {
+    init_blocks();
+    int MC = g_mc, KC = g_kc, NC = g_nc;
+    if (K > 0 && K <= KC) {
+        const long L2_TARGET_BYTES = 768 * 1024;   /* ~3/4 of i3-1315U P-core L2 */
+        long target_mc = L2_TARGET_BYTES / ((long)K * (long)sizeof(T));
+        if (target_mc > MC) {
+            if (target_mc > 4L * g_mc) target_mc = 4L * g_mc;
+            MC = egemm_round_up((int)target_mc, MR);
+            if (MC < g_mc) MC = g_mc;
+        }
+    }
+    *MC_out = MC; *KC_out = KC; *NC_out = NC;
+}
+
+/* ── beta pre-pass ────────────────────────────────────────────── */
+
+void egemm_beta_prepass(int M, int N, T beta, T *c, int ldc) {
+    for (int j = 0; j < N; ++j) {
+        T *cj = &c[(size_t)j * ldc];
+        if (beta == 0.0L)      for (int i = 0; i < M; ++i) cj[i]  = 0.0L;
+        else if (beta != 1.0L) for (int i = 0; i < M; ++i) cj[i] *= beta;
+    }
+}
 
 /* ── Packers (panel-packed, OpenBLAS-style) ───────────────────── */
 
@@ -81,9 +108,9 @@ static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
  *
  * The last panel is zero-padded to MR rows when ib % MR != 0.
  */
-static void pack_A(const T *restrict A, int lda,
-                   int ic, int pc, int ib, int pb,
-                   int ta, T *restrict Ap)
+void egemm_pack_A(const T *restrict A, int lda,
+                  int ic, int pc, int ib, int pb,
+                  int ta, T *restrict Ap)
 {
     const int npanel = (ib + MR - 1) / MR;
     for (int q = 0; q < npanel; ++q) {
@@ -114,9 +141,9 @@ static void pack_A(const T *restrict A, int lda,
  * Pack op(B)(pc..pc+pb, jc..jc+jb) into Bp as a stack of NR-col panels.
  * Panel layout:  Bp[(jj_panel * pb + p) * NR + jj] = op(B)[pc + p, jc + jj_panel*NR + jj].
  */
-static void pack_B(const T *restrict B, int ldb,
-                   int pc, int jc, int pb, int jb,
-                   int tb, T *restrict Bp)
+void egemm_pack_B(const T *restrict B, int ldb,
+                  int pc, int jc, int pb, int jb,
+                  int tb, T *restrict Bp)
 {
     const int npanel = (jb + NR - 1) / NR;
     for (int q = 0; q < npanel; ++q) {
@@ -192,9 +219,9 @@ static void kernel_edge(int mr, int nr, int pb, T alpha,
 }
 
 /* Drive one (ib, jb, pb) macro-tile via MR×NR sub-tiles. */
-static void macro_kernel(int ib, int jb, int pb, T alpha,
-                         const T *restrict Ap, const T *restrict Bp,
-                         T *restrict C, int ldc)
+void egemm_macro_kernel(int ib, int jb, int pb, T alpha,
+                        const T *restrict Ap, const T *restrict Bp,
+                        T *restrict C, int ldc)
 {
     const int npA = (ib + MR - 1) / MR;
     const int npB = (jb + NR - 1) / NR;
@@ -216,9 +243,30 @@ static void macro_kernel(int ib, int jb, int pb, T alpha,
     }
 }
 
-/* ── Entry point ──────────────────────────────────────────────── */
+/* ── Fast path: TA = 'T' (≡ 'C' for real), TB = 'N', one C-column ──
+ *
+ * With column-major storage the inner k-loop reads A column i and B
+ * column j both stride-1 — near peak x87 throughput. Packing adds
+ * overhead the blocked path can never recover here; this explicit
+ * reference body matches migrated at ~1.0× across all sizes.
+ */
+void egemm_fast_col(int j2, int M, int K, T alpha,
+                    const T *a, int lda, const T *b, int ldb,
+                    T *c, int ldc)
+{
+    T *cj = &c[(size_t)j2 * ldc];
+    const T *bj = &b[(size_t)j2 * ldb];
+    for (int i2 = 0; i2 < M; ++i2) {
+        const T *ai = &a[(size_t)i2 * lda];
+        T acc = 0.0L;
+        for (int l = 0; l < K; ++l) acc += ai[l] * bj[l];
+        cj[i2] += alpha * acc;
+    }
+}
 
-void egemm_(
+/* ── Single-thread entry ──────────────────────────────────────── */
+
+void egemm_serial(
     const char *transa, const char *transb,
     const int *m_, const int *n_, const int *k_,
     const T *alpha_,
@@ -231,106 +279,42 @@ void egemm_(
     const int M = *m_, N = *n_, K = *k_;
     const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = trans_code(transa, transa_len);
-    const int tb = trans_code(transb, transb_len);
+    const int ta = egemm_trans_code(transa, transa_len);
+    const int tb = egemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
-    /* BETA pre-pass: handles K==0 / alpha==0 in one place. */
-    for (int j = 0; j < N; ++j) {
-        T *cj = &c[(size_t)j * ldc];
-        if (beta == 0.0L)      for (int i = 0; i < M; ++i) cj[i]  = 0.0L;
-        else if (beta != 1.0L) for (int i = 0; i < M; ++i) cj[i] *= beta;
-    }
+    egemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
     if (alpha == 0.0L || K == 0) return;
 
-    /* Fast path: TA = 'T' (≡ 'C' for real), TB = 'N'. With column-major
-     * storage the inner k-loop reads A column i and B column j both
-     * stride-1 — near peak x87 throughput. Packing adds overhead the
-     * blocked path can never recover here; the explicit reference body
-     * matches migrated at ~1.0× across all sizes. */
     if (ta == 'T' && tb == 'N') {
-#ifdef _OPENMP
-        #pragma omp parallel for schedule(static)
-#endif
-        for (int j2 = 0; j2 < N; ++j2) {
-            T *cj = &c[(size_t)j2 * ldc];
-            const T *bj = &b[(size_t)j2 * ldb];
-            for (int i2 = 0; i2 < M; ++i2) {
-                const T *ai = &a[(size_t)i2 * lda];
-                T acc = 0.0L;
-                for (int l = 0; l < K; ++l) acc += ai[l] * bj[l];
-                cj[i2] += alpha * acc;
-            }
-        }
+        for (int j2 = 0; j2 < N; ++j2)
+            egemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
-    init_blocks();
-    int MC = g_mc, KC = g_kc, NC = g_nc;
+    int MC, KC, NC;
+    egemm_choose_blocks(K, &MC, &KC, &NC);
 
-    /* OpenBLAS-style adaptive MC: when K fits in one panel, grow MC
-     * so MC*KC stays roughly L2-sized (rounded to MR). Helps small-K
-     * shapes where the default MC under-uses cache. */
-    if (K <= KC) {
-        const long L2_TARGET_BYTES = 768 * 1024;   /* ~3/4 of i3-1315U P-core L2 */
-        long target_mc = L2_TARGET_BYTES / ((long)K * (long)sizeof(T));
-        if (target_mc > MC) {
-            if (target_mc > 4L * g_mc) target_mc = 4L * g_mc;
-            MC = round_up((int)target_mc, MR);
-            if (MC < g_mc) MC = g_mc;
-        }
-    }
-
-    /*
-     * Threading: single outer `omp parallel`, shared Bp packed once per
-     * (jc, pc) via `omp single` (implicit barrier), then `omp for` over
-     * the ic loop. Each thread keeps a private Ap.
-     *
-     * The previous 1D `omp for` over jc gave zero scaling whenever
-     * N ≤ NC (default NC=512): only one jc iteration to share across
-     * threads. Splitting along ic (the M axis) restores parallelism;
-     * keeping Bp shared avoids per-tile re-packing that a naive
-     * collapse(2) would force. Effective parallelism is bounded by
-     * (M / MC) per jc-band, which is ample for our typical square
-     * problems (HPC-target overlay, many cores) (Addendum 27 / Rule 35
-     * spirit applied with single-Bp-pack refinement).
-     */
-    const size_t ap_bytes = (size_t)round_up(MC, MR) * KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * round_up(NC, NR) * sizeof(T);
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * egemm_round_up(NC, NR) * sizeof(T);
+    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (!Bp) return;
-#ifdef _OPENMP
-    #pragma omp parallel
-#endif
-    {
-        T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-        if (Ap) {
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
-#ifdef _OPENMP
-                    #pragma omp single
-#endif
-                    pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                    /* implicit barrier at end of `single` makes Bp safe to
-                     * read in the for below. */
-#ifdef _OPENMP
-                    #pragma omp for schedule(static)
-#endif
-                    for (int ic = 0; ic < M; ic += MC) {
-                        const int ib = (M - ic < MC) ? (M - ic) : MC;
-                        pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
-                        macro_kernel(ib, jb, pb, alpha, Ap, Bp,
-                                     &c[(size_t)jc * ldc + ic], ldc);
-                    }
-                    /* implicit barrier at end of `for` keeps Bp stable
-                     * for the next (jc, pc) iteration. */
+    if (Ap && Bp) {
+        for (int jc = 0; jc < N; jc += NC) {
+            const int jb = (N - jc < NC) ? (N - jc) : NC;
+            for (int pc = 0; pc < K; pc += KC) {
+                const int pb = (K - pc < KC) ? (K - pc) : KC;
+                egemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
+                for (int ic = 0; ic < M; ic += MC) {
+                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                    egemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
+                    egemm_macro_kernel(ib, jb, pb, alpha, Ap, Bp,
+                                       &c[(size_t)jc * ldc + ic], ldc);
                 }
             }
         }
-        free(Ap);
     }
+    free(Ap);
     free(Bp);
 }
