@@ -1,25 +1,34 @@
 /*
- * etrmm_kernel.h — internal shared declarations for the kind10 real
- * (REAL(KIND=10) / long double) triangular matrix-multiply overlay, split
- * across two translation units:
+ * etrmm_kernel.h — internal shared declarations for the kind10 etrmm
+ * (REAL(KIND=10) / long double) triangular matrix-multiply overlay.
  *
- *   etrmm_serial.c   — all the math: the eight scalar column/row-range
- *                      cores (lln/lun/llt/lut, rln/run/rlt/rut), the blocked
- *                      per-chunk workers (diagonal core + egemm_serial
- *                      trailing), and the pure-serial Fortran-ABI entry
- *                      `etrmm_serial`. No `#pragma omp`.
- *   etrmm_parallel.c — the public Fortran entry `etrmm_`: threading only
- *                      (coarse-N/M `omp parallel` partition of the cores for
- *                      the unblocked path; one team per blocked dispatch),
- *                      with an `omp_in_parallel()` guard that delegates to
+ *   B := alpha · op(A) · B   (SIDE='L')   or   B := alpha · B · op(A) (SIDE='R')
+ *
+ * The overlay is a faithful L3 pack-and-conquer port of OpenBLAS DTRMM
+ * (sibling of the openblas overlay's etrmm.c), split across four TUs:
+ *
+ *   etrmm_pack.c     — the four TRMM A-packers (etrmm_i{ut,un,lt,ln}copy).
+ *   etrmm_kernel.c   — the diagonal-aware TRMM micro-kernel (etrmm_kernel),
+ *                      paired with the shared ob-convention GEMM substrate
+ *                      from etri_kernel.c.
+ *   etrmm_serial.c   — the SIDE='L'/'R' band drivers and the pure-serial
+ *                      Fortran-ABI entry `etrmm_serial`.
+ *   etrmm_parallel.c — the public Fortran entry `etrmm_`: threading
+ *                      orchestration only (per-thread Ap/Bp scratch,
+ *                      contiguous slice of the free axis), with an
+ *                      `omp_in_parallel()` guard that delegates to
  *                      `etrmm_serial` when called from inside another
- *                      routine's parallel region.
+ *                      routine's parallel region (libgomp barrier-wedge
+ *                      guard, memory project-etrsm-omp4-wedge).
  *
- * The cores process a column slice [j_start, j_end) (SIDE='L') or row slice
- * [i_start, i_end) (SIDE='R') of B; the serial entry runs the full range,
- * the parallel driver partitions it across one team. The blocked chunk
- * workers run their trailing update through egemm_serial — opening a nested
- * egemm team would trip the libgomp barrier wedge (project-etrsm-omp4-wedge).
+ * TRMM as alpha-prescale + overwrite nest: alpha pre-scales B in place
+ * (egemm_beta_prepass), then the L3 nest runs with kernel-alpha = 1.0L,
+ * overwriting B tile by tile. Since the spec is linear in B, the result is
+ * alpha · op(A) · B_old.
+ *
+ * Shares the ob-convention GEMM substrate (etri_kernel.h) with etrsm — see
+ * that header for why the triangular routines carry a private substrate
+ * rather than reusing par's egemm primitives (contiguous-odd-tail packing).
  */
 #ifndef EPBLAS_PARALLEL_KIND10_ETRMM_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_ETRMM_KERNEL_H
@@ -28,41 +37,43 @@
 
 typedef long double etrmm_T;
 
-enum etrmm_variant_L { ETRMM_LLN, ETRMM_LUN, ETRMM_LLT, ETRMM_LUT };
-enum etrmm_variant_R { ETRMM_RLN, ETRMM_RUN, ETRMM_RLT, ETRMM_RUT };
+/* ── TRMM A-packers (etrmm_pack.c) ───────────────────────────────────
+ * Pack the relevant triangle of A (plus the diagonal) into the packed
+ * buffer `b` in the ob contiguous-odd-tail convention. `posX`/`posY`
+ * position the diagonal; `unit` selects unit-diagonal. */
+void etrmm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, int unit);
+void etrmm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, int unit);
+void etrmm_iltcopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, int unit);
+void etrmm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, int unit);
 
-/* Env-tunable block size (ETRMM_NB, default 64). */
-int etrmm_nb(void);
+/* ── Diagonal-aware TRMM micro-kernel (etrmm_kernel.c) ───────────────
+ * C := alpha · ba · bb (overwrite) over one packed (bm,bn,bk) tile; the
+ * (left, trans) flags select TRMM_KERNEL_{LN,LT,RN,RT}. `offset` positions
+ * the diagonal within the tile. Self-consistent with the etrmm_i*copy
+ * packers and the etri_kernel.c substrate (contiguous-odd-tail). */
+void etrmm_kernel(int left, int trans,
+                  ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etrmm_T alpha,
+                  const etrmm_T *ba, const etrmm_T *bb,
+                  etrmm_T *C, ptrdiff_t ldc, ptrdiff_t offset);
 
-/* SIDE='L' column-range scalar cores (process B columns [j_start, j_end)). */
-void etrmm_lln_core(int j_start, int j_end, int M, etrmm_T alpha,
-                    const etrmm_T *a, int lda, etrmm_T *b, int ldb, int nounit);
-void etrmm_lun_core(int j_start, int j_end, int M, etrmm_T alpha,
-                    const etrmm_T *a, int lda, etrmm_T *b, int ldb, int nounit);
-void etrmm_llt_core(int j_start, int j_end, int M, etrmm_T alpha,
-                    const etrmm_T *a, int lda, etrmm_T *b, int ldb, int nounit);
-void etrmm_lut_core(int j_start, int j_end, int M, etrmm_T alpha,
-                    const etrmm_T *a, int lda, etrmm_T *b, int ldb, int nounit);
-
-/* SIDE='R' row-range scalar cores (process B rows [i_start, i_end)). */
-void etrmm_rln_core(int i_start, int i_end, int N, etrmm_T alpha,
-                    const etrmm_T *a, int lda, etrmm_T *b, int ldb, int nounit);
-void etrmm_run_core(int i_start, int i_end, int N, etrmm_T alpha,
-                    const etrmm_T *a, int lda, etrmm_T *b, int ldb, int nounit);
-void etrmm_rlt_core(int i_start, int i_end, int N, etrmm_T alpha,
-                    const etrmm_T *a, int lda, etrmm_T *b, int ldb, int nounit);
-void etrmm_rut_core(int i_start, int i_end, int N, etrmm_T alpha,
-                    const etrmm_T *a, int lda, etrmm_T *b, int ldb, int nounit);
-
-/* Per-chunk blocked workers (diagonal core + egemm_serial trailing). */
-void etrmm_blocked_chunk_L(enum etrmm_variant_L V, int j_start, int j_end,
-                           int M, int nb, etrmm_T alpha,
-                           const etrmm_T *a, int lda, etrmm_T *b, int ldb,
-                           int nounit);
-void etrmm_blocked_chunk_R(enum etrmm_variant_R V, int i_start, int i_end,
-                           int N, int nb, etrmm_T alpha,
-                           const etrmm_T *a, int lda, etrmm_T *b, int ldb,
-                           int nounit);
+/* ── Band drivers (etrmm_serial.c) ───────────────────────────────────
+ * Run the full L3 nest for one slice of the partition axis: a column band
+ * [js0, js1) of B for SIDE='L', or a row band [m_lo, m_hi) for SIDE='R'.
+ * Ap/Bp are caller-owned per-thread scratch. */
+void etrmm_L_band(int upper, int trans, int unit,
+                  int M, int js0, int js1,
+                  int MC, int KC, int NC,
+                  const etrmm_T *a, int lda, etrmm_T *b, int ldb,
+                  etrmm_T *Ap, etrmm_T *Bp);
+void etrmm_R_band(int upper, int trans, int unit,
+                  int N, int m_lo, int m_hi,
+                  int MC, int KC, int NC,
+                  const etrmm_T *a, int lda, etrmm_T *b, int ldb,
+                  etrmm_T *Ap, etrmm_T *Bp);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as etrmm_. */
 void etrmm_serial(

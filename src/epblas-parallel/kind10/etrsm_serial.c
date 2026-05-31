@@ -25,6 +25,7 @@
 #include <ctype.h>
 
 #include "etrsm_kernel.h"
+#include "etri_kernel.h"    /* etri_gemm_kernel / etri_ncopy / etri_tcopy */
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
 
 typedef etrsm_T T;
@@ -130,7 +131,7 @@ void etrsm_L_band(int upper, int trans, int unit,
                 for (int jjs = js; jjs < js + min_j; jjs += NR) {
                     int min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
-                    etrsm_ncopy(min_l, min_jj,
+                    etri_ncopy(min_l, min_jj,
                                       &b[(size_t)ls + (size_t)jjs * ldb], ldb,
                                       Bp + (size_t)min_l * (jjs - js));
                     etrsm_solve_kernel(/*left=*/1, kt,
@@ -163,13 +164,13 @@ void etrsm_L_band(int upper, int trans, int unit,
                     min_i = m - is;
                     if (min_i > MC) min_i = MC;
                     if (!trans) {
-                        etrsm_tcopy(min_l, min_i,
+                        etri_tcopy(min_l, min_i,
                                           &a[(size_t)is + (size_t)ls * lda], lda, Ap);
                     } else {
-                        etrsm_ncopy(min_l, min_i,
+                        etri_ncopy(min_l, min_i,
                                           &a[(size_t)ls + (size_t)is * lda], lda, Ap);
                     }
-                    etrsm_gemm_kernel(min_i, min_j, min_l, dm1,
+                    etri_gemm_kernel(min_i, min_j, min_l, dm1,
                                        Ap, Bp,
                                        &b[(size_t)is + (size_t)js * ldb], ldb);
                 }
@@ -199,7 +200,7 @@ void etrsm_L_band(int upper, int trans, int unit,
                 for (int jjs = js; jjs < js + min_j; jjs += NR) {
                     int min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
-                    etrsm_ncopy(min_l, min_jj,
+                    etri_ncopy(min_l, min_jj,
                                       &b[(size_t)(ls - min_l) + (size_t)jjs * ldb], ldb,
                                       Bp + (size_t)min_l * (jjs - js));
                     etrsm_solve_kernel(/*left=*/1, kt,
@@ -232,13 +233,13 @@ void etrsm_L_band(int upper, int trans, int unit,
                     min_i = ls - min_l - is;
                     if (min_i > MC) min_i = MC;
                     if (!trans) {
-                        etrsm_tcopy(min_l, min_i,
+                        etri_tcopy(min_l, min_i,
                                           &a[(size_t)is + (size_t)(ls - min_l) * lda], lda, Ap);
                     } else {
-                        etrsm_ncopy(min_l, min_i,
+                        etri_ncopy(min_l, min_i,
                                           &a[(size_t)(ls - min_l) + (size_t)is * lda], lda, Ap);
                     }
-                    etrsm_gemm_kernel(min_i, min_j, min_l, dm1,
+                    etri_gemm_kernel(min_i, min_j, min_l, dm1,
                                        Ap, Bp,
                                        &b[(size_t)is + (size_t)js * ldb], ldb);
                 }
@@ -283,22 +284,22 @@ void etrsm_R_band(int upper, int trans, int unit,
                 int min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
-                etrsm_tcopy(min_l, min_i,
+                etri_tcopy(min_l, min_i,
                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
 
                 for (int jjs = js; jjs < js + min_j; jjs += NR) {
                     int min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
-                        etrsm_ncopy(min_l, min_jj,
+                        etri_ncopy(min_l, min_jj,
                                           &a[(size_t)ls + (size_t)jjs * lda], lda,
                                           sb + (size_t)min_l * (jjs - js));
                     } else {
-                        etrsm_tcopy(min_l, min_jj,
+                        etri_tcopy(min_l, min_jj,
                                           &a[(size_t)jjs + (size_t)ls * lda], lda,
                                           sb + (size_t)min_l * (jjs - js));
                     }
-                    etrsm_gemm_kernel(min_i, min_jj, min_l, dm1,
+                    etri_gemm_kernel(min_i, min_jj, min_l, dm1,
                                        sa, sb + (size_t)min_l * (jjs - js),
                                        &b[(size_t)m_lo + (size_t)jjs * ldb], ldb);
                 }
@@ -306,9 +307,9 @@ void etrsm_R_band(int upper, int trans, int unit,
                 for (int is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
-                    etrsm_tcopy(min_l, min_i,
+                    etri_tcopy(min_l, min_i,
                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
-                    etrsm_gemm_kernel(min_i, min_j, min_l, dm1,
+                    etri_gemm_kernel(min_i, min_j, min_l, dm1,
                                        sa, sb,
                                        &b[(size_t)(m_lo + is) + (size_t)js * ldb], ldb);
                 }
@@ -322,7 +323,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                 int min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
-                etrsm_tcopy(min_l, min_i,
+                etri_tcopy(min_l, min_i,
                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
 
                 /* TRSM_O*COPY of A diagonal block. */
@@ -342,15 +343,15 @@ void etrsm_R_band(int upper, int trans, int unit,
                     int min_jj = min_j - min_l - ls + js - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
-                        etrsm_ncopy(min_l, min_jj,
+                        etri_ncopy(min_l, min_jj,
                                           &a[(size_t)ls + (size_t)(ls + min_l + jjs) * lda], lda,
                                           sb + (size_t)min_l * (min_l + jjs));
                     } else {
-                        etrsm_tcopy(min_l, min_jj,
+                        etri_tcopy(min_l, min_jj,
                                           &a[(size_t)(ls + min_l + jjs) + (size_t)ls * lda], lda,
                                           sb + (size_t)min_l * (min_l + jjs));
                     }
-                    etrsm_gemm_kernel(min_i, min_jj, min_l, dm1,
+                    etri_gemm_kernel(min_i, min_jj, min_l, dm1,
                                        sa, sb + (size_t)min_l * (min_l + jjs),
                                        &b[(size_t)m_lo + (size_t)(min_l + ls + jjs) * ldb], ldb);
                 }
@@ -359,7 +360,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                 for (int is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
-                    etrsm_tcopy(min_l, min_i,
+                    etri_tcopy(min_l, min_i,
                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
                     etrsm_solve_kernel(/*left=*/0, kt,
                                        min_i, min_l, min_l,
@@ -367,7 +368,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                                        &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb,
                                        /*offset=*/0);
                     if (min_j - min_l + js - ls > 0) {
-                        etrsm_gemm_kernel(min_i, min_j - min_l + js - ls, min_l, dm1,
+                        etri_gemm_kernel(min_i, min_j - min_l + js - ls, min_l, dm1,
                                            sa, sb + (size_t)min_l * min_l,
                                            &b[(size_t)(m_lo + is) + (size_t)(min_l + ls) * ldb], ldb);
                     }
@@ -388,22 +389,22 @@ void etrsm_R_band(int upper, int trans, int unit,
                 int min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
-                etrsm_tcopy(min_l, min_i,
+                etri_tcopy(min_l, min_i,
                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
 
                 for (int jjs = js; jjs < js + min_j; jjs += NR) {
                     int min_jj = min_j + js - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
-                        etrsm_ncopy(min_l, min_jj,
+                        etri_ncopy(min_l, min_jj,
                                           &a[(size_t)ls + (size_t)(jjs - min_j) * lda], lda,
                                           sb + (size_t)min_l * (jjs - js));
                     } else {
-                        etrsm_tcopy(min_l, min_jj,
+                        etri_tcopy(min_l, min_jj,
                                           &a[(size_t)(jjs - min_j) + (size_t)ls * lda], lda,
                                           sb + (size_t)min_l * (jjs - js));
                     }
-                    etrsm_gemm_kernel(min_i, min_jj, min_l, dm1,
+                    etri_gemm_kernel(min_i, min_jj, min_l, dm1,
                                        sa, sb + (size_t)min_l * (jjs - js),
                                        &b[(size_t)m_lo + (size_t)(jjs - min_j) * ldb], ldb);
                 }
@@ -411,9 +412,9 @@ void etrsm_R_band(int upper, int trans, int unit,
                 for (int is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
-                    etrsm_tcopy(min_l, min_i,
+                    etri_tcopy(min_l, min_i,
                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
-                    etrsm_gemm_kernel(min_i, min_j, min_l, dm1,
+                    etri_gemm_kernel(min_i, min_j, min_l, dm1,
                                        sa, sb,
                                        &b[(size_t)(m_lo + is) + (size_t)(js - min_j) * ldb], ldb);
                 }
@@ -430,7 +431,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                 int min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
-                etrsm_tcopy(min_l, min_i,
+                etri_tcopy(min_l, min_i,
                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
 
                 /* TRSM_O*COPY of A diagonal block.
@@ -455,15 +456,15 @@ void etrsm_R_band(int upper, int trans, int unit,
                     int min_jj = min_j - js + ls - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
-                        etrsm_ncopy(min_l, min_jj,
+                        etri_ncopy(min_l, min_jj,
                                           &a[(size_t)ls + (size_t)(js - min_j + jjs) * lda], lda,
                                           sb + (size_t)min_l * jjs);
                     } else {
-                        etrsm_tcopy(min_l, min_jj,
+                        etri_tcopy(min_l, min_jj,
                                           &a[(size_t)(js - min_j + jjs) + (size_t)ls * lda], lda,
                                           sb + (size_t)min_l * jjs);
                     }
-                    etrsm_gemm_kernel(min_i, min_jj, min_l, dm1,
+                    etri_gemm_kernel(min_i, min_jj, min_l, dm1,
                                        sa, sb + (size_t)min_l * jjs,
                                        &b[(size_t)m_lo + (size_t)(js - min_j + jjs) * ldb], ldb);
                 }
@@ -472,7 +473,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                 for (int is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
-                    etrsm_tcopy(min_l, min_i,
+                    etri_tcopy(min_l, min_i,
                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
                     etrsm_solve_kernel(/*left=*/0, kt,
                                        min_i, min_l, min_l,
@@ -480,7 +481,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                                        &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb,
                                        /*offset=*/0);
                     if (min_j - js + ls > 0) {
-                        etrsm_gemm_kernel(min_i, min_j - js + ls, min_l, dm1,
+                        etri_gemm_kernel(min_i, min_j - js + ls, min_l, dm1,
                                            sa, sb,
                                            &b[(size_t)(m_lo + is) + (size_t)(js - min_j) * ldb], ldb);
                     }

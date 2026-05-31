@@ -7,11 +7,11 @@
  *
  *   etrsm_pack.c     — the four diagonal-inverting A-packers
  *                      (etrsm_i{ut,un,lt,ln}copy).
- *   etrsm_serial.c   — the ob-convention L3 substrate (a private MR=NR=2
- *                      GEMM micro-kernel + ncopy/tcopy + the four solve()
- *                      directions + the diagonal-aware TRSM micro-kernel,
- *                      all static), the SIDE='L'/'R' band drivers, and the
- *                      pure-serial Fortran-ABI entry `etrsm_serial`.
+ *   etrsm_kernel.c   — the four solve() directions + the diagonal-aware TRSM
+ *                      micro-kernel (etrsm_solve_kernel), paired with the
+ *                      shared ob-convention GEMM substrate from etri_kernel.c.
+ *   etrsm_serial.c   — the SIDE='L'/'R' band drivers and the pure-serial
+ *                      Fortran-ABI entry `etrsm_serial`.
  *   etrsm_parallel.c — the public Fortran entry `etrsm_`: threading
  *                      orchestration only (per-thread Ap/Bp scratch,
  *                      contiguous slice of the free axis), with an
@@ -19,17 +19,17 @@
  *                      `etrsm_serial` when called from inside another
  *                      routine's parallel region.
  *
- * Why a private GEMM micro-kernel rather than reusing par's egemm
+ * Why the shared substrate (etri_kernel.c) rather than par's egemm
  * primitives: the TRSM solve and its trailing GEMM share one packed
  * diagonal-block buffer at MR/NR granularity, and OpenBLAS's
  * contiguous-odd-tail packing convention is baked into the packer ↔
  * solve ↔ kernel triad. par's egemm packs odd tails zero-padded at
  * stride MR instead, so its kernel reads those bytes differently (proven
- * mismatch on every odd m/n/k). The substrate therefore carries its own
- * self-consistent ob-convention kernel/packers. The layout-AGNOSTIC
- * helpers ARE reused from the egemm overlay: egemm_choose_blocks (incl.
- * its L2-detected adaptive MC), egemm_beta_prepass, egemm_round_up,
- * egemm_trans_code.
+ * mismatch on every odd m/n/k). The triangular routines therefore share a
+ * self-consistent ob-convention kernel/packer substrate (etri_kernel.c).
+ * The layout-AGNOSTIC helpers ARE reused from the egemm overlay:
+ * egemm_choose_blocks (incl. its L2-detected adaptive MC),
+ * egemm_beta_prepass, egemm_round_up, egemm_trans_code.
  *
  * Nested calls must run serial: opening a nested OpenMP region trips the
  * libgomp barrier wedge (see memory project-etrsm-omp4-wedge). The entry
@@ -55,20 +55,12 @@ void etrsm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
 void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
                    ptrdiff_t offset, etrsm_T *b, int unit);
 
-/* ── ob-convention L3 substrate (etrsm_kernel.c) ─────────────────────
- * A private MR=NR=2 GEMM micro-kernel and its matching ncopy/tcopy
- * packers, plus the diagonal-aware TRSM micro-kernel. Self-consistent
- * with the diagonal-inverting packers above (OpenBLAS contiguous-odd-tail
- * convention); see the header note on why these are NOT par's egemm
- * primitives. `etrsm_gemm_kernel` computes C += alpha·Ap·Bp over one
- * packed (bm,bn,bk) tile. */
-void etrsm_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etrsm_T alpha,
-                       const etrsm_T *Ap, const etrsm_T *Bp,
-                       etrsm_T *C, ptrdiff_t ldc);
-void etrsm_ncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                 etrsm_T *b);
-void etrsm_tcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                 etrsm_T *b);
+/* ── Diagonal-aware TRSM micro-kernel (etrsm_kernel.c) ───────────────
+ * Pairs the shared ob-convention GEMM substrate (etri_kernel.h) with the
+ * four diagonal solve directions. Self-consistent with the
+ * diagonal-inverting packers above (OpenBLAS contiguous-odd-tail
+ * convention); see the header note on why the substrate is NOT par's
+ * egemm. */
 void etrsm_solve_kernel(int left, int trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         const etrsm_T *ba, const etrsm_T *bb,

@@ -1,330 +1,592 @@
 /*
- * etrmm_serial — kind10 real (long double) triangular matrix-multiply,
- * single-thread. This TU owns ALL of the etrmm math: the eight scalar
- * column/row-range cores, the blocked per-chunk workers, and the
- * pure-serial Fortran-ABI entry. etrmm_parallel.c only orchestrates the
- * column/row partition across a team.
+ * etrmm_serial — kind10 (REAL(KIND=10) / long double) triangular
+ * matrix-multiply, single-thread half of the etrmm overlay. Owns the
+ * SIDE='L'/'R' L3 band drivers (faithful ports of OpenBLAS
+ * driver/level3/trmm_{L,R}.c) and the pure-serial Fortran-ABI entry
+ * `etrmm_serial`. The math primitives live in etrmm_kernel.c / etrmm_pack.c
+ * and the shared substrate etri_kernel.c.
  *
- *   B := alpha · op(A) · B   (SIDE='L')   or   B := alpha · B · op(A) (R)
+ * Each band driver runs the full trmm_{L,R}.c nest over one slice of the
+ * free axis (B columns for SIDE='L', rows for SIDE='R') with caller-owned
+ * per-thread Ap/Bp scratch, so etrmm_parallel.c can give each thread a
+ * disjoint slice with no cross-thread synchronization. The serial entry
+ * runs one band spanning the whole free axis.
  *
- * Blocked path: diagonal scalar core in place + egemm_serial trailing
- * update. The trailing update runs through egemm_serial (NOT egemm_): when
- * a chunk worker runs inside the team etrmm_parallel.c opened, a nested
- * egemm team would trip the libgomp barrier wedge (project-etrsm-omp4-wedge).
+ * The TRMM kernel overwrites B (C := alpha·A·B); off-diagonal sub-tiles go
+ * through etri_kernel_store (zero + accumulate, matching OpenBLAS's
+ * GEMM_KERNEL beta=0 inside the TRMM driver). alpha pre-scaling of B is done
+ * by the entry (egemm_beta_prepass), so the band drivers run kernel-alpha=1.
  */
 
-#include "etrmm_kernel.h"
+#include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
 
+#include "etrmm_kernel.h"
+#include "etri_kernel.h"    /* etri_ncopy / etri_tcopy / etri_kernel_store */
+#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
+
 typedef etrmm_T T;
 
-static int env_int(const char *name, int dflt) {
-    const char *s = getenv(name);
-    if (!s || !*s) return dflt;
-    int v = atoi(s);
-    return v > 0 ? v : dflt;
-}
-static int g_nb_trmm = 0;
-int etrmm_nb(void) {
-    if (g_nb_trmm == 0) g_nb_trmm = env_int("ETRMM_NB", 64);
-    return g_nb_trmm;
-}
+/* Register-tile dims — must match the packed layout (etrmm_kernel.c). */
+#define MR 2
+#define NR 2
 
-extern void egemm_serial(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    size_t transa_len, size_t transb_len);
-
-#define A_(i, j)  a[(size_t)(j) * lda + (i)]
-#define B_(i, j)  b[(size_t)(j) * ldb + (i)]
-
-/* ── SIDE = 'L' column-range scalar cores ─────────────────────── */
-
-void etrmm_lln_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+static inline void pack_trmm_a(int side_l, int uplo_upper, int trans, int unit,
+                               ptrdiff_t m, ptrdiff_t n,
+                               const T *a, ptrdiff_t lda,
+                               ptrdiff_t posX, ptrdiff_t posY,
+                               T *bp)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int k = M - 1; k >= 0; --k) {
-            if (B_(k, j) != 0.0L) {
-                T temp = alpha * B_(k, j);
-                for (int i = M - 1; i > k; --i)
-                    B_(i, j) += temp * A_(i, k);
-                if (nounit) temp *= A_(k, k);
-                B_(k, j) = temp;
+    if (side_l) {
+        if (uplo_upper && !trans)       etrmm_iutcopy(m, n, a, lda, posX, posY, bp, unit);
+        else if (uplo_upper &&  trans)  etrmm_iuncopy(m, n, a, lda, posX, posY, bp, unit);
+        else if (!uplo_upper && !trans) etrmm_iltcopy(m, n, a, lda, posX, posY, bp, unit);
+        else                            etrmm_ilncopy(m, n, a, lda, posX, posY, bp, unit);
+    } else {
+        if (uplo_upper && !trans)       etrmm_iuncopy(m, n, a, lda, posX, posY, bp, unit);
+        else if (uplo_upper &&  trans)  etrmm_iutcopy(m, n, a, lda, posX, posY, bp, unit);
+        else if (!uplo_upper && !trans) etrmm_ilncopy(m, n, a, lda, posX, posY, bp, unit);
+        else                            etrmm_iltcopy(m, n, a, lda, posX, posY, bp, unit);
+    }
+}
+
+
+/* ── SIDE='L' driver: port of trmm_L.c for one N-band (js0..js1) ─────
+ *
+ * Each thread calls this with its own N-slice and own per-thread Ap;
+ * Bp is shared but each thread re-OCOPYs into private Bp slots since we
+ * have one Bp per thread (no cross-thread sync needed). The OpenBLAS
+ * source uses a single shared sa/sb per call site; for our per-thread-
+ * over-N-slice partitioning, each thread has its own (Ap, Bp).
+ */
+void etrmm_L_band(int upper, int trans, int unit,
+                        int M, int js0, int js1,
+                        int MC, int KC, int NC,
+                        const T *a, int lda,
+                        T *b, int ldb,
+                        T *Ap, T *Bp)
+{
+    const T dp1 = 1.0L;
+    int m = M;
+
+    /* Outer js-loop walks the thread's N-band in steps of NC = GEMM_R. */
+    for (int js = js0; js < js1; js += NC) {
+        int min_j = js1 - js;
+        if (min_j > NC) min_j = NC;
+
+        if ((upper && !trans) || (!upper && trans)) {
+            /* trmm_L.c lines 119-299: TRMM_KERNEL_N = TRMM_KERNEL_LN
+             * (kernel trans-flag = 0; the user trans is absorbed by the
+             * packer choice).
+             * Walk down-diagonal: pack A[ls..ls+min_l, ls..ls+min_l] as
+             * the triangular block (TRMM_IUTCOPY for UPPER!TRANS,
+             * TRMM_ILNCOPY for LOWER+TRANS), then off-diagonal GEMM tiles
+             * above the diagonal block. */
+            const int kt = 0;   /* TRMM_KERNEL_N */
+            int min_l = m;
+            if (min_l > KC) min_l = KC;
+            int min_i = min_l;
+            if (min_i > MC) min_i = MC;
+            if (min_i > MR) min_i = (min_i / MR) * MR;
+
+            /* TRMM_I*COPY(min_l, min_i, a, lda, posX=0, posY=0, sa) */
+            pack_trmm_a(1, upper, trans, unit, min_l, min_i, a, lda, 0, 0, Ap);
+
+            /* Inner jjs loop — process min_j cols in NR-sized strips.
+             * For our NR=2, the OpenBLAS jjs stride logic resolves to
+             * min_jj = NR (or the trailing remnant). */
+            for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                int min_jj = js + min_j - jjs;
+                if (min_jj > NR) min_jj = NR;
+
+                /* GEMM_ONCOPY(min_l, min_jj, b + jjs*ldb, ldb, sb + ...) */
+                etri_ncopy(min_l, min_jj,
+                                  &b[(size_t)jjs * ldb], ldb,
+                                  Bp + (size_t)min_l * (jjs - js));
+
+                /* TRMM_KERNEL_N(min_i, min_jj, min_l, dp1, sa, sb_slice,
+                 *               b + jjs*ldb, ldb, 0) */
+                etrmm_kernel(/*left=*/1, /*trans=*/kt,
+                                   min_i, min_jj, min_l, dp1,
+                                   Ap, Bp + (size_t)min_l * (jjs - js),
+                                   &b[(size_t)jjs * ldb], ldb,
+                                   /*offset=*/0);
+            }
+
+            /* Lower-band: more MR-tiles of A below the diagonal block. */
+            for (int is = min_i; is < min_l; is += min_i) {
+                min_i = min_l - is;
+                if (min_i > MC) min_i = MC;
+                if (min_i > MR) min_i = (min_i / MR) * MR;
+
+                pack_trmm_a(1, upper, trans, unit, min_l, min_i, a, lda,
+                            /*posX=*/0, /*posY=*/is, Ap);
+
+                etrmm_kernel(/*left=*/1, /*trans=*/kt,
+                                   min_i, min_j, min_l, dp1,
+                                   Ap, Bp,
+                                   &b[(size_t)is + (size_t)js * ldb], ldb,
+                                   /*offset=*/is);
+            }
+
+            /* ls-loop continues for the remaining KC-bands of A. */
+            for (int ls = min_l; ls < m; ls += KC) {
+                min_l = m - ls;
+                if (min_l > KC) min_l = KC;
+                min_i = ls;
+                if (min_i > MC) min_i = MC;
+                if (min_i > MR) min_i = (min_i / MR) * MR;
+
+                /* GEMM_I{T,N}COPY of A: for !TRANS use TCOPY (normal A),
+                 * for TRANS use NCOPY. */
+                if (!trans) {
+                    etri_tcopy(min_l, min_i,
+                                      &a[(size_t)ls * lda], lda, Ap);
+                } else {
+                    etri_ncopy(min_l, min_i,
+                                      &a[(size_t)ls], lda, Ap);
+                }
+
+                for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                    int min_jj = js + min_j - jjs;
+                    if (min_jj > NR) min_jj = NR;
+
+                    etri_ncopy(min_l, min_jj,
+                                      &b[(size_t)ls + (size_t)jjs * ldb], ldb,
+                                      Bp + (size_t)min_l * (jjs - js));
+
+                    /* Pure GEMM into b[(jjs*ldb)..] — overwrite semantics */
+                    etri_kernel_store(min_i, min_jj, min_l, dp1,
+                                             Ap, Bp + (size_t)min_l * (jjs - js),
+                                             &b[(size_t)jjs * ldb], ldb);
+                }
+
+                for (int is = min_i; is < ls; is += min_i) {
+                    min_i = ls - is;
+                    if (min_i > MC) min_i = MC;
+                    if (min_i > MR) min_i = (min_i / MR) * MR;
+
+                    if (!trans) {
+                        etri_tcopy(min_l, min_i,
+                                          &a[(size_t)is + (size_t)ls * lda], lda, Ap);
+                    } else {
+                        etri_ncopy(min_l, min_i,
+                                          &a[(size_t)ls + (size_t)is * lda], lda, Ap);
+                    }
+
+                    etri_kernel_store(min_i, min_j, min_l, dp1,
+                                             Ap, Bp,
+                                             &b[(size_t)is + (size_t)js * ldb], ldb);
+                }
+
+                for (int is = ls; is < ls + min_l; is += min_i) {
+                    min_i = ls + min_l - is;
+                    if (min_i > MC) min_i = MC;
+                    if (min_i > MR) min_i = (min_i / MR) * MR;
+
+                    pack_trmm_a(1, upper, trans, unit, min_l, min_i, a, lda,
+                                /*posX=*/ls, /*posY=*/is, Ap);
+
+                    etrmm_kernel(/*left=*/1, /*trans=*/kt,
+                                       min_i, min_j, min_l, dp1,
+                                       Ap, Bp,
+                                       &b[(size_t)is + (size_t)js * ldb], ldb,
+                                       /*offset=*/(is - ls));
+                }
+            }
+        } else {
+            /* The other branch: (UPPER && TRANS) || (LOWER && !TRANS).
+             * trmm_L.c lines 301-488: uses TRMM_KERNEL_T = TRMM_KERNEL_LT
+             * (kernel trans-flag = 1). Walk up-diagonal (ls from m - min_l
+             * down). */
+            const int kt = 1;   /* TRMM_KERNEL_T */
+            int min_l = m;
+            if (min_l > KC) min_l = KC;
+            int min_i = min_l;
+            if (min_i > MC) min_i = MC;
+            if (min_i > MR) min_i = (min_i / MR) * MR;
+
+            pack_trmm_a(1, upper, trans, unit, min_l, min_i, a, lda,
+                        /*posX=*/m - min_l, /*posY=*/m - min_l, Ap);
+
+            for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                int min_jj = js + min_j - jjs;
+                if (min_jj > NR) min_jj = NR;
+
+                etri_ncopy(min_l, min_jj,
+                                  &b[(size_t)(m - min_l) + (size_t)jjs * ldb], ldb,
+                                  Bp + (size_t)min_l * (jjs - js));
+
+                etrmm_kernel(/*left=*/1, /*trans=*/kt,
+                                   min_i, min_jj, min_l, dp1,
+                                   Ap, Bp + (size_t)min_l * (jjs - js),
+                                   &b[(size_t)(m - min_l) + (size_t)jjs * ldb], ldb,
+                                   /*offset=*/0);
+            }
+
+            for (int is = m - min_l + min_i; is < m; is += min_i) {
+                min_i = m - is;
+                if (min_i > MC) min_i = MC;
+                if (min_i > MR) min_i = (min_i / MR) * MR;
+
+                pack_trmm_a(1, upper, trans, unit, min_l, min_i, a, lda,
+                            /*posX=*/m - min_l, /*posY=*/is, Ap);
+
+                etrmm_kernel(/*left=*/1, /*trans=*/kt,
+                                   min_i, min_j, min_l, dp1,
+                                   Ap, Bp,
+                                   &b[(size_t)is + (size_t)js * ldb], ldb,
+                                   /*offset=*/(is - m + min_l));
+            }
+
+            for (int ls = m - min_l; ls > 0; ls -= KC) {
+                min_l = ls;
+                if (min_l > KC) min_l = KC;
+                min_i = min_l;
+                if (min_i > MC) min_i = MC;
+                if (min_i > MR) min_i = (min_i / MR) * MR;
+
+                pack_trmm_a(1, upper, trans, unit, min_l, min_i, a, lda,
+                            /*posX=*/ls - min_l, /*posY=*/ls - min_l, Ap);
+
+                for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                    int min_jj = js + min_j - jjs;
+                    if (min_jj > NR) min_jj = NR;
+
+                    etri_ncopy(min_l, min_jj,
+                                      &b[(size_t)(ls - min_l) + (size_t)jjs * ldb], ldb,
+                                      Bp + (size_t)min_l * (jjs - js));
+
+                    etrmm_kernel(/*left=*/1, /*trans=*/kt,
+                                       min_i, min_jj, min_l, dp1,
+                                       Ap, Bp + (size_t)min_l * (jjs - js),
+                                       &b[(size_t)(ls - min_l) + (size_t)jjs * ldb], ldb,
+                                       /*offset=*/0);
+                }
+
+                for (int is = ls - min_l + min_i; is < ls; is += min_i) {
+                    min_i = ls - is;
+                    if (min_i > MC) min_i = MC;
+                    if (min_i > MR) min_i = (min_i / MR) * MR;
+
+                    pack_trmm_a(1, upper, trans, unit, min_l, min_i, a, lda,
+                                /*posX=*/ls - min_l, /*posY=*/is, Ap);
+
+                    etrmm_kernel(/*left=*/1, /*trans=*/kt,
+                                       min_i, min_j, min_l, dp1,
+                                       Ap, Bp,
+                                       &b[(size_t)is + (size_t)js * ldb], ldb,
+                                       /*offset=*/(is - ls + min_l));
+                }
+
+                for (int is = ls; is < m; is += min_i) {
+                    min_i = m - is;
+                    if (min_i > MC) min_i = MC;
+                    if (min_i > MR) min_i = (min_i / MR) * MR;
+
+                    /* GEMM_I{T,N}COPY of A: !TRANS → TCOPY of A at
+                     * (is, ls-min_l); TRANS → NCOPY of A at (ls-min_l, is). */
+                    if (!trans) {
+                        etri_tcopy(min_l, min_i,
+                                          &a[(size_t)is + (size_t)(ls - min_l) * lda], lda, Ap);
+                    } else {
+                        etri_ncopy(min_l, min_i,
+                                          &a[(size_t)(ls - min_l) + (size_t)is * lda], lda, Ap);
+                    }
+
+                    etri_kernel_store(min_i, min_j, min_l, dp1,
+                                             Ap, Bp,
+                                             &b[(size_t)is + (size_t)js * ldb], ldb);
+                }
             }
         }
     }
 }
 
-void etrmm_lun_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+
+/* ── SIDE='R' driver: port of trmm_R.c for one M-band ────────────────
+ *
+ * Each thread runs the FULL js/ls/is nest over its own M-slice (no
+ * inter-thread sync needed since each thread reads/writes disjoint
+ * M-row slices of B; A is read-only).
+ *
+ * The driver structure for SIDE='R' is more involved — `sa` is OCOPY
+ * of B (B is the input being transformed), `sb` is the packed
+ * triangular A. See trmm_R.c lines 109-241 for the
+ * (!UPPER && !TRANS) || (UPPER && TRANS) branch, and 244-382 for the
+ * opposite.
+ */
+void etrmm_R_band(int upper, int trans, int unit,
+                        int N, int m_lo, int m_hi,
+                        int MC, int KC, int NC,
+                        const T *a, int lda,
+                        T *b, int ldb,
+                        T *Ap, T *Bp)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int k = 0; k < M; ++k) {
-            if (B_(k, j) != 0.0L) {
-                T temp = alpha * B_(k, j);
-                for (int i = 0; i < k; ++i)
-                    B_(i, j) += temp * A_(i, k);
-                if (nounit) temp *= A_(k, k);
-                B_(k, j) = temp;
+    (void)MC;
+    const T dp1 = 1.0L;
+    int m_band = m_hi - m_lo;
+    if (m_band <= 0) return;
+
+    /* For SIDE='R', sa is OCOPY of B (one M-row strip), sb is the packed
+     * A (triangular packer + GEMM packer combinations). The naming gets
+     * confusing — Ap holds sa (a K-strip of B), Bp holds sb (the A
+     * panels). The kernel sees `ba=sa, bb=sb` with bb being the
+     * triangular A. */
+    T *sa = Ap;   /* MC × KC slab for B's OCOPY */
+    T *sb = Bp;   /* KC × NC slab for A's pack (incl. TRMM and GEMM) */
+
+    if ((!upper && !trans) || (upper && trans)) {
+        /* trmm_R.c lines 109-241. Uses TRMM_KERNEL_T = TRMM_KERNEL_RT
+         * (kernel runs in (left=0, trans=1) mode). */
+        const int kt = 1;
+        for (int js = 0; js < N; js += NC) {
+            int min_j = N - js;
+            if (min_j > NC) min_j = NC;
+
+            for (int ls = js; ls < js + min_j; ls += KC) {
+                int min_l = js + min_j - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = m_band;
+                if (min_i > MC) min_i = MC;
+
+                /* GEMM_ITCOPY(min_l, min_i, b + ls*ldb, ldb, sa) — pack
+                 * B[m_lo..m_lo+min_i, ls..ls+min_l] in TCOPY shape. */
+                etri_tcopy(min_l, min_i,
+                                  &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
+
+                /* Off-diagonal GEMM pack of A's left part. */
+                for (int jjs = 0; jjs < ls - js; jjs += NR) {
+                    int min_jj = ls - js - jjs;
+                    if (min_jj > NR) min_jj = NR;
+
+                    /* GEMM_O{N,T}COPY(min_l, min_jj, A_slice, lda, sb + ...) */
+                    if (!trans) {
+                        etri_ncopy(min_l, min_jj,
+                                          &a[(size_t)ls + (size_t)(js + jjs) * lda], lda,
+                                          sb + (size_t)min_l * jjs);
+                    } else {
+                        etri_tcopy(min_l, min_jj,
+                                          &a[(size_t)(js + jjs) + (size_t)ls * lda], lda,
+                                          sb + (size_t)min_l * jjs);
+                    }
+
+                    etri_kernel_store(min_i, min_jj, min_l, dp1,
+                                             sa, sb + (size_t)min_l * jjs,
+                                             &b[(size_t)m_lo + (size_t)(js + jjs) * ldb], ldb);
+                }
+
+                /* Diagonal block: TRMM_O*COPY then TRMM_KERNEL_T. */
+                for (int jjs = 0; jjs < min_l; jjs += NR) {
+                    int min_jj = min_l - jjs;
+                    if (min_jj > NR) min_jj = NR;
+
+                    /* TRMM_O{LN,UT}COPY(min_l, min_jj, a, lda, ls, ls+jjs, ...) */
+                    pack_trmm_a(0, upper, trans, unit, min_l, min_jj, a, lda,
+                                /*posX=*/ls, /*posY=*/ls + jjs,
+                                sb + (size_t)min_l * (ls - js + jjs));
+
+                    etrmm_kernel(/*left=*/0, /*trans=*/kt,
+                                       min_i, min_jj, min_l, dp1,
+                                       sa, sb + (size_t)min_l * (ls - js + jjs),
+                                       &b[(size_t)m_lo + (size_t)(ls + jjs) * ldb], ldb,
+                                       /*offset=*/-jjs);
+                }
+
+                /* Continue with more M-tiles (within the band). */
+                for (int is = min_i; is < m_band; is += MC) {
+                    min_i = m_band - is;
+                    if (min_i > MC) min_i = MC;
+
+                    etri_tcopy(min_l, min_i,
+                                      &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
+
+                    /* GEMM_KERNEL against the off-diagonal A pack (sb). */
+                    etri_kernel_store(min_i, ls - js, min_l, dp1,
+                                             sa, sb,
+                                             &b[(size_t)(m_lo + is) + (size_t)js * ldb], ldb);
+
+                    /* TRMM_KERNEL against the diagonal A pack. */
+                    etrmm_kernel(/*left=*/0, /*trans=*/kt,
+                                       min_i, min_l, min_l, dp1,
+                                       sa, sb + (size_t)(ls - js) * min_l,
+                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb,
+                                       /*offset=*/0);
+                }
+            }
+
+            /* Pure-GEMM tail for ls > js+min_j. */
+            for (int ls = js + min_j; ls < N; ls += KC) {
+                int min_l = N - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = m_band;
+                if (min_i > MC) min_i = MC;
+
+                etri_tcopy(min_l, min_i,
+                                  &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
+
+                for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                    int min_jj = js + min_j - jjs;
+                    if (min_jj > NR) min_jj = NR;
+
+                    if (!trans) {
+                        etri_ncopy(min_l, min_jj,
+                                          &a[(size_t)ls + (size_t)jjs * lda], lda,
+                                          sb + (size_t)min_l * (jjs - js));
+                    } else {
+                        etri_tcopy(min_l, min_jj,
+                                          &a[(size_t)jjs + (size_t)ls * lda], lda,
+                                          sb + (size_t)min_l * (jjs - js));
+                    }
+
+                    etri_kernel_store(min_i, min_jj, min_l, dp1,
+                                             sa, sb + (size_t)min_l * (jjs - js),
+                                             &b[(size_t)m_lo + (size_t)jjs * ldb], ldb);
+                }
+
+                for (int is = min_i; is < m_band; is += MC) {
+                    min_i = m_band - is;
+                    if (min_i > MC) min_i = MC;
+
+                    etri_tcopy(min_l, min_i,
+                                      &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
+
+                    etri_kernel_store(min_i, min_j, min_l, dp1,
+                                             sa, sb,
+                                             &b[(size_t)(m_lo + is) + (size_t)js * ldb], ldb);
+                }
+            }
+        }
+    } else {
+        /* trmm_R.c lines 244-382: (!UPPER && TRANS) || (UPPER && !TRANS).
+         * Uses TRMM_KERNEL_N = TRMM_KERNEL_RN (kernel runs in (left=0,
+         * trans=0) mode). */
+        const int kt = 0;
+        for (int js = N; js > 0; js -= NC) {
+            int min_j = js;
+            if (min_j > NC) min_j = NC;
+
+            int start_ls = js - min_j;
+            while (start_ls + KC < js) start_ls += KC;
+
+            for (int ls = start_ls; ls >= js - min_j; ls -= KC) {
+                int min_l = js - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = m_band;
+                if (min_i > MC) min_i = MC;
+
+                etri_tcopy(min_l, min_i,
+                                  &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
+
+                /* Diagonal triangular A pack (TRMM_O{UN,LT}COPY). */
+                for (int jjs = 0; jjs < min_l; jjs += NR) {
+                    int min_jj = min_l - jjs;
+                    if (min_jj > NR) min_jj = NR;
+
+                    pack_trmm_a(0, upper, trans, unit, min_l, min_jj, a, lda,
+                                /*posX=*/ls, /*posY=*/ls + jjs,
+                                sb + (size_t)min_l * jjs);
+
+                    etrmm_kernel(/*left=*/0, /*trans=*/kt,
+                                       min_i, min_jj, min_l, dp1,
+                                       sa, sb + (size_t)min_l * jjs,
+                                       &b[(size_t)m_lo + (size_t)(ls + jjs) * ldb], ldb,
+                                       /*offset=*/-jjs);
+                }
+
+                /* Off-diagonal GEMM pack of A's right part. */
+                for (int jjs = 0; jjs < js - ls - min_l; jjs += NR) {
+                    int min_jj = js - ls - min_l - jjs;
+                    if (min_jj > NR) min_jj = NR;
+
+                    if (!trans) {
+                        etri_ncopy(min_l, min_jj,
+                                          &a[(size_t)ls + (size_t)(ls + min_l + jjs) * lda], lda,
+                                          sb + (size_t)min_l * (min_l + jjs));
+                    } else {
+                        etri_tcopy(min_l, min_jj,
+                                          &a[(size_t)(ls + min_l + jjs) + (size_t)ls * lda], lda,
+                                          sb + (size_t)min_l * (min_l + jjs));
+                    }
+
+                    etri_kernel_store(min_i, min_jj, min_l, dp1,
+                                             sa, sb + (size_t)min_l * (min_l + jjs),
+                                             &b[(size_t)m_lo + (size_t)(ls + min_l + jjs) * ldb], ldb);
+                }
+
+                for (int is = min_i; is < m_band; is += MC) {
+                    min_i = m_band - is;
+                    if (min_i > MC) min_i = MC;
+
+                    etri_tcopy(min_l, min_i,
+                                      &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
+
+                    etrmm_kernel(/*left=*/0, /*trans=*/kt,
+                                       min_i, min_l, min_l, dp1,
+                                       sa, sb,
+                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb,
+                                       /*offset=*/0);
+
+                    if (js - ls - min_l > 0) {
+                        etri_kernel_store(min_i, js - ls - min_l, min_l, dp1,
+                                                 sa, sb + (size_t)min_l * min_l,
+                                                 &b[(size_t)(m_lo + is) + (size_t)(ls + min_l) * ldb], ldb);
+                    }
+                }
+            }
+
+            /* Pure-GEMM tail for ls < js - min_j. */
+            for (int ls = 0; ls < js - min_j; ls += KC) {
+                int min_l = js - min_j - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = m_band;
+                if (min_i > MC) min_i = MC;
+
+                etri_tcopy(min_l, min_i,
+                                  &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
+
+                for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                    int min_jj = min_j + js - jjs;
+                    if (min_jj > NR) min_jj = NR;
+
+                    if (!trans) {
+                        etri_ncopy(min_l, min_jj,
+                                          &a[(size_t)ls + (size_t)(jjs - min_j) * lda], lda,
+                                          sb + (size_t)min_l * (jjs - js));
+                    } else {
+                        etri_tcopy(min_l, min_jj,
+                                          &a[(size_t)(jjs - min_j) + (size_t)ls * lda], lda,
+                                          sb + (size_t)min_l * (jjs - js));
+                    }
+
+                    etri_kernel_store(min_i, min_jj, min_l, dp1,
+                                             sa, sb + (size_t)min_l * (jjs - js),
+                                             &b[(size_t)m_lo + (size_t)(jjs - min_j) * ldb], ldb);
+                }
+
+                for (int is = min_i; is < m_band; is += MC) {
+                    min_i = m_band - is;
+                    if (min_i > MC) min_i = MC;
+
+                    etri_tcopy(min_l, min_i,
+                                      &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
+
+                    etri_kernel_store(min_i, min_j, min_l, dp1,
+                                             sa, sb,
+                                             &b[(size_t)(m_lo + is) + (size_t)(js - min_j) * ldb], ldb);
+                }
             }
         }
     }
 }
 
-void etrmm_llt_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = 0; i < M; ++i) {
-            T t = B_(i, j);
-            if (nounit) t *= A_(i, i);
-            for (int k = i + 1; k < M; ++k) t += A_(k, i) * B_(k, j);
-            B_(i, j) = alpha * t;
-        }
-    }
-}
-
-void etrmm_lut_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = M - 1; i >= 0; --i) {
-            T t = B_(i, j);
-            if (nounit) t *= A_(i, i);
-            for (int k = 0; k < i; ++k) t += A_(k, i) * B_(k, j);
-            B_(i, j) = alpha * t;
-        }
-    }
-}
-
-/* ── SIDE = 'R' row-range scalar cores ────────────────────────── */
-
-void etrmm_rln_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = 0; j < N; ++j) {
-        T t = alpha;
-        if (nounit) t *= A_(j, j);
-        if (t != 1.0L)
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= t;
-        for (int k = j + 1; k < N; ++k) {
-            if (A_(k, j) != 0.0L) {
-                const T akj = alpha * A_(k, j);
-                for (int i = i_start; i < i_end; ++i)
-                    B_(i, j) += akj * B_(i, k);
-            }
-        }
-    }
-}
-
-void etrmm_run_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = N - 1; j >= 0; --j) {
-        T t = alpha;
-        if (nounit) t *= A_(j, j);
-        if (t != 1.0L)
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= t;
-        for (int k = 0; k < j; ++k) {
-            if (A_(k, j) != 0.0L) {
-                const T akj = alpha * A_(k, j);
-                for (int i = i_start; i < i_end; ++i)
-                    B_(i, j) += akj * B_(i, k);
-            }
-        }
-    }
-}
-
-void etrmm_rlt_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int k = N - 1; k >= 0; --k) {
-        for (int j = k + 1; j < N; ++j) {
-            if (A_(j, k) != 0.0L) {
-                const T ajk = alpha * A_(j, k);
-                for (int i = i_start; i < i_end; ++i)
-                    B_(i, j) += ajk * B_(i, k);
-            }
-        }
-        T t = alpha;
-        if (nounit) t *= A_(k, k);
-        if (t != 1.0L)
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= t;
-    }
-}
-
-void etrmm_rut_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int k = 0; k < N; ++k) {
-        for (int j = 0; j < k; ++j) {
-            if (A_(j, k) != 0.0L) {
-                const T ajk = alpha * A_(j, k);
-                for (int i = i_start; i < i_end; ++i)
-                    B_(i, j) += ajk * B_(i, k);
-            }
-        }
-        T t = alpha;
-        if (nounit) t *= A_(k, k);
-        if (t != 1.0L)
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= t;
-    }
-}
-
-/* ── Blocked SIDE='L' chunk worker ────────────────────────────── */
-
-void etrmm_blocked_chunk_L(enum etrmm_variant_L V, int j_start, int j_end,
-                           int M, int nb, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
-{
-    const int my_N = j_end - j_start;
-    if (my_N <= 0) return;
-
-    const T one = 1.0L;
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-    T *B_chunk = &B_(0, j_start);
-
-    if (V == ETRMM_LLN) {
-        int ic = ((M - 1) / nb) * nb;
-        while (ic >= 0) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
-            etrmm_lln_core(j_start, j_end, ib, alpha,
-                           &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            if (ic > 0) {
-                egemm_serial(NN, NN, &ib, &my_N, &ic, &alpha,
-                             &A_(ic, 0), &lda,
-                             B_chunk, &ldb, &one,
-                             &B_chunk[ic], &ldb, 1, 1);
-            }
-            ic -= nb;
-        }
-    } else if (V == ETRMM_LUN) {
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
-            etrmm_lun_core(j_start, j_end, ib, alpha,
-                           &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            const int trailing = M - (ic + ib);
-            if (trailing > 0) {
-                const int j0 = ic + ib;
-                egemm_serial(NN, NN, &ib, &my_N, &trailing, &alpha,
-                             &A_(ic, j0), &lda,
-                             &B_chunk[j0], &ldb, &one,
-                             &B_chunk[ic], &ldb, 1, 1);
-            }
-        }
-    } else if (V == ETRMM_LLT) {
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
-            etrmm_llt_core(j_start, j_end, ib, alpha,
-                           &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            const int trailing = M - (ic + ib);
-            if (trailing > 0) {
-                const int i0 = ic + ib;
-                egemm_serial(TN, NN, &ib, &my_N, &trailing, &alpha,
-                             &A_(i0, ic), &lda,
-                             &B_chunk[i0], &ldb, &one,
-                             &B_chunk[ic], &ldb, 1, 1);
-            }
-        }
-    } else { /* ETRMM_LUT */
-        int ic = ((M - 1) / nb) * nb;
-        while (ic >= 0) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
-            etrmm_lut_core(j_start, j_end, ib, alpha,
-                           &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            if (ic > 0) {
-                egemm_serial(TN, NN, &ib, &my_N, &ic, &alpha,
-                             &A_(0, ic), &lda,
-                             B_chunk, &ldb, &one,
-                             &B_chunk[ic], &ldb, 1, 1);
-            }
-            ic -= nb;
-        }
-    }
-}
-
-/* ── Blocked SIDE='R' chunk worker ────────────────────────────── */
-
-void etrmm_blocked_chunk_R(enum etrmm_variant_R V, int i_start, int i_end,
-                           int N, int nb, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
-{
-    const T one = 1.0L;
-    const char N_[1] = {'N'};
-    const char T_[1] = {'T'};
-    const int my_M = i_end - i_start;
-    if (my_M <= 0) return;
-    T *B_chunk = &B_(i_start, 0);
-
-    if (V == ETRMM_RLN) {
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
-            etrmm_rln_core(i_start, i_end, jb, alpha,
-                           &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-            const int trailing = N - (jc + jb);
-            if (trailing > 0) {
-                const int k0 = jc + jb;
-                egemm_serial(N_, N_, &my_M, &jb, &trailing, &alpha,
-                             &B_chunk[(size_t)k0 * ldb], &ldb,
-                             &A_(k0, jc), &lda, &one,
-                             &B_chunk[(size_t)jc * ldb], &ldb, 1, 1);
-            }
-        }
-    } else if (V == ETRMM_RUN) {
-        int jc = ((N - 1) / nb) * nb;
-        while (jc >= 0) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
-            etrmm_run_core(i_start, i_end, jb, alpha,
-                           &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-            if (jc > 0) {
-                egemm_serial(N_, N_, &my_M, &jb, &jc, &alpha,
-                             B_chunk, &ldb,
-                             &A_(0, jc), &lda, &one,
-                             &B_chunk[(size_t)jc * ldb], &ldb, 1, 1);
-            }
-            jc -= nb;
-        }
-    } else if (V == ETRMM_RLT) {
-        int jc = ((N - 1) / nb) * nb;
-        while (jc >= 0) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
-            etrmm_rlt_core(i_start, i_end, jb, alpha,
-                           &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-            if (jc > 0) {
-                egemm_serial(N_, T_, &my_M, &jb, &jc, &alpha,
-                             B_chunk, &ldb,
-                             &A_(jc, 0), &lda, &one,
-                             &B_chunk[(size_t)jc * ldb], &ldb, 1, 1);
-            }
-            jc -= nb;
-        }
-    } else { /* ETRMM_RUT */
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
-            etrmm_rut_core(i_start, i_end, jb, alpha,
-                           &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-            const int trailing = N - (jc + jb);
-            if (trailing > 0) {
-                const int k0 = jc + jb;
-                egemm_serial(N_, T_, &my_M, &jb, &trailing, &alpha,
-                             &B_chunk[(size_t)k0 * ldb], &ldb,
-                             &A_(jc, k0), &lda, &one,
-                             &B_chunk[(size_t)jc * ldb], &ldb, 1, 1);
-            }
-        }
-    }
-}
-
-/* ── Serial entry ─────────────────────────────────────────────── */
-
+/* ── Pure-serial Fortran-ABI entry ───────────────────────────────────
+ *
+ * Runs the full SIDE/UPLO/TRANSA dispatch over one band spanning the whole
+ * free axis (no threading). etrmm_parallel.c's etrmm_ delegates here when
+ * called from inside another routine's parallel region.
+ */
 void etrmm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
     const int *m_, const int *n_,
@@ -334,57 +596,38 @@ void etrmm_serial(
     size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
 {
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
+
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const char SIDE = (char)toupper((unsigned char)*side);
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    char TR = (char)toupper((unsigned char)*transa);
-    if (TR == 'C') TR = 'T';
-    const int nounit = ((char)toupper((unsigned char)*diag) != 'U');
+
+    const int lside = (toupper((unsigned char)*side)   == 'L');
+    const int upper = (toupper((unsigned char)*uplo)   == 'U');
+    const char trc  = (char)toupper((unsigned char)*transa);
+    const int trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
+    const int unit  = (toupper((unsigned char)*diag) == 'U');
 
     if (M == 0 || N == 0) return;
 
-    if (alpha == 0.0L) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = 0.0L;
-        return;
-    }
+    /* α pre-scale of B in place, then the nest runs kernel-alpha = 1
+     * (mirrors trmm_{L,R}.c GEMM_BETA pass; alpha == 0 → B := 0). */
+    if (alpha != 1.0L) egemm_beta_prepass(M, N, alpha, b, ldb);
+    if (alpha == 0.0L) return;
 
-    const int nb = etrmm_nb();
+    const int K_eff = lside ? M : N;
+    int MC, KC, NC;
+    egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
-    if (SIDE == 'L') {
-        const int use_blocked = (M >= 2 * nb);
-        enum etrmm_variant_L V = (TR == 'N')
-            ? (UPLO == 'L' ? ETRMM_LLN : ETRMM_LUN)
-            : (UPLO == 'L' ? ETRMM_LLT : ETRMM_LUT);
-        if (use_blocked) {
-            etrmm_blocked_chunk_L(V, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-        } else {
-            switch (V) {
-            case ETRMM_LLN: etrmm_lln_core(0, N, M, alpha, a, lda, b, ldb, nounit); break;
-            case ETRMM_LUN: etrmm_lun_core(0, N, M, alpha, a, lda, b, ldb, nounit); break;
-            case ETRMM_LLT: etrmm_llt_core(0, N, M, alpha, a, lda, b, ldb, nounit); break;
-            case ETRMM_LUT: etrmm_lut_core(0, N, M, alpha, a, lda, b, ldb, nounit); break;
-            }
-        }
-    } else {
-        const int use_blocked = (N >= 2 * nb);
-        enum etrmm_variant_R V = (TR == 'N')
-            ? (UPLO == 'L' ? ETRMM_RLN : ETRMM_RUN)
-            : (UPLO == 'L' ? ETRMM_RLT : ETRMM_RUT);
-        if (use_blocked) {
-            etrmm_blocked_chunk_R(V, 0, M, N, nb, alpha, a, lda, b, ldb, nounit);
-        } else {
-            switch (V) {
-            case ETRMM_RLN: etrmm_rln_core(0, M, N, alpha, a, lda, b, ldb, nounit); break;
-            case ETRMM_RUN: etrmm_run_core(0, M, N, alpha, a, lda, b, ldb, nounit); break;
-            case ETRMM_RLT: etrmm_rlt_core(0, M, N, alpha, a, lda, b, ldb, nounit); break;
-            case ETRMM_RUT: etrmm_rut_core(0, M, N, alpha, a, lda, b, ldb, nounit); break;
-            }
-        }
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
+    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    if (Ap && Bp) {
+        if (lside) etrmm_L_band(upper, trans, unit, M, 0, N,
+                                MC, KC, NC, a, lda, b, ldb, Ap, Bp);
+        else       etrmm_R_band(upper, trans, unit, N, 0, M,
+                                MC, KC, NC, a, lda, b, ldb, Ap, Bp);
     }
+    free(Ap);
+    free(Bp);
 }
-
-#undef A_
-#undef B_
