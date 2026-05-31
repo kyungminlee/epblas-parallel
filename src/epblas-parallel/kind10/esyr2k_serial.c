@@ -1,180 +1,189 @@
 /*
- * esyr2k_serial — kind10 real (long double) symmetric rank-2k, single-thread.
- * This TU owns ALL of the esyr2k math; esyr2k_parallel.c only orchestrates the
- * diagonal-block loop across a team.
+ * esyr2k_serial — kind10 real (long double) symmetric rank-2k update,
+ * single-thread. Owns the SYR2K-specific diagonal-aware writeback kernel and
+ * the fused serial driver.
  *
- *   C := alpha·(A·Bᵀ + B·Aᵀ) + beta·C   (TRANS='N')
- *   C := alpha·(Aᵀ·B + Bᵀ·A) + beta·C   (TRANS='T'/'C')
+ *   C := alpha·(A·B^T + B·A^T) + beta·C   (trans='N', A,B are N×K)
+ *   C := alpha·(A^T·B + B^T·A) + beta·C   (trans='T', A,B are K×N)
  *
- * C is N×N symmetric (only the UPLO triangle is touched). Blocked: scalar
- * rank-2k diagonal + two egemm trailing calls per block. The trailing updates
- * run through egemm_serial (NOT egemm_): when esyr2k_block runs inside the
- * team esyr2k_parallel.c opened, a nested egemm team would trip the libgomp
- * barrier wedge (memory project-etrsm-omp4-wedge).
+ * Only the UPLO triangle of C is read or written.
+ *
+ * Structure (faithful port of OpenBLAS DSYR2K — interface/syr2k.c dispatch,
+ * driver/level3/level3_syr2k.c blocking nest, driver/level3/syr2k_kernel.c
+ * diagonal kernel): one packed GEMM nest whose output is clipped to the UPLO
+ * triangle, run TWICE per (is,js) tile. Pass 1 (Ap=A, Bp=B, flag=1) folds the
+ * A·B^T contribution plus both diagonal halves via the symmetric subbuffer
+ * merge; pass 2 (Ap=B, Bp=A, flag=0) adds the off-diagonal B·A^T strips.
+ *
+ * Built on the SHARED ob-convention substrate (etri_gemm_kernel / etri_ncopy
+ * / etri_tcopy, etri_kernel.h) — the same one etrsm/etrmm/esyrk use — because
+ * the diagonal kernel indexes the packed buffers at arbitrary (possibly odd)
+ * offsets, valid only under OpenBLAS's contiguous-odd-tail packing. The
+ * triangular β pre-pass is the SYRK helper (esyrk_beta_{u,l}), reused as ob
+ * does. The layout-agnostic block policy is shared with egemm
+ * (egemm_choose_blocks / egemm_round_up). Calling only these *serial*
+ * primitives keeps esyr2k free of any nested OpenMP team, so it is safe inside
+ * another routine's parallel region (the libgomp barrier-wedge guard, memory
+ * project-etrsm-omp4-wedge).
  */
 
 #include "esyr2k_kernel.h"
+#include "esyrk_kernel.h"   /* esyrk_beta_{u,l} — shared triangular β pre-pass */
+#include "etri_kernel.h"
+#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_round_up */
+#include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
 
 typedef esyr2k_T T;
 
-static int g_esyr2k_nb = 0;
-int esyr2k_nb(void) {
-    if (g_esyr2k_nb == 0) {
-        g_esyr2k_nb = 64;
-        const char *s = getenv("ESYR2K_NB");
-        if (s && *s) { int v = atoi(s); if (v > 0) g_esyr2k_nb = v; }
-    }
-    return g_esyr2k_nb;
-}
+#define MR ESYR2K_MR
+#define NR ESYR2K_NR
 
-extern void egemm_serial(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    size_t transa_len, size_t transb_len);
-
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
-
-#define A_(i, j)  a[(size_t)(j) * lda + (i)]
-#define B_(i, j)  b[(size_t)(j) * ldb + (i)]
-#define C_(i, j)  c[(size_t)(j) * ldc + (i)]
-
-/* Scalar rank-2k diagonal-block add. No beta scaling (caller pre-scales). */
-static void syr2k_diag_add(int jc, int jb, int K, T alpha,
-                           const T *restrict a, int lda,
-                           const T *restrict b, int ldb,
-                           T *restrict c, int ldc,
-                           char UPLO, char TR)
+/* ── Diagonal-aware writeback kernel ───────────────────────────────────
+ * Faithful port of OpenBLAS driver/level3/syr2k_kernel.c (the openblas
+ * overlay's eblas_esyr2k_kernel_{u,l}), with eblas_egemm_kernel → the shared
+ * etri_gemm_kernel. Identical to the SYRK kernel except for the `flag`-gated
+ * diagonal block, whose merge adds the symmetric pair (subbuf + subbuf^T) so a
+ * single pass 1 covers both A·B^T and B·A^T on the NR×NR diagonal tile.
+ * Subbuffer sized NR*(NR+1) to match OpenBLAS's safety pad. */
+void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
+                     const T *a, const T *b,
+                     T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag)
 {
-    if (TR == 'N') {
-        /* C(I,J) += alpha * sum_l (A(I,l)*B(J,l) + B(I,l)*A(J,l))
-         * Inner i loop walks stride-1 over A(:,l) and B(:,l). */
-        for (int j = jc; j < jc + jb; ++j) {
-            const int i_lo = (UPLO == 'L') ? j     : jc;
-            const int i_hi = (UPLO == 'L') ? jc+jb : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            for (int l = 0; l < K; ++l) {
-                const T t1 = alpha * A_(j, l);
-                const T t2 = alpha * B_(j, l);
-                for (int i = i_lo; i < i_hi; ++i) {
-                    cj[i] += B_(i, l) * t1 + A_(i, l) * t2;
+    T subbuf[NR * (NR + 1)];
+
+    if (m + offset < 0) {
+        etri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
+        return;
+    }
+    if (n < offset) {
+        return;
+    }
+    if (offset > 0) {
+        b += offset * k;
+        c += offset * ldc;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        etri_gemm_kernel(m, n - m - offset, k, alpha,
+                         a, b + (m + offset) * k,
+                         c + (m + offset) * ldc, ldc);
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        etri_gemm_kernel(-offset, n, k, alpha, a, b, c, ldc);
+        a -= offset * k;
+        c -= offset;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        /* Strict-upper portion: rows 0..loop-1 × cols loop..loop+nn-1. */
+        if (loop > 0) {
+            etri_gemm_kernel(loop, nn, k, alpha,
+                             a, b + loop * k, c + loop * ldc, ldc);
+        }
+
+        if (flag) {
+            /* Diagonal NR×NR block: GEMM into subbuf, merge symmetric. */
+            for (ptrdiff_t z = 0; z < nn * nn; ++z) subbuf[z] = 0.0L;
+            etri_gemm_kernel(nn, nn, k, alpha,
+                             a + loop * k, b + loop * k, subbuf, nn);
+
+            T *cc = c + loop + loop * ldc;
+            for (ptrdiff_t j = 0; j < nn; ++j) {
+                for (ptrdiff_t i = 0; i <= j; ++i) {
+                    cc[i + j * ldc] += subbuf[i + j * nn]
+                                     + subbuf[j + i * nn];
                 }
             }
         }
-    } else {
-        /* C(I,J) += alpha * sum_l (A(l,I)*B(l,J) + B(l,I)*A(l,J))
-         * 2-chain dot product, same trick as esyrk TR='T'. */
-        for (int j = jc; j < jc + jb; ++j) {
-            const int i_lo = (UPLO == 'L') ? j     : jc;
-            const int i_hi = (UPLO == 'L') ? jc+jb : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            const T *Aj = a + (size_t)j * lda;
-            const T *Bj = b + (size_t)j * ldb;
-            for (int i = i_lo; i < i_hi; ++i) {
-                const T *Ai = a + (size_t)i * lda;
-                const T *Bi = b + (size_t)i * ldb;
-                T s0 = 0.0L, s1 = 0.0L;
-                int l = 0;
-                for (; l + 1 < K; l += 2) {
-                    s0 += Ai[l] * Bj[l] + Bi[l] * Aj[l];
-                    s1 += Ai[l + 1] * Bj[l + 1] + Bi[l + 1] * Aj[l + 1];
+    }
+}
+
+void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
+                     const T *a, const T *b,
+                     T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag)
+{
+    T subbuf[NR * (NR + 1)];
+
+    if (m + offset < 0) {
+        return;
+    }
+    if (n < offset) {
+        etri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
+        return;
+    }
+    if (offset > 0) {
+        etri_gemm_kernel(m, offset, k, alpha, a, b, c, ldc);
+        b += offset * k;
+        c += offset * ldc;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        a -= offset * k;
+        c -= offset;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+    if (m > n - offset) {
+        etri_gemm_kernel(m - n + offset, n, k, alpha,
+                         a + (n - offset) * k, b,
+                         c + (n - offset), ldc);
+        m = n + offset;
+        if (m <= 0) return;
+    }
+
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t mm = loop;
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        if (flag) {
+            for (ptrdiff_t z = 0; z < nn * nn; ++z) subbuf[z] = 0.0L;
+            etri_gemm_kernel(nn, nn, k, alpha,
+                             a + loop * k, b + loop * k, subbuf, nn);
+
+            T *cc = c + loop + loop * ldc;
+            for (ptrdiff_t j = 0; j < nn; ++j) {
+                for (ptrdiff_t i = j; i < nn; ++i) {
+                    cc[i + j * ldc] += subbuf[i + j * nn]
+                                     + subbuf[j + i * nn];
                 }
-                T s = s0 + s1;
-                for (; l < K; ++l) s += Ai[l] * Bj[l] + Bi[l] * Aj[l];
-                cj[i] += alpha * s;
             }
+        }
+
+        /* Strict-lower portion: rows loop+nn..m-1 × cols loop..loop+nn-1. */
+        if (m > mm + nn) {
+            etri_gemm_kernel(m - mm - nn, nn, k, alpha,
+                             a + (mm + nn) * k, b + loop * k,
+                             c + (mm + nn) + loop * ldc, ldc);
         }
     }
 }
 
-void esyr2k_beta_scale(int j_start, int j_end, int N, T beta,
-                       T *c, int ldc, char UPLO)
-{
-    const T zero = 0.0L;
-    for (int j = j_start; j < j_end; ++j) {
-        const int i_lo = (UPLO == 'L') ? j : 0;
-        const int i_hi = (UPLO == 'L') ? N : j + 1;
-        T *cj = c + (size_t)j * ldc;
-        if (beta == zero) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero;
-        else              for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-    }
-}
-
-void esyr2k_block(int jc, int jb, int N, int K, T alpha, T beta,
-                  const T *a, int lda, const T *b, int ldb,
-                  T *c, int ldc, char UPLO, char TR)
-{
-    const T zero = 0.0L, one = 1.0L;
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-
-    /* (1) Beta-scale this block's UPLO slice. */
-    for (int j = jc; j < jc + jb; ++j) {
-        const int i_lo = (UPLO == 'L') ? j : 0;
-        const int i_hi = (UPLO == 'L') ? N : j + 1;
-        T *cj = c + (size_t)j * ldc;
-        if (beta == zero)      for (int i = i_lo; i < i_hi; ++i) cj[i]  = zero;
-        else if (beta != one)  for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-    }
-
-    /* (2) Diagonal block: scalar rank-2k add. */
-    syr2k_diag_add(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR);
-
-    /* (3) Off-diagonal trailing via two egemm_serial calls (A·Bᵀ + B·Aᵀ). */
-    if (UPLO == 'L') {
-        const int trailing = N - jc - jb;
-        if (trailing > 0) {
-            const int j0 = jc + jb;
-            if (TR == 'N') {
-                /* C(j0:, jc..) += alpha · A(j0:, :) · B(jc.., :)ᵀ */
-                egemm_serial(NN, TN, &trailing, &jb, &K, &alpha,
-                             &A_(j0, 0), &lda, &B_(jc, 0), &ldb, &one,
-                             &C_(j0, jc), &ldc, 1, 1);
-                /* C(j0:, jc..) += alpha · B(j0:, :) · A(jc.., :)ᵀ */
-                egemm_serial(NN, TN, &trailing, &jb, &K, &alpha,
-                             &B_(j0, 0), &ldb, &A_(jc, 0), &lda, &one,
-                             &C_(j0, jc), &ldc, 1, 1);
-            } else {
-                /* C(j0:, jc..) += alpha · A(:, j0:)ᵀ · B(:, jc..) */
-                egemm_serial(TN, NN, &trailing, &jb, &K, &alpha,
-                             &A_(0, j0), &lda, &B_(0, jc), &ldb, &one,
-                             &C_(j0, jc), &ldc, 1, 1);
-                egemm_serial(TN, NN, &trailing, &jb, &K, &alpha,
-                             &B_(0, j0), &ldb, &A_(0, jc), &lda, &one,
-                             &C_(j0, jc), &ldc, 1, 1);
-            }
-        }
-    } else {  /* UPLO == 'U' */
-        if (jc > 0) {
-            if (TR == 'N') {
-                egemm_serial(NN, TN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &B_(jc, 0), &ldb, &one,
-                             &C_(0, jc), &ldc, 1, 1);
-                egemm_serial(NN, TN, &jc, &jb, &K, &alpha,
-                             &B_(0, 0), &ldb, &A_(jc, 0), &lda, &one,
-                             &C_(0, jc), &ldc, 1, 1);
-            } else {
-                egemm_serial(TN, NN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &B_(0, jc), &ldb, &one,
-                             &C_(0, jc), &ldc, 1, 1);
-                egemm_serial(TN, NN, &jc, &jb, &K, &alpha,
-                             &B_(0, 0), &ldb, &A_(0, jc), &lda, &one,
-                             &C_(0, jc), &ldc, 1, 1);
-            }
-        }
-    }
-}
-
+/* ── Single-thread driver ──────────────────────────────────────────────
+ * Faithful port of OpenBLAS level3_syr2k.c with a single thread spanning the
+ * whole output (rows ∈ [0, N]). The js-band UPLO clip bounds the active row
+ * range so the kernel only ever writes the requested triangle. Two B-packs
+ * (A and B in OCOPY shape) and two A-packs (ditto in ICOPY shape) per tile;
+ * pass 1 = (Ap_A, Bp_B, flag=1), pass 2 = (Ap_B, Bp_A, flag=0). */
 void esyr2k_serial(
-    const char *uplo, const char *trans,
+    const char *uplo_p, const char *trans_p,
     const int *n_, const int *k_,
     const T *alpha_,
     const T *a, const int *lda_,
@@ -185,32 +194,81 @@ void esyr2k_serial(
 {
     (void)uplo_len; (void)trans_len;
     const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
-    if (TR == 'C') TR = 'T';
+    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const int uplo  = (char)toupper((unsigned char)*uplo_p);
+    const int trans = (char)toupper((unsigned char)*trans_p);
 
-    if (N == 0) return;
+    if (N <= 0) return;
 
-    const T zero = 0.0L, one = 1.0L;
+    if (uplo == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
-    if (alpha == zero || K == 0) {
-        if (beta == one) return;
-        esyr2k_beta_scale(0, N, N, beta, c, ldc, UPLO);
-        return;
+    if (K == 0 || alpha == 0.0L) return;
+
+    int MC, KC, NC;
+    egemm_choose_blocks(K, &MC, &KC, &NC);
+
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
+    T *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    T *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    if (Ap_A && Ap_B && Bp_A && Bp_B) {
+        for (int js = 0; js < N; js += NC) {
+            const int jb = (N - js < NC) ? (N - js) : NC;
+
+            /* UPLO clip of the [0, N] row range for this js-band:
+             *   UPPER: only rows up to js+jb contribute.
+             *   LOWER: only rows from js onwards. */
+            int m_lo_eff = (uplo == 'L') ? js : 0;
+            int m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
+
+            for (int ls = 0; ls < K; ls += KC) {
+                const int pb = (K - ls < KC) ? (K - ls) : KC;
+
+                /* Pack both B-side panels (A and B in OCOPY shape). */
+                if (trans == 'N') {
+                    etri_tcopy(pb, jb, &a[(size_t)ls * lda + js], lda, Bp_A);
+                    etri_tcopy(pb, jb, &b[(size_t)ls * ldb + js], ldb, Bp_B);
+                } else {
+                    etri_ncopy(pb, jb, &a[(size_t)js * lda + ls], lda, Bp_A);
+                    etri_ncopy(pb, jb, &b[(size_t)js * ldb + ls], ldb, Bp_B);
+                }
+
+                for (int is = m_lo_eff; is < m_hi_eff; is += MC) {
+                    const int min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+
+                    if (trans == 'N') {
+                        etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap_A);
+                        etri_tcopy(pb, min_i, &b[(size_t)ls * ldb + is], ldb, Ap_B);
+                    } else {
+                        etri_ncopy(pb, min_i, &a[(size_t)is * lda + ls], lda, Ap_A);
+                        etri_ncopy(pb, min_i, &b[(size_t)is * ldb + ls], ldb, Ap_B);
+                    }
+
+                    T *cij = &c[(size_t)js * ldc + is];
+                    const ptrdiff_t off = (ptrdiff_t)(is - js);
+
+                    /* Pass 1: alpha·A·B^T + symmetric diagonal merge. */
+                    if (uplo == 'U')
+                        esyr2k_kernel_u(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
+                    else
+                        esyr2k_kernel_l(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
+
+                    /* Pass 2: alpha·B·A^T into the off-diagonal strips only. */
+                    if (uplo == 'U')
+                        esyr2k_kernel_u(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);
+                    else
+                        esyr2k_kernel_l(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);
+                }
+            }
+        }
     }
-
-    /* TR-aware nb (see esyr2k_kernel.h): the TR='T' diag kernel saturates the
-     * x87 2-stream fadd ceiling, so run it as one full-N block (no trailing
-     * egemm); TR='N' uses the tunable block size. */
-    const int nb = (TR == 'T') ? N : esyr2k_nb();
-    for (int jc = 0; jc < N; jc += nb) {
-        const int jb = (N - jc < nb) ? (N - jc) : nb;
-        esyr2k_block(jc, jb, N, K, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
-    }
+    free(Ap_A);
+    free(Ap_B);
+    free(Bp_A);
+    free(Bp_B);
 }
-
-#undef A_
-#undef B_
-#undef C_

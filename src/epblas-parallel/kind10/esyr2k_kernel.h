@@ -1,28 +1,40 @@
 /*
- * esyr2k_kernel.h — internal shared declarations for the kind10 real
- * (REAL(KIND=10) / long double) symmetric rank-2k overlay, split across two
- * translation units:
+ * esyr2k_kernel.h — internal surface shared by the two translation units the
+ * kind10 (REAL(KIND=10) / 80-bit long double) esyr2k overlay is split across:
  *
- *   esyr2k_serial.c   — all the math: the per-diagonal-block worker
- *                       (esyr2k_block: beta pre-scale + scalar rank-2k
- *                       diagonal + two egemm_serial trailing updates), the
- *                       beta-only column scaler, and the pure-serial
- *                       Fortran-ABI entry `esyr2k_serial`. No `#pragma omp`.
- *   esyr2k_parallel.c — the public Fortran entry `esyr2k_`: threading only
- *                       (one `omp parallel for schedule(dynamic,1)` over the
- *                       diagonal blocks), with an `omp_in_parallel()` guard
- *                       that delegates to `esyr2k_serial` when called from
- *                       inside another routine's parallel region.
+ *   esyr2k_serial.c    The pure single-thread rank-2k update (no OpenMP). Owns
+ *                      the SYR2K-specific diagonal-aware writeback kernel and
+ *                      the fused serial driver, plus the public Fortran-ABI
+ *                      serial entry `esyr2k_serial`. Called directly by
+ *                      esyr2k_ as its serial branch / OOM fallback / nesting
+ *                      delegate.
  *
- * C is N×N symmetric (only the UPLO triangle is touched). Work is partitioned
- * by diagonal block (jc): the serial entry walks the blocks in a plain loop;
- * the parallel driver hands the same per-block worker to a dynamic-scheduled
- * team. esyr2k_block runs its trailing updates through egemm_serial — opening
- * a nested egemm team would trip the libgomp barrier wedge (see memory
- * project-etrsm-omp4-wedge). The block size is TR-aware (the TR='T' diagonal
- * kernel already saturates the x87 2-stream fadd ceiling, so it runs as a
- * single full-N block with no trailing egemm); both entries compute it the
- * same way.
+ *   esyr2k_parallel.c  The public Fortran entry `esyr2k_` — threading only.
+ *                      Fans the same pieces across an OpenMP team (the two
+ *                      shared B-packs under `omp single`, each thread an M-row
+ *                      slice of the output, UPLO-clipped per N-band). Delegates
+ *                      to esyr2k_serial when called from inside another
+ *                      routine's parallel region (the libgomp barrier-wedge
+ *                      guard, memory project-etrsm-omp4-wedge).
+ *
+ * SYR2K is a faithful port of OpenBLAS DSYR2K:
+ *   C := alpha·(A·B^T + B·A^T) + beta·C   (trans='N', A,B are N×K)
+ *   C := alpha·(A^T·B + B^T·A) + beta·C   (trans='T', A,B are K×N)
+ * Only the UPLO triangle of C is touched. Each (is,js) tile does TWO kernel
+ * passes: pass 1 with (Ap=A-pack, Bp=B-pack) and flag=1 (the diagonal NR×NR
+ * block is GEMMed to a subbuffer and merged symmetrically, covering both the
+ * A·B^T and B·A^T contributions on the diagonal); pass 2 with (Ap=B-pack,
+ * Bp=A-pack) and flag=0 (only the strict-triangle strips, accumulating B·A^T
+ * off the diagonal).
+ *
+ * Like esyrk, this is built on the SHARED ob-convention L3 substrate
+ * (etri_gemm_kernel / etri_ncopy / etri_tcopy from etri_kernel.h) — NOT par's
+ * egemm primitives — because the diagonal kernel indexes the packed buffers at
+ * arbitrary (possibly odd) row/column offsets, valid only under OpenBLAS's
+ * contiguous-odd-tail packing. The triangular β pre-pass is the SYRK helper
+ * (esyrk_beta_{u,l} from esyrk_kernel.h), reused verbatim as ob does. The
+ * layout-agnostic block-size policy is shared with egemm (egemm_choose_blocks
+ * / egemm_round_up).
  */
 #ifndef EPBLAS_PARALLEL_KIND10_ESYR2K_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_ESYR2K_KERNEL_H
@@ -31,21 +43,22 @@
 
 typedef long double esyr2k_T;
 
-/* Env-tunable block size (ESYR2K_NB, default 64). TR-aware nb is the caller's
- * job: pass N for TR='T', esyr2k_nb() otherwise. */
-int esyr2k_nb(void);
+#define ESYR2K_MR 2
+#define ESYR2K_NR 2
 
-/* One diagonal block [jc, jc+jb): beta pre-scale of the block's triangular
- * columns, the scalar rank-2k diagonal add, and the two trailing egemm_serial
- * updates against the rest of the panel. */
-void esyr2k_block(int jc, int jb, int N, int K, esyr2k_T alpha, esyr2k_T beta,
-                  const esyr2k_T *a, int lda, const esyr2k_T *b, int ldb,
-                  esyr2k_T *c, int ldc, char UPLO, char TR);
-
-/* C := beta*C over the triangular columns [j_start, j_end) — the
- * alpha==0 / K==0 quick path. */
-void esyr2k_beta_scale(int j_start, int j_end, int N, esyr2k_T beta,
-                       esyr2k_T *c, int ldc, char UPLO);
+/* Diagonal-aware writeback kernel for one packed (m,n,k) block whose top-left
+ * corner sits at global diagonal offset `offset` (row_base - col_base). The
+ * strict-triangle rectangular remainders are full GEMMs (etri_gemm_kernel).
+ * When flag != 0 the diagonal NR×NR block is GEMMed into a zeroed subbuffer and
+ * its UPLO triangle merged symmetrically (subbuf + subbuf^T) into C — this is
+ * pass 1, which folds both A·B^T and B·A^T on the diagonal. flag == 0 (pass 2)
+ * skips the diagonal block; the off-diagonal B·A^T strips land in C directly. */
+void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_T alpha,
+                     const esyr2k_T *a, const esyr2k_T *b,
+                     esyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag);
+void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_T alpha,
+                     const esyr2k_T *a, const esyr2k_T *b,
+                     esyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as esyr2k_. */
 void esyr2k_serial(
