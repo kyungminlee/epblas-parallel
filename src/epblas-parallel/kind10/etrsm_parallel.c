@@ -1,151 +1,35 @@
 /*
- * etrsm_ — kind10 (REAL(KIND=10) / long double) triangular solve, the
+ * etrsm_ — kind10 (REAL(KIND=10) / long double) triangular solve: the
  * public Fortran entry and threading-orchestration half of the etrsm
- * overlay (see etrsm_kernel.h for the split rationale; all the math
- * lives in etrsm_serial.c).
+ * overlay (all the math lives in etrsm_serial.c / etrsm_kernel.c /
+ * etrsm_pack.c). Faithful port of OpenBLAS interface/trsm.c dispatch
+ * (gemm_thread_n for SIDE='L', gemm_thread_m for SIDE='R').
  *
- * Two parallel shapes, both partitioning a single axis across one team:
- *   SIDE='L'  — partition B's columns; each thread runs the serial
- *               blocked (or unblocked) solve on its own column slice.
- *   SIDE='R'  — partition B's rows; the diagonal walk stays serial per
- *               thread, rows are independent.
+ * One `omp parallel` per solve. Each thread takes a contiguous slice of
+ * the free axis — B's columns (SIDE='L') or rows (SIDE='R') — and runs
+ * the full L3 band driver on its slice with private Ap/Bp scratch, so
+ * there is no cross-thread synchronization inside the solve.
  *
- * One `omp parallel` per solve (not one per block), and egemm trailing
- * updates run single-thread (egemm_serial) inside each outer thread.
- *
- * Nesting guard: when etrsm_ is itself called from inside another
- * routine's parallel region, it delegates to etrsm_serial and opens no
- * region of its own — opening a nested team here trips the libgomp
- * barrier wedge (memory project-etrsm-omp4-wedge).
+ * Nesting guard: when etrsm_ is called from inside another routine's
+ * parallel region, it delegates to etrsm_serial and opens no team of its
+ * own — a nested team trips the libgomp barrier wedge (memory
+ * project-etrsm-omp4-wedge).
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 #include "etrsm_kernel.h"
+#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
 
 typedef etrsm_T T;
 
-/* Threshold below which OMP parallel-for on the partition axis isn't
- * worth the parallel-region setup. */
-#define ETRSM_OMP_N_MIN 32
-
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
-
-#define B_(i, j)  b[(size_t)(j) * ldb + (i)]
-
-/* ── SIDE='L' standalone unblocked wrappers: wrap a core in this solve's
- *    own parallel region if N is big enough. Called when M < 2·nb (the
- *    blocked path doesn't kick in). ─────────────────────────────── */
-#ifdef _OPENMP
-#define TRSM_OMP_WRAPPER(name, core)                                       \
-    static void name(int M, int N, T alpha,                                \
-                     const T *a, int lda, T *b, int ldb, int nounit)       \
-    {                                                                      \
-        if (N >= ETRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {           \
-            _Pragma("omp parallel")                                        \
-            {                                                              \
-                int tid = omp_get_thread_num();                            \
-                int nt  = omp_get_num_threads();                           \
-                int js  = ((long long)N * tid) / nt;                       \
-                int je  = ((long long)N * (tid + 1)) / nt;                 \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit);            \
-            }                                                              \
-        } else {                                                           \
-            core(0, N, M, alpha, a, lda, b, ldb, nounit);                  \
-        }                                                                  \
-    }
-#else
-#define TRSM_OMP_WRAPPER(name, core)                                       \
-    static void name(int M, int N, T alpha,                                \
-                     const T *a, int lda, T *b, int ldb, int nounit)       \
-    {                                                                      \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit);                      \
-    }
-#endif
-
-TRSM_OMP_WRAPPER(trsm_lln, etrsm_lln_core)
-TRSM_OMP_WRAPPER(trsm_lun, etrsm_lun_core)
-TRSM_OMP_WRAPPER(trsm_llt, etrsm_llt_core)
-TRSM_OMP_WRAPPER(trsm_lut, etrsm_lut_core)
-
-/* ── Blocked SIDE='L': one outer `omp parallel` partitions B's columns
- *    across threads; each thread runs the serial blocked worker on its
- *    own column chunk. ─────────────────────────────────────────── */
-static void blocked_dispatch(enum etrsm_variant V, int M, int N, T alpha,
-                             const T *a, int lda, T *b, int ldb, int nounit)
-{
-    const int nb = etrsm_nb();
-#ifdef _OPENMP
-    if (N >= ETRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt  = omp_get_num_threads();
-            int js  = ((long long)N * tid) / nt;
-            int je  = ((long long)N * (tid + 1)) / nt;
-            etrsm_blocked_chunk(V, js, je, M, nb, alpha, a, lda, b, ldb, nounit);
-        }
-        return;
-    }
-#endif
-    etrsm_blocked_chunk(V, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-}
-
-static void blocked_lln(int M, int N, T alpha,
-                        const T *a, int lda, T *b, int ldb, int nounit) {
-    blocked_dispatch(LLN, M, N, alpha, a, lda, b, ldb, nounit);
-}
-static void blocked_lun(int M, int N, T alpha,
-                        const T *a, int lda, T *b, int ldb, int nounit) {
-    blocked_dispatch(LUN, M, N, alpha, a, lda, b, ldb, nounit);
-}
-static void blocked_llt(int M, int N, T alpha,
-                        const T *a, int lda, T *b, int ldb, int nounit) {
-    blocked_dispatch(LLT, M, N, alpha, a, lda, b, ldb, nounit);
-}
-static void blocked_lut(int M, int N, T alpha,
-                        const T *a, int lda, T *b, int ldb, int nounit) {
-    blocked_dispatch(LUT, M, N, alpha, a, lda, b, ldb, nounit);
-}
-
-/* ── SIDE='R' wrappers: one parallel region partitions the M (row) axis.
- *    Gates on M (the partition axis) >= ETRSM_OMP_N_MIN. The entry guard
- *    already excludes nested calls, so no omp_in_parallel() check here. */
-#ifdef _OPENMP
-#define ETRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
-        if (M >= ETRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {            \
-            _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                             \
-                int nt  = omp_get_num_threads();                            \
-                int is  = (int)((long long)M * tid / nt);                   \
-                int ie  = (int)((long long)M * (tid + 1) / nt);             \
-                core(is, ie, N, alpha, a, lda, b, ldb, nounit);             \
-            }                                                               \
-        } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }            \
-    }
-#else
-#define ETRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
-        core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
-    }
-#endif
-
-ETRSM_OMP_WRAP_R(trsm_rln, etrsm_rln_core)
-ETRSM_OMP_WRAP_R(trsm_run, etrsm_run_core)
-ETRSM_OMP_WRAP_R(trsm_rlt, etrsm_rlt_core)
-ETRSM_OMP_WRAP_R(trsm_rut, etrsm_rut_core)
-
-/* ── Entry point ──────────────────────────────────────────────── */
+#define MR 2
+#define NR 2
 
 void etrsm_(
     const char *side, const char *uplo, const char *transa, const char *diag,
@@ -165,55 +49,106 @@ void etrsm_(
     }
 #endif
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
+
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const char SIDE   = up(side);
-    const char UPLO   = up(uplo);
-    char TR           = up(transa);
-    if (TR == 'C') TR = 'T';   /* real type: conj-trans ≡ trans */
-    const int nounit = (up(diag) != 'U');
+
+    const int lside = (toupper((unsigned char)*side)   == 'L');
+    const int upper = (toupper((unsigned char)*uplo)   == 'U');
+    const char trc  = (char)toupper((unsigned char)*transa);
+    const int trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
+    const int unit  = (toupper((unsigned char)*diag) == 'U');
 
     if (M == 0 || N == 0) return;
 
-    /* alpha == 0 quick return: B becomes all zeros. */
-    if (alpha == 0.0L) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = 0.0L;
+    /* α pre-scale of B (mirrors trsm_{L,R}.c GEMM_BETA pass). */
+    if (alpha != 1.0L) egemm_beta_prepass(M, N, alpha, b, ldb);
+    if (alpha == 0.0L) return;
+
+    const int K_eff = lside ? M : N;
+    int MC, KC, NC;
+    egemm_choose_blocks(K_eff, &MC, &KC, &NC);
+
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
+
+#ifdef _OPENMP
+    int nthreads = omp_get_max_threads();
+    if (nthreads < 1) nthreads = 1;
+#else
+    int nthreads = 1;
+#endif
+
+    /* Small problems: one thread (the parallel-region setup isn't worth
+     * it). Mirrors OpenBLAS's GEMM_MULTITHREAD_THRESHOLD gating. */
+    long mnk = (long)M * (long)N * (long)K_eff;
+    if (mnk < 64L * 64L * 64L) nthreads = 1;
+
+    const int partition_axis = lside ? N : M;
+    if (nthreads > partition_axis) nthreads = partition_axis;
+    if (nthreads < 1) nthreads = 1;
+
+    /* Per-thread Ap/Bp scratch, allocated BEFORE the region: an in-region
+     * alloc failure that skips a thread's loop body would deadlock the
+     * others at no barrier here (there is none), but pre-allocating keeps
+     * the failure path simple and race-free. */
+    T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
+    T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
+    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    int alloc_ok = 1;
+    for (int t = 0; t < nthreads; ++t) {
+        Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        Bp_arr[t] = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+        if (!Ap_arr[t] || !Bp_arr[t]) { alloc_ok = 0; break; }
+    }
+    if (!alloc_ok) {
+        for (int t = 0; t < nthreads; ++t) {
+            if (Ap_arr) free(Ap_arr[t]);
+            if (Bp_arr) free(Bp_arr[t]);
+        }
+        free(Ap_arr); free(Bp_arr);
         return;
     }
 
-    if (SIDE == 'L') {
-        /* Blocked path when M is large enough to amortize the egemm
-         * call overhead. Threshold is twice the block size — below
-         * that, blocking only adds noise. */
-        const int use_blocked = (M >= 2 * etrsm_nb());
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_lln(M, N, alpha, a, lda, b, ldb, nounit);
-                else             trsm_lln(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_lun(M, N, alpha, a, lda, b, ldb, nounit);
-                else             trsm_lun(M, N, alpha, a, lda, b, ldb, nounit);
-            }
+#ifdef _OPENMP
+    #pragma omp parallel num_threads(nthreads)
+#endif
+    {
+#ifdef _OPENMP
+        int tid = omp_get_thread_num();
+        int nth = omp_get_num_threads();
+#else
+        int tid = 0, nth = 1;
+#endif
+        T *Ap = Ap_arr[tid];
+        T *Bp = Bp_arr[tid];
+
+        if (lside) {
+            int chunk = egemm_round_up((N + nth - 1) / nth, NR);
+            int js0 = tid * chunk;
+            int js1 = js0 + chunk;
+            if (js0 > N) js0 = N;
+            if (js1 > N) js1 = N;
+            if (js0 < js1)
+                etrsm_L_band(upper, trans, unit, M, js0, js1,
+                             MC, KC, NC, a, lda, b, ldb, Ap, Bp);
         } else {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_llt(M, N, alpha, a, lda, b, ldb, nounit);
-                else             trsm_llt(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_lut(M, N, alpha, a, lda, b, ldb, nounit);
-                else             trsm_lut(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        }
-    } else {
-        if (TR == 'N') {
-            if (UPLO == 'L') trsm_rln(M, N, alpha, a, lda, b, ldb, nounit);
-            else             trsm_run(M, N, alpha, a, lda, b, ldb, nounit);
-        } else {
-            if (UPLO == 'L') trsm_rlt(M, N, alpha, a, lda, b, ldb, nounit);
-            else             trsm_rut(M, N, alpha, a, lda, b, ldb, nounit);
+            int chunk = egemm_round_up((M + nth - 1) / nth, MR);
+            int m_lo = tid * chunk;
+            int m_hi = m_lo + chunk;
+            if (m_lo > M) m_lo = M;
+            if (m_hi > M) m_hi = M;
+            if (m_lo < m_hi)
+                etrsm_R_band(upper, trans, unit, N, m_lo, m_hi,
+                             MC, KC, NC, a, lda, b, ldb, Ap, Bp);
         }
     }
-}
 
-#undef B_
+    for (int t = 0; t < nthreads; ++t) {
+        free(Ap_arr[t]);
+        free(Bp_arr[t]);
+    }
+    free(Ap_arr);
+    free(Bp_arr);
+}

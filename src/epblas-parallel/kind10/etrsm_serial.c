@@ -1,23 +1,23 @@
 /*
- * etrsm_serial — kind10 (REAL(KIND=10) / long double) triangular solve,
- * pure single-thread worker half of the etrsm overlay (see
- * etrsm_kernel.h for the split rationale).
+ * etrsm_serial — kind10 (REAL(KIND=10) / long double) triangular solve:
+ * the SIDE='L'/'R' L3 band drivers and the pure-serial Fortran-ABI entry
+ * `etrsm_serial`. Faithful port of OpenBLAS driver/level3/trsm_{L,R}.c
+ * (sibling of the openblas overlay's etrsm.c).
  *
- * Solves one of:
- *   op(A) · X = alpha · B          (SIDE='L')
- *   X · op(A) = alpha · B          (SIDE='R')
+ * A "band" is one contiguous slice of the partition (free) axis: a column
+ * band [js0, js1) of B for SIDE='L', a row band [m_lo, m_hi) for SIDE='R'.
+ * The serial entry runs one band spanning the whole axis; the threaded
+ * entry (etrsm_parallel.c) splits the axis across a team and calls these
+ * same drivers, one band per thread, with per-thread Ap/Bp scratch.
  *
- * where op(A) ∈ {A, Aᵀ, Aᴴ}; for real types Aᴴ ≡ Aᵀ. A is M×M (or N×N)
- * triangular (upper or lower; optionally unit-diagonal). B is overwritten
- * with the solution X.
+ * The numeric substrate (GEMM micro-kernel, ncopy/tcopy, diagonal-aware
+ * TRSM kernel) lives in etrsm_kernel.c; the diagonal-inverting A-packers
+ * in etrsm_pack.c. Block-size policy (incl. the L2-detected adaptive MC)
+ * and the α pre-scale are the layout-agnostic egemm primitives, reused
+ * directly — see etrsm_kernel.h for why the rest is NOT shared with egemm.
  *
- * This file holds ALL the math: the column/row-range cores, the blocked
- * SIDE='L' worker, and the serial Fortran-ABI entry `etrsm_serial`. It
- * contains no `#pragma omp` — the threading lives entirely in
- * etrsm_parallel.c, which calls these same cores per team chunk.
- *
- * The rank-1-update loop structure matches upstream Netlib DTRSM so the
- * numerical behavior tracks the migrated archive to a tight tolerance.
+ * Contains no `#pragma omp`. The libgomp barrier-wedge nesting guard
+ * lives in etrsm_parallel.c (memory project-etrsm-omp4-wedge).
  */
 
 #include <stddef.h>
@@ -25,308 +25,478 @@
 #include <ctype.h>
 
 #include "etrsm_kernel.h"
+#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
 
 typedef etrsm_T T;
 
-/* Block size for the SIDE='L' blocked path. Env-tunable; default picked
- * empirically to match egemm's natural panel sizing. */
-static int env_int(const char *name, int dflt) {
-    const char *s = getenv(name);
-    if (!s || !*s) return dflt;
-    int v = atoi(s);
-    return v > 0 ? v : dflt;
-}
-static int g_nb_trsm = 0;
-int etrsm_nb(void) {
-    if (g_nb_trsm == 0) g_nb_trsm = env_int("ETRSM_NB", 64);
-    return g_nb_trsm;
-}
+/* Register-tile dims — must match the packed layout (etrsm_kernel.c). */
+#define MR 2
+#define NR 2
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
-
-/* Convenience accessors over column-major A and B. */
-#define A_(i, j)  a[(size_t)(j) * lda + (i)]
-#define B_(i, j)  b[(size_t)(j) * ldb + (i)]
-
-/* The overlay's single-thread egemm worker (egemm_serial.c). We call it
- * — not the parallel egemm_ — because every trailing update here runs
- * inside the caller's `omp parallel` (blocked_dispatch in
- * etrsm_parallel.c); opening egemm's own nested team is what tripped the
- * libgomp barrier wedge (memory project-etrsm-omp4-wedge). egemm_ would
- * itself delegate here via its omp_in_parallel() guard; calling
- * egemm_serial directly makes the intent explicit and skips the check. */
-extern void egemm_serial(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    size_t transa_len, size_t transb_len);
-
-/* ── SIDE = 'L': solve op(A) X = α B, A is M×M, B is M×N ───────── */
-
-/* Column-range cores: serial work over columns j in [j_start, j_end).
- * Used both standalone (the parallel driver wraps them in its own
- * region) and inside the blocked path (where the outer parallel region
- * has already partitioned the column range). */
-
-void etrsm_lln_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit,
+                                             ptrdiff_t m, ptrdiff_t n,
+                                             const T *a, ptrdiff_t lda,
+                                             ptrdiff_t offset, T *bp)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        if (alpha != 1.0L) for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (int k = 0; k < M; ++k) {
-            if (B_(k, j) != 0.0L) {
-                if (nounit) B_(k, j) /= A_(k, k);
-                const T bk = B_(k, j);
-                for (int i = k + 1; i < M; ++i)
-                    B_(i, j) -= bk * A_(i, k);
+    /* forward direction (UPPER+!TRANS or !UPPER+TRANS branch is
+     * backwards; this is for !UPPER+!TRANS / UPPER+TRANS). */
+    if (!trans) {
+        etrsm_iltcopy(m, n, a, lda, offset, bp, unit);
+    } else {
+        etrsm_iuncopy(m, n, a, lda, offset, bp, unit);
+    }
+}
+
+static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit,
+                                              ptrdiff_t m, ptrdiff_t n,
+                                              const T *a, ptrdiff_t lda,
+                                              ptrdiff_t offset, T *bp)
+{
+    /* backward direction: UPPER+!TRANS uses IUTCOPY, !UPPER+TRANS uses ILNCOPY */
+    if (!trans) {
+        etrsm_iutcopy(m, n, a, lda, offset, bp, unit);
+    } else {
+        etrsm_ilncopy(m, n, a, lda, offset, bp, unit);
+    }
+}
+
+static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit,
+                                             ptrdiff_t m, ptrdiff_t n,
+                                             const T *a, ptrdiff_t lda,
+                                             ptrdiff_t offset, T *bp)
+{
+    /* trsm_R.c lines 170/172: UPPER+!TRANS → OUNCOPY = iuncopy;
+     *                          !UPPER+TRANS → OLTCOPY = iltcopy. */
+    if (!trans) {
+        etrsm_iuncopy(m, n, a, lda, offset, bp, unit);
+    } else {
+        etrsm_iltcopy(m, n, a, lda, offset, bp, unit);
+    }
+}
+
+static inline void pack_trsm_a_rside_backward(int upper, int trans, int unit,
+                                              ptrdiff_t m, ptrdiff_t n,
+                                              const T *a, ptrdiff_t lda,
+                                              ptrdiff_t offset, T *bp)
+{
+    /* trsm_R.c lines 290/293: !UPPER+!TRANS → OLNCOPY = ilncopy;
+     *                          UPPER+TRANS → OUTCOPY = iutcopy. */
+    if (!trans) {
+        etrsm_ilncopy(m, n, a, lda, offset, bp, unit);
+    } else {
+        etrsm_iutcopy(m, n, a, lda, offset, bp, unit);
+    }
+}
+
+/* ── SIDE='L' driver: port of trsm_L.c for one N-band [js0..js1) ───── */
+void etrsm_L_band(int upper, int trans, int unit,
+                        int M, int js0, int js1,
+                        int MC, int KC, int NC,
+                        const T *a, int lda,
+                        T *b, int ldb,
+                        T *Ap, T *Bp)
+{
+    const T dm1 = -1.0L;
+    int m = M;
+    /* Pick which (uplo, trans) branch (forward vs backward ls). Forward
+     * = !UPPER+!TRANS || UPPER+TRANS (ls walks 0..m). */
+    const int forward = (!upper && !trans) || (upper && trans);
+    /* TRSM_KERNEL trans flag: forward branch → LT (kt=1); backward → LN (kt=0).
+     * See trsm_L.c #define logic at top of file. */
+    const int kt = forward ? 1 : 0;
+
+    for (int js = js0; js < js1; js += NC) {
+        int min_j = js1 - js;
+        if (min_j > NC) min_j = NC;
+
+        if (forward) {
+            /* trsm_L.c lines 119-182 (forward ls walk). */
+            for (int ls = 0; ls < m; ls += KC) {
+                int min_l = m - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = min_l;
+                if (min_i > MC) min_i = MC;
+
+                /* TRSM_I*COPY of A diagonal block [ls..ls+min_l, ls..ls+min_l].
+                 * In trsm_L.c the packed shape is (min_l, min_i) with the
+                 * is-iteration packing only `min_i` rows at a time of the
+                 * `min_l × min_l` diagonal block. */
+                pack_trsm_a_lside_forward(upper, trans, unit,
+                                          min_l, min_i,
+                                          &a[(size_t)ls + (size_t)ls * lda], lda,
+                                          /*offset=*/0, Ap);
+
+                /* jjs loop: pack B-strip [ls..ls+min_l, jjs..jjs+min_jj] then TRSM_KERNEL. */
+                for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                    int min_jj = js + min_j - jjs;
+                    if (min_jj > NR) min_jj = NR;
+                    etrsm_ncopy(min_l, min_jj,
+                                      &b[(size_t)ls + (size_t)jjs * ldb], ldb,
+                                      Bp + (size_t)min_l * (jjs - js));
+                    etrsm_solve_kernel(/*left=*/1, kt,
+                                       min_i, min_jj, min_l,
+                                       Ap, Bp + (size_t)min_l * (jjs - js),
+                                       &b[(size_t)ls + (size_t)jjs * ldb], ldb,
+                                       /*offset=*/0);
+                }
+
+                /* is loop: more A rows from the same KC-band (still
+                 * containing the diagonal entries below it). */
+                for (int is = ls + min_i; is < ls + min_l; is += MC) {
+                    min_i = ls + min_l - is;
+                    if (min_i > MC) min_i = MC;
+                    pack_trsm_a_lside_forward(upper, trans, unit,
+                                              min_l, min_i,
+                                              !trans ? &a[(size_t)is + (size_t)ls * lda]
+                                                     : &a[(size_t)ls + (size_t)is * lda],
+                                              lda,
+                                              /*offset=*/is - ls, Ap);
+                    etrsm_solve_kernel(/*left=*/1, kt,
+                                       min_i, min_j, min_l,
+                                       Ap, Bp,
+                                       &b[(size_t)is + (size_t)js * ldb], ldb,
+                                       /*offset=*/is - ls);
+                }
+
+                /* is loop: rows entirely below the diagonal — pure GEMM. */
+                for (int is = ls + min_l; is < m; is += MC) {
+                    min_i = m - is;
+                    if (min_i > MC) min_i = MC;
+                    if (!trans) {
+                        etrsm_tcopy(min_l, min_i,
+                                          &a[(size_t)is + (size_t)ls * lda], lda, Ap);
+                    } else {
+                        etrsm_ncopy(min_l, min_i,
+                                          &a[(size_t)ls + (size_t)is * lda], lda, Ap);
+                    }
+                    etrsm_gemm_kernel(min_i, min_j, min_l, dm1,
+                                       Ap, Bp,
+                                       &b[(size_t)is + (size_t)js * ldb], ldb);
+                }
+            }
+        } else {
+            /* trsm_L.c lines 184-248 (backward ls walk: ls from m down). */
+            for (int ls = m; ls > 0; ls -= KC) {
+                int min_l = ls;
+                if (min_l > KC) min_l = KC;
+                int start_is = ls - min_l;
+                while (start_is + MC < ls) start_is += MC;
+                int min_i = ls - start_is;
+                if (min_i > MC) min_i = MC;
+
+                /* Pack diagonal block — note OpenBLAS passes
+                 *   a + (start_is + (ls - min_l)*lda)   [for !TRANS / IUTCOPY]
+                 *   a + ((ls - min_l) + start_is*lda)   [for TRANS / ILNCOPY]
+                 * with offset = start_is - (ls - min_l). */
+                pack_trsm_a_lside_backward(upper, trans, unit,
+                                           min_l, min_i,
+                                           !trans
+                                             ? &a[(size_t)start_is + (size_t)(ls - min_l) * lda]
+                                             : &a[(size_t)(ls - min_l) + (size_t)start_is * lda],
+                                           lda,
+                                           /*offset=*/start_is - (ls - min_l), Ap);
+
+                for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                    int min_jj = js + min_j - jjs;
+                    if (min_jj > NR) min_jj = NR;
+                    etrsm_ncopy(min_l, min_jj,
+                                      &b[(size_t)(ls - min_l) + (size_t)jjs * ldb], ldb,
+                                      Bp + (size_t)min_l * (jjs - js));
+                    etrsm_solve_kernel(/*left=*/1, kt,
+                                       min_i, min_jj, min_l,
+                                       Ap, Bp + (size_t)min_l * (jjs - js),
+                                       &b[(size_t)start_is + (size_t)jjs * ldb], ldb,
+                                       /*offset=*/start_is - ls + min_l);
+                }
+
+                /* is loop: rows above start_is, within [ls-min_l, ls). */
+                for (int is = start_is - MC; is >= ls - min_l; is -= MC) {
+                    min_i = ls - is;
+                    if (min_i > MC) min_i = MC;
+                    pack_trsm_a_lside_backward(upper, trans, unit,
+                                               min_l, min_i,
+                                               !trans
+                                                 ? &a[(size_t)is + (size_t)(ls - min_l) * lda]
+                                                 : &a[(size_t)(ls - min_l) + (size_t)is * lda],
+                                               lda,
+                                               /*offset=*/is - (ls - min_l), Ap);
+                    etrsm_solve_kernel(/*left=*/1, kt,
+                                       min_i, min_j, min_l,
+                                       Ap, Bp,
+                                       &b[(size_t)is + (size_t)js * ldb], ldb,
+                                       /*offset=*/is - (ls - min_l));
+                }
+
+                /* is loop: rows entirely above the diagonal band. */
+                for (int is = 0; is < ls - min_l; is += MC) {
+                    min_i = ls - min_l - is;
+                    if (min_i > MC) min_i = MC;
+                    if (!trans) {
+                        etrsm_tcopy(min_l, min_i,
+                                          &a[(size_t)is + (size_t)(ls - min_l) * lda], lda, Ap);
+                    } else {
+                        etrsm_ncopy(min_l, min_i,
+                                          &a[(size_t)(ls - min_l) + (size_t)is * lda], lda, Ap);
+                    }
+                    etrsm_gemm_kernel(min_i, min_j, min_l, dm1,
+                                       Ap, Bp,
+                                       &b[(size_t)is + (size_t)js * ldb], ldb);
+                }
             }
         }
     }
 }
 
-void etrsm_lun_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+/* ── SIDE='R' driver: port of trsm_R.c for one M-band [m_lo..m_hi) ──── */
+void etrsm_R_band(int upper, int trans, int unit,
+                        int N, int m_lo, int m_hi,
+                        int MC, int KC, int NC,
+                        const T *a, int lda,
+                        T *b, int ldb,
+                        T *Ap, T *Bp)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        if (alpha != 1.0L) for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (int k = M - 1; k >= 0; --k) {
-            if (B_(k, j) != 0.0L) {
-                if (nounit) B_(k, j) /= A_(k, k);
-                const T bk = B_(k, j);
-                for (int i = 0; i < k; ++i)
-                    B_(i, j) -= bk * A_(i, k);
+    const T dm1 = -1.0L;
+    const int m_band = m_hi - m_lo;
+    if (m_band <= 0) return;
+    /* SIDE=R forward direction = UPPER+!TRANS || !UPPER+TRANS (js walks
+     * up; for each js, ls walks 0..js then js..js+min_j). */
+    const int forward = (upper && !trans) || (!upper && trans);
+    /* TRSM_KERNEL trans flag (left=0): forward branch → RN (kt=0);
+     * backward → RT (kt=1). See trsm_R.c #define logic. */
+    const int kt = forward ? 0 : 1;
+
+    /* sa = B-tile pack (Ap); sb = A pack (Bp) — matches trsm_R.c naming. */
+    T *sa = Ap;
+    T *sb = Bp;
+
+    if (forward) {
+        /* trsm_R.c lines 115-229 (forward js walk). */
+        for (int js = 0; js < N; js += NC) {
+            int min_j = N - js;
+            if (min_j > NC) min_j = NC;
+
+            /* ls loop part 1: A-cols [ls, ls+min_l) entirely above the
+             * diagonal of B's js-band — pure GEMM. */
+            for (int ls = 0; ls < js; ls += KC) {
+                int min_l = js - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = m_band;
+                if (min_i > MC) min_i = MC;
+
+                etrsm_tcopy(min_l, min_i,
+                                  &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
+
+                for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                    int min_jj = js + min_j - jjs;
+                    if (min_jj > NR) min_jj = NR;
+                    if (!trans) {
+                        etrsm_ncopy(min_l, min_jj,
+                                          &a[(size_t)ls + (size_t)jjs * lda], lda,
+                                          sb + (size_t)min_l * (jjs - js));
+                    } else {
+                        etrsm_tcopy(min_l, min_jj,
+                                          &a[(size_t)jjs + (size_t)ls * lda], lda,
+                                          sb + (size_t)min_l * (jjs - js));
+                    }
+                    etrsm_gemm_kernel(min_i, min_jj, min_l, dm1,
+                                       sa, sb + (size_t)min_l * (jjs - js),
+                                       &b[(size_t)m_lo + (size_t)jjs * ldb], ldb);
+                }
+
+                for (int is = min_i; is < m_band; is += MC) {
+                    min_i = m_band - is;
+                    if (min_i > MC) min_i = MC;
+                    etrsm_tcopy(min_l, min_i,
+                                      &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
+                    etrsm_gemm_kernel(min_i, min_j, min_l, dm1,
+                                       sa, sb,
+                                       &b[(size_t)(m_lo + is) + (size_t)js * ldb], ldb);
+                }
+            }
+
+            /* ls loop part 2: A-cols [ls, ls+min_l) intersecting the
+             * diagonal — TRSM packers + TRSM_KERNEL. */
+            for (int ls = js; ls < js + min_j; ls += KC) {
+                int min_l = js + min_j - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = m_band;
+                if (min_i > MC) min_i = MC;
+
+                etrsm_tcopy(min_l, min_i,
+                                  &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
+
+                /* TRSM_O*COPY of A diagonal block. */
+                pack_trsm_a_rside_forward(upper, trans, unit,
+                                          min_l, min_l,
+                                          &a[(size_t)ls + (size_t)ls * lda], lda,
+                                          /*offset=*/0, sb);
+
+                etrsm_solve_kernel(/*left=*/0, kt,
+                                   min_i, min_l, min_l,
+                                   sa, sb,
+                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb,
+                                   /*offset=*/0);
+
+                /* Off-diagonal A pack to the right of the diagonal block. */
+                for (int jjs = 0; jjs < min_j - min_l - ls + js; jjs += NR) {
+                    int min_jj = min_j - min_l - ls + js - jjs;
+                    if (min_jj > NR) min_jj = NR;
+                    if (!trans) {
+                        etrsm_ncopy(min_l, min_jj,
+                                          &a[(size_t)ls + (size_t)(ls + min_l + jjs) * lda], lda,
+                                          sb + (size_t)min_l * (min_l + jjs));
+                    } else {
+                        etrsm_tcopy(min_l, min_jj,
+                                          &a[(size_t)(ls + min_l + jjs) + (size_t)ls * lda], lda,
+                                          sb + (size_t)min_l * (min_l + jjs));
+                    }
+                    etrsm_gemm_kernel(min_i, min_jj, min_l, dm1,
+                                       sa, sb + (size_t)min_l * (min_l + jjs),
+                                       &b[(size_t)m_lo + (size_t)(min_l + ls + jjs) * ldb], ldb);
+                }
+
+                /* is loop: more M-rows of B with same A-packs. */
+                for (int is = min_i; is < m_band; is += MC) {
+                    min_i = m_band - is;
+                    if (min_i > MC) min_i = MC;
+                    etrsm_tcopy(min_l, min_i,
+                                      &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
+                    etrsm_solve_kernel(/*left=*/0, kt,
+                                       min_i, min_l, min_l,
+                                       sa, sb,
+                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb,
+                                       /*offset=*/0);
+                    if (min_j - min_l + js - ls > 0) {
+                        etrsm_gemm_kernel(min_i, min_j - min_l + js - ls, min_l, dm1,
+                                           sa, sb + (size_t)min_l * min_l,
+                                           &b[(size_t)(m_lo + is) + (size_t)(min_l + ls) * ldb], ldb);
+                    }
+                }
+            }
+        }
+    } else {
+        /* trsm_R.c lines 232-352 (backward js walk: js from N down). */
+        for (int js = N; js > 0; js -= NC) {
+            int min_j = js;
+            if (min_j > NC) min_j = NC;
+
+            /* ls loop part 1: A-cols [ls, ls+min_l) entirely below the
+             * diagonal of B's js-band — pure GEMM. */
+            for (int ls = js; ls < N; ls += KC) {
+                int min_l = N - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = m_band;
+                if (min_i > MC) min_i = MC;
+
+                etrsm_tcopy(min_l, min_i,
+                                  &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
+
+                for (int jjs = js; jjs < js + min_j; jjs += NR) {
+                    int min_jj = min_j + js - jjs;
+                    if (min_jj > NR) min_jj = NR;
+                    if (!trans) {
+                        etrsm_ncopy(min_l, min_jj,
+                                          &a[(size_t)ls + (size_t)(jjs - min_j) * lda], lda,
+                                          sb + (size_t)min_l * (jjs - js));
+                    } else {
+                        etrsm_tcopy(min_l, min_jj,
+                                          &a[(size_t)(jjs - min_j) + (size_t)ls * lda], lda,
+                                          sb + (size_t)min_l * (jjs - js));
+                    }
+                    etrsm_gemm_kernel(min_i, min_jj, min_l, dm1,
+                                       sa, sb + (size_t)min_l * (jjs - js),
+                                       &b[(size_t)m_lo + (size_t)(jjs - min_j) * ldb], ldb);
+                }
+
+                for (int is = min_i; is < m_band; is += MC) {
+                    min_i = m_band - is;
+                    if (min_i > MC) min_i = MC;
+                    etrsm_tcopy(min_l, min_i,
+                                      &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
+                    etrsm_gemm_kernel(min_i, min_j, min_l, dm1,
+                                       sa, sb,
+                                       &b[(size_t)(m_lo + is) + (size_t)(js - min_j) * ldb], ldb);
+                }
+            }
+
+            /* ls loop part 2: walk down the diagonal band, from
+             * start_ls to (js-min_j) in steps of -KC. */
+            int start_ls = js - min_j;
+            while (start_ls + KC < js) start_ls += KC;
+
+            for (int ls = start_ls; ls >= js - min_j; ls -= KC) {
+                int min_l = js - ls;
+                if (min_l > KC) min_l = KC;
+                int min_i = m_band;
+                if (min_i > MC) min_i = MC;
+
+                etrsm_tcopy(min_l, min_i,
+                                  &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
+
+                /* TRSM_O*COPY of A diagonal block.
+                 * sb offset = min_l * (min_j - js + ls) — packs diag
+                 * block at the tail of sb so the off-diagonal pack to
+                 * its LEFT can be sb + 0. */
+                pack_trsm_a_rside_backward(upper, trans, unit,
+                                           min_l, min_l,
+                                           &a[(size_t)ls + (size_t)ls * lda], lda,
+                                           /*offset=*/0,
+                                           sb + (size_t)min_l * (min_j - js + ls));
+
+                etrsm_solve_kernel(/*left=*/0, kt,
+                                   min_i, min_l, min_l,
+                                   sa, sb + (size_t)min_l * (min_j - js + ls),
+                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb,
+                                   /*offset=*/0);
+
+                /* Off-diagonal A pack to the left of the diagonal
+                 * block: A-cols [js-min_j, ls). */
+                for (int jjs = 0; jjs < min_j - js + ls; jjs += NR) {
+                    int min_jj = min_j - js + ls - jjs;
+                    if (min_jj > NR) min_jj = NR;
+                    if (!trans) {
+                        etrsm_ncopy(min_l, min_jj,
+                                          &a[(size_t)ls + (size_t)(js - min_j + jjs) * lda], lda,
+                                          sb + (size_t)min_l * jjs);
+                    } else {
+                        etrsm_tcopy(min_l, min_jj,
+                                          &a[(size_t)(js - min_j + jjs) + (size_t)ls * lda], lda,
+                                          sb + (size_t)min_l * jjs);
+                    }
+                    etrsm_gemm_kernel(min_i, min_jj, min_l, dm1,
+                                       sa, sb + (size_t)min_l * jjs,
+                                       &b[(size_t)m_lo + (size_t)(js - min_j + jjs) * ldb], ldb);
+                }
+
+                /* is loop: more M-rows of B with same A-packs. */
+                for (int is = min_i; is < m_band; is += MC) {
+                    min_i = m_band - is;
+                    if (min_i > MC) min_i = MC;
+                    etrsm_tcopy(min_l, min_i,
+                                      &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
+                    etrsm_solve_kernel(/*left=*/0, kt,
+                                       min_i, min_l, min_l,
+                                       sa, sb + (size_t)min_l * (min_j - js + ls),
+                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb,
+                                       /*offset=*/0);
+                    if (min_j - js + ls > 0) {
+                        etrsm_gemm_kernel(min_i, min_j - js + ls, min_l, dm1,
+                                           sa, sb,
+                                           &b[(size_t)(m_lo + is) + (size_t)(js - min_j) * ldb], ldb);
+                    }
+                }
             }
         }
     }
 }
 
-void etrsm_llt_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = M - 1; i >= 0; --i) {
-            T t = alpha * B_(i, j);
-            for (int k = i + 1; k < M; ++k) t -= A_(k, i) * B_(k, j);
-            if (nounit) t /= A_(i, i);
-            B_(i, j) = t;
-        }
-    }
-}
 
-void etrsm_lut_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = 0; i < M; ++i) {
-            T t = alpha * B_(i, j);
-            for (int k = 0; k < i; ++k) t -= A_(k, i) * B_(k, j);
-            if (nounit) t /= A_(i, i);
-            B_(i, j) = t;
-        }
-    }
-}
-
-/* ── Blocked SIDE='L' worker ──────────────────────────────────────
+/* ── Pure-serial Fortran-ABI entry ───────────────────────────────────
  *
- * One column slice [j_start, j_end) of B, solved serially with `egemm`
- * trailing updates. The parallel driver partitions B's columns across a
- * team and calls this once per thread; the serial entry calls it once
- * over the whole column range. egemm calls run single-thread
- * (egemm_serial), so a 4-core TRSM is 4 cores each doing serial gemm on
- * their chunk — near-perfect scaling with one OMP setup for the whole
- * solve.
+ * Runs the full SIDE/UPLO/TRANSA dispatch over one band spanning the
+ * whole free axis (no threading). etrsm_parallel.c's etrsm_ delegates
+ * here when called from inside another routine's parallel region.
  */
-
-/* Apply alpha to a column slice [j_start, j_end) of B in place. */
-static inline void prescale_chunk(int j_start, int j_end, int M, T alpha,
-                                  T *b, int ldb)
-{
-    if (alpha == 1.0L) return;
-    if (alpha == 0.0L) {
-        for (int j = j_start; j < j_end; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = 0.0L;
-        return;
-    }
-    for (int j = j_start; j < j_end; ++j)
-        for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-}
-
-void etrsm_blocked_chunk(enum etrsm_variant V, int j_start, int j_end,
-                         int M, int nb, T alpha,
-                         const T *a, int lda, T *b, int ldb, int nounit)
-{
-    const int my_N = j_end - j_start;
-    if (my_N <= 0) return;
-    prescale_chunk(j_start, j_end, M, alpha, b, ldb);
-
-    const T m_one = -1.0L, one = 1.0L;
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-    /* The egemm call sees only this thread's column slice — operates
-     * on B starting at column j_start, my_N columns wide. */
-    T *B_chunk = &B_(0, j_start);
-
-    if (V == LLN) {
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
-            if (ic > 0) {
-                /* B[ic..ic+ib, j_start..j_end] -= A[ic..ic+ib, 0..ic] · B[0..ic, j_start..j_end] */
-                egemm_serial(NN, NN, &ib, &my_N, &ic, &m_one,
-                       &A_(ic, 0), &lda,
-                       B_chunk, &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
-            }
-            etrsm_lln_core(j_start, j_end, ib, 1.0L,
-                           &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-        }
-    } else if (V == LUN) {
-        int ic = ((M - 1) / nb) * nb;
-        while (ic >= 0) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
-            const int trailing = M - (ic + ib);
-            if (trailing > 0) {
-                const int j0 = ic + ib;
-                egemm_serial(NN, NN, &ib, &my_N, &trailing, &m_one,
-                       &A_(ic, j0), &lda,
-                       &B_chunk[j0], &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
-            }
-            etrsm_lun_core(j_start, j_end, ib, 1.0L,
-                           &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            ic -= nb;
-        }
-    } else if (V == LLT) {
-        int ic = ((M - 1) / nb) * nb;
-        while (ic >= 0) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
-            const int trailing = M - (ic + ib);
-            if (trailing > 0) {
-                const int i0 = ic + ib;
-                egemm_serial(TN, NN, &ib, &my_N, &trailing, &m_one,
-                       &A_(i0, ic), &lda,
-                       &B_chunk[i0], &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
-            }
-            etrsm_llt_core(j_start, j_end, ib, 1.0L,
-                           &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            ic -= nb;
-        }
-    } else { /* LUT */
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
-            if (ic > 0) {
-                egemm_serial(TN, NN, &ib, &my_N, &ic, &m_one,
-                       &A_(0, ic), &lda,
-                       B_chunk, &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
-            }
-            etrsm_lut_core(j_start, j_end, ib, 1.0L,
-                           &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-        }
-    }
-}
-
-/* ── SIDE = 'R': solve X op(A) = α B, A is N×N, B is M×N ─────────
- *
- * R-side cores partition the M (row) axis: the j (column) loop walks the
- * diagonal serially (each B[:,j] depends on prior B[:,k]), but within
- * each step every row of B is processed identically. Each thread owns a
- * disjoint row slice [i_start, i_end) of B and reads shared A read-only —
- * race-free, no barriers needed. */
-
-/* (R, L, N): solve X · A = α B, A lower triangular.
- * Equivalent to back-substitution on columns of B from j = N-1 down. */
-void etrsm_rln_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = N - 1; j >= 0; --j) {
-        if (alpha != 1.0L) for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (int k = j + 1; k < N; ++k) {
-            if (A_(k, j) != 0.0L) {
-                const T akj = A_(k, j);
-                for (int i = i_start; i < i_end; ++i)
-                    B_(i, j) -= akj * B_(i, k);
-            }
-        }
-        if (nounit) {
-            const T inv = 1.0L / A_(j, j);
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= inv;
-        }
-    }
-}
-
-/* (R, U, N): solve X · A = α B, A upper triangular.
- * Forward-sub on columns of B from j = 0 up. */
-void etrsm_run_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = 0; j < N; ++j) {
-        if (alpha != 1.0L) for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (int k = 0; k < j; ++k) {
-            if (A_(k, j) != 0.0L) {
-                const T akj = A_(k, j);
-                for (int i = i_start; i < i_end; ++i)
-                    B_(i, j) -= akj * B_(i, k);
-            }
-        }
-        if (nounit) {
-            const T inv = 1.0L / A_(j, j);
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= inv;
-        }
-    }
-}
-
-/* (R, L, T): solve X · Aᵀ = α B, A lower. */
-void etrsm_rlt_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int k = 0; k < N; ++k) {
-        if (nounit) {
-            const T inv = 1.0L / A_(k, k);
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= inv;
-        }
-        for (int j = k + 1; j < N; ++j) {
-            if (A_(j, k) != 0.0L) {
-                const T ajk = A_(j, k);
-                for (int i = i_start; i < i_end; ++i)
-                    B_(i, j) -= ajk * B_(i, k);
-            }
-        }
-        if (alpha != 1.0L) for (int i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
-    }
-}
-
-/* (R, U, T): solve X · Aᵀ = α B, A upper. */
-void etrsm_rut_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int k = N - 1; k >= 0; --k) {
-        if (nounit) {
-            const T inv = 1.0L / A_(k, k);
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= inv;
-        }
-        for (int j = 0; j < k; ++j) {
-            if (A_(j, k) != 0.0L) {
-                const T ajk = A_(j, k);
-                for (int i = i_start; i < i_end; ++i)
-                    B_(i, j) -= ajk * B_(i, k);
-            }
-        }
-        if (alpha != 1.0L) for (int i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
-    }
-}
-
-/* ── Pure-serial entry ────────────────────────────────────────────
- *
- * The full SIDE/UPLO/TRANSA dispatch, calling each core over its whole
- * range (no threading). etrsm_parallel.c's etrsm_ delegates here when
- * called from inside another routine's parallel region. */
 void etrsm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
     const int *m_, const int *n_,
@@ -336,57 +506,37 @@ void etrsm_serial(
     size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
 {
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
+
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const char SIDE   = up(side);
-    const char UPLO   = up(uplo);
-    char TR           = up(transa);
-    if (TR == 'C') TR = 'T';   /* real type: conj-trans ≡ trans */
-    const int nounit = (up(diag) != 'U');
+
+    const int lside = (toupper((unsigned char)*side)   == 'L');
+    const int upper = (toupper((unsigned char)*uplo)   == 'U');
+    const char trc  = (char)toupper((unsigned char)*transa);
+    const int trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
+    const int unit  = (toupper((unsigned char)*diag) == 'U');
 
     if (M == 0 || N == 0) return;
 
-    /* alpha == 0 quick return: B becomes all zeros. */
-    if (alpha == 0.0L) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = 0.0L;
-        return;
-    }
+    /* α pre-scale of B (mirrors trsm_{L,R}.c GEMM_BETA pass). */
+    if (alpha != 1.0L) egemm_beta_prepass(M, N, alpha, b, ldb);
+    if (alpha == 0.0L) return;
 
-    if (SIDE == 'L') {
-        /* Blocked path when M is large enough to amortize the egemm call
-         * overhead — twice the block size; below that, blocking only adds
-         * noise. */
-        const int nb = etrsm_nb();
-        const int use_blocked = (M >= 2 * nb);
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                if (use_blocked) etrsm_blocked_chunk(LLN, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-                else             etrsm_lln_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) etrsm_blocked_chunk(LUN, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-                else             etrsm_lun_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-            }
-        } else {
-            if (UPLO == 'L') {
-                if (use_blocked) etrsm_blocked_chunk(LLT, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-                else             etrsm_llt_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) etrsm_blocked_chunk(LUT, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-                else             etrsm_lut_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-            }
-        }
-    } else {
-        if (TR == 'N') {
-            if (UPLO == 'L') etrsm_rln_core(0, M, N, alpha, a, lda, b, ldb, nounit);
-            else             etrsm_run_core(0, M, N, alpha, a, lda, b, ldb, nounit);
-        } else {
-            if (UPLO == 'L') etrsm_rlt_core(0, M, N, alpha, a, lda, b, ldb, nounit);
-            else             etrsm_rut_core(0, M, N, alpha, a, lda, b, ldb, nounit);
-        }
+    const int K_eff = lside ? M : N;
+    int MC, KC, NC;
+    egemm_choose_blocks(K_eff, &MC, &KC, &NC);
+
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
+    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    if (Ap && Bp) {
+        if (lside) etrsm_L_band(upper, trans, unit, M, 0, N,
+                                MC, KC, NC, a, lda, b, ldb, Ap, Bp);
+        else       etrsm_R_band(upper, trans, unit, N, 0, M,
+                                MC, KC, NC, a, lda, b, ldb, Ap, Bp);
     }
+    free(Ap);
+    free(Bp);
 }
-
-#undef A_
-#undef B_

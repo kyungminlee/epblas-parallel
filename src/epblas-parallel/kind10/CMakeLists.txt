@@ -97,6 +97,8 @@ set(_split_sources
     egemm_serial.c
     etrsm_parallel.c
     etrsm_serial.c
+    etrsm_kernel.c
+    etrsm_pack.c
     ygemm_parallel.c
     ygemm_serial.c
     ytrsm_parallel.c
