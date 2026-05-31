@@ -39,6 +39,7 @@
 #include "egemm_kernel.h"
 #include <stdlib.h>
 #include <ctype.h>
+#include <unistd.h>
 
 typedef egemm_T T;
 
@@ -55,11 +56,22 @@ static int env_int(const char *name, int dflt) {
 }
 
 static int g_mc = 0, g_kc = 0, g_nc = 0;
+static long g_l2_bytes = 0;        /* adaptive-MC cache target (see below) */
 static void init_blocks(void) {
     if (g_mc) return;
-    g_mc = env_int("EBLAS_MC",  64);
     g_kc = env_int("EBLAS_KC", 256);
     g_nc = env_int("EBLAS_NC", 512);
+    /* Adaptive-MC cache budget: a packed Ap block (MC*KC) should sit in L2.
+     * Detect this core's L2 at runtime rather than hardcoding one machine's
+     * size — a wrong target bloats Ap past L2 (e.g. a 768K target on a 256K
+     * L2 core blew Ap to 768K at K=256, ~1% slower). Override with EBLAS_L2_KB. */
+    int l2_kb = env_int("EBLAS_L2_KB", 0);
+    if (l2_kb <= 0) {
+        long sz = sysconf(_SC_LEVEL2_CACHE_SIZE);
+        l2_kb = (sz > 0) ? (int)(sz / 1024) : 256;
+    }
+    g_l2_bytes = (long)l2_kb * 1024L;
+    g_mc = env_int("EBLAS_MC", 64);  /* set last: g_mc!=0 is the init flag */
 }
 
 int egemm_trans_code(const char *p, size_t len) {
@@ -79,8 +91,7 @@ void egemm_choose_blocks(int K, int *MC_out, int *KC_out, int *NC_out) {
     init_blocks();
     int MC = g_mc, KC = g_kc, NC = g_nc;
     if (K > 0 && K <= KC) {
-        const long L2_TARGET_BYTES = 768 * 1024;   /* ~3/4 of i3-1315U P-core L2 */
-        long target_mc = L2_TARGET_BYTES / ((long)K * (long)sizeof(T));
+        long target_mc = g_l2_bytes / ((long)K * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * g_mc) target_mc = 4L * g_mc;
             MC = egemm_round_up((int)target_mc, MR);
