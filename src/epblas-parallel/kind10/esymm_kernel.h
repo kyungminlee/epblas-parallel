@@ -1,26 +1,23 @@
 /*
- * esymm_kernel.h — internal shared declarations for the kind10 real
+ * esymm_kernel.h — internal shared surface for the kind10 real
  * (REAL(KIND=10) / long double) symmetric matrix-multiply overlay, split
  * across two translation units:
  *
- *   esymm_serial.c   — all the math: the alpha==0 beta-only column scaler,
- *                      the SIDE='L' single-diagonal-block fast path (per
- *                      column), the SIDE='L' column-panel worker and the
- *                      SIDE='R' row-panel worker (both with egemm_serial
- *                      "read A_IK once, use it twice" trailing updates),
- *                      and the pure-serial Fortran-ABI entry `esymm_serial`.
- *                      No `#pragma omp`.
- *   esymm_parallel.c — the public Fortran entry `esymm_`: threading only
- *                      (one `omp parallel for schedule(static)` over the
- *                      outer panel axis — J column panels for SIDE='L', I
- *                      row panels for SIDE='R'), with an `omp_in_parallel()`
- *                      guard that delegates to `esymm_serial` when called
- *                      from inside another routine's parallel region.
+ *   esymm_serial.c   — the symm-aware packers + the pure single-thread
+ *                      fused driver (`esymm_serial`). No `#pragma omp`.
+ *   esymm_parallel.c — the public Fortran entry `esymm_`: same fused
+ *                      driver fanned across an OpenMP team (M-axis split,
+ *                      shared Bp), with an `omp_in_parallel()` guard that
+ *                      delegates to `esymm_serial` when called from inside
+ *                      another routine's parallel region.
  *
- * Each thread owns a disjoint slice of C's columns (L) or rows (R), so the
- * inner I/K loops run serial inside the worker with no cross-thread races.
- * The trailing updates run through egemm_serial — opening a nested egemm
- * team would trip the libgomp barrier wedge (see project-etrsm-omp4-wedge).
+ * Structure mirrors the egemm overlay: esymm owns NO GEMM math of its own.
+ * It composes the shared egemm kernel primitives (block policy, packers,
+ * beta pre-pass, MR×NR macro-kernel — see egemm_kernel.h) and adds only the
+ * SYMM-aware packers below, which read the symmetric operand into egemm's
+ * packed layout while mirroring the UPLO triangle across the diagonal. The
+ * same microkernel then streams diagonal and off-diagonal tiles alike — no
+ * scalar diagonal special-case, no per-tile re-dispatch into egemm.
  */
 #ifndef EPBLAS_PARALLEL_KIND10_ESYMM_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_ESYMM_KERNEL_H
@@ -29,33 +26,29 @@
 
 typedef long double esymm_T;
 
-/* Block/panel size (env ESYMM_NB; otherwise 64). */
-int esymm_nb(void);
-
-/* alpha==0 quick path: C := beta*C over columns [j_start, j_end), rows
- * [0, M). */
-void esymm_beta_only(int j_start, int j_end, int M, esymm_T beta,
-                     esymm_T *c, int ldc);
-
-/* SIDE='L', M <= nb single-block fast path, one column range [j_start,
- * j_end): inlined scalar DSYMM with beta folded into the diagonal write. */
-void esymm_L_singleblock(int j_start, int j_end, int M,
-                         esymm_T alpha, esymm_T beta,
-                         const esymm_T *a, int lda,
-                         const esymm_T *b, int ldb,
-                         esymm_T *c, int ldc, char UPLO);
-
-/* SIDE='L' general path, one column panel [jc, jc+jb): beta pre-scale +
- * I/K block loops (egemm_serial trailing) + scalar diagonal block. */
-void esymm_L_panel(int jc, int jb, int M, esymm_T alpha, esymm_T beta,
-                   const esymm_T *a, int lda, const esymm_T *b, int ldb,
-                   esymm_T *c, int ldc, char UPLO, int nb);
-
-/* SIDE='R' general path, one row panel [ic, ic+ib): beta pre-scale +
- * J/K block loops (egemm_serial trailing) + scalar diagonal block. */
-void esymm_R_panel(int ic, int ib, int N, esymm_T alpha, esymm_T beta,
-                   const esymm_T *a, int lda, const esymm_T *b, int ldb,
-                   esymm_T *c, int ldc, char UPLO, int nb);
+/* ── SYMM-aware packers (real) ───────────────────────────────────────
+ *
+ * Pack a block of the symmetric operand `a` (col-major, leading dim lda,
+ * only the UPLO triangle populated — the other triangle is never read)
+ * into the egemm packed layout. The logical element (row, col) is
+ * reconstructed by mirroring: A[row,col] == A[col,row], so a position in
+ * the unstored triangle is fetched from its transpose in the stored one.
+ *
+ *   esymm_pack_a_sym → egemm_pack_A('N') layout: rows [ic, ic+ib) over the
+ *                      MR-row panels, cols [pc, pc+pb) over the K depth.
+ *                      Used for the SIDE='L' A-operand.
+ *   esymm_pack_b_sym → egemm_pack_B('N') layout: rows [pc, pc+pb) over the
+ *                      K depth, cols [jc, jc+jb) over the NR-col panels.
+ *                      Used for the SIDE='R' B-operand.
+ *
+ * `uplo` is 'U' or 'L' (already upper-cased by the caller).
+ */
+void esymm_pack_a_sym(const esymm_T *a, int lda,
+                      int ic, int pc, int ib, int pb,
+                      char uplo, esymm_T *Ap);
+void esymm_pack_b_sym(const esymm_T *a, int lda,
+                      int pc, int jc, int pb, int jb,
+                      char uplo, esymm_T *Bp);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as esymm_. */
 void esymm_serial(
