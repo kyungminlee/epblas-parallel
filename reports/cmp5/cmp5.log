@@ -1,12 +1,4 @@
-[fail] epopenblas-omp1/ytpsv exit=0
-[fail] epopenblas-omp4/ytpsv exit=0
-[fail] parallel-blas-omp1/ytpsv exit=0
-[fail] parallel-blas-omp4/ytpsv exit=0
-[fail] epopenblas-omp1/ytrsm exit=0
-[fail] epopenblas-omp4/ytrsm exit=0
-[fail] parallel-blas-omp1/ytrsm exit=0
-[fail] parallel-blas-omp4/ytrsm exit=0
-[fail] epopenblas-omp1/ytrsv exit=0
-[fail] epopenblas-omp4/ytrsv exit=0
-[fail] parallel-blas-omp1/ytrsv exit=0
-[fail] parallel-blas-omp4/ytrsv exit=0
+[partial] epopenblas-omp1/ytrsm exit=124 — ingesting 47 emitted rows
+[partial] epopenblas-omp4/ytrsm exit=124 — ingesting 79 emitted rows
+[partial] parallel-blas-omp1/ytrsm exit=124 — ingesting 51 emitted rows
+[partial] parallel-blas-omp4/ytrsm exit=124 — ingesting 79 emitted rows
