@@ -29,53 +29,106 @@ typedef esymm_T T;
 #define MR EGEMM_MR
 #define NR EGEMM_NR
 
-/* Logical symmetric element (row, col): only the UPLO triangle is stored,
- * so a position in the other triangle is read from its transpose. */
-static inline T sym_at(const T *a, int lda, int row, int col, char uplo) {
-    if (uplo == 'L')
-        return (row >= col) ? a[(size_t)col * lda + row]
-                            : a[(size_t)row * lda + col];
-    else
-        return (row <= col) ? a[(size_t)col * lda + row]
-                            : a[(size_t)row * lda + col];
+/* Pack a sub-block of an UPLO-stored symmetric matrix into egemm's packed
+ * MR/NR panel layout. Adapted from the OpenBLAS-overlay SYMM_{U,L}TCOPY
+ * (common/eblas_l3_real.c eblas_esymm_{u,l}copy): the `m` depth axis streams
+ * along incremental row/column pointers (ao1/ao2) chosen by the running
+ * diagonal `offset = posX - posY`, two strips at a time. `offset` decreases
+ * monotonically along the depth walk, so the per-element branch crosses the
+ * diagonal at most once per strip — the branch predictor nails the rest. This
+ * replaces a per-element sym_at() (a multiply + UPLO test for every element);
+ * the packed output is bit-identical.
+ *
+ * Because A is symmetric, sym(r,c) == sym(c,r), so the SIDE=L (A-into-Ap,
+ * posX=row-base) and SIDE=R (A-into-Bp, posX=col-base) packs are the SAME walk
+ * with posX/posY playing swapped roles — one routine serves both. No tail
+ * padding: ragged MR/NR panels are consumed only by kernel_edge, which reads
+ * just the real rows/cols (see egemm_macro_kernel). */
+static void esymm_pack_u(int m, int n, const T *a, int lda,
+                         int posX, int posY, T *b)
+{
+    int js = n >> 1;
+    while (js > 0) {
+        int offset = posX - posY;
+        const T *ao1 = (offset >  0) ? a + (size_t)posY + (size_t)(posX + 0) * lda
+                                     : a + (size_t)(posX + 0) + (size_t)posY * lda;
+        const T *ao2 = (offset > -1) ? a + (size_t)posY + (size_t)(posX + 1) * lda
+                                     : a + (size_t)(posX + 1) + (size_t)posY * lda;
+        for (int i = m; i > 0; --i) {
+            b[0] = ao1[0]; b[1] = ao2[0]; b += 2;
+            ao1 += (offset >  0) ? 1 : lda;
+            ao2 += (offset > -1) ? 1 : lda;
+            offset--;
+        }
+        posX += 2;
+        js--;
+    }
+    if (n & 1) {
+        /* Lone trailing strip: write the single column at panel stride MR
+         * (kernel_edge reads Apanel[p*MR], so the odd panel keeps the same
+         * stride as a full one — unlike OpenBLAS, which packs it contiguous). */
+        int offset = posX - posY;
+        const T *ao1 = (offset > 0) ? a + (size_t)posY + (size_t)(posX + 0) * lda
+                                    : a + (size_t)(posX + 0) + (size_t)posY * lda;
+        for (int i = m; i > 0; --i) {
+            b[0] = ao1[0]; b += MR;
+            ao1 += (offset > 0) ? 1 : lda;
+            offset--;
+        }
+    }
+}
+
+static void esymm_pack_l(int m, int n, const T *a, int lda,
+                         int posX, int posY, T *b)
+{
+    int js = n >> 1;
+    while (js > 0) {
+        int offset = posX - posY;
+        const T *ao1 = (offset >  0) ? a + (size_t)(posX + 0) + (size_t)posY * lda
+                                     : a + (size_t)posY + (size_t)(posX + 0) * lda;
+        const T *ao2 = (offset > -1) ? a + (size_t)(posX + 1) + (size_t)posY * lda
+                                     : a + (size_t)posY + (size_t)(posX + 1) * lda;
+        for (int i = m; i > 0; --i) {
+            b[0] = ao1[0]; b[1] = ao2[0]; b += 2;
+            ao1 += (offset >  0) ? lda : 1;
+            ao2 += (offset > -1) ? lda : 1;
+            offset--;
+        }
+        posX += 2;
+        js--;
+    }
+    if (n & 1) {
+        /* Lone trailing strip at panel stride MR — see esymm_pack_u. */
+        int offset = posX - posY;
+        const T *ao1 = (offset > 0) ? a + (size_t)(posX + 0) + (size_t)posY * lda
+                                    : a + (size_t)posY + (size_t)(posX + 0) * lda;
+        for (int i = m; i > 0; --i) {
+            b[0] = ao1[0]; b += MR;
+            ao1 += (offset > 0) ? lda : 1;
+            offset--;
+        }
+    }
 }
 
 void esymm_pack_a_sym(const T *a, int lda,
                       int ic, int pc, int ib, int pb,
                       char uplo, T *Ap)
 {
-    const int npanel = (ib + MR - 1) / MR;
-    for (int q = 0; q < npanel; ++q) {
-        const int i0   = ic + q * MR;
-        const int rows = (q == npanel - 1) ? (ib - q * MR) : MR;
-        T *Apanel = &Ap[(size_t)q * pb * MR];
-        for (int p = 0; p < pb; ++p) {
-            const int col = pc + p;
-            T *dst = &Apanel[(size_t)p * MR];
-            int ii;
-            for (ii = 0; ii < rows; ++ii) dst[ii] = sym_at(a, lda, i0 + ii, col, uplo);
-            for (; ii < MR; ++ii)         dst[ii] = 0.0L;
-        }
-    }
+    /* SIDE=L: A is the M×K symmetric operand. Rows (ib) form the panel/strip
+     * axis (posX), the K depth (pb) streams (m, posY). */
+    if (uplo == 'U') esymm_pack_u(pb, ib, a, lda, ic, pc, Ap);
+    else             esymm_pack_l(pb, ib, a, lda, ic, pc, Ap);
 }
 
 void esymm_pack_b_sym(const T *a, int lda,
                       int pc, int jc, int pb, int jb,
                       char uplo, T *Bp)
 {
-    const int npanel = (jb + NR - 1) / NR;
-    for (int q = 0; q < npanel; ++q) {
-        const int j0   = jc + q * NR;
-        const int cols = (q == npanel - 1) ? (jb - q * NR) : NR;
-        T *Bpanel = &Bp[(size_t)q * pb * NR];
-        for (int p = 0; p < pb; ++p) {
-            const int row = pc + p;
-            T *dst = &Bpanel[(size_t)p * NR];
-            int jj;
-            for (jj = 0; jj < cols; ++jj) dst[jj] = sym_at(a, lda, row, j0 + jj, uplo);
-            for (; jj < NR; ++jj)         dst[jj] = 0.0L;
-        }
-    }
+    /* SIDE=R: A is the K×N symmetric operand in the B slot. Columns (jb) form
+     * the panel/strip axis (posX), the K depth (pb) streams (m, posY). By
+     * symmetry this is the identical walk to the A pack. */
+    if (uplo == 'U') esymm_pack_u(pb, jb, a, lda, jc, pc, Bp);
+    else             esymm_pack_l(pb, jb, a, lda, jc, pc, Bp);
 }
 
 void esymm_serial(
