@@ -184,15 +184,30 @@ static inline void kernel_2x2(int pb, T alpha,
                               T *restrict C, int ldc)
 {
     T c00 = 0.0L, c01 = 0.0L, c10 = 0.0L, c11 = 0.0L;
-    for (int p = 0; p < pb; ++p) {
-        const T a0 = Apanel[(size_t)p * MR + 0];
-        const T a1 = Apanel[(size_t)p * MR + 1];
-        const T b0 = Bpanel[(size_t)p * NR + 0];
-        const T b1 = Bpanel[(size_t)p * NR + 1];
-        c00 += a0 * b0;
-        c10 += a1 * b0;
-        c01 += a0 * b1;
-        c11 += a1 * b1;
+    /* K-loop unrolled by 4 (matches the OpenBLAS-overlay kernel): amortizes
+     * the loop-counter/pointer arithmetic over 4 MR×NR MAC-sets and widens
+     * gcc's scheduling window for the x87 accumulator chains. */
+    const T *ap = Apanel, *bp = Bpanel;
+    int p = pb;
+    for (; p >= 4; p -= 4) {
+        c00 += ap[0] * bp[0]; c10 += ap[1] * bp[0];
+        c01 += ap[0] * bp[1]; c11 += ap[1] * bp[1];
+        c00 += ap[2] * bp[2]; c10 += ap[3] * bp[2];
+        c01 += ap[2] * bp[3]; c11 += ap[3] * bp[3];
+        c00 += ap[4] * bp[4]; c10 += ap[5] * bp[4];
+        c01 += ap[4] * bp[5]; c11 += ap[5] * bp[5];
+        c00 += ap[6] * bp[6]; c10 += ap[7] * bp[6];
+        c01 += ap[6] * bp[7]; c11 += ap[7] * bp[7];
+        ap += 4 * MR;
+        bp += 4 * NR;
+    }
+    for (; p > 0; --p) {
+        const T a0 = ap[0], a1 = ap[1];
+        const T b0 = bp[0], b1 = bp[1];
+        c00 += a0 * b0; c10 += a1 * b0;
+        c01 += a0 * b1; c11 += a1 * b1;
+        ap += MR;
+        bp += NR;
     }
     C[0]         += alpha * c00;
     C[1]         += alpha * c10;
