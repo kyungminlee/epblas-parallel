@@ -58,8 +58,14 @@ void esymm_(
 
     if (M <= 0 || N <= 0) return;
 
-    egemm_beta_prepass(M, N, beta, c, ldc);   /* C := beta*C (handles beta 0/1) */
-    if (alpha == 0.0L) return;
+    /* alpha == 0 ⇒ pure C := beta*C, no GEMM. Rare; not worth a team. */
+    if (alpha == 0.0L) { egemm_beta_prepass(M, N, beta, c, ldc); return; }
+
+    /* The C := beta*C pre-pass is NOT done here: each thread applies it to
+     * its own M-row slice inside the region (see below), so it scales with
+     * the team instead of being a serial Amdahl tax. A thread only ever
+     * touches its own rows — for both the beta pass and the kernel writes —
+     * so no barrier is needed between them. */
 
     const int K = (SIDE == 'L') ? M : N;
 
@@ -105,6 +111,15 @@ void esymm_(
             const int m_lo = tid * m_chunk;
             int m_hi = m_lo + m_chunk;
             if (m_hi > M) m_hi = M;
+
+            /* C := beta*C over this thread's rows only (handles beta 0/1). */
+            if (beta != 1.0L && m_lo < m_hi) {
+                for (int j = 0; j < N; ++j) {
+                    T *cj = &c[(size_t)j * ldc];
+                    if (beta == 0.0L) for (int i = m_lo; i < m_hi; ++i) cj[i]  = 0.0L;
+                    else              for (int i = m_lo; i < m_hi; ++i) cj[i] *= beta;
+                }
+            }
 
             for (int jc = 0; jc < N; jc += NC) {
                 const int jb = (N - jc < NC) ? (N - jc) : NC;
