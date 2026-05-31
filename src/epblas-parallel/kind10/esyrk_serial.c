@@ -1,21 +1,36 @@
 /*
- * esyrk_serial.c — the pure single-thread half of the kind10 (REAL(KIND=10) /
- * `long double`) symmetric rank-k update overlay. No `#pragma omp`.
+ * esyrk_serial — kind10 real (long double) symmetric rank-k update,
+ * single-thread. Owns the SYRK-specific math (triangular β pre-pass +
+ * diagonal-aware writeback kernel) and the fused serial driver.
  *
- * Owns ALL the leaf math shared with the cooperative parallel driver
- * (esyrk_parallel.c) through esyrk_kernel.h: the block-size policy, the
- * GotoBLAS packers, the MR×NR micro-kernel, the rectangular and
- * triangle-aware macro-kernels, the inline single-thread driver
- * (esyrk_serial_inline), and the public Fortran-ABI serial entry
- * `esyrk_serial`.
+ *   C := alpha · A · A^T + beta · C    (trans='N', A is N×K)
+ *   C := alpha · A^T · A + beta · C    (trans='T', A is K×N)
  *
- * esyrk_serial_inline is reused by esyrk_parallel.c as its OOM fallback;
- * esyrk_serial is the path the public `esyrk_` driver delegates to when
- * called from inside another routine's parallel region (the libgomp barrier
- * wedge guard, project-etrsm-omp4-wedge).
+ * Only the UPLO triangle of C is read or written.
+ *
+ * Structure (faithful port of OpenBLAS DSYRK — interface/syrk.c dispatch,
+ * driver/level3/level3_syrk.c blocking nest, driver/level3/syrk_kernel.c
+ * diagonal kernel): one packed GEMM whose output is clipped to the UPLO
+ * triangle. Both Ap and Bp source from the same input A (A doubles as B);
+ * the diagonal kernel splits each MC×NC block around the global diagonal,
+ * GEMMing the strict-triangle remainders and merging only the UPLO triangle
+ * of each diagonal NR×NR sub-block.
+ *
+ * Built on the SHARED ob-convention substrate (etri_gemm_kernel / etri_ncopy
+ * / etri_tcopy, etri_kernel.h) — the same one etrsm/etrmm use — because the
+ * diagonal kernel indexes the packed buffers at arbitrary (possibly odd)
+ * offsets, which is only valid under OpenBLAS's contiguous-odd-tail packing
+ * (par's egemm zero-pads odd tails at stride MR and would mis-read those
+ * bytes). The layout-agnostic block policy is shared with egemm
+ * (egemm_choose_blocks / egemm_round_up). Calling only these *serial*
+ * primitives (never the threaded entries) keeps esyrk free of any nested
+ * OpenMP team, so it is safe inside another routine's parallel region (the
+ * libgomp barrier-wedge guard, memory project-etrsm-omp4-wedge).
  */
 
 #include "esyrk_kernel.h"
+#include "etri_kernel.h"
+#include "egemm_kernel.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -25,385 +40,180 @@ typedef esyrk_T T;
 #define MR ESYRK_MR
 #define NR ESYRK_NR
 
-#define ESYRK_MC_DEFAULT  64
-#define ESYRK_KC_DEFAULT 256
-#define ESYRK_NC_DEFAULT 512
-#define ESYRK_SWITCH_RATIO_DEFAULT 16
-
-/* ─── Block-size / switch-ratio policy (lazy, env-tunable) ─────── */
-
-static int g_mc = 0, g_kc = 0, g_nc = 0;
-static int g_switch_ratio = 0;
-static int g_config_done = 0;
-
-static int env_int(const char *name, int dflt) {
-    const char *s = getenv(name);
-    if (!s || !*s) return dflt;
-    int v = atoi(s);
-    return v > 0 ? v : dflt;
-}
-
-/* Lazy replacement for the old __attribute__((constructor)). All writes are
- * idempotent (identical values), so the benign first-call race is harmless;
- * the public entries always resolve config serially before opening a team. */
-static void esyrk_config_init(void) {
-    if (g_config_done) return;
-    g_mc = env_int("ESYRK_MC", ESYRK_MC_DEFAULT);
-    g_kc = env_int("ESYRK_KC", ESYRK_KC_DEFAULT);
-    g_nc = env_int("ESYRK_NC", ESYRK_NC_DEFAULT);
-    g_switch_ratio = env_int("ESYRK_SWITCH_RATIO", ESYRK_SWITCH_RATIO_DEFAULT);
-    g_config_done = 1;
-}
-
-void esyrk_block_sizes(int *MC, int *KC, int *NC) {
-    esyrk_config_init();
-    if (MC) *MC = g_mc;
-    if (KC) *KC = g_kc;
-    if (NC) *NC = g_nc;
-}
-
-int esyrk_switch_ratio(void) {
-    esyrk_config_init();
-    return g_switch_ratio;
-}
-
-/* ─── Small helpers ─────────────────────────────────────────────── */
-
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
-
-int esyrk_round_up(int v, int m) { return ((v + m - 1) / m) * m; }
-static inline int imin(int a, int b) { return a < b ? a : b; }
-
-/* ─── GotoBLAS packers + MR×NR micro-kernel (mirrors egemm) ───── */
-
-/* Pack op(A) rows [i0, i0+min_i) × cols [pc, pc+min_l) into MR-row panels.
- *   layout: panel q at offset (q * min_l * MR);
- *           entry [(p * MR) + ii] = op(A)[i0 + q*MR + ii, pc + p].
- *   - TR='N': op(A) = A, so row major access at A[col=pc+p, row=i0+q*MR+ii].
- *   - TR='T': op(A) = Aᵀ, so A[row=pc+p, col=i0+q*MR+ii].
- */
-void esyrk_pack_A_panel(const T *restrict A, int lda,
-                        int i0, int pc, int min_i, int min_l,
-                        int TR, T *restrict Apack)
-{
-    const int npanel = (min_i + MR - 1) / MR;
-    for (int q = 0; q < npanel; ++q) {
-        const int row0 = i0 + q * MR;
-        const int rows = (q == npanel - 1) ? (min_i - q * MR) : MR;
-        T *panel = &Apack[(size_t)q * min_l * MR];
-        if (TR == 'N') {
-            for (int p = 0; p < min_l; ++p) {
-                const T *src = &A[(size_t)(pc + p) * lda + row0];
-                T *dst = &panel[(size_t)p * MR];
-                int ii;
-                for (ii = 0; ii < rows; ++ii) dst[ii] = src[ii];
-                for (; ii < MR; ++ii) dst[ii] = 0.0L;
-            }
-        } else {
-            for (int p = 0; p < min_l; ++p) {
-                T *dst = &panel[(size_t)p * MR];
-                int ii;
-                for (ii = 0; ii < rows; ++ii)
-                    dst[ii] = A[(size_t)(row0 + ii) * lda + (pc + p)];
-                for (; ii < MR; ++ii) dst[ii] = 0.0L;
-            }
+/* ── Triangular β pre-pass ─────────────────────────────────────────────
+ * Port of OpenBLAS driver/level3/syrk_k.c's `syrk_beta`. Scales only the
+ * UPLO triangle of C; the off-UPLO triangle is left untouched. */
+void esyrk_beta_u(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+    if (beta == 1.0L) return;
+    if (beta == 0.0L) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            T *cj = c + j * ldc;
+            for (ptrdiff_t i = 0; i <= j; ++i) cj[i] = 0.0L;
+        }
+    } else {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            T *cj = c + j * ldc;
+            for (ptrdiff_t i = 0; i <= j; ++i) cj[i] *= beta;
         }
     }
 }
 
-/* Pack Aᵀ (or A) cols [j0, j0+min_j) × depth [pc, pc+min_l) into NR-col panels.
- *
- * For SYRK with C = α·A·Aᵀ (TR='N'), op(B) in the underlying GEMM is Aᵀ:
- *   B[p, jj] = Aᵀ[pc+p, j0+jj] = A[j0+jj, pc+p].
- * For TR='T' (C = α·Aᵀ·A), op(B) is A:
- *   B[p, jj] = A[pc+p, j0+jj].
- */
-void esyrk_pack_B_panel(const T *restrict A, int lda,
-                        int j0, int pc, int min_j, int min_l,
-                        int TR, T *restrict Bpack)
-{
-    const int npanel = (min_j + NR - 1) / NR;
-    for (int q = 0; q < npanel; ++q) {
-        const int col0 = j0 + q * NR;
-        const int cols = (q == npanel - 1) ? (min_j - q * NR) : NR;
-        T *panel = &Bpack[(size_t)q * min_l * NR];
-        if (TR == 'N') {
-            /* B[p, jj] = A[col0+jj, pc+p] → column (pc+p), row (col0+jj) of A */
-            for (int p = 0; p < min_l; ++p) {
-                const T *src = &A[(size_t)(pc + p) * lda + col0];
-                T *dst = &panel[(size_t)p * NR];
-                int jj;
-                for (jj = 0; jj < cols; ++jj) dst[jj] = src[jj];
-                for (; jj < NR; ++jj) dst[jj] = 0.0L;
-            }
-        } else {
-            /* B[p, jj] = A[pc+p, col0+jj] → column (col0+jj), row (pc+p) of A */
-            for (int p = 0; p < min_l; ++p) {
-                T *dst = &panel[(size_t)p * NR];
-                int jj;
-                for (jj = 0; jj < cols; ++jj)
-                    dst[jj] = A[(size_t)(col0 + jj) * lda + (pc + p)];
-                for (; jj < NR; ++jj) dst[jj] = 0.0L;
-            }
+void esyrk_beta_l(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+    if (beta == 1.0L) return;
+    if (beta == 0.0L) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            T *cj = c + j * ldc;
+            for (ptrdiff_t i = j; i < n; ++i) cj[i] = 0.0L;
+        }
+    } else {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            T *cj = c + j * ldc;
+            for (ptrdiff_t i = j; i < n; ++i) cj[i] *= beta;
         }
     }
 }
 
-static inline void kernel_2x2(int pb, T alpha,
-                              const T *restrict Ap,
-                              const T *restrict Bp,
-                              T *restrict C, int ldc)
+/* ── Diagonal-aware writeback kernel ───────────────────────────────────
+ * Faithful port of OpenBLAS driver/level3/syrk_kernel.c (the openblas
+ * overlay's eblas_esyrk_kernel_{u,l}), with eblas_egemm_kernel → the shared
+ * etri_gemm_kernel. The strict-triangle rectangular remainders are full
+ * GEMMs into C; each diagonal NR×NR sub-block is GEMMed into a zeroed
+ * subbuffer (etri_gemm_kernel accumulates), then only its UPLO triangle is
+ * merged into C. Subbuffer sized NR*(NR+1) to match OpenBLAS's safety pad. */
+void esyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
+                    const T *a, const T *b,
+                    T *c, ptrdiff_t ldc, ptrdiff_t offset)
 {
-    T c00 = 0.0L, c01 = 0.0L, c10 = 0.0L, c11 = 0.0L;
-    /* K-loop unrolled by 4 — mirrors the openblas eblas_egemm_kernel dense
-     * microkernel. Cuts x87 loop overhead on the fp80 inner loop (the ob1
-     * serial edge over a plain rolled loop). MR == NR == 2, so the packed
-     * panels are contiguous in stride-2 per p; walk Ap/Bp by 8 per step.
-     * Each C accumulator stays in strict p-order → bit-identical result. */
-    const T *pa = Ap, *pbb = Bp;
-    int p = 0;
-    for (; p + 4 <= pb; p += 4) {
-        T a0 = pa[0], a1 = pa[1], b0 = pbb[0], b1 = pbb[1];
-        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
-        a0 = pa[2]; a1 = pa[3]; b0 = pbb[2]; b1 = pbb[3];
-        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
-        a0 = pa[4]; a1 = pa[5]; b0 = pbb[4]; b1 = pbb[5];
-        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
-        a0 = pa[6]; a1 = pa[7]; b0 = pbb[6]; b1 = pbb[7];
-        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
-        pa += 8; pbb += 8;
-    }
-    for (; p < pb; ++p) {
-        const T a0 = pa[0], a1 = pa[1], b0 = pbb[0], b1 = pbb[1];
-        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
-        pa += 2; pbb += 2;
-    }
-    C[0]       += alpha * c00;
-    C[1]       += alpha * c10;
-    C[ldc]     += alpha * c01;
-    C[ldc + 1] += alpha * c11;
-}
+    T subbuf[NR * (NR + 1)];
 
-static void kernel_edge(int mr, int nr, int pb, T alpha,
-                        const T *restrict Ap,
-                        const T *restrict Bp,
-                        T *restrict C, int ldc)
-{
-    for (int jj = 0; jj < nr; ++jj) {
-        T *cj = &C[(size_t)jj * ldc];
-        for (int ii = 0; ii < mr; ++ii) {
-            T s = 0.0L;
-            for (int p = 0; p < pb; ++p)
-                s += Ap[(size_t)p * MR + ii] * Bp[(size_t)p * NR + jj];
-            cj[ii] += alpha * s;
-        }
-    }
-}
-
-/* Rectangular macro-kernel: ib × jb tile, no triangle constraint. */
-void esyrk_macro_kernel_rect(int ib, int jb, int pb, T alpha,
-                             const T *restrict Ap, const T *restrict Bp,
-                             T *restrict C, int ldc)
-{
-    const int npA = (ib + MR - 1) / MR;
-    const int npB = (jb + NR - 1) / NR;
-    for (int q = 0; q < npB; ++q) {
-        const int jj0  = q * NR;
-        const int nr_q = (q == npB - 1) ? (jb - jj0) : NR;
-        const T *Bpanel = &Bp[(size_t)q * pb * NR];
-        for (int r = 0; r < npA; ++r) {
-            const int ii0  = r * MR;
-            const int mr_r = (r == npA - 1) ? (ib - ii0) : MR;
-            const T *Apanel = &Ap[(size_t)r * pb * MR];
-            T *Ctile = &C[(size_t)jj0 * ldc + ii0];
-            if (mr_r == MR && nr_q == NR) {
-                kernel_2x2(pb, alpha, Apanel, Bpanel, Ctile, ldc);
-            } else {
-                kernel_edge(mr_r, nr_q, pb, alpha, Apanel, Bpanel, Ctile, ldc);
-            }
-        }
-    }
-}
-
-/* Triangle-aware macro-kernel: skips sub-tiles fully outside the UPLO
- * triangle (rooted at global (row_base, col_base)) and, for sub-tiles
- * that cross the diagonal, falls back to entry-by-entry check. */
-void esyrk_macro_kernel_tri(int ib, int jb, int pb, T alpha,
-                            const T *restrict Ap, const T *restrict Bp,
-                            T *restrict C, int ldc,
-                            int row_base, int col_base, char UPLO)
-{
-    const int npA = (ib + MR - 1) / MR;
-    const int npB = (jb + NR - 1) / NR;
-    for (int q = 0; q < npB; ++q) {
-        const int jj0  = q * NR;
-        const int nr_q = (q == npB - 1) ? (jb - jj0) : NR;
-        const T *Bpanel = &Bp[(size_t)q * pb * NR];
-        const int j_g0 = col_base + jj0;
-        const int j_g1 = j_g0 + nr_q - 1;
-        for (int r = 0; r < npA; ++r) {
-            const int ii0  = r * MR;
-            const int mr_r = (r == npA - 1) ? (ib - ii0) : MR;
-            const T *Apanel = &Ap[(size_t)r * pb * MR];
-            const int i_g0 = row_base + ii0;
-            const int i_g1 = i_g0 + mr_r - 1;
-            T *Ctile = &C[(size_t)jj0 * ldc + ii0];
-
-            int all_in, all_out;
-            if (UPLO == 'L') {
-                all_in  = (i_g0 >= j_g1);
-                all_out = (i_g1 <  j_g0);
-            } else {
-                all_in  = (i_g1 <= j_g0);
-                all_out = (i_g0 >  j_g1);
-            }
-            if (all_out) continue;
-
-            if (all_in) {
-                if (mr_r == MR && nr_q == NR)
-                    kernel_2x2(pb, alpha, Apanel, Bpanel, Ctile, ldc);
-                else
-                    kernel_edge(mr_r, nr_q, pb, alpha, Apanel, Bpanel, Ctile, ldc);
-            } else {
-                for (int jj = 0; jj < nr_q; ++jj) {
-                    const int j_g = col_base + jj0 + jj;
-                    T *cj = &Ctile[(size_t)jj * ldc];
-                    for (int ii = 0; ii < mr_r; ++ii) {
-                        const int i_g = row_base + ii0 + ii;
-                        const int keep = (UPLO == 'L') ? (i_g >= j_g) : (i_g <= j_g);
-                        if (!keep) continue;
-                        T s = 0.0L;
-                        for (int p = 0; p < pb; ++p)
-                            s += Apanel[(size_t)p * MR + ii] *
-                                 Bpanel[(size_t)p * NR + jj];
-                        cj[ii] += alpha * s;
-                    }
-                }
-            }
-        }
-    }
-}
-
-/* ─── Inline single-thread GotoBLAS path (OMP=1 / N below cooperative
- *      threshold, and the parallel driver's OOM fallback). Same MR×NR
- *      kernel as the cooperative path, but with no flag plumbing: one
- *      thread walks the (jc, pc, ic) nest and classifies each (ic, jc)
- *      tile against the UPLO triangle.
- *
- *      Three classes:
- *        skip   — tile entirely outside the stored triangle
- *        rect   — tile entirely inside (off-diagonal); rectangular kernel
- *        tri    — tile crosses the diagonal; triangle-aware kernel
- *      Tiles in 'rect' use the dense 2×2 outer-product kernel; 'tri'
- *      falls back to per-entry UPLO checks for the sub-tiles that
- *      actually straddle the diagonal.
- *
- *      Buffers (Ap, Bp) are allocated once at function entry. The old
- *      per-jc-block egemm_ call mmap'd and freed ~2 MB Bp + ~256 KB Ap
- *      on every block; inlining absorbs that. */
-void esyrk_serial_inline(char UPLO, char TR, int N, int K,
-                         T alpha, const T *restrict a, int lda,
-                         T beta, T *restrict c, int ldc)
-{
-    const T zero = 0.0L, one = 1.0L;
-
-    /* Beta-scale the UPLO triangle of C first. */
-    if (beta != one) {
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            if (beta == zero) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero;
-            else              for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-        }
-    }
-
-    if (alpha == zero || K == 0) return;
-
-    int MC, KC, NC;
-    esyrk_block_sizes(&MC, &KC, &NC);
-    if (NC > N) NC = N;
-    if (NC < NR) NC = NR;
-
-    const int sa_rows = esyrk_round_up(MC, MR);
-    const int sb_cols = esyrk_round_up(NC, NR);
-    const size_t ap_bytes = (size_t)sa_rows * KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * sb_cols * sizeof(T);
-
-    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (!Ap || !Bp) {
-        /* OOM — last-ditch O(N²·K) scalar fallback. */
-        free(Ap); free(Bp);
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            for (int i = i_lo; i < i_hi; ++i) {
-                T s = zero;
-                if (TR == 'N') {
-                    for (int l = 0; l < K; ++l)
-                        s += a[(size_t)l * lda + i] * a[(size_t)l * lda + j];
-                } else {
-                    for (int l = 0; l < K; ++l)
-                        s += a[(size_t)i * lda + l] * a[(size_t)j * lda + l];
-                }
-                cj[i] += alpha * s;
-            }
-        }
+    if (m + offset < 0) {
+        etri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
         return;
     }
-
-    /* Standard GotoBLAS loop nest: jc (output cols) → pc (depth) → ic
-     * (output rows). Bp packed once per (jc, pc); Ap repacked per
-     * (ic, pc). */
-    for (int jc = 0; jc < N; jc += NC) {
-        const int jb = imin(NC, N - jc);
-        for (int pc = 0; pc < K; pc += KC) {
-            const int pb = imin(KC, K - pc);
-
-            esyrk_pack_B_panel(a, lda, jc, pc, jb, pb, TR, Bp);
-
-            for (int ic = 0; ic < N; ic += MC) {
-                const int ib = imin(MC, N - ic);
-
-                /* Tile classification against UPLO triangle. */
-                int tile_class;
-                if (UPLO == 'L') {
-                    if (ic + ib <= jc)        tile_class = 0;  /* all i < j: skip */
-                    else if (ic >= jc + jb)   tile_class = 2;  /* all i > j: rect */
-                    else                      tile_class = 1;  /* crosses diag */
-                } else {
-                    if (ic >= jc + jb)        tile_class = 0;  /* all i > j: skip */
-                    else if (ic + ib <= jc)   tile_class = 2;  /* all i < j: rect */
-                    else                      tile_class = 1;
-                }
-                if (tile_class == 0) continue;
-
-                esyrk_pack_A_panel(a, lda, ic, pc, ib, pb, TR, Ap);
-
-                if (tile_class == 1) {
-                    esyrk_macro_kernel_tri(ib, jb, pb, alpha, Ap, Bp,
-                                           &c[(size_t)jc * ldc + ic], ldc,
-                                           ic, jc, UPLO);
-                } else {
-                    esyrk_macro_kernel_rect(ib, jb, pb, alpha, Ap, Bp,
-                                            &c[(size_t)jc * ldc + ic], ldc);
-                }
-            }
-        }
+    if (n < offset) {
+        return;
+    }
+    if (offset > 0) {
+        b += offset * k;
+        c += offset * ldc;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        etri_gemm_kernel(m, n - m - offset, k, alpha,
+                         a, b + (m + offset) * k,
+                         c + (m + offset) * ldc, ldc);
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        etri_gemm_kernel(-offset, n, k, alpha, a, b, c, ldc);
+        a -= offset * k;
+        c -= offset;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
     }
 
-    free(Ap);
-    free(Bp);
+    /* Diagonal walk in NR-step blocks. offset == 0, m == n here. */
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        /* Strict-upper portion: rows 0..loop-1 × cols loop..loop+nn-1. */
+        if (loop > 0) {
+            etri_gemm_kernel(loop, nn, k, alpha,
+                             a, b + loop * k, c + loop * ldc, ldc);
+        }
+
+        /* Diagonal block via subbuffer. */
+        for (ptrdiff_t z = 0; z < nn * nn; ++z) subbuf[z] = 0.0L;
+        etri_gemm_kernel(nn, nn, k, alpha,
+                         a + loop * k, b + loop * k, subbuf, nn);
+
+        T *cc = c + loop + loop * ldc;
+        const T *ss = subbuf;
+        for (ptrdiff_t j = 0; j < nn; ++j) {
+            for (ptrdiff_t i = 0; i <= j; ++i) cc[i] += ss[i];
+            ss += nn;
+            cc += ldc;
+        }
+    }
 }
 
-/* ─── Pure-serial Fortran-ABI entry (no OpenMP) ─────────────────── */
+void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
+                    const T *a, const T *b,
+                    T *c, ptrdiff_t ldc, ptrdiff_t offset)
+{
+    T subbuf[NR * (NR + 1)];
 
+    if (m + offset < 0) {
+        return;
+    }
+    if (n < offset) {
+        etri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
+        return;
+    }
+    if (offset > 0) {
+        etri_gemm_kernel(m, offset, k, alpha, a, b, c, ldc);
+        b += offset * k;
+        c += offset * ldc;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        a -= offset * k;
+        c -= offset;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+    if (m > n - offset) {
+        etri_gemm_kernel(m - n + offset, n, k, alpha,
+                         a + (n - offset) * k, b,
+                         c + (n - offset), ldc);
+        m = n + offset;
+        if (m <= 0) return;
+    }
+
+    /* Diagonal walk in NR-step blocks. offset == 0, m == n here. */
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t mm = loop;
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        /* Diagonal block via subbuffer. */
+        for (ptrdiff_t z = 0; z < nn * nn; ++z) subbuf[z] = 0.0L;
+        etri_gemm_kernel(nn, nn, k, alpha,
+                         a + loop * k, b + loop * k, subbuf, nn);
+
+        T *cc = c + loop + loop * ldc;
+        const T *ss = subbuf;
+        for (ptrdiff_t j = 0; j < nn; ++j) {
+            for (ptrdiff_t i = j; i < nn; ++i) cc[i] += ss[i];
+            ss += nn;
+            cc += ldc;
+        }
+
+        /* Strict-lower portion: rows loop+nn..m-1 × cols loop..loop+nn-1. */
+        if (m > mm + nn) {
+            etri_gemm_kernel(m - mm - nn, nn, k, alpha,
+                             a + (mm + nn) * k, b + loop * k,
+                             c + (mm + nn) + loop * ldc, ldc);
+        }
+    }
+}
+
+/* ── Single-thread driver ──────────────────────────────────────────────
+ * Faithful port of OpenBLAS level3_syrk.c with a single thread spanning the
+ * whole output (rows ∈ [0, N]). The js-band UPLO clip bounds the active row
+ * range so the kernel only ever writes the requested triangle. */
 void esyrk_serial(
-    const char *uplo, const char *trans,
+    const char *uplo_p, const char *trans_p,
     const int *n_, const int *k_,
     const T *alpha_,
     const T *a, const int *lda_,
@@ -413,28 +223,65 @@ void esyrk_serial(
 {
     (void)uplo_len; (void)trans_len;
     const int N = *n_, K = *k_;
-    const int lda = *lda_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
-    if (TR == 'C') TR = 'T';
+    const int lda = *lda_, ldc = *ldc_;
+    const int uplo  = (char)toupper((unsigned char)*uplo_p);
+    const int trans = (char)toupper((unsigned char)*trans_p);
 
-    if (N == 0) return;
+    if (N <= 0) return;
 
-    const T zero = 0.0L, one = 1.0L;
+    if (uplo == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
-    /* α==0 or K==0: only beta-scale the UPLO triangle. */
-    if (alpha == zero || K == 0) {
-        if (beta == one) return;
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            if (beta == zero) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero;
-            else              for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
+    if (K == 0 || alpha == 0.0L) return;
+
+    int MC, KC, NC;
+    egemm_choose_blocks(K, &MC, &KC, &NC);
+
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
+    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    if (Ap && Bp) {
+        for (int js = 0; js < N; js += NC) {
+            const int jb = (N - js < NC) ? (N - js) : NC;
+
+            /* UPLO clip of the [0, N] row range for this js-band:
+             *   UPPER: only rows up to js+jb contribute.
+             *   LOWER: only rows from js onwards. */
+            int m_lo_eff = (uplo == 'L') ? js : 0;
+            int m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
+
+            for (int ls = 0; ls < K; ls += KC) {
+                const int pb = (K - ls < KC) ? (K - ls) : KC;
+
+                /* Pack Bp = the same A in OCOPY shape (A doubles as B). */
+                if (trans == 'N')
+                    etri_tcopy(pb, jb, &a[(size_t)ls * lda + js], lda, Bp);
+                else
+                    etri_ncopy(pb, jb, &a[(size_t)js * lda + ls], lda, Bp);
+
+                for (int is = m_lo_eff; is < m_hi_eff; is += MC) {
+                    const int min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+
+                    if (trans == 'N')
+                        etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap);
+                    else
+                        etri_ncopy(pb, min_i, &a[(size_t)is * lda + ls], lda, Ap);
+
+                    if (uplo == 'U')
+                        esyrk_kernel_u(min_i, jb, pb, alpha, Ap, Bp,
+                                       &c[(size_t)js * ldc + is], ldc,
+                                       (ptrdiff_t)(is - js));
+                    else
+                        esyrk_kernel_l(min_i, jb, pb, alpha, Ap, Bp,
+                                       &c[(size_t)js * ldc + is], ldc,
+                                       (ptrdiff_t)(is - js));
+                }
+            }
         }
-        return;
     }
-
-    esyrk_serial_inline(UPLO, TR, N, K, alpha, a, lda, beta, c, ldc);
+    free(Ap);
+    free(Bp);
 }

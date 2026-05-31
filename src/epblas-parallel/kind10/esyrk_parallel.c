@@ -1,30 +1,35 @@
 /*
- * esyrk_parallel.c — the public Fortran entry `esyrk_` and threading-only half
- * of the kind10 (REAL(KIND=10) / `long double`) symmetric rank-k overlay (see
- * esyrk_kernel.h; all the leaf math lives in esyrk_serial.c).
+ * esyrk_ — kind10 (REAL(KIND=10) / long double) symmetric rank-k update:
+ * the public Fortran entry and threading-orchestration half of the esyrk
+ * overlay (all the math lives in esyrk_serial.c / esyrk_kernel.h). Faithful
+ * port of OpenBLAS interface/syrk.c → driver/level3/level3_syrk.c threading.
  *
- * Owns the cooperative GotoBLAS port (OpenBLAS DSYRK pattern): a quadratic
- * N-partition that balances triangular work across threads, cross-thread
- * buffer-sharing via per-(producer,consumer,bufferside) atomic flags, and the
- * cooperative inner kernel (inner_syrk). The leaf packers / micro-kernels /
- * macro-kernels are reused from the header.
+ *   C := alpha · A · A^T + beta · C    (trans='N', A is N×K)
+ *   C := alpha · A^T · A + beta · C    (trans='T', A is K×N)
  *
- * Nesting guard: when esyrk_ is itself called from inside another routine's
- * parallel region it delegates to esyrk_serial and opens no region of its own
- * (the libgomp barrier wedge guard, project-etrsm-omp4-wedge). esyrk_serial_inline
- * is the OOM fallback for every allocation that can fail along the way.
+ * Threading: one outer `omp parallel`. The right operand (Bp) is packed once
+ * per (js, ls) band under `omp single` and shared; each thread owns a
+ * CONTIGUOUS slice of the M axis (the N output rows, m_chunk = ceil(N/nth)
+ * rounded to MR) and runs the MC-blocked is loop within it. The per-band UPLO
+ * clip (m_lo_eff / m_hi_eff) further trims each thread's row range, but every
+ * thread still executes every js/ls iteration so the `omp single`/`omp
+ * barrier` pair stays collective. Partitioning the M axis into per-thread
+ * chunks (not by MC-block count) keeps threads busy on small/thin shapes.
+ *
+ * Nesting guard: when esyrk_ is called from inside another routine's parallel
+ * region, delegate to esyrk_serial and open no team of our own — calling only
+ * the *serial* kernel primitives means no nested team either way, the libgomp
+ * barrier-wedge cure (memory project-etrsm-omp4-wedge).
  */
 
 #include "esyrk_kernel.h"
+#include "etri_kernel.h"
+#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_round_up */
 #include <stddef.h>
 #include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <math.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 typedef esyrk_T T;
@@ -32,505 +37,132 @@ typedef esyrk_T T;
 #define MR ESYRK_MR
 #define NR ESYRK_NR
 
-#define ESYRK_OMP_MIN  32
-
-#define DIVIDE_RATE   2
-#define CACHE_LINE_T  8   /* 8 × sizeof(uintptr_t) = 64 bytes — one cache line */
-
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
-static inline int imin(int a, int b) { return a < b ? a : b; }
-
-#define C_(i, j)  c[(size_t)(j) * ldc + (i)]
-
-/* ─── Quadratic N partition for equal triangular work per thread ─ */
-
-/* Quadratic partition for COOPERATIVE work balance (matches OpenBLAS
- * driver/level3/level3_syrk_threaded.c). Width sequence is the same for
- * both UPLOs:
- *     w_t = sqrt(i_t^2 + N^2/nthreads) - i_t,    i_t = sum_{s<t} w_s.
- *
- * For LOWER, fill forward: thread 0 owns the widest band at the LOWEST
- * column indices (its diagonal triangle is the dominant work, no off-
- * diagonal contribution since no lower-index threads exist).
- *
- * For UPPER, fill backward: thread 0 owns the NARROWEST band at the
- * LOWEST column indices (its diagonal is tiny but it contributes
- * off-diagonal slabs to every higher-index thread's column band).
- *
- * Either way, each thread's total work — diagonal triangle plus all
- * rectangles it produces using OWN sa × OTHER buffer — equals N²/(2·nt).
- */
-static void syrk_quadratic_partition(int N, int nthreads, int mask,
-                                     char UPLO, int *range)
-{
-    const int seg = mask + 1;
-    const double dnum = (double)N * (double)N / (double)nthreads;
-
-    if (UPLO == 'L') {
-        int i = 0, num_cpu = 0;
-        range[0] = 0;
-        while (i < N && num_cpu < nthreads) {
-            int width;
-            if (nthreads - num_cpu > 1) {
-                const double di = (double)i;
-                const double dinum = di * di + dnum;
-                width = ((int)((sqrt(dinum) - di + mask) / seg)) * seg;
-                if (width <= 0 || width > N - i) width = N - i;
-            } else {
-                width = N - i;
-            }
-            range[num_cpu + 1] = range[num_cpu] + width;
-            num_cpu++;
-            i += width;
-        }
-        while (num_cpu < nthreads) {
-            range[num_cpu + 1] = N;
-            num_cpu++;
-        }
-    } else {
-        /* UPPER — backward fill */
-        range[nthreads] = N;
-        int i = 0, num_cpu = 0;
-        while (i < N && num_cpu < nthreads) {
-            int width;
-            if (nthreads - num_cpu > 1) {
-                const double di = (double)i;
-                const double dinum = di * di + dnum;
-                width = ((int)((sqrt(dinum) - di + mask) / seg)) * seg;
-                if (width <= 0 || width > N - i) width = N - i;
-            } else {
-                width = N - i;
-            }
-            range[nthreads - num_cpu - 1] = range[nthreads - num_cpu] - width;
-            num_cpu++;
-            i += width;
-        }
-        while (num_cpu < nthreads) {
-            range[nthreads - num_cpu - 1] = 0;
-            num_cpu++;
-        }
-    }
-}
-
-/* ─── Cooperative flag plumbing ────────────────────────────────── */
-
-/* flags[(producer * nt + consumer) * DIVIDE_RATE + bs] occupies one cache
- * line. Value = 0 ⇒ buffer is empty (or consumed). Non-zero ⇒ pointer
- * to producer's buffer[bs], safe for consumer to read. */
-static inline volatile uintptr_t *flag_at(volatile uintptr_t *flags,
-                                          int producer, int consumer, int bs,
-                                          int nt)
-{
-    return &flags[(((size_t)producer * nt + consumer) * DIVIDE_RATE + bs)
-                  * CACHE_LINE_T];
-}
-
-#ifdef _OPENMP
-static inline void cpu_relax(void) {
-#if defined(__x86_64__) || defined(__i386__)
-    __asm__ __volatile__("pause" ::: "memory");
-#else
-    __asm__ __volatile__("" ::: "memory");
-#endif
-}
-#define WMB() __atomic_thread_fence(__ATOMIC_RELEASE)
-#define RMB() __atomic_thread_fence(__ATOMIC_ACQUIRE)
-#else
-static inline void cpu_relax(void) { }
-#define WMB() do { } while (0)
-#define RMB() do { } while (0)
-#endif
-
-/* ─── Cooperative inner kernel ─────────────────────────────────── */
-
-/* One thread's contribution to the SYRK. mypos is the thread's index in
- * [0, nt). Produces a row panel (sa) and a column panel (buffer[bs]) per
- * K chunk; signals buffer-ready via flags; consumes other threads'
- * buffers for off-diagonal work. */
-static void inner_syrk(int N, int K, T alpha, char UPLO, char TR,
-                       const T *restrict a, int lda,
-                       T *restrict c, int ldc,
-                       const int *range, int nt, int mypos,
-                       volatile uintptr_t *flags,
-                       T *restrict sa, T *restrict buffer_base,
-                       int sa_rows_padded, int buf_div_n,
-                       int MC, int KC)
-{
-    (void)sa_rows_padded;
-    const int m_from = range[mypos];
-    const int m_to   = range[mypos + 1];
-    const int own_w  = m_to - m_from;
-    if (own_w <= 0) return;
-    const int lower = (UPLO == 'L');
-
-    /* DIVIDE_RATE sub-buffers, each sized KC × buf_div_n (in T). */
-    T *buffer[DIVIDE_RATE];
-    for (int b = 0; b < DIVIDE_RATE; ++b)
-        buffer[b] = buffer_base + (size_t)b * KC * esyrk_round_up(buf_div_n, NR);
-
-    /* Per-thread own-band sub-division for buffer sharing.
-     * Each bufferside holds up to div_n cols of own band, packed. */
-    const int div_n = esyrk_round_up((own_w + DIVIDE_RATE - 1) / DIVIDE_RATE, NR);
-    if (div_n != buf_div_n) {
-        /* defensive — caller computed buf_div_n as the MAX across threads;
-         * each thread's own div_n is ≤ buf_div_n, so layout still fits. */
-    }
-
-    for (int ls = 0; ls < K; ls += KC) {
-        const int min_l = imin(KC, K - ls);
-
-        /* Pick first row chunk size: split own_w into ~halves rounded
-         * to MR; clamp to MC. */
-        int min_i;
-        if (own_w >= 2 * MC) {
-            min_i = MC;
-        } else if (own_w > MC) {
-            min_i = esyrk_round_up(own_w / 2, MR);
-            if (min_i > MC) min_i = MC;
-        } else {
-            min_i = own_w;
-        }
-        const int start_i = lower ? min_i : 0;
-        const int first_row = lower ? (m_to - min_i) : m_from;
-
-        /* PHASE 1: pack own A row panel (sa) for first chunk, and own
-         * column panel (buffer[bs]) sub-pieces; compute diagonal block. */
-        esyrk_pack_A_panel(a, lda, first_row, ls, min_i, min_l, TR, sa);
-
-        int bs = 0;
-        for (int xxx = m_from; xxx < m_to; xxx += div_n, ++bs) {
-            /* wait for own working[i][bs] == 0 for cross-thread consumers
-             * (self-flag is intentionally never set, so skipping it is safe). */
-            const int i_lo = lower ? mypos     : 0;
-            const int i_hi = lower ? nt        : mypos + 1;
-            for (int i = i_lo; i < i_hi; ++i) {
-                if (i == mypos) continue;
-                volatile uintptr_t *f = flag_at(flags, mypos, i, bs, nt);
-                while (*f != 0) cpu_relax();
-            }
-            RMB();
-
-            const int sub_w = imin(div_n, m_to - xxx);
-            esyrk_pack_B_panel(a, lda, xxx, ls, sub_w, min_l, TR, buffer[bs]);
-
-            /* Diagonal sub-block kernel (triangle-aware). */
-            esyrk_macro_kernel_tri(min_i, sub_w, min_l, alpha, sa, buffer[bs],
-                                   &C_(first_row, xxx), ldc,
-                                   first_row, xxx, UPLO);
-
-            WMB();
-            for (int i = i_lo; i < i_hi; ++i) {
-                if (i == mypos) continue;
-                volatile uintptr_t *f = flag_at(flags, mypos, i, bs, nt);
-                *f = (uintptr_t)buffer[bs];
-            }
-        }
-
-        /* PHASE 2: work-steal own sa × OTHER threads' buffers for the
-         * off-diagonal slab spanned by this row chunk. */
-        if (lower) {
-            for (int current = mypos - 1; current >= 0; --current) {
-                const int cw = range[current + 1] - range[current];
-                const int cdiv = esyrk_round_up((cw + DIVIDE_RATE - 1) / DIVIDE_RATE, NR);
-                int cbs = 0;
-                for (int xxx = range[current]; xxx < range[current + 1];
-                     xxx += cdiv, ++cbs) {
-                    volatile uintptr_t *f = flag_at(flags, current, mypos, cbs, nt);
-                    while (*f == 0) cpu_relax();
-                    RMB();
-                    T *their = (T *)*f;
-                    const int sub_w = imin(cdiv, range[current + 1] - xxx);
-                    esyrk_macro_kernel_rect(min_i, sub_w, min_l, alpha, sa, their,
-                                            &C_(first_row, xxx), ldc);
-                    if (own_w == min_i) {
-                        WMB();
-                        *f = 0;
-                    }
-                }
-            }
-        } else {
-            for (int current = mypos + 1; current < nt; ++current) {
-                const int cw = range[current + 1] - range[current];
-                const int cdiv = esyrk_round_up((cw + DIVIDE_RATE - 1) / DIVIDE_RATE, NR);
-                int cbs = 0;
-                for (int xxx = range[current]; xxx < range[current + 1];
-                     xxx += cdiv, ++cbs) {
-                    volatile uintptr_t *f = flag_at(flags, current, mypos, cbs, nt);
-                    while (*f == 0) cpu_relax();
-                    RMB();
-                    T *their = (T *)*f;
-                    const int sub_w = imin(cdiv, range[current + 1] - xxx);
-                    esyrk_macro_kernel_rect(min_i, sub_w, min_l, alpha, sa, their,
-                                            &C_(first_row, xxx), ldc);
-                    if (own_w == min_i) {
-                        WMB();
-                        *f = 0;
-                    }
-                }
-            }
-        }
-
-        /* PHASE 3: remaining own row chunks. For LOWER, walk upward from
-         * m_from to m_to-start_i (the first chunk was at the bottom).
-         * For UPPER, walk downward from m_from+min_i to m_to. */
-        const int is_lo = lower ? m_from           : (m_from + min_i);
-        const int is_hi = lower ? (m_to - start_i) : m_to;
-
-        for (int is = is_lo; is < is_hi; is += MC) {
-            int chunk_i = imin(MC, is_hi - is);
-            esyrk_pack_A_panel(a, lda, is, ls, chunk_i, min_l, TR, sa);
-
-            const int last_chunk = (is + chunk_i >= is_hi);
-
-            if (lower) {
-                for (int current = mypos; current >= 0; --current) {
-                    const int cw = range[current + 1] - range[current];
-                    const int cdiv = esyrk_round_up((cw + DIVIDE_RATE - 1) / DIVIDE_RATE, NR);
-                    int cbs = 0;
-                    for (int xxx = range[current]; xxx < range[current + 1];
-                         xxx += cdiv, ++cbs) {
-                        T *their;
-                        if (current == mypos) {
-                            their = buffer[cbs];
-                        } else {
-                            volatile uintptr_t *f = flag_at(flags, current, mypos, cbs, nt);
-                            RMB();
-                            their = (T *)*f;
-                        }
-                        const int sub_w = imin(cdiv, range[current + 1] - xxx);
-                        if (current == mypos) {
-                            esyrk_macro_kernel_tri(chunk_i, sub_w, min_l, alpha, sa, their,
-                                                   &C_(is, xxx), ldc, is, xxx, UPLO);
-                        } else {
-                            esyrk_macro_kernel_rect(chunk_i, sub_w, min_l, alpha, sa, their,
-                                                    &C_(is, xxx), ldc);
-                            if (last_chunk) {
-                                volatile uintptr_t *f = flag_at(flags, current, mypos, cbs, nt);
-                                WMB();
-                                *f = 0;
-                            }
-                        }
-                    }
-                }
-            } else {
-                for (int current = mypos; current < nt; ++current) {
-                    const int cw = range[current + 1] - range[current];
-                    const int cdiv = esyrk_round_up((cw + DIVIDE_RATE - 1) / DIVIDE_RATE, NR);
-                    int cbs = 0;
-                    for (int xxx = range[current]; xxx < range[current + 1];
-                         xxx += cdiv, ++cbs) {
-                        T *their;
-                        if (current == mypos) {
-                            their = buffer[cbs];
-                        } else {
-                            volatile uintptr_t *f = flag_at(flags, current, mypos, cbs, nt);
-                            RMB();
-                            their = (T *)*f;
-                        }
-                        const int sub_w = imin(cdiv, range[current + 1] - xxx);
-                        if (current == mypos) {
-                            esyrk_macro_kernel_tri(chunk_i, sub_w, min_l, alpha, sa, their,
-                                                   &C_(is, xxx), ldc, is, xxx, UPLO);
-                        } else {
-                            esyrk_macro_kernel_rect(chunk_i, sub_w, min_l, alpha, sa, their,
-                                                    &C_(is, xxx), ldc);
-                            if (last_chunk) {
-                                volatile uintptr_t *f = flag_at(flags, current, mypos, cbs, nt);
-                                WMB();
-                                *f = 0;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        /* If own_w == min_i then the second pass loop was empty, and
-         * own-buffer flags toward LOWER consumers (other threads) were
-         * already cleared in PHASE 2. */
-    }
-
-    /* Drain: wait until every consumer (other than self) has cleared the
-     * flags producer mypos wrote during PHASE 1. */
-    for (int bs2 = 0; bs2 < DIVIDE_RATE; ++bs2) {
-        const int i_lo = lower ? mypos     : 0;
-        const int i_hi = lower ? nt        : mypos + 1;
-        for (int i = i_lo; i < i_hi; ++i) {
-            if (i == mypos) continue;
-            volatile uintptr_t *f = flag_at(flags, mypos, i, bs2, nt);
-            while (*f != 0) cpu_relax();
-        }
-    }
-}
-
-/* ─── Entry point ──────────────────────────────────────────────── */
-
 void esyrk_(
-    const char *uplo, const char *trans,
+    const char *uplo_p, const char *trans_p,
     const int *n_, const int *k_,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
+    const T *a, const int *lda_,
     const T *beta_,
-    T *restrict c, const int *ldc_,
+    T *c, const int *ldc_,
     size_t uplo_len, size_t trans_len)
 {
 #ifdef _OPENMP
-    /* Already inside a team → run serially, no nested region (wedge guard). */
+    /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        esyrk_serial(uplo, trans, n_, k_, alpha_, a, lda_, beta_, c, ldc_,
-                     uplo_len, trans_len);
+        esyrk_serial(uplo_p, trans_p, n_, k_, alpha_, a, lda_, beta_,
+                     c, ldc_, uplo_len, trans_len);
         return;
     }
 #endif
     (void)uplo_len; (void)trans_len;
     const int N = *n_, K = *k_;
-    const int lda = *lda_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
-    if (TR == 'C') TR = 'T';
+    const int lda = *lda_, ldc = *ldc_;
+    const int uplo  = (char)toupper((unsigned char)*uplo_p);
+    const int trans = (char)toupper((unsigned char)*trans_p);
 
-    if (N == 0) return;
+    if (N <= 0) return;
 
-    const T zero = 0.0L, one = 1.0L;
+    /* Triangular beta pre-pass on the UPLO triangle of C only. */
+    if (uplo == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
-    /* α==0 or K==0: only beta-scale the UPLO triangle. */
-    if (alpha == zero || K == 0) {
-        if (beta == one) return;
-#ifdef _OPENMP
-        const int use_omp_beta = (N >= ESYRK_OMP_MIN
-                                  && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp_beta) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            if (beta == zero) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero;
-            else              for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-        }
-        return;
-    }
+    if (K == 0 || alpha == 0.0L) return;
+
+    int MC, KC, NC;
+    egemm_choose_blocks(K, &MC, &KC, &NC);
+
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
 
 #ifdef _OPENMP
-    const int max_threads = blas_omp_max_threads();
-    const int can_par = (max_threads > 1 && N >= ESYRK_OMP_MIN);
-    const int nt = can_par ? max_threads : 1;
-    const int use_cooperative = can_par && (N >= nt * esyrk_switch_ratio());
+    int nthreads = omp_get_max_threads();
+    if (nthreads < 1) nthreads = 1;
 #else
-    const int can_par = 0;
-    const int nt = 1;
-    const int use_cooperative = 0;
+    int nthreads = 1;
 #endif
 
-    if (!use_cooperative) {
-        esyrk_serial_inline(UPLO, TR, N, K, alpha, a, lda, beta, c, ldc);
-        return;
+    /* SYRK does ~ N^2 · K / 2 flops; tiny-cutoff sized to match egemm. */
+    long nnk = (long)N * (long)N * (long)K;
+    if (nnk < 64L * 64L * 64L) nthreads = 1;
+
+    /* Shared Bp, one private Ap per thread, allocated BEFORE the region: a
+     * thread that skipped the loop on a failed in-region alloc would deadlock
+     * the others at the Bp barrier. */
+    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    T **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
+    int alloc_ok = (Bp && Ap_arr);
+    for (int t = 0; alloc_ok && t < nthreads; ++t) {
+        Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        if (!Ap_arr[t]) alloc_ok = 0;
     }
-
-    /* ─── Cooperative parallel path ─────────────────────────────── */
-
-    int MC, KC, NC_unused;
-    esyrk_block_sizes(&MC, &KC, &NC_unused);
-
-    /* Partition own col bands. */
-    int *range = (int *)malloc((size_t)(nt + 1) * sizeof(int));
-    if (!range) {
-        esyrk_serial_inline(UPLO, TR, N, K, alpha, a, lda, beta, c, ldc);
-        return;
-    }
-    syrk_quadratic_partition(N, nt, MR - 1, UPLO, range);
-
-    /* Compute max own-band width → buffer sizing.
-     * Fall back to serial if any thread got zero width (would deadlock
-     * the flag-based protocol). */
-    int max_w = 0, min_w = N + 1;
-    for (int t = 0; t < nt; ++t) {
-        const int w = range[t + 1] - range[t];
-        if (w > max_w) max_w = w;
-        if (w < min_w) min_w = w;
-    }
-    if (min_w <= 0) {
-        free(range);
-        esyrk_serial_inline(UPLO, TR, N, K, alpha, a, lda, beta, c, ldc);
-        return;
-    }
-    const int buf_div_n = esyrk_round_up((max_w + DIVIDE_RATE - 1) / DIVIDE_RATE, NR);
-
-    /* Allocate flag array (zeroed). */
-    const size_t flag_count = (size_t)nt * nt * DIVIDE_RATE * CACHE_LINE_T;
-    volatile uintptr_t *flags =
-        (volatile uintptr_t *)aligned_alloc(64,
-            ((flag_count * sizeof(uintptr_t)) + 63) & ~(size_t)63);
-    if (!flags) {
-        free(range);
-        esyrk_serial_inline(UPLO, TR, N, K, alpha, a, lda, beta, c, ldc);
-        return;
-    }
-    memset((void *)flags, 0, flag_count * sizeof(uintptr_t));
-
-    const int sa_rows_padded = esyrk_round_up(MC, MR);
-    const size_t sa_bytes  = (size_t)sa_rows_padded * KC * sizeof(T);
-    const size_t buf_bytes = (size_t)DIVIDE_RATE * KC * buf_div_n * sizeof(T);
-
-    int alloc_failed = 0;
-
+    if (alloc_ok) {
 #ifdef _OPENMP
-    #pragma omp parallel num_threads(nt)
+        #pragma omp parallel num_threads(nthreads)
 #endif
-    {
+        {
 #ifdef _OPENMP
-        const int tid = omp_get_thread_num();
-        const int nt_inside = omp_get_num_threads();
+            const int tid = omp_get_thread_num();
+            const int nth = omp_get_num_threads();
 #else
-        const int tid = 0;
-        const int nt_inside = 1;
+            const int tid = 0, nth = 1;
 #endif
-        (void)nt_inside;
+            T *Ap = Ap_arr[tid];
 
-        /* Per-thread beta scale of own UPLO column band. */
-        if (beta != one) {
-            const int m_from = range[tid];
-            const int m_to   = range[tid + 1];
-            for (int j = m_from; j < m_to; ++j) {
-                const int i_lo = (UPLO == 'L') ? j : 0;
-                const int i_hi = (UPLO == 'L') ? N : j + 1;
-                T *cj = c + (size_t)j * ldc;
-                if (beta == zero) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero;
-                else              for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
+            /* M-axis (= N output rows) partition into per-thread chunks. */
+            const int m_chunk = egemm_round_up((N + nth - 1) / nth, MR);
+            const int m_lo = tid * m_chunk;
+            int m_hi = m_lo + m_chunk;
+            if (m_hi > N) m_hi = N;
+
+            for (int js = 0; js < N; js += NC) {
+                const int jb = (N - js < NC) ? (N - js) : NC;
+
+                /* UPLO clip of this thread's [m_lo, m_hi] for this js-band. */
+                int m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
+                int m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
+                if (m_lo_eff < m_lo) m_lo_eff = m_lo;
+
+                for (int ls = 0; ls < K; ls += KC) {
+                    const int pb = (K - ls < KC) ? (K - ls) : KC;
+
+                    /* Pack the shared Bp = the same A in OCOPY shape. */
+#ifdef _OPENMP
+                    #pragma omp barrier
+                    #pragma omp single
+#endif
+                    {
+                        if (trans == 'N')
+                            etri_tcopy(pb, jb, &a[(size_t)ls * lda + js], lda, Bp);
+                        else
+                            etri_ncopy(pb, jb, &a[(size_t)js * lda + ls], lda, Bp);
+                    }
+                    /* implicit barrier at end of `single` → Bp safe to read */
+
+                    for (int is = m_lo_eff; is < m_hi_eff; is += MC) {
+                        const int min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+
+                        if (trans == 'N')
+                            etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap);
+                        else
+                            etri_ncopy(pb, min_i, &a[(size_t)is * lda + ls], lda, Ap);
+
+                        if (uplo == 'U')
+                            esyrk_kernel_u(min_i, jb, pb, alpha, Ap, Bp,
+                                           &c[(size_t)js * ldc + is], ldc,
+                                           (ptrdiff_t)(is - js));
+                        else
+                            esyrk_kernel_l(min_i, jb, pb, alpha, Ap, Bp,
+                                           &c[(size_t)js * ldc + is], ldc,
+                                           (ptrdiff_t)(is - js));
+                    }
+                }
             }
         }
-
-        T *sa  = (T *)aligned_alloc(64, (sa_bytes  + 63) & ~(size_t)63);
-        T *buf = (T *)aligned_alloc(64, (buf_bytes + 63) & ~(size_t)63);
-        if (!sa || !buf) {
-            __atomic_store_n(&alloc_failed, 1, __ATOMIC_RELAXED);
-        }
-
-#ifdef _OPENMP
-        #pragma omp barrier
-#endif
-
-        if (!__atomic_load_n(&alloc_failed, __ATOMIC_RELAXED) && sa && buf) {
-            inner_syrk(N, K, alpha, UPLO, TR, a, lda, c, ldc,
-                       range, nt, tid, flags, sa, buf,
-                       sa_rows_padded, buf_div_n, MC, KC);
-        }
-
-        free(sa);
-        free(buf);
     }
 
-    free((void *)flags);
-    free(range);
-
-    if (alloc_failed) {
-        /* Lost the parallel run to OOM — re-run via the serial fallback so
-         * the caller still gets a correct C. The parallel section already
-         * beta-scaled each thread's own column band before any thread hit
-         * OOM, so pass beta=1 here to avoid double-scaling. */
-        esyrk_serial_inline(UPLO, TR, N, K, alpha, a, lda, one, c, ldc);
-    }
+    for (int t = 0; t < nthreads && Ap_arr; ++t) free(Ap_arr[t]);
+    free(Ap_arr);
+    free(Bp);
 }
