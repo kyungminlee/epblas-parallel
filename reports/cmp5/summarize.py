@@ -83,10 +83,10 @@ def main():
     # 2. Per-routine median GF/s across all (key, size).
     out.append("## Per-routine medians (GF/s) — across all (key, size)")
     out.append("")
-    out.append(f"Columns: routine, then median GF/s for each of the 5 variants, then OMP=4/OMP=1 speedup for each C overlay.")
+    out.append(f"Columns: routine, then median GF/s for each of the 5 variants, then the par/ob GF/s ratios (**> 1.0 ⇒ parallel faster** — the firm bar is ≥ 1.0 in every cell), then OMP=4/OMP=1 speedup for each C overlay.")
     out.append("")
-    out.append(f"| routine | {EP1.label} | {EP4.label} | {P1.label} | {P4.label} | {MIG_LABEL} | ep4/ep1 | par4/par1 |")
-    out.append( "|---------|--------------:|--------------:|--------------:|--------------:|--------------:|--------:|----------:|")
+    out.append(f"| routine | {EP1.label} | {EP4.label} | {P1.label} | {P4.label} | {MIG_LABEL} | par1/ob1 | par4/ob4 | ep4/ep1 | par4/par1 |")
+    out.append( "|---------|--------------:|--------------:|--------------:|--------------:|--------------:|---------:|---------:|--------:|----------:|")
     for routine in sorted(by_routine):
         rr = by_routine[routine]
         cols = {v.tsv_col: [pf(r[v.tsv_col]) for r in rr] for v in SUBJECTS}
@@ -99,6 +99,7 @@ def main():
         out.append(
             f"| {routine} | {m[EP1.tsv_col]:.3f} | {m[EP4.tsv_col]:.3f} "
             f"| {m[P1.tsv_col]:.3f} | {m[P4.tsv_col]:.3f} | {m_mig:.3f} "
+            f"| {m[P1.tsv_col]/m[EP1.tsv_col]:.2f}× | {m[P4.tsv_col]/m[EP4.tsv_col]:.2f}× "
             f"| {m[EP4.tsv_col]/m[EP1.tsv_col]:.2f}× | {m[P4.tsv_col]/m[P1.tsv_col]:.2f}× |"
         )
 
@@ -115,8 +116,8 @@ def main():
     out.append("")
     out.append("For each routine, the row at the largest N actually measured. Useful for cases where a serial-OK overlay regresses only at large N (or vice versa).")
     out.append("")
-    out.append(f"| routine | key | N | {EP1.label} | {EP4.label} | {P1.label} | {P4.label} | {MIG_LABEL} | ep1/mig | par1/mig | par4/mig |")
-    out.append( "|---------|-----|--:|--------------:|--------------:|--------------:|--------------:|--------------:|--------:|---------:|---------:|")
+    out.append(f"| routine | key | N | {EP1.label} | {EP4.label} | {P1.label} | {P4.label} | {MIG_LABEL} | par1/ob1 | par4/ob4 | ep1/mig | par1/mig | par4/mig |")
+    out.append( "|---------|-----|--:|--------------:|--------------:|--------------:|--------------:|--------------:|---------:|---------:|--------:|---------:|---------:|")
     for routine in sorted(big_n_routines):
         rr = big_n_routines[routine]
         n_max = max(n for n, _ in rr)
@@ -133,6 +134,7 @@ def main():
         p1,  p4  = vals[P1.tsv_col],  vals[P4.tsv_col]
         out.append(
             f"| {routine} | {r['key']} | {n_max} | {ep1:.3f} | {ep4:.3f} | {p1:.3f} | {p4:.3f} | {mig:.3f} "
+            f"| {p1/ep1:.2f}× | {p4/ep4:.2f}× "
             f"| {ep1/mig:.2f}× | {p1/mig:.2f}× | {p4/mig:.2f}× |"
         )
     out.append("")
