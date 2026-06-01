@@ -153,6 +153,34 @@ K-unroll helped ygemm rank-1 (NN/NT/NC) but regressed dot-product paths. Full di
 
 ---
 
+## Reporting convention (how perf numbers are presented)
+
+**Always report both the absolute GF/s and the ratio.** A bare ratio hides
+whether a "win" is on a 0.04 GF/s triangular-solve or a 8 GF/s GEMM; a bare
+GF/s hides whether we're ahead of OpenBLAS. Quote them together, e.g.
+`par 7.86 vs ob 7.28 GF/s (1.08×)`.
+
+Two units appear in this repo; they point in **opposite directions**, so label
+which one you mean every time:
+
+| unit | what it is | direction | parity |
+|------|-----------|-----------|--------|
+| **GF/s** (throughput) | the cmp5 tables, `perf_*` harness output | **larger is better** | par/ob GF/s ratio **> 1.0** ⇒ par faster |
+| **cycle ratio** (par/ob cycles, the interleaved harness) | `perf stat -e cycles:u` | **smaller is better** | ratio **< 1.0** ⇒ par faster |
+
+They are reciprocals: a 1.84× cycle ratio (par takes 1.84× the cycles, bad) is
+the same fact as a 0.54× GF/s ratio (par at 54% throughput, bad). **Default to
+GF/s and a GF/s ratio in any summary**; reach for the cycle ratio only inside
+the interleaved min-of-N harness where it is the native measurement. When you
+do show a cycle ratio, say "cycles" explicitly so a `0.99` isn't misread as a
+throughput loss.
+
+The firm bar — **par ≥ ob in every cell** — therefore reads as *GF/s ratio ≥ 1.0*
+(equivalently *cycle ratio ≤ 1.0*) across all sizes, both OMP=1 and OMP=4, both
+uplos.
+
+---
+
 ## Diagnostic methodology that worked
 
 When chasing a perf gap, follow this order:

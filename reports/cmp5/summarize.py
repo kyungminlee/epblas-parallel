@@ -52,6 +52,8 @@ def main():
     out.append("- Same `BLAS_PERF_{ITERS,WARMUP,INCX,INCY}=200/20/1/1`; per-routine default sizes; pinned via `taskset` (P-cores 0 or 0..3).")
     out.append(f"- `{MIG_LABEL}` = migrated_GFs from the `{P1.label}` run; `mig_*` columns are sanity readings of the same migrated `_serial` symbol from each of the four runs (expected to be ~equal since `_serial` contains no OpenMP).")
     out.append("")
+    out.append("**Units: all columns are GF/s (throughput) — larger is better.** A `parallel/openblas` GF/s ratio **> 1.0** means parallel is faster; the firm bar is par ≥ ob in every cell. (The separate interleaved per-routine harness reports a par/ob *cycle* ratio instead, where smaller is better and < 1.0 = par faster — the reciprocal view. See `doc/optimization-findings.md` → \"Reporting convention\".)")
+    out.append("")
 
     # 1. migrated drift sanity check.
     out.append("## Migrated-baseline drift across runs (sanity check)")
