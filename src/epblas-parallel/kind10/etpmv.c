@@ -1,16 +1,201 @@
 /*
  * etpmv — kind10 (long double) triangular packed matrix-vector.
  *   x := A*x or A^T*x
+ *
+ * The serial reference is the in-place column sweep (each column updates a run
+ * of x in dependency order), which is inherently sequential. But the operation
+ * is a pure multiply — every *output* element is an independent dot/axpy — so
+ * the threaded path (large N) reformulates it out-of-place over a private
+ * buffer and partitions columns across threads, mirroring OpenBLAS tpmv_thread:
+ *   - NoTrans: column j writes a run of y (cross-column) -> per-thread private
+ *     slot, controller AXPY-reduces the touched range into slot 0.
+ *   - Trans:   y[j] is a dot of column j with x (disjoint per thread) -> all
+ *     threads write disjoint y[m_from..m_to) into the shared slot 0, no reduce.
+ * Final copy writes the buffer back to x. The column kernels index a
+ * loop-invariant per-column base (ap[cs + i]) to keep the fp80 loop body off
+ * a live running packed index.
  */
 
 #include <stddef.h>
 #include <ctype.h>
+#ifdef _OPENMP
+#include <stdlib.h>
+#include <math.h>
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
 
 typedef long double T;
 
 static inline char up(const char *p) {
     return (char)toupper((unsigned char)*p);
 }
+
+#ifdef _OPENMP
+static inline size_t col_start_U(ptrdiff_t j) { return (size_t)j * (size_t)(j + 1) / 2; }
+static inline size_t col_start_L(ptrdiff_t j, ptrdiff_t n) {
+    return (size_t)j * (size_t)(2 * n - j + 1) / 2;
+}
+
+/* Sqrt-balanced contiguous column partition (OpenBLAS tpmv_partition, mask=7,
+ * min-width 16). UPPER reverses the assignment so thread 0 takes the highest
+ * (heaviest) columns; LOWER is forward. */
+static void tpmv_partition(int upper, ptrdiff_t n, int nthreads, ptrdiff_t *range)
+{
+    const int mask = 7;
+    const double dnum = (double)n * (double)n / (double)nthreads;
+    if (!upper) {
+        range[0] = 0;
+        ptrdiff_t i = 0; int num_cpu = 0;
+        while (i < n && num_cpu < nthreads) {
+            ptrdiff_t width;
+            if (nthreads - num_cpu > 1) {
+                double di = (double)(n - i);
+                width = (di * di - dnum > 0.0)
+                    ? (((ptrdiff_t)(-sqrt(di * di - dnum) + di) + mask) & ~(ptrdiff_t)mask)
+                    : (n - i);
+                if (width < 16) width = 16;
+                if (width > n - i) width = n - i;
+            } else width = n - i;
+            range[num_cpu + 1] = range[num_cpu] + width;
+            num_cpu++; i += width;
+        }
+        for (int t = num_cpu + 1; t <= nthreads; ++t) range[t] = range[num_cpu];
+    } else {
+        range[nthreads] = n;
+        ptrdiff_t i = 0; int num_cpu = 0;
+        while (i < n && num_cpu < nthreads) {
+            ptrdiff_t width;
+            if (nthreads - num_cpu > 1) {
+                double di = (double)(n - i);
+                width = (di * di - dnum > 0.0)
+                    ? (((ptrdiff_t)(-sqrt(di * di - dnum) + di) + mask) & ~(ptrdiff_t)mask)
+                    : (n - i);
+                if (width < 16) width = 16;
+                if (width > n - i) width = n - i;
+            } else width = n - i;
+            range[nthreads - num_cpu - 1] = range[nthreads - num_cpu] - width;
+            num_cpu++; i += width;
+        }
+        for (int t = 0; t < nthreads - num_cpu; ++t) range[t] = range[nthreads - num_cpu];
+    }
+}
+
+static void tpmv_kernel_N(int upper, int nounit, ptrdiff_t n,
+                          ptrdiff_t m_from, ptrdiff_t m_to,
+                          const T *ap, const T *x, T *y)
+{
+    if (upper) {
+        for (ptrdiff_t j = m_from; j < m_to; ++j) {
+            size_t cs = col_start_U(j);
+            T xj = x[j];
+            for (ptrdiff_t i = 0; i < j; ++i) y[i] += ap[cs + (size_t)i] * xj;
+            y[j] += nounit ? ap[cs + (size_t)j] * xj : xj;
+        }
+    } else {
+        for (ptrdiff_t j = m_from; j < m_to; ++j) {
+            size_t cs = col_start_L(j, n);
+            T xj = x[j];
+            y[j] += nounit ? ap[cs] * xj : xj;
+            for (ptrdiff_t i = j + 1; i < n; ++i) y[i] += ap[cs + (size_t)(i - j)] * xj;
+        }
+    }
+}
+
+static void tpmv_kernel_T(int upper, int nounit, ptrdiff_t n,
+                          ptrdiff_t m_from, ptrdiff_t m_to,
+                          const T *ap, const T *x, T *y)
+{
+    if (upper) {
+        /* Diagonal (ap[cs+j]) sits at the END of the column, so accumulate the
+         * cs+0..cs+j-1 run first and fold the diagonal in last — keeping the
+         * packed read stream sequential (diag-first jumped back ~5-8%). */
+        for (ptrdiff_t j = m_from; j < m_to; ++j) {
+            size_t cs = col_start_U(j);
+            T s = 0.0L;
+            for (ptrdiff_t i = 0; i < j; ++i) s += ap[cs + (size_t)i] * x[i];
+            s += nounit ? ap[cs + (size_t)j] * x[j] : x[j];
+            y[j] += s;
+        }
+    } else {
+        /* Diagonal (ap[cs]) is at the column start, so diag-first stays sequential. */
+        for (ptrdiff_t j = m_from; j < m_to; ++j) {
+            size_t cs = col_start_L(j, n);
+            T s = nounit ? ap[cs] * x[j] : x[j];
+            for (ptrdiff_t i = j + 1; i < n; ++i) s += ap[cs + (size_t)(i - j)] * x[i];
+            y[j] += s;
+        }
+    }
+}
+
+/* Threaded out-of-place path. Returns 1 if it handled the call, 0 to fall back
+ * to the serial reference. Kept in its own noinline function so the in-place
+ * serial loops below compile in a clean register context (an inline threaded
+ * block crowded the x87 allocation and slowed the UPPER NoTrans serial sweep
+ * ~14%). */
+__attribute__((noinline))
+static int etpmv_omp(int upper, int is_t, int nounit, int N, int incx,
+                     const T *restrict ap, T *restrict x)
+{
+    int nthreads = 1;
+    if (N >= 50 && !omp_in_parallel()) {
+        nthreads = blas_omp_max_threads();
+        if (N < 500 && nthreads > 2) nthreads = 2;
+    }
+    if (nthreads <= 1) return 0;
+
+    const ptrdiff_t n = N;
+    const ptrdiff_t kx = (incx < 0) ? -(n - 1) * (ptrdiff_t)incx : 0;
+    T *buf_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
+    ptrdiff_t *range_m = (ptrdiff_t *)malloc((size_t)(nthreads + 1) * sizeof(ptrdiff_t));
+    T *xbuf = NULL;
+    const T *xptr = x;
+    if (incx != 1 && buf_all && range_m) {
+        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        if (xbuf) {
+            for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[kx + i * incx];
+            xptr = xbuf;
+        }
+    }
+    if (!(buf_all && range_m && (incx == 1 || xbuf))) {
+        free(buf_all); free(range_m); if (xbuf) free(xbuf);
+        return 0;
+    }
+
+    tpmv_partition(upper, n, nthreads, range_m);
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        T *y = is_t ? buf_all : &buf_all[(size_t)tid * (size_t)n];
+        ptrdiff_t m_from, m_to;
+        if (upper) { m_from = range_m[nthreads - tid - 1]; m_to = range_m[nthreads - tid]; }
+        else       { m_from = range_m[tid];               m_to = range_m[tid + 1]; }
+        if (m_from < m_to) {
+            if (is_t) tpmv_kernel_T(upper, nounit, n, m_from, m_to, ap, xptr, y);
+            else      tpmv_kernel_N(upper, nounit, n, m_from, m_to, ap, xptr, y);
+        }
+    }
+    if (!is_t) {  /* reduce private slots into slot 0 over the touched range */
+        if (upper) {
+            for (int t = 1; t < nthreads; ++t) {
+                ptrdiff_t m_to_t = range_m[nthreads - t];
+                const T *slot = &buf_all[(size_t)t * (size_t)n];
+                for (ptrdiff_t i = 0; i < m_to_t; ++i) buf_all[i] += slot[i];
+            }
+        } else {
+            for (int t = 1; t < nthreads; ++t) {
+                ptrdiff_t m_from_t = range_m[t];
+                const T *slot = &buf_all[(size_t)t * (size_t)n];
+                for (ptrdiff_t i = m_from_t; i < n; ++i) buf_all[i] += slot[i];
+            }
+        }
+    }
+    if (incx == 1) for (ptrdiff_t i = 0; i < n; ++i) x[i] = buf_all[i];
+    else           for (ptrdiff_t i = 0; i < n; ++i) x[kx + i * incx] = buf_all[i];
+    free(buf_all); free(range_m); if (xbuf) free(xbuf);
+    return 1;
+}
+#endif /* _OPENMP */
 
 void etpmv_(
     const char *uplo, const char *trans, const char *diag,
@@ -29,6 +214,10 @@ void etpmv_(
     const int nounit = (up(diag) != 'U');
 
     if (N == 0) return;
+
+#ifdef _OPENMP
+    if (etpmv_omp(UPLO == 'U', TR == 'T', nounit, N, incx, ap, x)) return;
+#endif
 
     if (incx == 1) {
         if (TR == 'N') {
