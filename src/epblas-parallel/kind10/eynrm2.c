@@ -22,18 +22,7 @@ static __attribute__((cold)) void blue_init(void)
 }
 
 static inline R sq(R x) { return x * x; }
-
-static inline void blue_bucket(R ax, R *abig, R *amed, R *asml, int *notbig)
-{
-    if (ax > btbig) {
-        *abig += sq(ax * bsbig);
-        *notbig = 0;
-    } else if (ax < btsml) {
-        if (*notbig) *asml += sq(ax * bssml);
-    } else {
-        *amed += sq(ax);
-    }
-}
+static inline R ldabs(R x) { return x < 0 ? -x : x; }
 
 R eynrm2_(const int *n_, const T *x, const int *incx_)
 {
@@ -44,9 +33,31 @@ R eynrm2_(const int *n_, const T *x, const int *incx_)
     R abig = 0.0L, amed = 0.0L, asml = 0.0L;
     int notbig = 1;
     int ix = (incx < 0) ? -(n - 1) * incx : 0;
+    /* Hot loop transcribed from the epblas-openblas port: a complex element
+     * is two reals read through `p[c]`, and the three-way Blue bucketing is
+     * inlined here with the accumulators as plain locals.  This exact shape
+     * is what lets gcc keep the dominant medium-magnitude accumulator `amed`
+     * (and the `btsml` threshold) on the x87 register stack — only the
+     * rare-path constant spills.  An earlier by-pointer/macro form spilled
+     * `amed` instead, costing a per-element 80-bit load/store (~1.8x slower).
+     * Same ops in the same order, so bit-identical to the reference. */
     for (int i = 0; i < n; ++i) {
-        blue_bucket(fabsl(__real__ x[ix]), &abig, &amed, &asml, &notbig);
-        blue_bucket(fabsl(__imag__ x[ix]), &abig, &amed, &asml, &notbig);
+        const R *p = (const R *)&x[ix];
+        for (int c = 0; c < 2; ++c) {
+            R ax = ldabs(p[c]);
+            if (ax > btbig) {
+                R t = ax * bsbig;
+                abig += t * t;
+                notbig = 0;
+            } else if (ax < btsml) {
+                if (notbig) {
+                    R t = ax * bssml;
+                    asml += t * t;
+                }
+            } else {
+                amed += ax * ax;
+            }
+        }
         ix += incx;
     }
 
