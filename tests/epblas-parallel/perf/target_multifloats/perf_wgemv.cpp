@@ -75,7 +75,7 @@ static void run_one(char trans, int M, int N, int incx, int incy,
     free(A); free(X); free(Y); free(Yi);
 }
 
-static const int default_sizes[] = {128, 256, 512, 1024, 2048};
+static const int default_sizes[] = {128, 256, 512, 1024};
 static const int default_incxs[] = {1, 2, -1};
 int main(void) {
     int iters  = perf_env_int("BLAS_PERF_ITERS",  200);

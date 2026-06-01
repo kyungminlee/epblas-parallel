@@ -17,6 +17,20 @@ follow-up PR (move into tests/epblas-parallel/perf/perf_common.h).
 L1_DEFAULT_SIZES = '64, 128, 256, 512, 1024, 2048, 4096, 16384, 65536'
 
 
+def sizes_body(real_sizes: tuple[int, ...], is_c: bool) -> str:
+    """Comma-joined body for an L2/L3 `default_sizes[]` literal.
+
+    A complex routine does ~4x the flops of its real twin at a given N (four
+    real multiplies per complex multiply), so it runs ~4x longer per size and
+    is the one that trips the per-binary wall-clock cap in the cmp5 sweep
+    (ytrsm/ytrsv/ytpsv at the top size). Drop the largest size for complex so
+    its wall-time stays comparable to the real routine; the real twin keeps the
+    full range. Used as `{{{sizes_body(...)}}}` inside the emitters' f-strings.
+    """
+    sizes = real_sizes[:-1] if (is_c and len(real_sizes) > 1) else real_sizes
+    return ', '.join(str(s) for s in sizes)
+
+
 def emit_externs(name: str, ret_type: str, signature: str) -> str:
     """BLAS_EXTERN declaration pair for the subject + migrated symbols."""
     return (

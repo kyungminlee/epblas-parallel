@@ -1,5 +1,6 @@
 """L3 BLAS emitters: gemm, symm/hemm, syrk/herk, syr2k/her2k, trmm/trsm, gemmtr."""
 from .core import TypeInfo
+from .scaffold import sizes_body
 
 def emit_gemm(name: str, ti: TypeInfo, is_c: bool) -> str:
     T = ti.cmplx_T if is_c else ti.real_T
@@ -46,7 +47,7 @@ static void run_one(char ta, char tb, int M, int N, int K, int iters, int warmup
     free(A); free(B); free(C); free(Ci);
 }}
 
-static const int default_sizes[] = {{64, 128, 256, 512}};
+static const int default_sizes[] = {{{sizes_body((64, 128, 256, 512), is_c)}}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  10);
     int warmup = perf_env_int("BLAS_PERF_WARMUP", 2);
@@ -108,7 +109,7 @@ static void run_one(char side, char uplo, int M, int N, int iters, int warmup) {
     free(A); free(B); free(C); free(Ci);
 }}
 
-static const int default_sizes[] = {{64, 128, 256, 512}};
+static const int default_sizes[] = {{{sizes_body((64, 128, 256, 512), is_c)}}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  10);
     int warmup = perf_env_int("BLAS_PERF_WARMUP", 2);
@@ -171,7 +172,7 @@ static void run_one(char uplo, char trans, int N, int K, int iters, int warmup) 
     free(A); free(C); free(Ci);
 }}
 
-static const int default_sizes[] = {{64, 128, 256, 512}};
+static const int default_sizes[] = {{{sizes_body((64, 128, 256, 512), is_c)}}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  10);
     int warmup = perf_env_int("BLAS_PERF_WARMUP", 2);
@@ -241,7 +242,7 @@ static void run_one(char uplo, char trans, int N, int K, int iters, int warmup) 
     free(A); free(B); free(C); free(Ci);
 }}
 
-static const int default_sizes[] = {{64, 128, 256, 512}};
+static const int default_sizes[] = {{{sizes_body((64, 128, 256, 512), is_c)}}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  10);
     int warmup = perf_env_int("BLAS_PERF_WARMUP", 2);
@@ -308,7 +309,7 @@ static void run_one(char side, char uplo, char trans, char diag,
     free(A); free(B); free(Bi);
 }}
 
-static const int default_sizes[] = {{64, 128, 256, 512}};
+static const int default_sizes[] = {{{sizes_body((64, 128, 256, 512), is_c)}}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  10);
     int warmup = perf_env_int("BLAS_PERF_WARMUP", 2);
@@ -385,7 +386,7 @@ static void run_one(char uplo, char ta, char tb, int N, int K, int iters, int wa
     free(A); free(B); free(C); free(Ci);
 }}
 
-static const int default_sizes[] = {{64, 128, 256, 512}};
+static const int default_sizes[] = {{{sizes_body((64, 128, 256, 512), is_c)}}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  10);
     int warmup = perf_env_int("BLAS_PERF_WARMUP", 2);

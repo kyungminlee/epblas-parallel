@@ -59,7 +59,7 @@ static void run_one(char uplo, char trans, int N, int K, int iters, int warmup) 
     free(A); free(C); free(Ci);
 }
 
-static const int default_sizes[] = {64, 128, 256, 512};
+static const int default_sizes[] = {64, 128, 256};
 int main(void) {
     int iters  = perf_env_int("BLAS_PERF_ITERS",  10);
     int warmup = perf_env_int("BLAS_PERF_WARMUP", 2);

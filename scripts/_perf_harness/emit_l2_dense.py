@@ -1,5 +1,6 @@
 """L2 BLAS emitters for dense storage: gemv, ger, symv/hemv, syr/her, trmv/trsv."""
 from .core import TypeInfo
+from .scaffold import sizes_body
 
 def emit_gemv(name: str, ti: TypeInfo, is_c: bool) -> str:
     T = ti.cmplx_T if is_c else ti.real_T
@@ -59,7 +60,7 @@ static void run_one(char trans, int M, int N, int incx, int incy,
     free(A); free(X); free(Y); free(Yi);
 }}
 
-static const int default_sizes[] = {{128, 256, 512, 1024, 2048}};
+static const int default_sizes[] = {{{sizes_body((128, 256, 512, 1024, 2048), is_c)}}};
 static const int default_incxs[] = {{1, 2, -1}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  200);
@@ -141,7 +142,7 @@ static void run_one(int M, int N, int incx, int incy, int iters, int warmup) {{
     free(A); free(Ai); free(X); free(Y);
 }}
 
-static const int default_sizes[] = {{128, 256, 512, 1024}};
+static const int default_sizes[] = {{{sizes_body((128, 256, 512, 1024), is_c)}}};
 static const int default_incxs[] = {{1, 2, -1}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  200);
@@ -219,7 +220,7 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     free(A); free(X); free(Y); free(Yi);
 }}
 
-static const int default_sizes[] = {{128, 256, 512, 1024}};
+static const int default_sizes[] = {{{sizes_body((128, 256, 512, 1024), is_c)}}};
 static const int default_incxs[] = {{1, 2, -1}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  200);
@@ -292,7 +293,7 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {{
     free(A); free(Ai); free(X);
 }}
 
-static const int default_sizes[] = {{128, 256, 512, 1024}};
+static const int default_sizes[] = {{{sizes_body((128, 256, 512, 1024), is_c)}}};
 static const int default_incxs[] = {{1, 2, -1}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  200);
@@ -367,7 +368,7 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     free(A); free(X); free(Xi);
 }}
 
-static const int default_sizes[] = {{128, 256, 512, 1024}};
+static const int default_sizes[] = {{{sizes_body((128, 256, 512, 1024), is_c)}}};
 static const int default_incxs[] = {{1, 2, -1}};
 int main(void) {{
     int iters  = perf_env_int("BLAS_PERF_ITERS",  200);
