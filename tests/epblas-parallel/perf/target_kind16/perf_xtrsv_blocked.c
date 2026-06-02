@@ -148,7 +148,6 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     double t_mig_1 = time_kernel(xtrsv_migrated_, 1, uplo, trans, diag, N, incx,
                                   A, Xi, X, lenx, iters, warmup);
 
-    double flops = 4.0 * (double)N * (double)N;
     char key[16];
     if (incx == 1) {
         key[0] = uplo; key[1] = trans; key[2] = diag; key[3] = 0;
@@ -156,20 +155,21 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
         snprintf(key, sizeof(key), "%c%c%c/x%d", uplo, trans, diag, incx);
     }
 
-    double g_cur_1 = flops / t_cur_1 / 1e9;
-    double g_cur_4 = flops / t_cur_4 / 1e9;
-    double g_blk_1 = flops / t_blk_1 / 1e9;
-    double g_blk_4 = flops / t_blk_4 / 1e9;
-    double g_mig_1 = flops / t_mig_1 / 1e9;
+    /* Bare wall time, ns/call (smaller = faster). */
+    double ns_cur_1 = t_cur_1 * 1e9;
+    double ns_cur_4 = t_cur_4 * 1e9;
+    double ns_blk_1 = t_blk_1 * 1e9;
+    double ns_blk_4 = t_blk_4 * 1e9;
+    double ns_mig_1 = t_mig_1 * 1e9;
 
-    printf("%-10s  %-7s  %5d  %4d  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  "
+    printf("%-10s  %-7s  %5d  %4d  %12.1f  %12.1f  %12.1f  %12.1f  %12.1f  "
            "%6.2fx %6.2fx %6.2fx %6.2fx\n",
            "xtrsv", key, N, iters,
-           g_cur_1, g_cur_4, g_blk_1, g_blk_4, g_mig_1,
-           g_cur_4 / g_cur_1,   /* scaling of current */
-           g_blk_1 / g_cur_1,   /* blocked-OMP1 vs current-OMP1 */
-           g_blk_4 / g_cur_4,   /* blocked-OMP4 vs current-OMP4 */
-           g_blk_4 / g_mig_1);  /* blocked-OMP4 vs migrated */
+           ns_cur_1, ns_cur_4, ns_blk_1, ns_blk_4, ns_mig_1,
+           ns_cur_4 / ns_cur_1,   /* threading scaling of current (<1 = 4thr faster) */
+           ns_blk_1 / ns_cur_1,   /* blocked-OMP1 vs current-OMP1 (<1 = blk faster) */
+           ns_blk_4 / ns_cur_4,   /* blocked-OMP4 vs current-OMP4 */
+           ns_blk_4 / ns_mig_1);  /* blocked-OMP4 vs migrated */
     fflush(stdout);
 
     free(A); free(X); free(Xi); free(Xref); free(Xtst);
@@ -192,9 +192,9 @@ int main(void) {
     int n_incx = perf_parse_int_list("BLAS_PERF_INCX", default_incxs,
         (int)(sizeof(default_incxs)/sizeof(default_incxs[0])), incxs, 8);
 
-    printf("# columns: cur_1, cur_4, blk_1, blk_4, mig_1 (all in GFlop/s)\n");
-    printf("# ratios:  cur4/cur1  blk1/cur1  blk4/cur4  blk4/mig1\n");
-    printf("# routine    key      N      it   cur_1     cur_4     blk_1     blk_4     mig_1     ratios\n");
+    printf("# columns: cur_1, cur_4, blk_1, blk_4, mig_1 (all in ns/call, smaller = faster)\n");
+    printf("# ratios:  cur4/cur1  blk1/cur1  blk4/cur4  blk4/mig1  (wall ratios, < 1.0 = first faster)\n");
+    printf("# routine    key      N      it   cur_1         cur_4         blk_1         blk_4         mig_1         ratios\n");
 
     const char transes[] = { 'N', 'T', 'C' };
     const char diags[]   = { 'N', 'U' };

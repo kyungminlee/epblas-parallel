@@ -152,22 +152,24 @@ static void run_one(char uplo, char trans, char diag, int M, int N,
     double t_mig_1 = time_kernel(xtrsm_migrated_, 1, side, uplo, trans, diag, M, N, alpha,
                                   A, lda, Bi, B, ldb, iters, warmup);
 
-    /* ZTRSM flops = 8 * M^2 * N / 2 = 4 * M^2 * N (complex multiplies). */
-    double flops = 4.0 * (double)M * (double)M * (double)N;
+    /* Bare wall time, ns/call (smaller = faster). */
     char key[16];
     snprintf(key, sizeof(key), "L%c%c%c", uplo, trans, diag);
-    double g_cur_1 = flops / t_cur_1 / 1e9;
-    double g_cur_4 = flops / t_cur_4 / 1e9;
-    double g_blk_1 = flops / t_blk_1 / 1e9;
-    double g_blk_4 = flops / t_blk_4 / 1e9;
-    double g_mig_1 = flops / t_mig_1 / 1e9;
+    double ns_cur_1 = t_cur_1 * 1e9;
+    double ns_cur_4 = t_cur_4 * 1e9;
+    double ns_blk_1 = t_blk_1 * 1e9;
+    double ns_blk_4 = t_blk_4 * 1e9;
+    double ns_mig_1 = t_mig_1 * 1e9;
 
-    printf("%-10s  %-7s  %4dx%-4d %4d  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  "
+    /* Ratios are wall-time ratios (subject in numerator): < 1.0 = first faster.
+     * cur4/cur1 = threading scaling of current; blk1/cur1, blk4/cur4 = blocked
+     * vs current at matched OMP; blk4/mig1 = blocked-OMP4 vs migrated. */
+    printf("%-10s  %-7s  %4dx%-4d %4d  %12.1f  %12.1f  %12.1f  %12.1f  %12.1f  "
            "%6.2fx %6.2fx %6.2fx %6.2fx\n",
            "xtrsm", key, M, N, iters,
-           g_cur_1, g_cur_4, g_blk_1, g_blk_4, g_mig_1,
-           g_cur_4 / g_cur_1, g_blk_1 / g_cur_1,
-           g_blk_4 / g_cur_4, g_blk_4 / g_mig_1);
+           ns_cur_1, ns_cur_4, ns_blk_1, ns_blk_4, ns_mig_1,
+           ns_cur_4 / ns_cur_1, ns_blk_1 / ns_cur_1,
+           ns_blk_4 / ns_cur_4, ns_blk_4 / ns_mig_1);
     fflush(stdout);
 
     free(A); free(B); free(Bi); free(Bref); free(Btst);
@@ -184,8 +186,8 @@ int main(void) {
     int n = perf_parse_sizes(default_sizes,
         (int)(sizeof(default_sizes)/sizeof(default_sizes[0])), sizes, 32);
 
-    printf("# columns: cur_1, cur_4, blk_1, blk_4, mig_1 (all in GFlop/s)\n");
-    printf("# ratios:  cur4/cur1  blk1/cur1  blk4/cur4  blk4/mig1\n");
+    printf("# columns: cur_1, cur_4, blk_1, blk_4, mig_1 (all in ns/call, smaller = faster)\n");
+    printf("# ratios:  cur4/cur1  blk1/cur1  blk4/cur4  blk4/mig1  (wall ratios, < 1.0 = first faster)\n");
 
     /* nrhs-sweep mode: when BLAS_PERF_NRHS is set, sizes[] are M values,
      * nrhs comes from BLAS_PERF_NRHS, and we run only LUNN since the
