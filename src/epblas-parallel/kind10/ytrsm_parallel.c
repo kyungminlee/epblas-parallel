@@ -117,6 +117,32 @@ static void blocked_dispatch(enum ytrsm_variant V, int M, int N, T alpha,
     ytrsm_blocked_chunk(V, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
 }
 
+/* ── Blocked SIDE='R': one outer `omp parallel` partitions B's rows
+ *    across threads; each thread runs the serial blocked R worker on its
+ *    own row band. Mirrors blocked_dispatch (SIDE='L'). ──────────── */
+static void blocked_dispatch_R(int upper, int trans, int conj,
+                               int M, int N, T alpha,
+                               const T *a, int lda, T *b, int ldb, int nounit)
+{
+    const int nb = ytrsm_nb();
+#ifdef _OPENMP
+    if (M >= YTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
+        #pragma omp parallel
+        {
+            int tid = omp_get_thread_num();
+            int nt  = omp_get_num_threads();
+            int is  = (int)((long long)M * tid / nt);
+            int ie  = (int)((long long)M * (tid + 1) / nt);
+            ytrsm_R_blocked_chunk(upper, trans, conj, is, ie, N, nb, alpha,
+                                  a, lda, b, ldb, nounit);
+        }
+        return;
+    }
+#endif
+    ytrsm_R_blocked_chunk(upper, trans, conj, 0, M, N, nb, alpha,
+                          a, lda, b, ldb, nounit);
+}
+
 /* ── SIDE='R' wrappers: one parallel region partitions the M (row) axis.
  *    Gates on M (the partition axis) >= YTRSM_OMP_N_MIN. The entry guard
  *    already excludes nested calls, so no omp_in_parallel() check here. */
@@ -231,7 +257,11 @@ void ytrsm_(
             }
         }
     } else {
-        if (TR == 'N') {
+        const int use_blocked = (N >= 2 * ytrsm_nb());
+        if (use_blocked) {
+            blocked_dispatch_R(UPLO == 'U', TR != 'N', TR == 'C',
+                               M, N, alpha, a, lda, b, ldb, nounit);
+        } else if (TR == 'N') {
             if (UPLO == 'L') ytrsm_rln(M, N, alpha, a, lda, b, ldb, nounit);
             else             ytrsm_run(M, N, alpha, a, lda, b, ldb, nounit);
         } else if (TR == 'T') {

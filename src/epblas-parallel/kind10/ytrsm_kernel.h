@@ -72,6 +72,15 @@ void ytrsm_blocked_chunk(enum ytrsm_variant V, int j_start, int j_end,
                          const ytrsm_T *a, int lda, ytrsm_T *b, int ldb,
                          int nounit);
 
+/* Per-thread serial blocked-TRSM on a row band [i_start, i_end) of B
+ * (SIDE='R'). Blocks the triangular column (N) axis: the bulk cross-block
+ * update runs through ygemm_serial, only the jb×jb diagonal block goes
+ * through the naive R cores. (upper, trans, conj) select the variant. */
+void ytrsm_R_blocked_chunk(int upper, int trans, int conj,
+                           int i_start, int i_end, int N, int nb, ytrsm_T alpha,
+                           const ytrsm_T *a, int lda, ytrsm_T *b, int ldb,
+                           int nounit);
+
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ytrsm_. */
 void ytrsm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,

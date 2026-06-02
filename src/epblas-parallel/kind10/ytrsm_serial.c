@@ -303,6 +303,74 @@ void ytrsm_blocked_chunk(enum ytrsm_variant V, int j_start, int j_end,
     }
 }
 
+/* ── Blocked SIDE='R' worker ───────────────────────────────────────
+ *
+ * The complex twin of the SIDE='L' blocked path, transposed in role: A is
+ * N×N, B is M×N, and the triangular axis being blocked is the column (N)
+ * axis. The diagonal jb×jb block is solved with the naive R core; every
+ * earlier/later solved column block is folded in by a single ygemm_serial
+ * (the bulk of the FLOPs, at packed-GEMM speed). Threads own disjoint row
+ * bands [i_start, i_end) of B and read shared A read-only, so each band
+ * runs this independently with no barrier (same contract as the cores).
+ *
+ * Direction (matches OpenBLAS trsm_R): forward (column blocks ascending,
+ * each solved from the already-solved blocks to its left) for the
+ * upper-NoTrans and lower-Trans shapes; backward otherwise. */
+void ytrsm_R_blocked_chunk(int upper, int trans, int conj,
+                           int i_start, int i_end, int N, int nb, T alpha,
+                           const T *a, int lda, T *b, int ldb, int nounit)
+{
+    if (i_end <= i_start) return;
+    /* Prescale this row band by alpha once; the cores then run alpha=ONE. */
+    if (alpha != ONE)
+        for (int j = 0; j < N; ++j)
+            for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
+
+    const int m_band = i_end - i_start;
+    const char NN[1] = {'N'};
+    const char TC[1] = {conj ? 'C' : 'T'};
+    const int forward = (upper && !trans) || (!upper && trans);
+
+    if (forward) {
+        for (int jc = 0; jc < N; jc += nb) {
+            const int jb = (N - jc < nb) ? (N - jc) : nb;
+            if (jc > 0) {
+                /* B[:,jc:jc+jb] -= B[:,0:jc] · op(A)[0:jc, jc:jc+jb]. */
+                ygemm_serial(NN, trans ? TC : NN, &m_band, &jb, &jc, &NEG_ONE,
+                             &B_(i_start, 0), &ldb,
+                             trans ? &A_(jc, 0) : &A_(0, jc), &lda, &ONE,
+                             &B_(i_start, jc), &ldb, 1, 1);
+            }
+            if (trans)  /* lower · op = lower-Trans/Conj */
+                ytrsm_rlTC_core(i_start, i_end, jb, ONE,
+                                &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj);
+            else        /* upper · NoTrans */
+                ytrsm_run_core(i_start, i_end, jb, ONE,
+                               &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+        }
+    } else {
+        int jc = ((N - 1) / nb) * nb;
+        for (; jc >= 0; jc -= nb) {
+            const int jb = (N - jc < nb) ? (N - jc) : nb;
+            const int trail = N - (jc + jb);
+            if (trail > 0) {
+                const int j0 = jc + jb;
+                /* B[:,jc:jc+jb] -= B[:,j0:N] · op(A)[j0:N, jc:jc+jb]. */
+                ygemm_serial(NN, trans ? TC : NN, &m_band, &jb, &trail, &NEG_ONE,
+                             &B_(i_start, j0), &ldb,
+                             trans ? &A_(jc, j0) : &A_(j0, jc), &lda, &ONE,
+                             &B_(i_start, jc), &ldb, 1, 1);
+            }
+            if (trans)  /* upper · op = upper-Trans/Conj */
+                ytrsm_ruTC_core(i_start, i_end, jb, ONE,
+                                &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj);
+            else        /* lower · NoTrans */
+                ytrsm_rln_core(i_start, i_end, jb, ONE,
+                               &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+        }
+    }
+}
+
 /* ── Single-thread entry ──────────────────────────────────────── */
 
 void ytrsm_serial(
@@ -359,7 +427,15 @@ void ytrsm_serial(
             }
         }
     } else {
-        if (TR == 'N') {
+        const int use_blocked = (N >= 2 * ytrsm_nb());
+        const int nb = ytrsm_nb();
+        const int upper = (UPLO == 'U');
+        const int trans = (TR != 'N');
+        const int conj  = (TR == 'C');
+        if (use_blocked) {
+            ytrsm_R_blocked_chunk(upper, trans, conj, 0, M, N, nb, alpha,
+                                  a, lda, b, ldb, nounit);
+        } else if (TR == 'N') {
             if (UPLO == 'L') ytrsm_rln_core(0, M, N, alpha, a, lda, b, ldb, nounit);
             else             ytrsm_run_core(0, M, N, alpha, a, lda, b, ldb, nounit);
         } else if (TR == 'T') {
