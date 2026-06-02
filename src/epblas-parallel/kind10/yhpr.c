@@ -39,10 +39,20 @@ void yhpr_(
     if (N == 0 || alpha == rzero) return;
 
     if (incx == 1) {
+        /* schedule(static, 1): plain static dumps the heavy triangle end on one
+         * thread (caps threading ~1.8x); cyclic static,1 interleaves short and
+         * long columns, balancing both uplo. Chunk-1 is the right grain here —
+         * this complex rank-1 body does enough fp80 work per written element to
+         * hide the adjacent-column false sharing, so the finest balance wins
+         * (static,1 ~= or beats static,8; measured 2026-06-02, vs the lighter
+         * real rank-1 espr which prefers static,8). The serial path (OMP=1, or
+         * if(use_omp) false) is already at parity with the reference — the
+         * rank-1 loop body is small enough not to spill when outlined — so no
+         * noinline carve-out is needed (unlike yhpr2). */
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const int use_omp = (N >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
                 const int kk = (j * (j + 1)) / 2;
@@ -57,7 +67,7 @@ void yhpr_(
         } else {
 #ifdef _OPENMP
             const int use_omp = (N >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
                 const int kk = j * N - (j * (j - 1)) / 2;

@@ -49,11 +49,22 @@ void espr_(
          * of the call for small-N. The L path happens to amortize this
          * cost better; the U path's per-outer-j work is smaller, so
          * the same fixed dispatch cost shows up as a bigger ratio gap.
-         * Two separate loop bodies, one with pragma, one without. */
+         * Two separate loop bodies, one with pragma, one without.
+         *
+         * schedule(static, 8): plain static dumps the heavy triangle end on
+         * one thread (column j touches j+1 (U) / N-j (L) packed elems), capping
+         * threading at ~1.8x; a balanced schedule fixes that. Among balanced
+         * options a MODERATE chunk beats cyclic chunk-1 here: adjacent packed
+         * columns are contiguous in ap, so chunk-1 puts every neighbour pair on
+         * different threads (a cross-thread cache-line boundary at every
+         * column). This light real rank-1 body exposes the false sharing —
+         * static,8 is ~2-8% faster than static,1 across both uplo and all N
+         * (measured 2026-06-02). Heavier bodies (complex rank-1, any rank-2)
+         * hide it and prefer static,1; see yhpr/espr2/yhpr2. */
         if (UPLO == 'U') {
             if (use_omp) {
 #ifdef _OPENMP
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static, 8)
 #endif
                 for (int j = 0; j < N; ++j) {
                     if (x[j] != zero) {
@@ -91,7 +102,7 @@ void espr_(
         } else {
             if (use_omp) {
 #ifdef _OPENMP
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static, 8)
 #endif
                 for (int j = 0; j < N; ++j) {
                     if (x[j] != zero) {

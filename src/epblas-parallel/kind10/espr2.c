@@ -57,15 +57,21 @@ void espr2_(
     if (N == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
-        /* schedule(static,1): column j touches j+1 (upper) or N-j (lower)
+        /* schedule(static, 8): column j touches j+1 (upper) or N-j (lower)
          * packed elements, so a contiguous static block hands one thread the
          * heavy triangle end and starves the rest (par caps at ~2x on 4 cores).
-         * Cyclic static,1 interleaves short and long columns across the team,
-         * balancing the skew symmetrically for both UPLO (~3.5x, beats ob). */
+         * A balanced schedule fixes that. Among balanced options a MODERATE
+         * chunk beats cyclic chunk-1 for this real rank-2 body: adjacent packed
+         * columns are contiguous in ap, so chunk-1 puts every neighbour pair on
+         * different threads (false sharing). static,8 is ~1-2% faster than
+         * static,1 here (measured 2026-06-02). NOTE the complex rank-2 twin
+         * yhpr2 keeps static,1 — its heavier body fully hides the false sharing
+         * and the finest balance wins there; the lighter real rank-1 espr also
+         * uses static,8. */
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const int use_omp = (N >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
+            #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (int j = 0; j < N; ++j) {
                 if (x[j] != zero || y[j] != zero)
@@ -74,7 +80,7 @@ void espr2_(
         } else {
 #ifdef _OPENMP
             const int use_omp = (N >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
+            #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (int j = 0; j < N; ++j) {
                 if (x[j] != zero || y[j] != zero)
