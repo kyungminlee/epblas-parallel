@@ -82,7 +82,24 @@ L/1024 — par matches mig while ob's serial reference is slower there).
 
 ## Scope
 
-Only the `incx==1 && incy==1` fast path is touched (helpers + static,1). The strided
-fallback (rare) is unchanged. Rows-only, math-preserving — `fuzz_espr2` passes at
-OMP 1 and 4. Plain `omp parallel for` (no blocked_dispatch barrier), so the
+Only the `incx==1 && incy==1` fast path is touched (helpers + the cyclic schedule).
+The strided fallback (rare) is unchanged. Rows-only, math-preserving — `fuzz_espr2`
+passes at OMP 1 and 4. Plain `omp parallel for` (no blocked_dispatch barrier), so the
 libgomp wedge window ([[project_etrsm_omp4_wedge]]) is not involved.
+
+## Addendum (2026-06-02): chunk re-tuned `static,1` → `static,8`
+
+The "static,1 is the clean robust choice" claim above was re-examined with a
+schedule bake-off (par4 wall ns, min-of-5, both UPLO, N=256–1024) across the four
+packed rank-update bodies. The big win is just *balance* (plain contiguous `static`
+is the only real loser); among balanced schedules the best **chunk** depends on
+compute-per-written-element, because cyclic chunk-1 maximizes false sharing
+(adjacent packed columns are contiguous in `ap`, so chunk-1 puts every neighbour
+pair on different threads). For this **real rank-2** body `static,8` is ~1–2% faster
+than `static,1` (same-session, controlled) while staying symmetric for both UPLO, so
+espr2's two threaded loops were moved to `schedule(static, 8)`. The lighter real
+rank-1 `espr` benefits more (~2–8%, also `static,8`); the heavier complex bodies
+hide the false sharing and keep `static,1` (complex rank-1 `yhpr`, complex rank-2
+`yhpr2` — where `static,8` would *regress* ~3–5%). See `reports/cmp5/espr_interleaved.md`,
+`yhpr_interleaved.md`, and commit `87ca26b`. The fix-era tables above were measured
+at `static,1`; espr2 remains par4/ob4 ≈ 0.89–0.91 under `static,8`.
