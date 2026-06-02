@@ -1,17 +1,55 @@
 /*
  * egbmv — kind10 (long double) general band matrix-vector multiply.
  *   y := alpha*A*x + beta*y  or  y := alpha*A^T*x + beta*y
- * Band storage: A(i,j) at AB[(ku + i - j) + j*lda], for max(1,j-ku) <= i <= min(M,j+kl).
+ * Band storage: A(i,j) at AB[(ku + i - j) + j*lda], for max(0,j-ku) <= i <= min(M,j+kl).
+ *
+ * NoTrans (y := A*x): every OUTPUT row is an independent dot over the row's band,
+ * so we GATHER -- each y[i] is accumulated in a register-resident x87 scalar and
+ * stored once (y[i] += alpha*s), never the column SCATTER (y[i] += tmp*A per
+ * element = read-modify-write to memory) that reference gbmv uses. Keeping the
+ * accumulator off memory runs ~2x faster per element on fp80 -- there is no SIMD,
+ * so the x87 dependency chain dominates and the per-element RMW store to y is the
+ * real cost, not the strided A read (project_x87_accumulator_spill,
+ * project_l2_rowgather_scaling). For row i, A(i,j) = a[(KU+i) + j*(lda-1)], so
+ * with base = a + (KU+i) and s1 = lda-1 the row is a unit-j dot base[j*s1]*x[j]
+ * over j in [max(0,i-KL), min(N,i+KU+1)) -- an anti-diagonal walk of A (the same
+ * stride the triangular/symmetric/Hermitian band gathers use). Because x and y
+ * are DISTINCT arrays (BLAS forbids gbmv aliasing), the threaded path partitions
+ * output rows [lo,hi) with NO scratch, NO reduction, and NO barrier: each thread
+ * writes its own y[lo,hi) while reading x globally.
+ *
+ * Per-output summation order is preserved (ascending j == the column order in
+ * which the old scatter accumulated each y[i]), so the serial gather is
+ * bit-identical to the old scatter, not merely close.
+ *
+ * Trans (y := A^T*x) was already a gather over disjoint y[j] and is left as-is
+ * (it threads cleanly via the source-level if(use_omp) macro duplication).
+ *
+ * The serial NoTrans reference is defined inline FIRST; the threaded
+ * orchestration is a noinline helper so its bookkeeping does not crowd the serial
+ * gather's x87 register allocation (outlining tax).
  */
 
 #include <stddef.h>
 #include <ctype.h>
 #ifdef _OPENMP
+#include <stdlib.h>
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 
-#define EGBMV_OMP_MIN 64
+/* Thread-entry threshold = measured break-even where par4 < par1 (forking beats
+ * our own serial gather). The register-resident serial NoTrans gather is fast, so
+ * threading only pays once the output-row count amortizes the parallel region's
+ * fork/join (+ any strided-x malloc). Calibrated at KL=KU=16: NoTrans first clean
+ * all-win at N=256 (p4/p1: 224->1.017 loss, 256->0.980, 320->0.811). The Trans
+ * gather shares this threshold (its break-even is ~256-512; the old 64 made it
+ * thread far too early, a 1.7-3.2x loss at N=64-128). #ifndef so the calibration
+ * probe can force it. */
+#ifndef EGBMV_OMP_MIN
+#define EGBMV_OMP_MIN 256
+#endif
+#define EGBMV_MAX_CPUS 256
 
 typedef long double T;
 
@@ -20,6 +58,13 @@ static inline char up(const char *p) {
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
+
+#ifdef _OPENMP
+static int egbmv_n_omp(int m, int n, int kl, int ku,
+                       const T *restrict a, int lda,
+                       const T *restrict x, int incx,
+                       T alpha, T *restrict y, int incy);
+#endif
 
 void egbmv_(
     const char *trans,
@@ -56,15 +101,42 @@ void egbmv_(
     }
     if (alpha == zero) return;
 
-    if (TR == 'N' && incx == 1 && incy == 1) {
-        for (int j = 0; j < N; ++j) {
-            const T tmp = alpha * x[j];
-            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-            const int k = KU - j;
-            for (int i = i_lo; i < i_hi; ++i) y[i] += tmp * A_(k + i, j);
+    const ptrdiff_t s1 = (ptrdiff_t)lda - 1;
+
+    if (TR == 'N') {
+#ifdef _OPENMP
+        /* Cheap inline gate before the noinline call's marshalling, so the serial
+         * gather below keeps its unperturbed register allocation (outlining tax). */
+        if (M >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1
+            && egbmv_n_omp(M, N, KL, KU, a, lda, x, incx, alpha, y, incy))
+            return;
+#endif
+        /* Serial NoTrans row-gather: y[i] = alpha * Σ_j A(i,j)*x[j], accumulated
+         * in a register-resident x87 scalar. A(i,j) = base[j*s1], base = a+(KU+i),
+         * an lda-1 anti-diagonal walk; j ranges over row i's band. */
+        if (incx == 1 && incy == 1) {
+            for (int i = 0; i < M; ++i) {
+                const int j_lo = (i - KL > 0) ? (i - KL) : 0;
+                const int j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
+                const T *base = a + (KU + i);
+                T s = zero;
+                for (int j = j_lo; j < j_hi; ++j) s += base[(ptrdiff_t)j * s1] * x[j];
+                y[i] += alpha * s;
+            }
+        } else {
+            const ptrdiff_t ix0 = (incx < 0) ? -(ptrdiff_t)(lenx - 1) * incx : 0;
+            const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(leny - 1) * incy : 0;
+            for (int i = 0; i < M; ++i) {
+                const int j_lo = (i - KL > 0) ? (i - KL) : 0;
+                const int j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
+                const T *base = a + (KU + i);
+                T s = zero;
+                ptrdiff_t xx = ix0 + (ptrdiff_t)j_lo * incx;
+                for (int j = j_lo; j < j_hi; ++j) { s += base[(ptrdiff_t)j * s1] * x[xx]; xx += incx; }
+                y[iy0 + (ptrdiff_t)i * incy] += alpha * s;
+            }
         }
-    } else if (TR != 'N' && incx == 1 && incy == 1) {
+    } else if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         const int use_omp = (N >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1);
 #else
@@ -91,41 +163,93 @@ void egbmv_(
         }
 #undef EGBMV_T_BODY
     } else {
+        /* Strided Trans gather. */
         int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
         int ky = (incy < 0) ? -(leny - 1) * incy : 0;
-        if (TR == 'N') {
-            int jx = kx;
-            for (int j = 0; j < N; ++j) {
-                const T tmp = alpha * x[jx];
-                int iy = ky;
-                const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-                const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-                const int k = KU - j;
-                for (int i = i_lo; i < i_hi; ++i) {
-                    y[iy] += tmp * A_(k + i, j);
-                    iy += incy;
-                }
-                jx += incx;
-                if (j >= KU) ky += incy;
+        int jy = ky;
+        for (int j = 0; j < N; ++j) {
+            T s = zero;
+            int ix = kx;
+            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
+            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+            const int k = KU - j;
+            for (int i = i_lo; i < i_hi; ++i) {
+                s += A_(k + i, j) * x[ix];
+                ix += incx;
             }
-        } else {
-            int jy = ky;
-            for (int j = 0; j < N; ++j) {
-                T s = zero;
-                int ix = kx;
-                const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-                const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-                const int k = KU - j;
-                for (int i = i_lo; i < i_hi; ++i) {
-                    s += A_(k + i, j) * x[ix];
-                    ix += incx;
-                }
-                y[jy] += alpha * s;
-                jy += incy;
-                if (j >= KU) kx += incx;
-            }
+            y[jy] += alpha * s;
+            jy += incy;
+            if (j >= KU) kx += incx;
         }
     }
 }
+
+#ifdef _OPENMP
+/* Row-partitioned NoTrans gather kernel: compute y[i] for i in [lo,hi) as a
+ * register-resident band dot reading x (contiguous logical order) and adding
+ * alpha*s into the already-beta-scaled y[i*incy]. Same gather as the serial path.
+ * Output rows partition across threads with no cross-thread write dependence --
+ * no scratch, no zero-fill, no reduction, no barrier (x and y distinct). */
+static void gbmv_n_rowgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
+                             ptrdiff_t lo, ptrdiff_t hi,
+                             const T *restrict a, ptrdiff_t lda,
+                             const T *restrict x, T alpha,
+                             T *restrict y, ptrdiff_t incy)
+{
+    const ptrdiff_t s1 = lda - 1;
+    for (ptrdiff_t i = lo; i < hi; ++i) {
+        ptrdiff_t j_lo = (i - kl > 0) ? (i - kl) : 0;
+        ptrdiff_t j_hi = (i + ku + 1 < n) ? (i + ku + 1) : n;
+        const T *base = a + (ku + i);
+        T s = 0.0L;
+        for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += base[j * s1] * x[j];
+        y[i * incy] += alpha * s;
+    }
+}
+
+/* Threaded NoTrans general band matvec. Each thread owns a disjoint output-row
+ * range [lo,hi): it gathers y[lo,hi) reading x. No cross-thread data dependence
+ * (x and y distinct) -- no barrier, no scratch beyond the strided-x gather
+ * buffer. Returns 1 if handled, 0 to fall back. Carved out (noinline) so its
+ * bookkeeping does not pressure the serial gather's x87 allocation. */
+__attribute__((noinline)) static int egbmv_n_omp(
+    int m, int n, int kl, int ku,
+    const T *restrict a, int lda,
+    const T *restrict x, int incx,
+    T alpha, T *restrict y, int incy)
+{
+    if (m < EGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > EGBMV_MAX_CPUS) nthreads = EGBMV_MAX_CPUS;
+
+    /* Negative-increment base adjustment so x[i*incx], y[i*incy] walk logically.
+     * lenx = n (NoTrans reads N elements of x), leny = m (writes M of y). */
+    if (incx < 0) x -= (ptrdiff_t)(n - 1) * incx;
+    if (incy < 0) y -= (ptrdiff_t)(m - 1) * incy;
+
+    /* Gather strided x to contiguous (logical order) so the inner dot is unit
+     * stride; y is written disjointly per thread in place. */
+    const T *xptr = x;
+    T *xbuf = NULL;
+    if (incx != 1) {
+        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        if (!xbuf) return 0;
+        for (int i = 0; i < n; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
+        xptr = xbuf;
+    }
+
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        ptrdiff_t lo = ((ptrdiff_t)m * tid) / nthreads;
+        ptrdiff_t hi = ((ptrdiff_t)m * (tid + 1)) / nthreads;
+        gbmv_n_rowgather(m, n, kl, ku, lo, hi, a, lda, xptr, alpha, y, (ptrdiff_t)incy);
+    }
+
+    free(xbuf);
+    return 1;
+}
+#endif /* _OPENMP */
 
 #undef A_
