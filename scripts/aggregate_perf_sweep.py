@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Aggregate reports/perf_sweep.tsv into a Markdown summary.
 
-Per-routine: median (epblas-parallel / migrated) ratio over all (key, size)
-cells, plus min/max. Highlights cells with ratio < 0.95× (epblas-parallel
-slower than migrated) or > 1.10× (epblas-parallel faster) — useful for
-spotting where the C harness's honest measurement differs from prior
-Fortran-bench reports.
+All values are bare wall time (ns/call, smaller = faster). Per-routine:
+median (epblas-parallel / migrated) WALL ratio over all (key, size) cells,
+plus best/worst. A ratio < 1.0 means epblas-parallel is faster than migrated.
+Highlights cells with median ratio > 1.087× (epblas-parallel slower than
+migrated) or < 0.909× (epblas-parallel ≥10% faster) — useful for spotting
+where the C harness's honest measurement differs from prior Fortran-bench
+reports.
 
 Scope: epblas-parallel overlay vs migrated Fortran reference (epblas-openblas not
 covered by this sweep — see `reports/cmp5/` for that comparison).
@@ -39,8 +41,8 @@ def main():
             try:
                 r['size'] = int(r['size'])
                 r['iters'] = int(r['iters'])
-                r['epblas_parallel_GFs'] = float(r['epblas_parallel_GFs'])
-                r['migrated_GFs'] = float(r['migrated_GFs'])
+                r['epblas_parallel_ns'] = float(r['epblas_parallel_ns'])
+                r['migrated_ns'] = float(r['migrated_ns'])
                 r['ratio'] = float(r['ratio'])
             except (ValueError, KeyError) as e:
                 print(f'skip bad row: {r} ({e})', file=sys.stderr)
@@ -60,7 +62,7 @@ def main():
     out.append('')
     out.append(f'Source: `{tsv}` ({len(rows)} cells, {len(by_routine)} routines)')
     out.append('')
-    out.append('Ratio column: `epblas-parallel GF/s ÷ migrated GF/s` (>1 = epblas-parallel wins).')
+    out.append('Ratio column: `epblas-parallel ns ÷ migrated ns` wall-time ratio (<1 = epblas-parallel wins). All values ns/call, smaller = faster.')
     out.append('')
     out.append('Methodology:')
     out.append('- Kernel-isolated C harness with `-ffunction-sections -Wl,--gc-sections`')
@@ -76,23 +78,25 @@ def main():
             continue
         out.append(f'## target_{tgt}')
         out.append('')
-        out.append('| routine | cells | median × | min × | max × | min cell | max cell |')
-        out.append('|---------|------:|---------:|------:|------:|----------|----------|')
+        out.append('| routine | cells | median × | best × | worst × | best cell | worst cell |')
+        out.append('|---------|------:|---------:|-------:|--------:|-----------|------------|')
         for name in tgt_routines:
             cells = by_routine[(tgt, name)]
             ratios = [c['ratio'] for c in cells]
             med = statistics.median(ratios)
-            mn = min(cells, key=lambda c: c['ratio'])
-            mx = max(cells, key=lambda c: c['ratio'])
+            # Wall ratio: smaller = epblas-parallel faster, so the best cell is
+            # the minimum ratio and the worst cell is the maximum.
+            best = min(cells, key=lambda c: c['ratio'])
+            worst = max(cells, key=lambda c: c['ratio'])
             mark = ''
-            if med < 0.92:
+            if med > 1.087:
                 mark = ' ⚠'
-            elif med > 1.10:
+            elif med < 0.909:
                 mark = ' ⬆'
             out.append(
                 f'| `{name}` | {len(cells)} | {med:.3f}{mark} | '
-                f'{mn["ratio"]:.3f} | {mx["ratio"]:.3f} | '
-                f'`{mn["key"]}`@{mn["size"]} | `{mx["key"]}`@{mx["size"]} |'
+                f'{best["ratio"]:.3f} | {worst["ratio"]:.3f} | '
+                f'`{best["key"]}`@{best["size"]} | `{worst["key"]}`@{worst["size"]} |'
             )
         out.append('')
 

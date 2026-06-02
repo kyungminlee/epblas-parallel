@@ -3,10 +3,11 @@
 # the epblas-parallel build tree at OMP=1, pinned to P-core 0, and append
 # the structured output to a TSV.
 #
-# TSV columns: target routine key size iters epblas_parallel_GFs migrated_GFs ratio
-#   epblas_parallel_GFs = the C epblas-parallel overlay's GF/s for this row
-#   migrated_GFs       = the migrated Fortran reference's GF/s for this row
-#   ratio              = epblas_parallel_GFs / migrated_GFs
+# TSV columns: target routine key size iters epblas_parallel_ns migrated_ns ratio
+#   epblas_parallel_ns = the C epblas-parallel overlay's wall time (ns/call,
+#                        smaller = faster) for this row
+#   migrated_ns        = the migrated Fortran reference's ns/call for this row
+#   ratio              = epblas_parallel_ns / migrated_ns (< 1.0 = parallel faster)
 #
 # Scope: epblas-parallel overlay only. epblas-openblas comparisons live under
 # reports/cmp5/ (see reports/cmp5/run_cmp5.sh).
@@ -42,7 +43,7 @@ LOG="$OUTDIR/perf_sweep.log"
 : > "$TSV"
 : > "$LOG"
 
-echo -e "target\troutine\tkey\tsize\titers\tepblas_parallel_GFs\tmigrated_GFs\tratio" >> "$TSV"
+echo -e "target\troutine\tkey\tsize\titers\tepblas_parallel_ns\tmigrated_ns\tratio" >> "$TSV"
 
 for target in e q m; do
     case "$target" in
