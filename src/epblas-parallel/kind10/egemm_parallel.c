@@ -72,8 +72,12 @@ void egemm_(
     egemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
     if (alpha == 0.0L || K == 0) return;
 
-    /* Fast path: TA='T' (≡'C'), TB='N'. Stride-1 dot, no packing. */
-    if (ta == 'T' && tb == 'N') {
+    /* Fast path: TA='T' (≡'C'), TB='N'. Stride-1 dot, no packing — but only
+     * for skinny problems (see egemm_tn_use_fast). For non-trivial K the
+     * blocked packed path below is faster per FLOP (the single fp80 dot
+     * accumulator in fast_col serializes the fadd latency the blocked
+     * kernel's 4 chains hide) and threads over M just as well. */
+    if (ta == 'T' && tb == 'N' && egemm_tn_use_fast(M, N, K)) {
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static)
 #endif

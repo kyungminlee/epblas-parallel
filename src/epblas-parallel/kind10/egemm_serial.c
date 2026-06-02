@@ -313,7 +313,9 @@ void egemm_serial(
     egemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
     if (alpha == 0.0L || K == 0) return;
 
-    if (ta == 'T' && tb == 'N') {
+    /* TN no-pack fast path only for skinny problems; otherwise the blocked
+     * packed path below is faster per FLOP (4-way accumulator ILP). */
+    if (ta == 'T' && tb == 'N' && egemm_tn_use_fast(M, N, K)) {
         for (int j2 = 0; j2 < N; ++j2)
             egemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
         return;

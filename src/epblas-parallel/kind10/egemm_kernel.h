@@ -63,6 +63,19 @@ void egemm_fast_col(int j2, int M, int K, egemm_T alpha,
                     const egemm_T *a, int lda, const egemm_T *b, int ldb,
                     egemm_T *c, int ldc);
 
+/*
+ * Gate for the TN (ta='T', tb='N') no-pack fast_col path. fast_col runs the
+ * stride-1 dot with a SINGLE fp80 accumulator, so the ~3-cyc x87 `fadd`
+ * latency serializes the reduction (~5.1 cyc/MAC). The blocked packed path
+ * keeps four independent MR×NR accumulator chains that hide that latency
+ * (~2.9 cyc/MAC) AND threads over the M axis — so it is faster per FLOP for
+ * any non-trivial K. fast_col only wins where packing isn't amortized:
+ * short K (the single chain hasn't yet lost to the blocked ILP) or a tiny
+ * output. Everything else falls through to the blocked path. */
+static inline int egemm_tn_use_fast(int M, int N, int K) {
+    return K <= 64 || (long)M * (long)N <= 64L * 64L;
+}
+
 /* Pure single-thread GEMM. Same signature as egemm_ — no OpenMP. */
 void egemm_serial(
     const char *transa, const char *transb,
