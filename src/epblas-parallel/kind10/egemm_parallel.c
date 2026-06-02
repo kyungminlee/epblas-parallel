@@ -88,6 +88,22 @@ void egemm_(
 
     int MC, KC, NC;
     egemm_choose_blocks(K, &MC, &KC, &NC);
+#ifdef _OPENMP
+    /* This entry partitions the ic loop across the team via `omp for`, so the
+     * number of ic-blocks (ceil(M/MC)) must be >= the team size or threads
+     * sit idle. egemm_choose_blocks' adaptive-MC growth can collapse a
+     * small-M problem to a single block (e.g. N=K=128 grew MC to M -> one
+     * block -> no threading, par4 ~= par1). Cap MC so M splits into at least
+     * `nthr` blocks. The cap is local to this threaded entry; the shared
+     * policy (used by the serial path and the L3 routines, which partition
+     * other axes) is untouched. Only shrinks MC; stays a multiple of MR. */
+    const int nthr = omp_get_max_threads();
+    if (nthr > 1) {
+        int cap = egemm_round_up((M + nthr - 1) / nthr, MR);
+        if (cap < MR) cap = MR;
+        if (MC > cap) MC = cap;
+    }
+#endif
 
     /*
      * Threading: single outer `omp parallel`, shared Bp packed once per
