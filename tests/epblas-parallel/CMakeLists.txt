@@ -141,3 +141,29 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
         endforeach()
     endif()
 endforeach()
+
+# Wait-policy safety regression for etrsm's OMP=4 threading.
+#
+# etrsm once livelocked ~16% of OMP=4 runs under libgomp's *active* barrier
+# spin (the nested-team wedge). The fix is structural and lives in
+# etrsm_parallel.c: a single non-nesting parallel region with no explicit
+# barrier, an omp_in_parallel() guard that forces nested calls serial, and no
+# `#pragma omp` anywhere in the kernel/pack/serial path. The default fuzz tests
+# run under whatever wait policy ctest inherits (typically passive), which would
+# MASK a regression that reintroduces nesting or a barrier. This test pins the
+# guarantee: run the etrsm fuzz under OMP_WAIT_POLICY=active + OMP=4 with a hard
+# TIMEOUT, so a reintroduced wedge fails the suite (livelock -> timeout) instead
+# of hanging silently in production under active. Verified clean: 36000 cases
+# across 3 seeds pass under active, no hang. (memory project-etrsm-omp4-wedge)
+#
+# Case count is the full 12000-case bar (still ~1.5s under active): fuzz sizes
+# are log-uniform in [1,128] biased to small matrices, and etrsm only threads at
+# mnk >= 64^3, so a high count is needed to land enough genuine 4-thread regions
+# (the ones the wedge lives in) each run.
+if(TARGET fuzz_etrsm)
+    add_test(NAME epblas_parallel_fuzz_etrsm_active COMMAND fuzz_etrsm)
+    set_tests_properties(epblas_parallel_fuzz_etrsm_active PROPERTIES
+        ENVIRONMENT "BLAS_FUZZ_CASES=12000;OMP_NUM_THREADS=4;OMP_WAIT_POLICY=active"
+        TIMEOUT 120
+        LABELS "fuzz")
+endif()
