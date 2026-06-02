@@ -142,28 +142,31 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     endif()
 endforeach()
 
-# Wait-policy safety regression for etrsm's OMP=4 threading.
+# Wait-policy livelock regression for etrsm's OMP=4 threading.
 #
-# etrsm once livelocked ~16% of OMP=4 runs under libgomp's *active* barrier
-# spin (the nested-team wedge). The fix is structural and lives in
-# etrsm_parallel.c: a single non-nesting parallel region with no explicit
-# barrier, an omp_in_parallel() guard that forces nested calls serial, and no
-# `#pragma omp` anywhere in the kernel/pack/serial path. The default fuzz tests
-# run under whatever wait policy ctest inherits (typically passive), which would
-# MASK a regression that reintroduces nesting or a barrier. This test pins the
-# guarantee: run the etrsm fuzz under OMP_WAIT_POLICY=active + OMP=4 with a hard
-# TIMEOUT, so a reintroduced wedge fails the suite (livelock -> timeout) instead
-# of hanging silently in production under active. Verified clean: 36000 cases
-# across 3 seeds pass under active, no hang. (memory project-etrsm-omp4-wedge)
+# etrsm once livelocked ~16-23% of OMP=4 runs: a libgomp lost-wakeup race where
+# a barrier wake fired during the *default* finite spin-then-block window gets
+# lost, leaving a worker blocked forever. It was fixed structurally by the
+# 03f48ac rewrite of etrsm_parallel.c — now a single flat non-nesting parallel
+# region with NO explicit barrier (only the implicit join), an omp_in_parallel()
+# guard forcing nested calls serial, and no `#pragma omp` in the kernel/pack/
+# serial path, so the vulnerable blocked_dispatch dynamic barrier is gone.
 #
-# Case count is the full 12000-case bar (still ~1.5s under active): fuzz sizes
-# are log-uniform in [1,128] biased to small matrices, and etrsm only threads at
-# mnk >= 64^3, so a high count is needed to land enough genuine 4-thread regions
-# (the ones the wedge lives in) each run.
-if(TARGET fuzz_etrsm)
-    add_test(NAME epblas_parallel_fuzz_etrsm_active COMMAND fuzz_etrsm)
-    set_tests_properties(epblas_parallel_fuzz_etrsm_active PROPERTIES
-        ENVIRONMENT "BLAS_FUZZ_CASES=12000;OMP_NUM_THREADS=4;OMP_WAIT_POLICY=active"
-        TIMEOUT 120
+# Policy note: the race is specific to the spin-then-block window. passive
+# (block immediately) and active (spin forever, never block) are both immune;
+# only the DEFAULT policy is exposed. So this guard must force that window —
+# GOMP_SPINCOUNT=300000 with OMP_WAIT_POLICY unset, so an inherited passive/
+# active can't mask it — and run the historical trigger (perf_etrsm, heavy
+# 4-thread region churn) under it with a hard TIMEOUT: if a future change
+# reintroduces a nested team or a dispatch barrier the run hangs and the TIMEOUT
+# fails the suite instead of the wedge resurfacing silently in production.
+# The wedge is probabilistic, so one run is a best-effort guard, not a certain
+# catch. Verified clean on the current code: 0/30 perf runs + 60k threaded
+# regions, no wedge. (memory project-etrsm-omp4-wedge)
+if(TARGET perf_etrsm)
+    add_test(NAME epblas_parallel_etrsm_wedge_guard COMMAND perf_etrsm)
+    set_tests_properties(epblas_parallel_etrsm_wedge_guard PROPERTIES
+        ENVIRONMENT_MODIFICATION "OMP_WAIT_POLICY=unset:;GOMP_SPINCOUNT=set:300000;OMP_NUM_THREADS=set:4;BLAS_PERF_ITERS=set:20;BLAS_PERF_TIME_BUDGET=set:0.1"
+        TIMEOUT 90
         LABELS "fuzz")
 endif()
