@@ -34,8 +34,8 @@ OUT = Path(__file__).parent / "cmp5.tsv"
 
 
 def main():
-    subject = defaultdict(dict)   # (routine, key, size) → {variant: gflops}
-    migrated = defaultdict(dict)  # (routine, key, size) → {mig_*: gflops}
+    subject = defaultdict(dict)   # (routine, key, size) → {variant: ns}
+    migrated = defaultdict(dict)  # (routine, key, size) → {mig_*: ns}
     with RAW.open() as f:
         r = csv.DictReader(f, delimiter="\t")
         for row in r:

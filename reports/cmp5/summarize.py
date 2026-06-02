@@ -4,7 +4,7 @@
 Sanity-checks the migrated-serial column by comparing the 4 mig_* readings
 (should be near-equal since `_serial` is OpenMP-free), then emits:
 
-  1) Per-routine table — for each routine, the median GF/s across (key, size)
+  1) Per-routine table — for each routine, the median ns/call across (key, size)
      for each of the 5 columns plus the omp4 speedups.
   2) Migrated-baseline drift table — how much the 4 mig_* readings disagree
      (should be small).
@@ -50,7 +50,7 @@ def main():
     out.append(f"- Five variants: `{EP1.label}` and `{EP4.label}` (epblas-openblas overlay), `{P1.label}` and `{P4.label}` (epblas-parallel overlay), and `{MIG_LABEL}` (Fortran reference, serial baseline).")
     out.append("- All four overlay binaries link the SAME `tests/epblas-parallel/perf/target_kind10/perf_<r>.c` source — only the C-overlay symbol differs.")
     out.append("- Same `BLAS_PERF_{ITERS,WARMUP,INCX,INCY}=200/20/1/1`; per-routine default sizes; pinned via `taskset` (P-cores 0 or 0..3).")
-    out.append(f"- `{MIG_LABEL}` = migrated_GFs from the `{P1.label}` run; `mig_*` columns are sanity readings of the same migrated `_serial` symbol from each of the four runs (expected to be ~equal since `_serial` contains no OpenMP).")
+    out.append(f"- `{MIG_LABEL}` = migrated_ns from the `{P1.label}` run; `mig_*` columns are sanity readings of the same migrated `_serial` symbol from each of the four runs (expected to be ~equal since `_serial` contains no OpenMP).")
     out.append("")
     out.append("**Units: all columns are bare wall time in ns/call — smaller is faster.** A `parallel/openblas` wall-time ratio **< 1.0** means parallel is faster; the firm bar is par ≤ ob in every cell. (The separate interleaved per-routine harness reports the same par/ob wall-time ratio, where < 1.0 = par faster — the same direction. See `doc/optimization-findings.md` → \"Reporting convention\".)")
     out.append("")
