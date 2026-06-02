@@ -140,33 +140,39 @@ static inline void perf_print_header(void) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     /* Single line printed once per binary. Format chosen so a downstream
      * Python aggregator can split on whitespace. */
-    /* "subject_GFs" = GF/s of the C-overlay routine under test in this
-     * binary (epblas-openblas OR epblas-parallel, depending on which archive was
-     * linked — perf_*.c sources are overlay-agnostic). */
-    printf("# routine            key      size    iters   subject_GFs   migrated_GFs   mig/subject\n");
+    /* "subject_ns" = bare wall time (ns/call) of the C-overlay routine under
+     * test in this binary (epblas-openblas OR epblas-parallel, depending on
+     * which archive was linked — perf_*.c sources are overlay-agnostic).
+     * Reported as ns/call, NOT GF/s: smaller is faster. The trailing ratio is
+     * subject/mig wall time (< 1.0 ⇒ the C overlay is faster than migrated). */
+    printf("# routine            key      size    iters   subject_ns   migrated_ns   subject/mig\n");
 }
 
 /* t_subject / t_mg: wall-clock seconds per iter of the C-overlay routine
  * (subject) vs the migrated Fortran reference (mg). Caller doesn't care
- * which overlay — perf_*.c sources are overlay-agnostic. */
+ * which overlay — perf_*.c sources are overlay-agnostic. Emitted as bare
+ * wall time in ns/call (smaller = faster); the `flops` arg is retained in the
+ * signature (the generated perf_*.c callers still pass it) but unused. */
 static inline void perf_emit(const char *routine, const char *key, int size,
                              int iters, double flops, double t_subject, double t_mg)
 {
-    double g_subject = (t_subject > 0) ? flops / t_subject / 1e9 : 0;
-    double g_mg = (t_mg > 0) ? flops / t_mg / 1e9 : 0;
-    double ratio = (t_subject > 0) ? t_mg / t_subject : 0;
-    printf("%-18s  %-7s  %6d  %6d  %12.4f  %13.4f  %8.3fx\n",
-           routine, key, size, iters, g_subject, g_mg, ratio);
+    (void)flops;
+    double ns_subject = t_subject * 1e9;
+    double ns_mg = t_mg * 1e9;
+    double ratio = (t_mg > 0) ? t_subject / t_mg : 0;  /* < 1.0 ⇒ subject faster */
+    printf("%-18s  %-7s  %6d  %6d  %12.1f  %13.1f  %8.3fx\n",
+           routine, key, size, iters, ns_subject, ns_mg, ratio);
 }
 
 /* JSON line emitter, optional. One JSON object per (routine, key, size).
  * Caller writes to BLAS_PERF_JSON in append mode if set.
  *
  * JSON keys:
- *   t_subject, gflops_subject  — C overlay (epblas-openblas OR epblas-parallel; varies
- *                                by which archive is linked into the binary)
- *   t_mg, gflops_mg            — migrated Fortran reference
- *   ratio                      — subject GF/s ÷ migrated GF/s
+ *   t_subject, ns_subject  — C overlay (epblas-openblas OR epblas-parallel; varies
+ *                            by which archive is linked into the binary); seconds
+ *                            and ns/call (smaller = faster)
+ *   t_mg, ns_mg            — migrated Fortran reference (seconds, ns/call)
+ *   ratio                  — subject ÷ migrated wall time (< 1.0 ⇒ subject faster)
  */
 static inline void perf_emit_json(const char *routine, const char *key,
                                   int size, int iters, double flops,
@@ -176,13 +182,14 @@ static inline void perf_emit_json(const char *routine, const char *key,
     if (!path || !*path) return;
     FILE *f = fopen(path, "a");
     if (!f) return;
-    double g_subject = (t_subject > 0) ? flops / t_subject / 1e9 : 0;
-    double g_mg = (t_mg > 0) ? flops / t_mg / 1e9 : 0;
-    double ratio = (t_subject > 0) ? t_mg / t_subject : 0;
+    (void)flops;
+    double ns_subject = t_subject * 1e9;
+    double ns_mg = t_mg * 1e9;
+    double ratio = (t_mg > 0) ? t_subject / t_mg : 0;
     fprintf(f, "{\"routine\":\"%s\",\"key\":\"%s\",\"size\":%d,\"iters\":%d,"
-               "\"t_subject\":%.6e,\"t_mg\":%.6e,\"gflops_subject\":%.4f,"
-               "\"gflops_mg\":%.4f,\"ratio\":%.4f}\n",
-            routine, key, size, iters, t_subject, t_mg, g_subject, g_mg, ratio);
+               "\"t_subject\":%.6e,\"t_mg\":%.6e,\"ns_subject\":%.1f,"
+               "\"ns_mg\":%.1f,\"ratio\":%.4f}\n",
+            routine, key, size, iters, t_subject, t_mg, ns_subject, ns_mg, ratio);
     fclose(f);
 }
 
