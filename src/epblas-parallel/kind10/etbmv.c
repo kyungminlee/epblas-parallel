@@ -2,21 +2,26 @@
  * etbmv — kind10 (long double) triangular band matrix-vector.
  *   x := A*x or A^T*x, A triangular band with K+1 diagonals.
  *
- * The serial sweep is this overlay's faster reference and is defined FIRST so
- * its hot-loop placement is unperturbed by the threaded scaffolding (function
- * order shifts alignment). x := op(A)*x is a pure matvec (no solve dependency),
- * so although the in-place column sweep serializes it, every OUTPUT element is
- * independent. The threaded path (large N) exploits that with a ROW-PARTITIONED
- * GATHER: thread t owns a disjoint output-row range [lo,hi) and computes each
- * y[i] as a band dot accumulated in a register-resident x87 scalar, reading x
- * globally but never writing it; one barrier; then each thread copies its own
- * range back to x. No per-thread buffer, no zero-fill, no O(n*nthreads)
- * reduction (which is what OpenBLAS tbmv_thread pays AND what an earlier private-
- * slot port here paid) -- the only serial cost is one malloc(n), so speedup
- * climbs monotonically toward nthreads instead of capping. The gather also runs
- * ~1.7x faster per element than the in-place scatter (accumulator stays off
- * memory). The orchestration is a noinline helper so its bookkeeping does not
- * crowd the serial sweep's x87 allocator.
+ * x := op(A)*x is a pure matvec (no solve dependency): every OUTPUT element is
+ * an independent band dot. Both the serial reference and the threaded path
+ * therefore GATHER -- each x[i] is accumulated in a register-resident x87 scalar
+ * and stored once, never the column SCATTER (read-modify-write to memory per
+ * element) that reference tbmv uses for NoTrans. Keeping the accumulator off
+ * memory runs ~2x faster per element (project_x87_accumulator_spill).
+ *
+ * Serial NoTrans gathers IN PLACE with no buffer: op(A)*x reads only indices
+ * >= i (upper) or <= i (lower), so sweeping upper ASCENDING / lower DESCENDING
+ * never clobbers an unread input. Serial Trans is already a register dot.
+ *
+ * The serial reference is defined FIRST so its hot-loop placement is unperturbed
+ * by the threaded scaffolding (function order shifts alignment). The threaded
+ * path (large N) gives thread t a disjoint output-row range [lo,hi); it gathers
+ * into a shared scratch buffer y, one barrier, then copies its own range back to
+ * x. No per-thread buffer, no zero-fill, no O(n*nthreads) reduction (what
+ * OpenBLAS tbmv_thread pays AND what an earlier private-slot port here paid) --
+ * the only serial cost is one malloc(n), so speedup climbs toward nthreads
+ * instead of capping. The orchestration is a noinline helper so its bookkeeping
+ * does not crowd the serial reference's x87 allocator.
  */
 
 #include <stddef.h>
@@ -36,11 +41,14 @@ static inline char up(const char *p) {
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 
 /* Thread-entry thresholds = the measured break-even where par4 < par1 (forking
- * actually beats our own serial sweep). Trans needs ~2x the size: its gather
- * kernel is ~half the work per row, so the fixed omp-parallel fork/join cost
- * amortizes at larger N. Below these, the serial sweep is faster than any thread
- * split — and faster than ob's threaded path too — so we never fork into a loss. */
-#define ETBMV_OMP_MIN_N 512   /* NoTrans/ConjNoTrans: break-even ~N=350 */
+ * actually beats our own serial path). Both serial paths are register-resident
+ * (NoTrans in-place gather, Trans dot), so threading only pays once N is large
+ * enough to amortize the threaded path's malloc(n) + copy-back + fork/join.
+ * Below these the serial path wins — and beats ob's threaded path too — so we
+ * never fork into a loss. NoTrans's fast in-place-gather serial pushes its
+ * break-even up near Trans's (it was 512 back when serial NoTrans was the slower
+ * column scatter). Calibrated at K=16. */
+#define ETBMV_OMP_MIN_N 768   /* NoTrans/ConjNoTrans: break-even ~N=700 */
 #define ETBMV_OMP_MIN_T 1024  /* Trans: break-even ~N=800 */
 #define ETBMV_MAX_CPUS 256
 
@@ -59,7 +67,6 @@ void etbmv_(
     (void)uplo_len; (void)trans_len; (void)diag_len;
     const int N = *n_, K = *k_;
     const int lda = *lda_, incx = *incx_;
-    const T zero = 0.0L;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
@@ -78,24 +85,28 @@ void etbmv_(
 
     if (incx == 1) {
         if (TR == 'N') {
+            /* In-place row-gather (NOT the old column scatter): each output x[i]
+             * is a band dot accumulated in a register-resident x87 scalar and
+             * stored once -- no read-modify-write to memory per element. Safe
+             * with no buffer because upper reads indices >= i and lower reads
+             * indices <= i, so upper ASCENDING / lower DESCENDING never clobbers
+             * an unread input. base[k +- d*s1] walks the lda-1 anti-diagonal. */
+            const ptrdiff_t s1 = lda - 1;
             if (UPLO == 'U') {
-                for (int j = 0; j < N; ++j) {
-                    if (x[j] != zero) {
-                        const T tmp = x[j];
-                        const int L = K - j;
-                        const int i_lo = (j - K > 0) ? (j - K) : 0;
-                        for (int i = i_lo; i < j; ++i) x[i] += tmp * A_(L + i, j);
-                        if (nounit) x[j] *= A_(K, j);
-                    }
+                for (int i = 0; i < N; ++i) {
+                    const T *base = &A_(0, i);
+                    const int len = (N - 1 - i < K) ? (N - 1 - i) : K;
+                    T s = nounit ? base[K] * x[i] : x[i];
+                    for (int d = 1; d <= len; ++d) s += base[K + (ptrdiff_t)d * s1] * x[i + d];
+                    x[i] = s;
                 }
             } else {
-                for (int j = N - 1; j >= 0; --j) {
-                    if (x[j] != zero) {
-                        const T tmp = x[j];
-                        const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (int i = i_hi - 1; i > j; --i) x[i] += tmp * A_(i - j, j);
-                        if (nounit) x[j] *= A_(0, j);
-                    }
+                for (int i = N - 1; i >= 0; --i) {
+                    const T *base = &A_(0, i);
+                    const int len = (i < K) ? i : K;
+                    T s = nounit ? base[0] * x[i] : x[i];
+                    for (int d = 1; d <= len; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
+                    x[i] = s;
                 }
             }
         } else {
@@ -119,44 +130,36 @@ void etbmv_(
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
+            /* Strided in-place row-gather (same as the incx==1 path; logical
+             * index i lives at x[off0 + i*incx], off0 placing logical 0 for
+             * incx<0). Register-resident accumulator; upper ASCENDING / lower
+             * DESCENDING keeps the in-place write safe. */
+            const ptrdiff_t off0 = (incx < 0) ? -(ptrdiff_t)(N - 1) * incx : 0;
+            const ptrdiff_t s1 = lda - 1;
             if (UPLO == 'U') {
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
-                    if (x[jx] != zero) {
-                        const T tmp = x[jx];
-                        int ix = kx;
-                        const int L = K - j;
-                        const int i_lo = (j - K > 0) ? (j - K) : 0;
-                        for (int i = i_lo; i < j; ++i) {
-                            x[ix] += tmp * A_(L + i, j);
-                            ix += incx;
-                        }
-                        if (nounit) x[jx] *= A_(K, j);
-                    }
-                    jx += incx;
-                    if (j >= K) kx += incx;
+                for (int i = 0; i < N; ++i) {
+                    const T *base = &A_(0, i);
+                    const int len = (N - 1 - i < K) ? (N - 1 - i) : K;
+                    const ptrdiff_t ii = off0 + (ptrdiff_t)i * incx;
+                    T s = nounit ? base[K] * x[ii] : x[ii];
+                    ptrdiff_t ix = ii + incx;
+                    for (int d = 1; d <= len; ++d) { s += base[K + (ptrdiff_t)d * s1] * x[ix]; ix += incx; }
+                    x[ii] = s;
                 }
             } else {
-                kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
-                    if (x[jx] != zero) {
-                        const T tmp = x[jx];
-                        int ix = kx;
-                        const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (int i = i_hi - 1; i > j; --i) {
-                            x[ix] += tmp * A_(i - j, j);
-                            ix -= incx;
-                        }
-                        if (nounit) x[jx] *= A_(0, j);
-                    }
-                    jx -= incx;
-                    if ((N - 1 - j) >= K) kx -= incx;
+                for (int i = N - 1; i >= 0; --i) {
+                    const T *base = &A_(0, i);
+                    const int len = (i < K) ? i : K;
+                    const ptrdiff_t ii = off0 + (ptrdiff_t)i * incx;
+                    T s = nounit ? base[0] * x[ii] : x[ii];
+                    ptrdiff_t ix = ii - incx;
+                    for (int d = 1; d <= len; ++d) { s += base[-(ptrdiff_t)d * s1] * x[ix]; ix -= incx; }
+                    x[ii] = s;
                 }
             }
         } else {
+            int kx = (incx < 0) ? -(N - 1) * incx : 0;
             if (UPLO == 'U') {
                 kx += (N - 1) * incx;
                 int jx = kx;
@@ -197,13 +200,12 @@ void etbmv_(
 #ifdef _OPENMP
 /* Row-partitioned gather kernel: compute y[i] for i in [lo, hi) as a band dot,
  * reading x globally (never written here) and accumulating in a register-
- * resident scalar (x87 stack), then a single store y[i]=s. This is the lever:
- * the in-place serial sweep SCATTERS (read-modify-write to memory per element),
- * but op(A)*x has independent output rows, so gathering each row as a dot keeps
- * the accumulator off memory and is ~1.7x faster per element than the scatter
- * AND lets us partition output rows disjointly — no per-thread buffer, no
- * zero-fill, no reduction. Branch hoisted out of the i-loop; lda-1 (NoTrans
- * anti-diagonal stride) vs contiguous (Trans). */
+ * resident scalar (x87 stack), then a single store y[i]=s. Same gather the
+ * serial NoTrans path uses, but writing a disjoint scratch buffer rather than in
+ * place, so output rows partition across threads with no cross-thread write
+ * dependence — no per-thread buffer beyond the shared y, no zero-fill, no
+ * reduction. Branch hoisted out of the i-loop; lda-1 (NoTrans anti-diagonal
+ * stride) vs contiguous (Trans). */
 static void tbmv_rowgather(int upper, int trans, int nounit,
                            ptrdiff_t n, ptrdiff_t k, ptrdiff_t lo, ptrdiff_t hi,
                            const T *restrict a, ptrdiff_t lda,
