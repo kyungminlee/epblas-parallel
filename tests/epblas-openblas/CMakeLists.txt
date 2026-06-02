@@ -1,7 +1,7 @@
 # epblas-openblas overlay test suite — multi-target driver.
 #
 # Per target in EPBLAS_PARALLEL_BUILT_TARGETS that has an epblas-openblas
-# kernel set, we build consistency / bench / perf executables that
+# kernel set, we build consistency / perf executables that
 # compare the epblas-openblas overlay archive against the
 # `<prefix>blas_openblas_migrated` renamed-migrated archive (also
 # produced by src/epblas-openblas/).
@@ -11,7 +11,10 @@
 # Per-target shims live here:
 #   common/target_<name>/fuzz_util.fypp
 #   consistency/target_<name>/fuzz_<routine>.fypp
-#   bench/target_<name>/bench_<routine>.fypp
+#
+# The legacy Fortran bench harness (bench/) has been archived under
+# archive/tests/ — the C perf harness is the supported timing path. See
+# archive/README.md.
 
 set(_have_multifloats_f FALSE)
 if(TARGET multifloatsf)
@@ -41,8 +44,6 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
 
     set(_consist_target_dir
         ${CMAKE_CURRENT_SOURCE_DIR}/consistency/target_${_target})
-    set(_bench_target_dir
-        ${CMAKE_CURRENT_SOURCE_DIR}/bench/target_${_target})
 
     # Body .fypp templates live in tests/epblas-parallel/ (same Fortran
     # ABI, nothing references "parallel" specifically).
@@ -50,8 +51,6 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
         ${CMAKE_CURRENT_SOURCE_DIR}/../epblas-parallel/common)
     set(_parallel_consist_body
         ${CMAKE_CURRENT_SOURCE_DIR}/../epblas-parallel/consistency)
-    set(_parallel_bench_body
-        ${CMAKE_CURRENT_SOURCE_DIR}/../epblas-parallel/bench)
 
     # Per-target fuzz_util library.
     add_fypp_source(_fuzz_util_src
@@ -98,32 +97,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
         endforeach()
     endif()
 
-    # Bench tests — registered twice (OMP=1, OMP=4).
-    if(IS_DIRECTORY ${_bench_target_dir})
-        file(GLOB _bench_shims CONFIGURE_DEPENDS
-            ${_bench_target_dir}/bench_*.fypp)
-        foreach(_s ${_bench_shims})
-            get_filename_component(_name ${_s} NAME_WE)
-            add_fypp_source(_src ${_s} ${_parallel_bench_body})
-            add_executable(ep_${_name} ${_src})
-            target_link_libraries(ep_${_name} PRIVATE
-                ${_fuzz_common}
-                ${_overlay_archive}
-                ${_migrated_archive}
-                eplinalg::blas)
-            file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
-            foreach(_threads 1 4)
-                set(_test_name epblas_openblas_${_name}_omp${_threads})
-                set(_json
-                    ${CMAKE_BINARY_DIR}/reports/epblas-openblas/${_name}_omp${_threads}.json)
-                add_test(NAME ${_test_name} COMMAND ep_${_name}
-                         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
-                set_tests_properties(${_test_name} PROPERTIES
-                    ENVIRONMENT "OMP_NUM_THREADS=${_threads};BLAS_BENCH_OUT=${_json}"
-                    LABELS "bench;epblas-openblas-bench;epblas-openblas-bench-omp${_threads}")
-            endforeach()
-        endforeach()
-    endif()
+    # (The legacy Fortran bench harness was removed here — see
+    # archive/tests/epblas-openblas/bench and archive/README.md.)
 
     # C perf harnesses — reused from tests/epblas-parallel/perf/target_<T>/,
     # built only for routines that are in the epblas-openblas overlay set

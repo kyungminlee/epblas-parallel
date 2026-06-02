@@ -3,8 +3,11 @@
 # Per target in EPBLAS_PARALLEL_TESTABLE_TARGETS we generate:
 #   common/target_<name>/fuzz_util.fypp        → fuzz_util.f90 (per-target shim)
 #   consistency/target_<name>/fuzz_*.fypp      → fuzz drivers (overlay vs migrated)
-#   bench/target_<name>/bench_*.fypp           → Fortran benches
 #   perf/target_<name>/perf_*.c|.cpp           → C/C++ perf harnesses
+#
+# The legacy Fortran bench harness (bench/target_<name>/bench_*.fypp) has been
+# archived under archive/tests/ — the C perf harness (perf/) is the supported
+# timing path and reports bare wall time (ns/call). See archive/README.md.
 #
 # Each test binary links the composite `epblas-parallel::<prefix>blas`
 # (WHOLE_ARCHIVE-wrapped overlay) AND the renamed `_migrated` archive
@@ -47,8 +50,6 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
 
     set(_consist_target_dir
         ${CMAKE_CURRENT_SOURCE_DIR}/consistency/target_${_target})
-    set(_bench_target_dir
-        ${CMAKE_CURRENT_SOURCE_DIR}/bench/target_${_target})
     set(_perf_target_dir
         ${CMAKE_CURRENT_SOURCE_DIR}/perf/target_${_target})
 
@@ -92,27 +93,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
         endforeach()
     endif()
 
-    # Bench tests.
-    if(IS_DIRECTORY ${_bench_target_dir})
-        file(GLOB _bench_shims CONFIGURE_DEPENDS
-            ${_bench_target_dir}/bench_*.fypp)
-        foreach(_s ${_bench_shims})
-            get_filename_component(_name ${_s} NAME_WE)
-            add_fypp_source(_src ${_s}
-                ${CMAKE_CURRENT_SOURCE_DIR}/bench)
-            add_executable(${_name} ${_src})
-            target_link_libraries(${_name} PRIVATE
-                ${_fuzz_common}
-                ${_composite}
-                ${_migrated_archive}
-                eplinalg::blas)
-            file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports)
-            add_test(NAME epblas_parallel_${_name} COMMAND ${_name}
-                     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports)
-            set_tests_properties(epblas_parallel_${_name}
-                PROPERTIES LABELS "bench")
-        endforeach()
-    endif()
+    # (The legacy Fortran bench harness was removed here — see
+    # archive/tests/epblas-parallel/bench and archive/README.md.)
 
     # C perf harnesses — kernel-isolated timing without the Fortran
     # bench's per-iter realloc/copy asymmetry. The
