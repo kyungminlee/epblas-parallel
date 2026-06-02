@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Update the existing `par>ep (omp1/omp4)` column in src/epblas-openblas/CHECKLIST.md.
 
+cmp5.tsv holds bare wall time (ns/call); the par-vs-ep speedup factor is
+ep_ns / par_ns (≥ 1.10× ⇒ par ≥ 10% faster).
+
 Unlike `insert_par_vs_ep_column.py` (which adds a brand-new column), this
 script REPLACES the cell contents in the column, leaving everything else
 untouched. Run it after re-running the cmp5 sweep + `aggregate.py`.
@@ -47,8 +50,8 @@ def load_ratios():
         rt = r["routine"]; seen.add(rt)
         ep1 = pf(r[EP1.tsv_col]); p1 = pf(r[P1.tsv_col])
         ep4 = pf(r[EP4.tsv_col]); p4 = pf(r[P4.tsv_col])
-        if ep1 and p1: omp1[rt] = max(omp1[rt], p1 / ep1)
-        if ep4 and p4: omp4[rt] = max(omp4[rt], p4 / ep4)
+        if ep1 and p1: omp1[rt] = max(omp1[rt], ep1 / p1)   # ep_ns/par_ns speedup
+        if ep4 and p4: omp4[rt] = max(omp4[rt], ep4 / p4)
     return omp1, omp4, seen
 
 

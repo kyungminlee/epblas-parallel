@@ -155,29 +155,30 @@ K-unroll helped ygemm rank-1 (NN/NT/NC) but regressed dot-product paths. Full di
 
 ## Reporting convention (how perf numbers are presented)
 
-**Always report both the absolute GF/s and the ratio.** A bare ratio hides
-whether a "win" is on a 0.04 GF/s triangular-solve or a 8 GF/s GEMM; a bare
-GF/s hides whether we're ahead of OpenBLAS. Quote them together, e.g.
-`par 7.86 vs ob 7.28 GF/s (1.08×)`.
+**Report bare wall time (ns/call) and the wall-time ratio.** A bare ratio hides
+whether a "win" is on a 40 ns triangular-solve element or a 200 µs GEMM; the
+absolute ns/call gives the scale. Quote them together, e.g.
+`par 1568939 vs ob 1556720 ns/call (1.008×)`. **Do not convert to GF/s** — this
+repo reports throughput nowhere; bare wall time is the single unit.
 
-Two units appear in this repo; they point in **opposite directions**, so label
-which one you mean every time:
+Wall time is the only unit now, and **smaller is faster** everywhere — the cmp5
+tables, the `perf_*` harness output, and the interleaved min-of-N harness all
+report ns/call (the interleaved harness uses warmed wall-clock, taskset-pinned,
+`OMP_WAIT_POLICY=passive`; do **not** use `perf stat -e cycles:u`, which sums
+user-cycles across cores and is meaningless across thread counts).
 
 | unit | what it is | direction | parity |
 |------|-----------|-----------|--------|
-| **GF/s** (throughput) | the cmp5 tables, `perf_*` harness output | **larger is better** | par/ob GF/s ratio **> 1.0** ⇒ par faster |
-| **cycle ratio** (par/ob cycles, the interleaved harness) | `perf stat -e cycles:u` | **smaller is better** | ratio **< 1.0** ⇒ par faster |
+| **ns/call** (bare wall time) | the cmp5 tables, `perf_*` harness output, the interleaved harness | **smaller is better** | par/ob wall ratio **< 1.0** ⇒ par faster |
 
-They are reciprocals: a 1.84× cycle ratio (par takes 1.84× the cycles, bad) is
-the same fact as a 0.54× GF/s ratio (par at 54% throughput, bad). **Default to
-GF/s and a GF/s ratio in any summary**; reach for the cycle ratio only inside
-the interleaved min-of-N harness where it is the native measurement. When you
-do show a cycle ratio, say "cycles" explicitly so a `0.99` isn't misread as a
-throughput loss.
+Always **label the direction** when you quote a ratio, so a `0.99` isn't misread.
+A par/ob wall ratio of 0.54× means par takes 54% of ob's time (good); 1.84×
+means par takes 1.84× the time (bad).
 
-The firm bar — **par ≥ ob in every cell** — therefore reads as *GF/s ratio ≥ 1.0*
-(equivalently *cycle ratio ≤ 1.0*) across all sizes, both OMP=1 and OMP=4, both
-uplos.
+The firm bar — **par ≤ ob in every cell** — therefore reads as *wall ratio ≤ 1.0*
+across all sizes, both OMP=1 and OMP=4, both uplos. (One derived speedup also
+appears as a factor ≥ 1.0: the CHECKLIST `par>ep` column is `ep_ns / par_ns`, so
+≥ 1.10× there means par is ≥ 10% faster — a factor, not a wall ratio.)
 
 ---
 

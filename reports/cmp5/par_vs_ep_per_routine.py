@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""For each routine, emit max(par/ep) at OMP=1 and OMP=4.
+"""For each routine, emit the best par-vs-ep speedup at OMP=1 and OMP=4.
 
-Used to build the `par>ep` column in src/epopenblas/CHECKLIST.md.
+cmp5.tsv holds bare wall time (ns/call), so the speedup factor is
+ep_ns / par_ns (≥ 1.10× ⇒ par is ≥ 10% faster). Used to build the
+`par>ep` column in src/epopenblas/CHECKLIST.md.
 """
 import csv
 from collections import defaultdict
@@ -32,12 +34,12 @@ for r in csv.DictReader(CMP.open(), delimiter="\t"):
     ep1 = pf(r[EP1.tsv_col]);    p1 = pf(r[P1.tsv_col])
     ep4 = pf(r[EP4.tsv_col]);    p4 = pf(r[P4.tsv_col])
     if ep1 and p1:
-        ratio = p1 / ep1
+        ratio = ep1 / p1   # ep_ns / par_ns = par-vs-ep speedup
         if ratio >= THRESH:
             by_rt_1_n[rt] += 1
         by_rt_1[rt] = max(by_rt_1[rt], ratio)
     if ep4 and p4:
-        ratio = p4 / ep4
+        ratio = ep4 / p4
         if ratio >= THRESH:
             by_rt_4_n[rt] += 1
         by_rt_4[rt] = max(by_rt_4[rt], ratio)

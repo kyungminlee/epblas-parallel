@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Insert a `par>ep` column into src/epblas-openblas/CHECKLIST.md.
 
-For each routine row in each table, look up the peak par-blas / epopenblas
-ratio at OMP=1 and OMP=4 (from reports/cmp5/cmp5.tsv) and emit a cell of
+cmp5.tsv holds bare wall time (ns/call), so the par-vs-ep speedup is
+ep_ns / par_ns. For each routine row in each table, look up the best
+speedup at OMP=1 and OMP=4 (from reports/cmp5/cmp5.tsv) and emit a cell of
 the form `omp1 / omp4`, e.g. `1.51× / 2.15×`. If either ratio is below
 the 1.10× noise floor it becomes "—"; if both are below it the whole
 cell is "—". Routines that timed out (no rows in cmp5.tsv) get "n/d".
@@ -44,9 +45,9 @@ def load_ratios():
         ep1 = pf(r[EP1.tsv_col]); p1 = pf(r[P1.tsv_col])
         ep4 = pf(r[EP4.tsv_col]); p4 = pf(r[P4.tsv_col])
         if ep1 and p1:
-            omp1_max[rt] = max(omp1_max[rt], p1 / ep1)
+            omp1_max[rt] = max(omp1_max[rt], ep1 / p1)   # ep_ns/par_ns speedup
         if ep4 and p4:
-            omp4_max[rt] = max(omp4_max[rt], p4 / ep4)
+            omp4_max[rt] = max(omp4_max[rt], ep4 / p4)
     return omp1_max, omp4_max, seen
 
 

@@ -8,11 +8,12 @@
 #
 # Output: cmp5_raw.tsv (alongside this script) in the format the existing
 # aggregate.py expects:
-#   run_id  run_binary  omp  taskset  routine  key  size  iters  subject_GFs  migrated_GFs
+#   run_id  run_binary  omp  taskset  routine  key  size  iters  subject_ns  migrated_ns
 #
-# subject_GFs = GF/s of the C-implemented routine under test in this row
-#   (which C overlay it is — epopenblas or parallel-blas — is read from run_id).
-# migrated_GFs = GF/s of the migrated Fortran reference (the migrator-translated
+# subject_ns = bare wall time (ns/call, smaller = faster) of the C-implemented
+#   routine under test in this row (which C overlay it is — epopenblas or
+#   parallel-blas — is read from run_id).
+# migrated_ns = ns/call of the migrated Fortran reference (the migrator-translated
 #   _serial symbol; same symbol in both binaries, so should agree across runs).
 #
 # Usage: bash reports/cmp5/run_cmp5.sh
@@ -43,7 +44,7 @@ LOG="${HERE}/cmp5.log"
 
 : > "$RAW"
 : > "$LOG"
-echo -e "run_id\trun_binary\tomp\ttaskset\troutine\tkey\tsize\titers\tsubject_GFs\tmigrated_GFs" >> "$RAW"
+echo -e "run_id\trun_binary\tomp\ttaskset\troutine\tkey\tsize\titers\tsubject_ns\tmigrated_ns" >> "$RAW"
 
 if [[ ! -d "$EP_DIR" ]]; then
     echo "[fatal] $EP_DIR missing (build dir not configured?)" | tee -a "$LOG" >&2
@@ -100,10 +101,10 @@ run_one() {
     awk -v rid="$run_id" -v tag="$run_bin_tag" -v omp="$omp" -v ts="$cpulist" '
         /^#/ {next}
         NF >= 6 {
-            # perf binary stdout cols: routine key size iters subject_GFs migrated_GFs ratio
-            # (subject = epopenblas or parallel-blas — read from rid).
-            # $7 (ratio) is dropped — kept for human readability of
-            # the perf binary stdout but not aggregated here.
+            # perf binary stdout cols: routine key size iters subject_ns migrated_ns ratio
+            # (subject = epopenblas or parallel-blas — read from rid; ns/call,
+            # smaller = faster). $7 (subject/mig wall ratio) is dropped — kept
+            # for human readability of the perf binary stdout but not aggregated.
             printf "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
                 rid, tag, omp, ts, $1, $2, $3, $4, $5, $6;
         }' "$TMP" >> "$RAW"
