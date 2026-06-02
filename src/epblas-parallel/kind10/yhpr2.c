@@ -20,6 +20,38 @@ static inline char up(const char *p) {
     return (char)toupper((unsigned char)*p);
 }
 
+/* Per-column rank-2 updates, carved out as their own functions so the inner
+ * loop compiles with clean x87 register allocation. Inlined into the
+ * `omp parallel for` body, the upper-triangle loop loses ~10% (the outlined
+ * region spills the kept-resident operands); keeping it a separate noinline
+ * function restores parity with the reference and lets both the serial and
+ * threaded paths share one tight loop. The Hermitian diagonal is forced real
+ * here: the off-diagonal run plus the single real diagonal write. */
+__attribute__((noinline))
+static void yhpr2_col_upper(int j, T t1, T t2,
+                            const T *restrict x, const T *restrict y, T *restrict ap) {
+    T *restrict c = ap + (size_t)j * (j + 1) / 2;
+    for (int i = 0; i < j; ++i) c[i] += x[i] * t1 + y[i] * t2;
+    c[j] = (TR)__real__ c[j] + (TR)__real__ (x[j] * t1 + y[j] * t2);
+}
+
+__attribute__((noinline))
+static void yhpr2_col_lower(int j, int N, T t1, T t2,
+                            const T *restrict x, const T *restrict y, T *restrict ap) {
+    /* Pre-advance the off-diagonal bases so the loop runs 0-based over a single
+     * induction variable indexing three pointers — the exact tight form gcc
+     * picks for the upper helper. A loop that starts at i=1 (or indexes the
+     * original arrays by the absolute j+1..N-1) instead makes gcc walk three
+     * separate pointers with an extra increment per iteration (~7% on the
+     * lower triangle). Diagonal last so the loop compiles on a clean x87 stack. */
+    const int mo = N - j - 1;
+    T *restrict c0 = ap + ((size_t)j * N - (size_t)j * (j - 1) / 2);
+    T *restrict c = c0 + 1;
+    const T *restrict xc = x + j + 1, *restrict yc = y + j + 1;
+    for (int i = 0; i < mo; ++i) c[i] += xc[i] * t1 + yc[i] * t2;
+    c0[0] = (TR)__real__ c0[0] + (TR)__real__ (x[j] * t1 + y[j] * t2);
+}
+
 void yhpr2_(
     const char *uplo,
     const int *n_,
@@ -39,35 +71,36 @@ void yhpr2_(
     if (N == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
+        /* schedule(static,1): column j touches j (upper) or N-1-j (lower)
+         * off-diagonal packed elements, so a contiguous static block hands one
+         * thread the heavy triangle end and starves the rest (par caps at ~2x
+         * on 4 cores). Cyclic static,1 interleaves short and long columns
+         * across the team, balancing the skew symmetrically for both UPLO. The
+         * Hermitian diagonal is forced real every column — including the
+         * skipped (x[j]==y[j]==0) ones — so the else branch still writes it. */
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const int use_omp = (N >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
-                const int kk = (j * (j + 1)) / 2;
-                if (x[j] != zero || y[j] != zero) {
-                    const T t1 = alpha * cconj(y[j]);
-                    const T t2 = cconj(alpha * x[j]);
-                    for (int i = 0; i < j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
-                    ap[kk + j] = (TR)__real__ ap[kk + j] + (TR)__real__ (x[j] * t1 + y[j] * t2);
-                } else {
+                if (x[j] != zero || y[j] != zero)
+                    yhpr2_col_upper(j, alpha * cconj(y[j]), cconj(alpha * x[j]), x, y, ap);
+                else {
+                    const size_t kk = (size_t)j * (j + 1) / 2;
                     ap[kk + j] = (TR)__real__ ap[kk + j];
                 }
             }
         } else {
 #ifdef _OPENMP
             const int use_omp = (N >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
-                const int kk = j * N - (j * (j - 1)) / 2;
-                if (x[j] != zero || y[j] != zero) {
-                    const T t1 = alpha * cconj(y[j]);
-                    const T t2 = cconj(alpha * x[j]);
-                    ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (x[j] * t1 + y[j] * t2);
-                    for (int i = j + 1; i < N; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
-                } else {
+                if (x[j] != zero || y[j] != zero)
+                    yhpr2_col_lower(j, N, alpha * cconj(y[j]), cconj(alpha * x[j]), x, y, ap);
+                else {
+                    const size_t kk = (size_t)j * N - (size_t)j * (j - 1) / 2;
                     ap[kk] = (TR)__real__ ap[kk];
                 }
             }
