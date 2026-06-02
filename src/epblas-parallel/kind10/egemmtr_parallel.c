@@ -91,6 +91,26 @@ void egemmtr_(const char *uplo, const char *transa, const char *transb,
     if (NC > N) NC = N;
     if (NC < NR) NC = NR;
 
+#ifdef _OPENMP
+    /* The `omp for` below partitions the ic (output-row-block) loop across the
+     * team. With the default MC=64, small/moderate N yields only N/MC ic-blocks
+     * — too few for the team — and the triangular work-skew (later ic-blocks
+     * keep more of the stored triangle, so they are heavier) leaves the
+     * lightest-block threads idle under schedule(static, 1). Cap MC locally so
+     * the ic loop yields >=~3 blocks per thread, giving static,1 enough chunks
+     * to balance the smooth row-work ramp. This is a ROWS-only retiling: it does
+     * not reorder any K-reduction, so the output is bit-identical. The cap is
+     * LOCAL to this threaded entry — egemmtr_block_sizes and egemmtr_serial keep
+     * MC=64, and it is a no-op once N/MC_default already gives enough blocks
+     * (large N) since we only ever lower MC. */
+    const int nthr = blas_omp_max_threads();
+    if (N >= EGEMMTR_OMP_MIN && nthr > 1) {
+        int cap = egemmtr_round_up((N + 3 * nthr - 1) / (3 * nthr), MR);
+        if (cap < 32) cap = 32;        /* keep the register kernel amortized */
+        if (MC > cap) MC = cap;
+    }
+#endif
+
     const int sa_rows = egemmtr_round_up(MC, MR);
     const int sb_cols = egemmtr_round_up(NC, NR);
     const size_t ap_bytes = (size_t)sa_rows * KC * sizeof(T);
