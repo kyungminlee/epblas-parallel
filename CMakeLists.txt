@@ -146,6 +146,40 @@ function(_epblas_use_system_multifloats)
     endif()
 endfunction()
 
+# ── OpenMP runtime selection ──────────────────────────────────────────────
+# Prefer Intel's libiomp5 as the OpenMP runtime when it's installed. It is
+# GOMP-ABI compatible (so GCC-emitted GOMP_* calls resolve against it) but ships
+# a lower-overhead thread pool with hot-team reuse (KMP_BLOCKTIME, default 200ms),
+# which removes the libgomp futex-wakeup tax that inflates small/medium parallel
+# regions — e.g. the kind10 L1 reductions thread cleanly under it with no need
+# for OMP_WAIT_POLICY tuning.
+#
+# Mechanism: pre-seed FindOpenMP's cache vars so every find_package(OpenMP) below
+# resolves the runtime library to iomp5. `-fopenmp` stays a COMPILE flag only
+# (it's not added at link by the OpenMP:: imported targets), so the link line
+# carries iomp5 and NOT libgomp — the two OpenMP runtimes are never mixed.
+#
+# Detected, never hardcoded as a requirement: falls back silently to the
+# compiler default (libgomp for GCC) when iomp5 is absent. Force libgomp with
+# -DEPBLAS_PREFER_IOMP5=OFF, or pin a runtime with -DOpenMP_C_LIB_NAMES=gomp.
+option(EPBLAS_PREFER_IOMP5 "Use Intel libiomp5 as the OpenMP runtime when found" ON)
+if(EPBLAS_PREFER_IOMP5 AND NOT DEFINED OpenMP_C_LIB_NAMES)
+    find_library(EPBLAS_IOMP5_LIBRARY NAMES iomp5
+        PATHS /opt/intel/oneapi/compiler/latest/lib
+              /opt/intel/oneapi/compiler/latest/linux/compiler/lib/intel64_lin
+        ENV LD_LIBRARY_PATH)
+    if(EPBLAS_IOMP5_LIBRARY)
+        message(STATUS "epblas: OpenMP runtime = Intel libiomp5 (${EPBLAS_IOMP5_LIBRARY})")
+        set(OpenMP_C_FLAGS "-fopenmp" CACHE STRING "OpenMP C compile flags")
+        set(OpenMP_C_LIB_NAMES "iomp5" CACHE STRING "OpenMP C runtime lib names")
+        set(OpenMP_CXX_FLAGS "-fopenmp" CACHE STRING "OpenMP CXX compile flags")
+        set(OpenMP_CXX_LIB_NAMES "iomp5" CACHE STRING "OpenMP CXX runtime lib names")
+        set(OpenMP_iomp5_LIBRARY "${EPBLAS_IOMP5_LIBRARY}" CACHE FILEPATH "iomp5 path")
+    else()
+        message(STATUS "epblas: libiomp5 not found — OpenMP runtime = compiler default (libgomp)")
+    endif()
+endif()
+
 if("multifloats" IN_LIST EPBLAS_PARALLEL_BUILT_TARGETS)
     if(EPBLAS_PARALLEL_USE_SYSTEM_MULTIFLOATS)
         _epblas_use_system_multifloats()
