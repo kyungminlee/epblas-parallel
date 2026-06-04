@@ -23,7 +23,7 @@
 
 typedef etrmm_T T;
 
-void etrmm_kernel(int left, int trans,
+void etrmm_kernel(ptrdiff_t left, ptrdiff_t trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         T alpha,
                         const T *ba, const T *bb,

@@ -30,40 +30,40 @@
 typedef _Complex long double yhemm_T;
 
 /* Block/panel size (env YHEMM_NB; otherwise 32). */
-int yhemm_nb(void);
+ptrdiff_t yhemm_nb(void);
 
 /* alpha==0 quick path: C := beta*C over columns [j_start, j_end), rows
  * [0, M). */
-void yhemm_beta_only(int j_start, int j_end, int M, yhemm_T beta,
-                     yhemm_T *c, int ldc);
+void yhemm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, yhemm_T beta,
+                     yhemm_T *c, ptrdiff_t ldc);
 
 /* SIDE='L', M <= nb single-block fast path, one column range [j_start,
  * j_end): inlined scalar ZHEMM with beta folded into the diagonal write. */
-void yhemm_L_singleblock(int j_start, int j_end, int M,
+void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
                          yhemm_T alpha, yhemm_T beta,
-                         const yhemm_T *a, int lda,
-                         const yhemm_T *b, int ldb,
-                         yhemm_T *c, int ldc, char UPLO);
+                         const yhemm_T *a, ptrdiff_t lda,
+                         const yhemm_T *b, ptrdiff_t ldb,
+                         yhemm_T *c, ptrdiff_t ldc, char UPLO);
 
 /* SIDE='L' general path, one column panel [jc, jc+jb). */
-void yhemm_L_panel(int jc, int jb, int M, yhemm_T alpha, yhemm_T beta,
-                   const yhemm_T *a, int lda, const yhemm_T *b, int ldb,
-                   yhemm_T *c, int ldc, char UPLO, int nb);
+void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, yhemm_T alpha, yhemm_T beta,
+                   const yhemm_T *a, ptrdiff_t lda, const yhemm_T *b, ptrdiff_t ldb,
+                   yhemm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
 /* SIDE='R' general path, one row panel [ic, ic+ib). */
-void yhemm_R_panel(int ic, int ib, int N, yhemm_T alpha, yhemm_T beta,
-                   const yhemm_T *a, int lda, const yhemm_T *b, int ldb,
-                   yhemm_T *c, int ldc, char UPLO, int nb);
+void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, yhemm_T alpha, yhemm_T beta,
+                   const yhemm_T *a, ptrdiff_t lda, const yhemm_T *b, ptrdiff_t ldb,
+                   yhemm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as yhemm_. */
 void yhemm_serial(
     const char *side, const char *uplo,
-    const int *m_, const int *n_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_,
     const yhemm_T *alpha_,
-    const yhemm_T *a, const int *lda_,
-    const yhemm_T *b, const int *ldb_,
+    const yhemm_T *a, const ptrdiff_t *lda_,
+    const yhemm_T *b, const ptrdiff_t *ldb_,
     const yhemm_T *beta_,
-    yhemm_T *c, const int *ldc_,
+    yhemm_T *c, const ptrdiff_t *ldc_,
     size_t side_len, size_t uplo_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YHEMM_KERNEL_H */

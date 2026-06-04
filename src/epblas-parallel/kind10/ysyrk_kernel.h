@@ -30,28 +30,28 @@
 typedef _Complex long double ysyrk_T;
 
 /* Env-tunable block size (YSYRK_NB). */
-int ysyrk_nb(void);
+ptrdiff_t ysyrk_nb(void);
 
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's triangular
  * columns, the scalar diagonal rank-k add, and the trailing ygemm_serial
  * update against the rest of the panel. */
-void ysyrk_block(int jc, int jb, int N, int K, ysyrk_T alpha, ysyrk_T beta,
-                 const ysyrk_T *a, int lda, ysyrk_T *c, int ldc,
+void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, ysyrk_T alpha, ysyrk_T beta,
+                 const ysyrk_T *a, ptrdiff_t lda, ysyrk_T *c, ptrdiff_t ldc,
                  char UPLO, char TR);
 
 /* C := beta*C over the triangular columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. */
-void ysyrk_beta_scale(int j_start, int j_end, int N, ysyrk_T beta,
-                      ysyrk_T *c, int ldc, char UPLO);
+void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, ysyrk_T beta,
+                      ysyrk_T *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ysyrk_. */
 void ysyrk_serial(
     const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
     const ysyrk_T *alpha_,
-    const ysyrk_T *a, const int *lda_,
+    const ysyrk_T *a, const ptrdiff_t *lda_,
     const ysyrk_T *beta_,
-    ysyrk_T *c, const int *ldc_,
+    ysyrk_T *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YSYRK_KERNEL_H */

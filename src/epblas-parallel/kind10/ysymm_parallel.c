@@ -44,14 +44,15 @@ void ysymm_(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        ysymm_serial(side, uplo, m_, n_, alpha_, a, lda_, b, ldb_, beta_,
-                     c, ldc_, side_len, uplo_len);
+        const ptrdiff_t m_pt = *m_, n_pt = *n_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
+        ysymm_serial(side, uplo, &m_pt, &n_pt, alpha_, a, &lda_pt, b, &ldb_pt, beta_,
+                     c, &ldc_pt, side_len, uplo_len);
         return;
     }
 #endif
     (void)side_len; (void)uplo_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const char SIDE = (char)toupper((unsigned char)*side);
     const char UPLO = (char)toupper((unsigned char)*uplo);
@@ -61,47 +62,47 @@ void ysymm_(
     if (alpha == ZERO) {
         if (beta == ONE) return;
 #ifdef _OPENMP
-        const int axis = (SIDE == 'L') ? N : M;
-        const int use_omp = (axis >= YSYMM_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t axis = (SIDE == 'L') ? N : M;
+        const ptrdiff_t use_omp = (axis >= YSYMM_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (ptrdiff_t j = 0; j < N; ++j)
             ysymm_beta_only(j, j + 1, M, beta, c, ldc);
         return;
     }
 
-    int nt = 1;
+    ptrdiff_t nt = 1;
 #ifdef _OPENMP
     nt = blas_omp_max_threads();
 #endif
-    const int nb = ysymm_nb();
+    const ptrdiff_t nb = ysymm_nb();
 
     if (SIDE == 'L' && M <= nb) {
 #ifdef _OPENMP
-        const int use_omp = (N >= YSYMM_OMP_MIN && nt > 1);
+        const ptrdiff_t use_omp = (N >= YSYMM_OMP_MIN && nt > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (ptrdiff_t j = 0; j < N; ++j)
             ysymm_L_singleblock(j, j + 1, M, alpha, beta, a, lda, b, ldb, c, ldc, UPLO);
         return;
     }
 
     if (SIDE == 'L') {
 #ifdef _OPENMP
-        const int use_omp = (N >= YSYMM_OMP_MIN && nt > 1);
+        const ptrdiff_t use_omp = (N >= YSYMM_OMP_MIN && nt > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+        for (ptrdiff_t jc = 0; jc < N; jc += nb) {
+            const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
             ysymm_L_panel(jc, jb, M, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
         }
     } else {
 #ifdef _OPENMP
-        const int use_omp = (M >= YSYMM_OMP_MIN && nt > 1);
+        const ptrdiff_t use_omp = (M >= YSYMM_OMP_MIN && nt > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+        for (ptrdiff_t ic = 0; ic < M; ic += nb) {
+            const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             ysymm_R_panel(ic, ib, N, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
         }
     }

@@ -49,7 +49,7 @@ typedef esyr2k_T T;
  * Subbuffer sized NR*(NR+1) to match OpenBLAS's safety pad. */
 void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
                      const T *a, const T *b,
-                     T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag)
+                     T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag)
 {
     T subbuf[NR * (NR + 1)];
 
@@ -111,7 +111,7 @@ void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
 
 void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
                      const T *a, const T *b,
-                     T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag)
+                     T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag)
 {
     T subbuf[NR * (NR + 1)];
 
@@ -184,20 +184,20 @@ void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * pass 1 = (Ap_A, Bp_B, flag=1), pass 2 = (Ap_B, Bp_A, flag=0). */
 void esyr2k_serial(
     const char *uplo_p, const char *trans_p,
-    const int *n_, const int *k_,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, const ptrdiff_t *lda_,
+    const T *b, const ptrdiff_t *ldb_,
     const T *beta_,
-    T *c, const int *ldc_,
+    T *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len)
 {
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
+    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const int uplo  = (char)toupper((unsigned char)*uplo_p);
-    const int trans = (char)toupper((unsigned char)*trans_p);
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t uplo  = (char)toupper((unsigned char)*uplo_p);
+    const ptrdiff_t trans = (char)toupper((unsigned char)*trans_p);
 
     if (N <= 0) return;
 
@@ -206,7 +206,7 @@ void esyr2k_serial(
 
     if (K == 0 || alpha == 0.0L) return;
 
-    int MC, KC, NC;
+    ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
@@ -216,18 +216,18 @@ void esyr2k_serial(
     T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap_A && Ap_B && Bp_A && Bp_B) {
-        for (int js = 0; js < N; js += NC) {
-            const int jb = (N - js < NC) ? (N - js) : NC;
+        for (ptrdiff_t js = 0; js < N; js += NC) {
+            const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
 
             /* UPLO clip of the [0, N] row range for this js-band:
              *   UPPER: only rows up to js+jb contribute.
              *   LOWER: only rows from js onwards. */
-            int m_lo_eff = (uplo == 'L') ? js : 0;
-            int m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
+            ptrdiff_t m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
-            for (int ls = 0; ls < K; ls += KC) {
-                const int pb = (K - ls < KC) ? (K - ls) : KC;
+            for (ptrdiff_t ls = 0; ls < K; ls += KC) {
+                const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
 
                 /* Pack both B-side panels (A and B in OCOPY shape). */
                 if (trans == 'N') {
@@ -238,8 +238,8 @@ void esyr2k_serial(
                     etri_ncopy(pb, jb, &b[(size_t)js * ldb + ls], ldb, Bp_B);
                 }
 
-                for (int is = m_lo_eff; is < m_hi_eff; is += MC) {
-                    const int min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+                for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
+                    const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
                     if (trans == 'N') {
                         etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap_A);

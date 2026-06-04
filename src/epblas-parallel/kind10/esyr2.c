@@ -30,8 +30,8 @@ void esyr2_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, incy = *incy_, lda = *lda_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
     const T zero = 0.0L;
     const char UPLO = up(uplo);
@@ -40,25 +40,25 @@ void esyr2_(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= ESYR2_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t use_omp = (N >= ESYR2_OMP_MIN && blas_omp_max_threads() > 1);
 #else
-        const int use_omp = 0;
+        const ptrdiff_t use_omp = 0;
 #endif
         /* Branch on use_omp at C source level — `#pragma omp parallel for
          * if(use_omp)` outlines unconditionally; at OMP=1 the GOMP_parallel
          * + omp_get_* overhead is a visible fraction of the per-call cost
          * for this small kernel. See Addendum 16. */
 #define ESYR2_BODY                                                              \
-        for (int j = 0; j < N; ++j) {                                           \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                           \
             const T xj = x[j], yj = y[j];                                       \
             if (xj != zero || yj != zero) {                                     \
                 const T tx = alpha * yj;                                        \
                 const T ty = alpha * xj;                                        \
                 T *aj = &A_(0, j);                                              \
                 if (UPLO == 'L') {                                              \
-                    for (int i = j; i < N; ++i) aj[i] += x[i] * tx + y[i] * ty; \
+                    for (ptrdiff_t i = j; i < N; ++i) aj[i] += x[i] * tx + y[i] * ty; \
                 } else {                                                        \
-                    for (int i = 0; i <= j; ++i) aj[i] += x[i] * tx + y[i] * ty;\
+                    for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += x[i] * tx + y[i] * ty;\
                 }                                                               \
             }                                                                   \
         }
@@ -76,22 +76,34 @@ void esyr2_(
         }
 #undef ESYR2_BODY
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        for (int j = 0; j < N; ++j) {
-            const T xj = x[kx + j * incx];
-            const T yj = y[ky + j * incy];
+        /* General-stride fallback — hoist the matrix column to aj[i] and
+         * walk the strided vectors with running indices (Class-B fix,
+         * memory project_ptrdiff_conversion_regressors). */
+        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t jx = kx, jy = ky;
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            const T xj = x[jx];
+            const T yj = y[jy];
             if (xj != zero || yj != zero) {
                 const T tx = alpha * yj;
                 const T ty = alpha * xj;
+                T *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (int i = j; i < N; ++i)
-                        A_(i, j) += x[kx + i * incx] * tx + y[ky + i * incy] * ty;
+                    ptrdiff_t ix = jx, iy = jy;
+                    for (ptrdiff_t i = j; i < N; ++i) {
+                        aj[i] += x[ix] * tx + y[iy] * ty;
+                        ix += incx; iy += incy;
+                    }
                 } else {
-                    for (int i = 0; i <= j; ++i)
-                        A_(i, j) += x[kx + i * incx] * tx + y[ky + i * incy] * ty;
+                    ptrdiff_t ix = kx, iy = ky;
+                    for (ptrdiff_t i = 0; i <= j; ++i) {
+                        aj[i] += x[ix] * tx + y[iy] * ty;
+                        ix += incx; iy += incy;
+                    }
                 }
             }
+            jx += incx; jy += incy;
         }
     }
 }

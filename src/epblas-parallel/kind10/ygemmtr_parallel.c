@@ -39,44 +39,45 @@ void ygemmtr_(const char *uplo, const char *transa, const char *transb,
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        ygemmtr_serial(uplo, transa, transb, n_, k_, alpha_, a, lda_, b, ldb_,
-                       beta_, c, ldc_, uplo_len, ta_len, tb_len);
+        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
+        ygemmtr_serial(uplo, transa, transb, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt,
+                       beta_, c, &ldc_pt, uplo_len, ta_len, tb_len);
         return;
     }
 #endif
     (void)uplo_len; (void)ta_len; (void)tb_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int upper = ((char)toupper((unsigned char)*uplo) == 'U');
-    const int ta = (char)toupper((unsigned char)*transa);
-    const int tb = (char)toupper((unsigned char)*transb);
+    const ptrdiff_t upper = ((char)toupper((unsigned char)*uplo) == 'U');
+    const ptrdiff_t ta = (char)toupper((unsigned char)*transa);
+    const ptrdiff_t tb = (char)toupper((unsigned char)*transb);
 
     if (N <= 0) return;
     const T zero = 0.0L + 0.0iL;
     const T one  = 1.0L + 0.0iL;
 
-    const int conj_a = (ta == 'C');
-    const int conj_b = (tb == 'C');
-    const int trans_a = (ta != 'N');
-    const int trans_b = (tb != 'N');
+    const ptrdiff_t conj_a = (ta == 'C');
+    const ptrdiff_t conj_b = (tb == 'C');
+    const ptrdiff_t trans_a = (ta != 'N');
+    const ptrdiff_t trans_b = (tb != 'N');
 
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const int use_omp0 = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t use_omp0 = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (ptrdiff_t j = 0; j < N; ++j)
             ygemmtr_beta_scale(j, j + 1, N, upper, beta, c, ldc);
         return;
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const ptrdiff_t use_omp = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-    for (int j = 0; j < N; ++j)
+    for (ptrdiff_t j = 0; j < N; ++j)
         ygemmtr_col(j, N, K, upper, alpha, beta, a, lda, b, ldb, c, ldc,
                     trans_a, conj_a, trans_b, conj_b);
 }

@@ -39,8 +39,8 @@ void esymv_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 
@@ -50,11 +50,11 @@ void esymv_(
 
     if (beta != one) {
         if (incy == 1) {
-            if (beta == zero) for (int i = 0; i < N; ++i) y[i] = zero;
-            else              for (int i = 0; i < N; ++i) y[i] *= beta;
+            if (beta == zero) for (ptrdiff_t i = 0; i < N; ++i) y[i] = zero;
+            else              for (ptrdiff_t i = 0; i < N; ++i) y[i] *= beta;
         } else {
-            int iy = (incy < 0) ? -(N - 1) * incy : 0;
-            for (int i = 0; i < N; ++i) {
+            ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 if (beta == zero) y[iy] = zero;
                 else              y[iy] *= beta;
                 iy += incy;
@@ -67,11 +67,11 @@ void esymv_(
     /* The unit-stride path: stride-1 column walks of A. */
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int nt = blas_omp_max_threads();
-        const int use_omp = (N >= ESYMV_OMP_MIN && nt > 1 && !omp_in_parallel());
+        const ptrdiff_t nt = blas_omp_max_threads();
+        const ptrdiff_t use_omp = (N >= ESYMV_OMP_MIN && nt > 1 && !omp_in_parallel());
 #else
-        const int use_omp = 0;
-        const int nt = 1;
+        const ptrdiff_t use_omp = 0;
+        const ptrdiff_t nt = 1;
 #endif
         if (use_omp) {
             /* Parallel two-pass with per-thread private y accumulator.
@@ -92,18 +92,18 @@ void esymv_(
 #ifdef _OPENMP
                 #pragma omp parallel
                 {
-                    const int tid = omp_get_thread_num();
+                    const ptrdiff_t tid = omp_get_thread_num();
                     T *y_priv = &y_priv_all[(size_t)tid * N];
-                    for (int k = 0; k < N; ++k) y_priv[k] = zero;
+                    for (ptrdiff_t k = 0; k < N; ++k) y_priv[k] = zero;
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
-                        for (int j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < N; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = zero;
                             const T *aj = &A_(0, j);
                             y_priv[j] += temp1 * aj[j];
-                            for (int k = j + 1; k < N; ++k) {
+                            for (ptrdiff_t k = j + 1; k < N; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += aj[k] * x[k];
                             }
@@ -111,11 +111,11 @@ void esymv_(
                         }
                     } else {
                         #pragma omp for schedule(static, 1)
-                        for (int j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < N; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = zero;
                             const T *aj = &A_(0, j);
-                            for (int k = 0; k < j; ++k) {
+                            for (ptrdiff_t k = 0; k < j; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += aj[k] * x[k];
                             }
@@ -127,9 +127,9 @@ void esymv_(
                      * before the reduction begins reading. */
 
                     #pragma omp for schedule(static)
-                    for (int i = 0; i < N; ++i) {
+                    for (ptrdiff_t i = 0; i < N; ++i) {
                         T s = zero;
-                        for (int t = 0; t < nt; ++t)
+                        for (ptrdiff_t t = 0; t < nt; ++t)
                             s += y_priv_all[(size_t)t * N + i];
                         y[i] += s;
                     }
@@ -143,12 +143,12 @@ void esymv_(
         if (UPLO == 'L') {
             /* Iterate i forward; the inner k loop covers k = i..N-1
              * (stored lower triangle). Uses A_(k, i) (stride-1 in k). */
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = zero;
                 const T *ai = &A_(0, i);
                 y[i] += temp1 * ai[i];
-                for (int k = i + 1; k < N; ++k) {
+                for (ptrdiff_t k = i + 1; k < N; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += ai[k] * x[k];
                 }
@@ -157,11 +157,11 @@ void esymv_(
         } else {
             /* UPLO='U': iterate i forward; inner k = 0..i-1
              * (stored upper triangle). */
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = zero;
                 const T *ai = &A_(0, i);
-                for (int k = 0; k < i; ++k) {
+                for (ptrdiff_t k = 0; k < i; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += ai[k] * x[k];
                 }
@@ -171,32 +171,36 @@ void esymv_(
     } else {
         /* General-stride fallback: walks ix/iy by incrementing (matches
          * Netlib reference's IX=IX+INCX, not k*incx recomputation). */
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         if (UPLO == 'L') {
-            int jx = kx, jy = ky;
-            for (int i = 0; i < N; ++i) {
+            ptrdiff_t jx = kx, jy = ky;
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[jx];
                 T temp2 = zero;
                 y[jy] += temp1 * A_(i, i);
-                int ix = jx, iy = jy;
-                for (int k = i + 1; k < N; ++k) {
+                ptrdiff_t ix = jx, iy = jy;
+                const T *ak = &A_(i + 1, i);
+                for (ptrdiff_t k = i + 1; k < N; ++k) {
                     ix += incx; iy += incy;
-                    y[iy] += temp1 * A_(k, i);
-                    temp2 += A_(k, i) * x[ix];
+                    const T akv = *ak++;
+                    y[iy] += temp1 * akv;
+                    temp2 += akv * x[ix];
                 }
                 y[jy] += alpha * temp2;
                 jx += incx; jy += incy;
             }
         } else {
-            int jx = kx, jy = ky;
-            for (int i = 0; i < N; ++i) {
+            ptrdiff_t jx = kx, jy = ky;
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[jx];
                 T temp2 = zero;
-                int ix = kx, iy = ky;
-                for (int k = 0; k < i; ++k) {
-                    y[iy] += temp1 * A_(k, i);
-                    temp2 += A_(k, i) * x[ix];
+                ptrdiff_t ix = kx, iy = ky;
+                const T *ak = &A_(0, i);
+                for (ptrdiff_t k = 0; k < i; ++k) {
+                    const T akv = *ak++;
+                    y[iy] += temp1 * akv;
+                    temp2 += akv * x[ix];
                     ix += incx; iy += incy;
                 }
                 y[jy] += temp1 * A_(i, i) + alpha * temp2;

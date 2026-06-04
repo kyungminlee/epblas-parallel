@@ -1,3 +1,4 @@
+#include <stddef.h>
 /* erotm — kind10 real: apply modified Givens.
  *
  * Imag-part products written with the just-loaded operand (z) first so
@@ -19,16 +20,16 @@ static inline void step(const T flag, const T h11, const T h12, const T h21, con
 void erotm_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
             const T *dparam)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T flag = dparam[0];
     if (n <= 0 || flag == -2.0L) return;
     const T h11 = dparam[1], h21 = dparam[2], h12 = dparam[3], h22 = dparam[4];
     if (incx == 1 && incy == 1) {
-        for (int i = 0; i < n; ++i) step(flag, h11, h12, h21, h22, &x[i], &y[i]);
+        for (ptrdiff_t i = 0; i < n; ++i) step(flag, h11, h12, h21, h22, &x[i], &y[i]);
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (int i = 0; i < n; ++i) { step(flag, h11, h12, h21, h22, &x[ix], &y[iy]);
+        ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
+        for (ptrdiff_t i = 0; i < n; ++i) { step(flag, h11, h12, h21, h22, &x[ix], &y[iy]);
                                        ix += incx; iy += incy; }
     }
 }

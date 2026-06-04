@@ -20,50 +20,50 @@ void etpsv_(
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int incx = *incx_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_;
     const T zero = 0.0L;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
-    const int nounit = (up(diag) != 'U');
+    const ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (x[j] != zero) {
                         if (nounit) x[j] /= ap[kk];
                         const T tmp = x[j];
-                        int k = kk - 1;
-                        for (int i = j - 1; i >= 0; --i) { x[i] -= tmp * ap[k]; --k; }
+                        ptrdiff_t k = kk - 1;
+                        for (ptrdiff_t i = j - 1; i >= 0; --i) { x[i] -= tmp * ap[k]; --k; }
                     }
                     kk -= j + 1;
                 }
             } else {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[j] != zero) {
                         if (nounit) x[j] /= ap[kk];
                         const T tmp = x[j];
-                        int k = kk + 1;
-                        for (int i = j + 1; i < N; ++i) { x[i] -= tmp * ap[k]; ++k; }
+                        ptrdiff_t k = kk + 1;
+                        for (ptrdiff_t i = j + 1; i < N; ++i) { x[i] -= tmp * ap[k]; ++k; }
                     }
                     kk += N - j;
                 }
             }
         } else {
             if (UPLO == 'U') {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     /* Single-acc x87 dot — split into two parallel chains
                      * (Rule 22 / Addendum 21). */
                     T t0 = x[j], t1 = zero;
-                    int k = kk;
-                    int i = 0;
+                    ptrdiff_t k = kk;
+                    ptrdiff_t i = 0;
                     for (; i + 1 < j; i += 2) {
                         t0 -= ap[k]     * x[i];
                         t1 -= ap[k + 1] * x[i + 1];
@@ -76,11 +76,11 @@ void etpsv_(
                     kk += j + 1;
                 }
             } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[j];
-                    int k = kk;
-                    for (int i = N - 1; i > j; --i) { tmp -= ap[k] * x[i]; --k; }
+                    ptrdiff_t k = kk;
+                    for (ptrdiff_t i = N - 1; i > j; --i) { tmp -= ap[k] * x[i]; --k; }
                     if (nounit) tmp /= ap[kk - (N - 1 - j)];
                     x[j] = tmp;
                     kk -= (N - j);
@@ -88,17 +88,17 @@ void etpsv_(
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                int jx = kx + (N - 1) * incx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                ptrdiff_t jx = kx + (N - 1) * incx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (x[jx] != zero) {
                         if (nounit) x[jx] /= ap[kk];
                         const T tmp = x[jx];
-                        int ix = jx;
-                        for (int k = kk - 1; k >= kk - j; --k) {
+                        ptrdiff_t ix = jx;
+                        for (ptrdiff_t k = kk - 1; k >= kk - j; --k) {
                             ix -= incx;
                             x[ix] -= tmp * ap[k];
                         }
@@ -107,14 +107,14 @@ void etpsv_(
                     kk -= j + 1;
                 }
             } else {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[jx] != zero) {
                         if (nounit) x[jx] /= ap[kk];
                         const T tmp = x[jx];
-                        int ix = jx;
-                        for (int k = kk + 1; k < kk + N - j; ++k) {
+                        ptrdiff_t ix = jx;
+                        for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
                             ix += incx;
                             x[ix] -= tmp * ap[k];
                         }
@@ -125,12 +125,12 @@ void etpsv_(
             }
         } else {
             if (UPLO == 'U') {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[jx];
-                    int ix = kx;
-                    for (int k = kk; k < kk + j; ++k) {
+                    ptrdiff_t ix = kx;
+                    for (ptrdiff_t k = kk; k < kk + j; ++k) {
                         tmp -= ap[k] * x[ix];
                         ix += incx;
                     }
@@ -140,13 +140,13 @@ void etpsv_(
                     kk += j + 1;
                 }
             } else {
-                int kk = (N * (N + 1)) / 2 - 1;
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
                 kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[jx];
-                    int ix = kx;
-                    for (int k = kk; k > kk - (N - 1 - j); --k) {
+                    ptrdiff_t ix = kx;
+                    for (ptrdiff_t k = kk; k > kk - (N - 1 - j); --k) {
                         tmp -= ap[k] * x[ix];
                         ix -= incx;
                     }

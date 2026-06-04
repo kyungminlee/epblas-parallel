@@ -39,13 +39,13 @@ static inline size_t col_start_L(ptrdiff_t j, ptrdiff_t n) {
 
 /* Sqrt-balanced contiguous column partition (OpenBLAS tpmv_partition, mask=7,
  * min-width 16); UPPER reversed so thread 0 takes the heaviest columns. */
-static void tpmv_partition(int upper, ptrdiff_t n, int nthreads, ptrdiff_t *range)
+static void tpmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
 {
-    const int mask = 7;
+    const ptrdiff_t mask = 7;
     const double dnum = (double)n * (double)n / (double)nthreads;
     if (!upper) {
         range[0] = 0;
-        ptrdiff_t i = 0; int num_cpu = 0;
+        ptrdiff_t i = 0; ptrdiff_t num_cpu = 0;
         while (i < n && num_cpu < nthreads) {
             ptrdiff_t width;
             if (nthreads - num_cpu > 1) {
@@ -59,10 +59,10 @@ static void tpmv_partition(int upper, ptrdiff_t n, int nthreads, ptrdiff_t *rang
             range[num_cpu + 1] = range[num_cpu] + width;
             num_cpu++; i += width;
         }
-        for (int t = num_cpu + 1; t <= nthreads; ++t) range[t] = range[num_cpu];
+        for (ptrdiff_t t = num_cpu + 1; t <= nthreads; ++t) range[t] = range[num_cpu];
     } else {
         range[nthreads] = n;
-        ptrdiff_t i = 0; int num_cpu = 0;
+        ptrdiff_t i = 0; ptrdiff_t num_cpu = 0;
         while (i < n && num_cpu < nthreads) {
             ptrdiff_t width;
             if (nthreads - num_cpu > 1) {
@@ -76,11 +76,11 @@ static void tpmv_partition(int upper, ptrdiff_t n, int nthreads, ptrdiff_t *rang
             range[nthreads - num_cpu - 1] = range[nthreads - num_cpu] - width;
             num_cpu++; i += width;
         }
-        for (int t = 0; t < nthreads - num_cpu; ++t) range[t] = range[nthreads - num_cpu];
+        for (ptrdiff_t t = 0; t < nthreads - num_cpu; ++t) range[t] = range[nthreads - num_cpu];
     }
 }
 
-static void tpmv_kernel_N(int upper, int nounit, ptrdiff_t n,
+static void tpmv_kernel_N(ptrdiff_t upper, ptrdiff_t nounit, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
                           const T *ap, const T *x, T *y)
 {
@@ -101,7 +101,7 @@ static void tpmv_kernel_N(int upper, int nounit, ptrdiff_t n,
     }
 }
 
-static void tpmv_kernel_T(int upper, int nounit, int conj, ptrdiff_t n,
+static void tpmv_kernel_T(ptrdiff_t upper, ptrdiff_t nounit, ptrdiff_t conj, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
                           const T *ap, const T *x, T *y)
 {
@@ -131,10 +131,10 @@ static void tpmv_kernel_T(int upper, int nounit, int conj, ptrdiff_t n,
  * to the serial reference. Kept noinline so the in-place serial loops below
  * compile in a clean x87 register context. */
 __attribute__((noinline))
-static int ytpmv_omp(int upper, int is_t, int conj, int nounit, int N, int incx,
+static ptrdiff_t ytpmv_omp(ptrdiff_t upper, ptrdiff_t is_t, ptrdiff_t conj, ptrdiff_t nounit, ptrdiff_t N, ptrdiff_t incx,
                      const T *restrict ap, T *restrict x)
 {
-    int nthreads = 1;
+    ptrdiff_t nthreads = 1;
     if (N >= 50 && !omp_in_parallel()) {
         nthreads = blas_omp_max_threads();
         if (N < 500 && nthreads > 2) nthreads = 2;
@@ -162,7 +162,7 @@ static int ytpmv_omp(int upper, int is_t, int conj, int nounit, int N, int incx,
     tpmv_partition(upper, n, nthreads, range_m);
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
+        ptrdiff_t tid = omp_get_thread_num();
         T *y = is_t ? buf_all : &buf_all[(size_t)tid * (size_t)n];
         ptrdiff_t m_from, m_to;
         if (upper) { m_from = range_m[nthreads - tid - 1]; m_to = range_m[nthreads - tid]; }
@@ -174,13 +174,13 @@ static int ytpmv_omp(int upper, int is_t, int conj, int nounit, int N, int incx,
     }
     if (!is_t) {  /* reduce private slots into slot 0 over the touched range */
         if (upper) {
-            for (int t = 1; t < nthreads; ++t) {
+            for (ptrdiff_t t = 1; t < nthreads; ++t) {
                 ptrdiff_t m_to_t = range_m[nthreads - t];
                 const T *slot = &buf_all[(size_t)t * (size_t)n];
                 for (ptrdiff_t i = 0; i < m_to_t; ++i) buf_all[i] += slot[i];
             }
         } else {
-            for (int t = 1; t < nthreads; ++t) {
+            for (ptrdiff_t t = 1; t < nthreads; ++t) {
                 ptrdiff_t m_from_t = range_m[t];
                 const T *slot = &buf_all[(size_t)t * (size_t)n];
                 for (ptrdiff_t i = m_from_t; i < n; ++i) buf_all[i] += slot[i];
@@ -202,13 +202,13 @@ void ytpmv_(
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int incx = *incx_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_;
     const T zero = 0.0L + 0.0Li;
     const char UPLO = up(uplo);
     const char TR = up(trans);
-    const int noconj = (TR == 'T');
-    const int nounit = (up(diag) != 'U');
+    const ptrdiff_t noconj = (TR == 'T');
+    const ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 
@@ -219,23 +219,23 @@ void ytpmv_(
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[j] != zero) {
                         const T tmp = x[j];
-                        int k = kk;
-                        for (int i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
+                        ptrdiff_t k = kk;
+                        for (ptrdiff_t i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
                         if (nounit) x[j] *= ap[kk + j];
                     }
                     kk += j + 1;
                 }
             } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (x[j] != zero) {
                         const T tmp = x[j];
-                        int k = kk;
-                        for (int i = N - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
+                        ptrdiff_t k = kk;
+                        for (ptrdiff_t i = N - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
                         if (nounit) x[j] *= ap[kk - (N - 1 - j)];
                     }
                     kk -= (N - j);
@@ -243,40 +243,40 @@ void ytpmv_(
             }
         } else {
             if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[j];
                     if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
-                    int k = kk - 1;
-                    if (noconj) for (int i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
-                    else        for (int i = j - 1; i >= 0; --i) { tmp += cconj(ap[k]) * x[i]; --k; }
+                    ptrdiff_t k = kk - 1;
+                    if (noconj) for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
+                    else        for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += cconj(ap[k]) * x[i]; --k; }
                     x[j] = tmp;
                     kk -= j + 1;
                 }
             } else {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[j];
                     if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
-                    int k = kk + 1;
-                    if (noconj) for (int i = j + 1; i < N; ++i) { tmp += ap[k] * x[i]; ++k; }
-                    else        for (int i = j + 1; i < N; ++i) { tmp += cconj(ap[k]) * x[i]; ++k; }
+                    ptrdiff_t k = kk + 1;
+                    if (noconj) for (ptrdiff_t i = j + 1; i < N; ++i) { tmp += ap[k] * x[i]; ++k; }
+                    else        for (ptrdiff_t i = j + 1; i < N; ++i) { tmp += cconj(ap[k]) * x[i]; ++k; }
                     x[j] = tmp;
                     kk += N - j;
                 }
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[jx] != zero) {
                         const T tmp = x[jx];
-                        int ix = kx;
-                        for (int k = kk; k < kk + j; ++k) {
+                        ptrdiff_t ix = kx;
+                        for (ptrdiff_t k = kk; k < kk + j; ++k) {
                             x[ix] += tmp * ap[k];
                             ix += incx;
                         }
@@ -286,14 +286,14 @@ void ytpmv_(
                     kk += j + 1;
                 }
             } else {
-                int kk = (N * (N + 1)) / 2 - 1;
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
                 kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (x[jx] != zero) {
                         const T tmp = x[jx];
-                        int ix = kx;
-                        for (int k = kk; k > kk - (N - 1 - j); --k) {
+                        ptrdiff_t ix = kx;
+                        for (ptrdiff_t k = kk; k > kk - (N - 1 - j); --k) {
                             x[ix] += tmp * ap[k];
                             ix -= incx;
                         }
@@ -305,13 +305,13 @@ void ytpmv_(
             }
         } else {
             if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                int jx = kx + (N - 1) * incx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                ptrdiff_t jx = kx + (N - 1) * incx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[jx];
-                    int ix = jx;
+                    ptrdiff_t ix = jx;
                     if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
-                    for (int k = kk - 1; k >= kk - j; --k) {
+                    for (ptrdiff_t k = kk - 1; k >= kk - j; --k) {
                         ix -= incx;
                         tmp += (noconj ? ap[k] : cconj(ap[k])) * x[ix];
                     }
@@ -320,13 +320,13 @@ void ytpmv_(
                     kk -= j + 1;
                 }
             } else {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[jx];
-                    int ix = jx;
+                    ptrdiff_t ix = jx;
                     if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
-                    for (int k = kk + 1; k < kk + N - j; ++k) {
+                    for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
                         ix += incx;
                         tmp += (noconj ? ap[k] : cconj(ap[k])) * x[ix];
                     }

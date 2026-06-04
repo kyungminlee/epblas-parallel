@@ -29,8 +29,8 @@ void esyr_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, lda = *lda_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_, lda = *lda_;
     const T alpha = *alpha_;
     const T zero = 0.0L;
     const char UPLO = up(uplo);
@@ -39,24 +39,24 @@ void esyr_(
 
     if (incx == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= ESYR_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t use_omp = (N >= ESYR_OMP_MIN && blas_omp_max_threads() > 1);
 #else
-        const int use_omp = 0;
+        const ptrdiff_t use_omp = 0;
 #endif
         /* Branch on use_omp at C source level — `#pragma omp parallel for
          * if(use_omp)` outlines unconditionally; at OMP=1 the GOMP_parallel
          * + omp_get_* overhead is a visible fraction of the per-call cost
          * for this small kernel. See Addendum 16. */
 #define ESYR_BODY                                                            \
-        for (int j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
             const T xj = x[j];                                               \
             if (xj != zero) {                                                \
                 const T t = alpha * xj;                                      \
                 T *aj = &A_(0, j);                                           \
                 if (UPLO == 'L') {                                           \
-                    for (int i = j; i < N; ++i) aj[i] += t * x[i];           \
+                    for (ptrdiff_t i = j; i < N; ++i) aj[i] += t * x[i];           \
                 } else {                                                     \
-                    for (int i = 0; i <= j; ++i) aj[i] += t * x[i];          \
+                    for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += t * x[i];          \
                 }                                                            \
             }                                                                \
         }
@@ -73,17 +73,25 @@ void esyr_(
         }
 #undef ESYR_BODY
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        for (int j = 0; j < N; ++j) {
-            const T xj = x[kx + j * incx];
+        /* General-stride fallback — hoist the matrix column to aj[i] and
+         * walk the strided vector with a running index (Class-B fix,
+         * memory project_ptrdiff_conversion_regressors). */
+        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t jx = kx;
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            const T xj = x[jx];
             if (xj != zero) {
                 const T t = alpha * xj;
+                T *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (int i = j; i < N; ++i) A_(i, j) += t * x[kx + i * incx];
+                    ptrdiff_t ix = jx;
+                    for (ptrdiff_t i = j; i < N; ++i) { aj[i] += t * x[ix]; ix += incx; }
                 } else {
-                    for (int i = 0; i <= j; ++i) A_(i, j) += t * x[kx + i * incx];
+                    ptrdiff_t ix = kx;
+                    for (ptrdiff_t i = 0; i <= j; ++i) { aj[i] += t * x[ix]; ix += incx; }
                 }
             }
+            jx += incx;
         }
     }
 }

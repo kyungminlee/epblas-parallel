@@ -48,23 +48,23 @@ void ygemv_(
     size_t trans_len)
 {
     (void)trans_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char TR = up(trans);
 
     if (M == 0 || N == 0) return;
 
-    const int leny = (TR == 'N') ? M : N;
+    const ptrdiff_t leny = (TR == 'N') ? M : N;
 
     /* β-scale y. */
     if (beta != ONE) {
         if (incy == 1) {
-            if (beta == ZERO) for (int i = 0; i < leny; ++i) y[i] = ZERO;
-            else              for (int i = 0; i < leny; ++i) y[i] *= beta;
+            if (beta == ZERO) for (ptrdiff_t i = 0; i < leny; ++i) y[i] = ZERO;
+            else              for (ptrdiff_t i = 0; i < leny; ++i) y[i] *= beta;
         } else {
-            int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-            for (int i = 0; i < leny; ++i) {
+            ptrdiff_t iy = (incy < 0) ? -(leny - 1) * incy : 0;
+            for (ptrdiff_t i = 0; i < leny; ++i) {
                 if (beta == ZERO) y[iy] = ZERO;
                 else              y[iy] *= beta;
                 iy += incy;
@@ -77,10 +77,10 @@ void ygemv_(
     if (TR == 'N') {
         if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-            const int use_omp = (M >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
+            const ptrdiff_t use_omp = (M >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
                                  && !omp_in_parallel());
 #else
-            const int use_omp = 0;
+            const ptrdiff_t use_omp = 0;
 #endif
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
              * still outlines the body into a `._omp_fn` function and pays
@@ -101,58 +101,58 @@ void ygemv_(
 #ifdef _OPENMP
                 #pragma omp parallel
                 {
-                    const int tid = omp_get_thread_num();
-                    const int nt  = omp_get_num_threads();
-                    const int i_lo = ((long long)M * tid) / nt;
-                    const int i_hi = ((long long)M * (tid + 1)) / nt;
-                    int j = 0;
+                    const ptrdiff_t tid = omp_get_thread_num();
+                    const ptrdiff_t nt  = omp_get_num_threads();
+                    const ptrdiff_t i_lo = ((long long)M * tid) / nt;
+                    const ptrdiff_t i_hi = ((long long)M * (tid + 1)) / nt;
+                    ptrdiff_t j = 0;
                     for (; j + 1 < N; j += 2) {
                         const T t0 = alpha * x[j];
                         const T t1 = alpha * x[j + 1];
                         const T *a0 = &A_(0, j);
                         const T *a1 = &A_(0, j + 1);
-                        for (int i = i_lo; i < i_hi; ++i) {
+                        for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
                             y[i] = (y[i] + t0 * a0[i]) + t1 * a1[i];
                         }
                     }
                     for (; j < N; ++j) {
                         const T t = alpha * x[j];
                         const T *aj = &A_(0, j);
-                        for (int i = i_lo; i < i_hi; ++i) y[i] += t * aj[i];
+                        for (ptrdiff_t i = i_lo; i < i_hi; ++i) y[i] += t * aj[i];
                     }
                 }
 #endif
             } else {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     const T t = alpha * x[j];
                     const T *aj = &A_(0, j);
-                    for (int i = 0; i < M; ++i) y[i] += t * aj[i];
+                    for (ptrdiff_t i = 0; i < M; ++i) y[i] += t * aj[i];
                 }
             }
         } else if (incy == 1) {
             /* incx != 1, incy == 1: single-column inner — same reason
              * as fast path above. Complex cmul + J-unroll spills a1 on
              * x87 stack; single-column matches migrated. */
-            int jx = (incx < 0) ? -(N - 1) * incx : 0;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t = alpha * x[jx];
                 const T *aj = &A_(0, j);
-                for (int i = 0; i < M; ++i) y[i] += t * aj[i];
+                for (ptrdiff_t i = 0; i < M; ++i) y[i] += t * aj[i];
                 jx += incx;
             }
         } else {
             /* incy != 1: strided y writes — replicate gfortran auto
              * J-unroll-by-2 to halve y traffic on the strided path. */
-            int jx = (incx < 0) ? -(N - 1) * incx : 0;
-            const int iy0 = (incy < 0) ? -(M - 1) * incy : 0;
-            int j = 0;
+            ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;
+            const ptrdiff_t iy0 = (incy < 0) ? -(M - 1) * incy : 0;
+            ptrdiff_t j = 0;
             for (; j + 1 < N; j += 2) {
                 const T t0 = alpha * x[jx];
                 const T t1 = alpha * x[jx + incx];
                 const T *a0 = &A_(0, j);
                 const T *a1 = &A_(0, j + 1);
-                int iy = iy0;
-                for (int i = 0; i < M; ++i) {
+                ptrdiff_t iy = iy0;
+                for (ptrdiff_t i = 0; i < M; ++i) {
                     y[iy] = (y[iy] + t0 * a0[i]) + t1 * a1[i];
                     iy += incy;
                 }
@@ -162,8 +162,8 @@ void ygemv_(
                 const T xj = x[jx];
                 if (xj != ZERO) {
                     const T t = alpha * xj;
-                    int iy = iy0;
-                    for (int i = 0; i < M; ++i) {
+                    ptrdiff_t iy = iy0;
+                    for (ptrdiff_t i = 0; i < M; ++i) {
                         y[iy] += t * A_(i, j);
                         iy += incy;
                     }
@@ -176,24 +176,24 @@ void ygemv_(
          * Single-acc dot product (complex inner-loop is x87-stack-heavy;
          * K-unroll with split accumulators regressed on similar paths
          * in ygemm — keep single accumulator). */
-        const int conj_a = (TR == 'C');
+        const ptrdiff_t conj_a = (TR == 'C');
         if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-            const int use_omp = (N >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
+            const ptrdiff_t use_omp = (N >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
                                  && !omp_in_parallel());
 #else
-            const int use_omp = 0;
+            const ptrdiff_t use_omp = 0;
 #endif
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
              * still outlines (see Addendum 16). */
 #define YGEMV_T_BODY                                                         \
-            for (int j = 0; j < N; ++j) {                                    \
+            for (ptrdiff_t j = 0; j < N; ++j) {                                    \
                 const T *aj = &A_(0, j);                                     \
                 T s = ZERO;                                                  \
                 if (conj_a) {                                                \
-                    for (int i = 0; i < M; ++i) s += cconj(aj[i]) * x[i];    \
+                    for (ptrdiff_t i = 0; i < M; ++i) s += cconj(aj[i]) * x[i];    \
                 } else {                                                     \
-                    for (int i = 0; i < M; ++i) s += aj[i] * x[i];           \
+                    for (ptrdiff_t i = 0; i < M; ++i) s += aj[i] * x[i];           \
                 }                                                            \
                 y[j] += alpha * s;                                           \
             }
@@ -207,11 +207,11 @@ void ygemv_(
             }
 #undef YGEMV_T_BODY
         } else {
-            int jy = (incy < 0) ? -(N - 1) * incy : 0;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jy = (incy < 0) ? -(N - 1) * incy : 0;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 T s = ZERO;
-                int ix = (incx < 0) ? -(M - 1) * incx : 0;
-                for (int i = 0; i < M; ++i) {
+                ptrdiff_t ix = (incx < 0) ? -(M - 1) * incx : 0;
+                for (ptrdiff_t i = 0; i < M; ++i) {
                     s += (conj_a ? cconj(A_(i, j)) : A_(i, j)) * x[ix];
                     ix += incx;
                 }

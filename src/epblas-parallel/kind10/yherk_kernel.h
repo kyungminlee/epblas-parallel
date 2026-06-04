@@ -33,30 +33,30 @@ typedef _Complex long double yherk_TC;
 typedef long double          yherk_TR;
 
 /* Env-tunable block size (YHERK_NB). */
-int yherk_nb(void);
+ptrdiff_t yherk_nb(void);
 
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's columns
  * (diagonal kept real), the scalar Hermitian diagonal rank-k add, and the
  * trailing ygemm_serial conjugate-transpose update against the rest of the
  * panel. */
-void yherk_block(int jc, int jb, int N, int K, yherk_TR alpha, yherk_TR beta,
-                 const yherk_TC *a, int lda, yherk_TC *c, int ldc,
+void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, yherk_TR alpha, yherk_TR beta,
+                 const yherk_TC *a, ptrdiff_t lda, yherk_TC *c, ptrdiff_t ldc,
                  char UPLO, char TR_c);
 
 /* C := beta*C over the columns [j_start, j_end) keeping the diagonal real —
  * the alpha==0 / K==0 quick path (and the per-block pre-scale). beta==1
  * realifies only the diagonal entry. */
-void yherk_beta_scale(int j_start, int j_end, int N, yherk_TR beta,
-                      yherk_TC *c, int ldc, char UPLO);
+void yherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, yherk_TR beta,
+                      yherk_TC *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as yherk_. */
 void yherk_serial(
     const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
     const yherk_TR *alpha_,
-    const yherk_TC *a, const int *lda_,
+    const yherk_TC *a, const ptrdiff_t *lda_,
     const yherk_TR *beta_,
-    yherk_TC *c, const int *ldc_,
+    yherk_TC *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YHERK_KERNEL_H */

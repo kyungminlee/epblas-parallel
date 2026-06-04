@@ -10,10 +10,11 @@
  */
 #include <math.h>
 #include <float.h>
+#include <stddef.h>
 typedef long double T;
 
 static T btsml, btbig, bssml, bsbig, maxN;
-static int blue_inited = 0;
+static ptrdiff_t blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
 {
@@ -35,14 +36,14 @@ static inline T sq(T x) { return x * x; }
 
 T enrm2_(const int *n_, const T *x, const int *incx_)
 {
-    const int n = *n_, incx = *incx_;
+    const ptrdiff_t n = *n_, incx = *incx_;
     if (n <= 0) return 0.0L;
     if (!blue_inited) blue_init();
 
     T abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    int notbig = 1;
-    int ix = (incx < 0) ? -(n - 1) * incx : 0;
-    for (int i = 0; i < n; ++i) {
+    ptrdiff_t notbig = 1;
+    ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
+    for (ptrdiff_t i = 0; i < n; ++i) {
         T ax = fabsl(x[ix]);
         if (ax > btbig) {
             abig += sq(ax * bsbig);

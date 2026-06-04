@@ -26,8 +26,8 @@ void eger_(
     const T *restrict y, const int *incy_,
     T *restrict a, const int *lda_)
 {
-    const int M = *m_, N = *n_;
-    const int incx = *incx_, incy = *incy_, lda = *lda_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
     const T zero = 0.0L;
 
@@ -35,19 +35,19 @@ void eger_(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= EGER_OMP_MIN && blas_omp_max_threads() > 1
+        const ptrdiff_t use_omp = (N >= EGER_OMP_MIN && blas_omp_max_threads() > 1
                              && !omp_in_parallel());
 #else
-        const int use_omp = 0;
+        const ptrdiff_t use_omp = 0;
 #endif
         /* C-source branch on use_omp to dodge Add-16 outlining tax. */
 #define EGER_BODY                                                            \
-        for (int j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
             const T yj = y[j];                                               \
             if (yj != zero) {                                                \
                 const T t = alpha * yj;                                      \
                 T *aj = &A_(0, j);                                           \
-                for (int i = 0; i < M; ++i) aj[i] += t * x[i];               \
+                for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * x[i];               \
             }                                                                \
         }
         if (use_omp) {
@@ -60,16 +60,20 @@ void eger_(
         }
 #undef EGER_BODY
     } else {
-        int jy = (incy < 0) ? -(N - 1) * incy : 0;
-        for (int j = 0; j < N; ++j) {
+        ptrdiff_t jy = (incy < 0) ? -(N - 1) * incy : 0;
+        for (ptrdiff_t j = 0; j < N; ++j) {
             const T yj = y[jy];
             if (yj != zero) {
                 const T t = alpha * yj;
-                int ix = (incx < 0) ? -(M - 1) * incx : 0;
                 T *aj = &A_(0, j);
-                for (int i = 0; i < M; ++i) {
-                    aj[i] += t * x[ix];
-                    ix += incx;
+                if (incx == 1) {
+                    for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * x[i];
+                } else {
+                    ptrdiff_t ix = (incx < 0) ? -(M - 1) * incx : 0;
+                    for (ptrdiff_t i = 0; i < M; ++i) {
+                        aj[i] += t * x[ix];
+                        ix += incx;
+                    }
                 }
             }
             jy += incy;

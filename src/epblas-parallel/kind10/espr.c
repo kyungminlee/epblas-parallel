@@ -27,8 +27,8 @@ void espr_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_;
     const T alpha = *alpha_;
     const T zero = 0.0L;
     const char UPLO = up(uplo);
@@ -37,9 +37,9 @@ void espr_(
 
     if (incx == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= ESPR_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t use_omp = (N >= ESPR_OMP_MIN && blas_omp_max_threads() > 1);
 #else
-        const int use_omp = 0;
+        const ptrdiff_t use_omp = 0;
 #endif
         /* Branching on use_omp at the outer level — gcc with -fopenmp
          * still outlines the loop body into a `._omp_fn.0` function
@@ -66,7 +66,7 @@ void espr_(
 #ifdef _OPENMP
                 #pragma omp parallel for schedule(static, 8)
 #endif
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[j] != zero) {
                         const T tmp = alpha * x[j];
                         T *restrict apk  = &ap[(size_t)j * (j + 1) / 2];
@@ -84,7 +84,7 @@ void espr_(
                  * different bases (apk = &ap[kk], xp = &x[0]) so gcc
                  * doesn't fold them; the explicit char* form forces it. */
                 T *restrict apk_base = ap;
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[j] != zero) {
                         const T tmp = alpha * x[j];
                         char *restrict apkb = (char *)apk_base;
@@ -104,7 +104,7 @@ void espr_(
 #ifdef _OPENMP
                 #pragma omp parallel for schedule(static, 8)
 #endif
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[j] != zero) {
                         const T tmp = alpha * x[j];
                         T *restrict apk  = &ap[(size_t)j * N - (size_t)j * (j - 1) / 2];
@@ -114,7 +114,7 @@ void espr_(
                     }
                 }
             } else {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[j] != zero) {
                         const T tmp = alpha * x[j];
                         T *restrict apk  = &ap[(size_t)j * N - (size_t)j * (j - 1) / 2];
@@ -126,15 +126,15 @@ void espr_(
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int kk = 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kk = 0;
         if (UPLO == 'U') {
-            int jx = kx;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jx = kx;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 if (x[jx] != zero) {
                     const T tmp = alpha * x[jx];
-                    int ix = kx;
-                    for (int k = kk; k < kk + j + 1; ++k) {
+                    ptrdiff_t ix = kx;
+                    for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
                         ap[k] += x[ix] * tmp;
                         ix += incx;
                     }
@@ -143,12 +143,12 @@ void espr_(
                 kk += j + 1;
             }
         } else {
-            int jx = kx;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jx = kx;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 if (x[jx] != zero) {
                     const T tmp = alpha * x[jx];
-                    int ix = jx;
-                    for (int k = kk; k < kk + N - j; ++k) {
+                    ptrdiff_t ix = jx;
+                    for (ptrdiff_t k = kk; k < kk + N - j; ++k) {
                         ap[k] += x[ix] * tmp;
                         ix += incx;
                     }

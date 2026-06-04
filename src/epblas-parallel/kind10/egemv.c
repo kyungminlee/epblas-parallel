@@ -43,8 +43,8 @@ void egemv_(
     size_t trans_len)
 {
     (void)trans_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
@@ -54,18 +54,18 @@ void egemv_(
     const T zero = 0.0L, one = 1.0L;
 
     /* Output length: M for TRANS='N', N for TRANS='T'. */
-    const int leny = (TR == 'N') ? M : N;
+    const ptrdiff_t leny = (TR == 'N') ? M : N;
 
     /* Beta-scale y (or zero) first — independent of A·x update. */
     if (beta != one) {
         if (incy == 1) {
-            if (beta == zero) for (int i = 0; i < leny; ++i) y[i] = zero;
-            else              for (int i = 0; i < leny; ++i) y[i] *= beta;
+            if (beta == zero) for (ptrdiff_t i = 0; i < leny; ++i) y[i] = zero;
+            else              for (ptrdiff_t i = 0; i < leny; ++i) y[i] *= beta;
         } else {
             size_t iy0 = (incy < 0) ? (size_t)(-(leny - 1)) * (size_t)incy : 0;
             (void)iy0;
-            int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-            for (int i = 0; i < leny; ++i) {
+            ptrdiff_t iy = (incy < 0) ? -(leny - 1) * incy : 0;
+            for (ptrdiff_t i = 0; i < leny; ++i) {
                 if (beta == zero) y[iy] = zero;
                 else              y[iy] *= beta;
                 iy += incy;
@@ -93,8 +93,8 @@ void egemv_(
              * etrsv_blocked's parallel region, where omp_in_parallel
              * forces use_omp=false and we pay the tax N/NB times. */
 #define EGEMV_N_BODY(i_lo, i_hi) do {                                       \
-                const int span = (i_hi) - (i_lo);                           \
-                int j = 0;                                                  \
+                const ptrdiff_t span = (i_hi) - (i_lo);                           \
+                ptrdiff_t j = 0;                                                  \
                 for (; j + 1 < N; j += 2) {                                 \
                     const T t0 = alpha * x[j];                              \
                     const T t1 = alpha * x[j + 1];                          \
@@ -112,23 +112,23 @@ void egemv_(
                 for (; j < N; ++j) {                                        \
                     const T t = alpha * x[j];                               \
                     const T *aj = &A_(0, j);                                \
-                    for (int i = (i_lo); i < (i_hi); ++i) y[i] += t * aj[i];\
+                    for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) y[i] += t * aj[i];\
                 }                                                           \
             } while (0)
 #ifdef _OPENMP
-            const int use_omp = (M >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
+            const ptrdiff_t use_omp = (M >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
                                  && !omp_in_parallel());
 #else
-            const int use_omp = 0;
+            const ptrdiff_t use_omp = 0;
 #endif
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel
                 {
-                    const int tid = omp_get_thread_num();
-                    const int nt  = omp_get_num_threads();
-                    const int i_lo = ((long long)M * tid) / nt;
-                    const int i_hi = ((long long)M * (tid + 1)) / nt;
+                    const ptrdiff_t tid = omp_get_thread_num();
+                    const ptrdiff_t nt  = omp_get_num_threads();
+                    const ptrdiff_t i_lo = ((long long)M * tid) / nt;
+                    const ptrdiff_t i_hi = ((long long)M * (tid + 1)) / nt;
                     EGEMV_N_BODY(i_lo, i_hi);
                 }
 #endif
@@ -143,14 +143,14 @@ void egemv_(
              * inner at .380). Without the unroll this branch sits at
              * 0.65x of migrated; with it, parity. No OMP wrap — at
              * OMP=1 the outline overhead loses what the unroll wins. */
-            int jx = (incx < 0) ? -(N - 1) * incx : 0;
-            int j = 0;
+            ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;
+            ptrdiff_t j = 0;
             for (; j + 1 < N; j += 2) {
                 const T t0 = alpha * x[jx];
                 const T t1 = alpha * x[jx + incx];
                 const T *a0 = &A_(0, j);
                 const T *a1 = &A_(0, j + 1);
-                for (int i = 0; i < M; ++i) {
+                for (ptrdiff_t i = 0; i < M; ++i) {
                     y[i] = (y[i] + t0 * a0[i]) + t1 * a1[i];
                 }
                 jx += 2 * incx;
@@ -158,7 +158,7 @@ void egemv_(
             for (; j < N; ++j) {
                 const T t = alpha * x[jx];
                 const T *aj = &A_(0, j);
-                for (int i = 0; i < M; ++i) y[i] += t * aj[i];
+                for (ptrdiff_t i = 0; i < M; ++i) y[i] += t * aj[i];
                 jx += incx;
             }
         } else {
@@ -167,16 +167,16 @@ void egemv_(
              * .380 inner is 8 insns: 2 fmul + 2 fadd + 1 y load+store
              * + 1 y stride advance per pair of columns). Halves y
              * memory traffic, which is the dominant cost. */
-            int jx = (incx < 0) ? -(N - 1) * incx : 0;
-            const int iy0 = (incy < 0) ? -(M - 1) * incy : 0;
-            int j = 0;
+            ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;
+            const ptrdiff_t iy0 = (incy < 0) ? -(M - 1) * incy : 0;
+            ptrdiff_t j = 0;
             for (; j + 1 < N; j += 2) {
                 const T t0 = alpha * x[jx];
                 const T t1 = alpha * x[jx + incx];
                 const T *a0 = &A_(0, j);
                 const T *a1 = &A_(0, j + 1);
-                int iy = iy0;
-                for (int i = 0; i < M; ++i) {
+                ptrdiff_t iy = iy0;
+                for (ptrdiff_t i = 0; i < M; ++i) {
                     y[iy] = (y[iy] + t0 * a0[i]) + t1 * a1[i];
                     iy += incy;
                 }
@@ -186,8 +186,8 @@ void egemv_(
                 const T xj = x[jx];
                 if (xj != zero) {
                     const T t = alpha * xj;
-                    int iy = iy0;
-                    for (int i = 0; i < M; ++i) {
+                    ptrdiff_t iy = iy0;
+                    for (ptrdiff_t i = 0; i < M; ++i) {
                         y[iy] += t * A_(i, j);
                         iy += incy;
                     }
@@ -201,10 +201,10 @@ void egemv_(
              * (Addendum 16). Body is a macro to share between the
              * parallel and serial paths. */
 #define EGEMV_T_BODY do {                                                   \
-                for (int j = 0; j < N; ++j) {                               \
+                for (ptrdiff_t j = 0; j < N; ++j) {                               \
                     const T *aj = &A_(0, j);                                \
                     T s0 = zero, s1 = zero;                                 \
-                    int i = 0;                                              \
+                    ptrdiff_t i = 0;                                              \
                     for (; i + 1 < M; i += 2) {                             \
                         s0 += aj[i]     * x[i];                             \
                         s1 += aj[i + 1] * x[i + 1];                         \
@@ -215,18 +215,18 @@ void egemv_(
                 }                                                           \
             } while (0)
 #ifdef _OPENMP
-            const int use_omp = (N >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
+            const ptrdiff_t use_omp = (N >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
                                  && !omp_in_parallel());
 #else
-            const int use_omp = 0;
+            const ptrdiff_t use_omp = 0;
 #endif
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel for schedule(static)
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     const T *aj = &A_(0, j);
                     T s0 = zero, s1 = zero;
-                    int i = 0;
+                    ptrdiff_t i = 0;
                     for (; i + 1 < M; i += 2) {
                         s0 += aj[i]     * x[i];
                         s1 += aj[i + 1] * x[i + 1];
@@ -241,11 +241,11 @@ void egemv_(
             }
 #undef EGEMV_T_BODY
         } else {
-            int jy = (incy < 0) ? -(N - 1) * incy : 0;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jy = (incy < 0) ? -(N - 1) * incy : 0;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 T s = zero;
-                int ix = (incx < 0) ? -(M - 1) * incx : 0;
-                for (int i = 0; i < M; ++i) {
+                ptrdiff_t ix = (incx < 0) ? -(M - 1) * incx : 0;
+                for (ptrdiff_t i = 0; i < M; ++i) {
                     s += A_(i, j) * x[ix];
                     ix += incx;
                 }

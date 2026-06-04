@@ -14,27 +14,28 @@
 #include "ysyr2k_kernel.h"
 #include <stdlib.h>
 #include <ctype.h>
+#include <stddef.h>
 
 typedef ysyr2k_T T;
 
-static int g_ysyr2k_nb = 0;
-int ysyr2k_nb(void) {
+static ptrdiff_t g_ysyr2k_nb = 0;
+ptrdiff_t ysyr2k_nb(void) {
     if (g_ysyr2k_nb == 0) {
         g_ysyr2k_nb = 32;
         const char *s = getenv("YSYR2K_NB");
-        if (s && *s) { int v = atoi(s); if (v > 0) g_ysyr2k_nb = v; }
+        if (s && *s) { ptrdiff_t v = atoi(s); if (v > 0) g_ysyr2k_nb = v; }
     }
     return g_ysyr2k_nb;
 }
 
 extern void ygemm_serial(
     const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
+    const ptrdiff_t *m, const ptrdiff_t *n, const ptrdiff_t *k,
     const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
+    const T *a, const ptrdiff_t *lda,
+    const T *b, const ptrdiff_t *ldb,
     const T *beta,
-    T *c, const int *ldc,
+    T *c, const ptrdiff_t *ldc,
     size_t transa_len, size_t transb_len);
 
 static const T ZERO = 0.0L + 0.0Li;
@@ -47,52 +48,52 @@ static const T ONE  = 1.0L + 0.0Li;
 /* TRANS='T' diagonal-block update (dot form: each C element accumulates in
  * a register over the K axis). Only the Trans path uses this; the NoTrans
  * path runs a flat per-column rank-1 sweep inline in ysyr2k_block. */
-static void syr2k_diag_add_t(int jc, int jb, int K, T alpha,
-                             const T *restrict a, int lda,
-                             const T *restrict b, int ldb,
-                             T *restrict c, int ldc, char UPLO)
+static void syr2k_diag_add_t(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, T alpha,
+                             const T *restrict a, ptrdiff_t lda,
+                             const T *restrict b, ptrdiff_t ldb,
+                             T *restrict c, ptrdiff_t ldc, char UPLO)
 {
-    for (int j = jc; j < jc + jb; ++j) {
-        const int i_lo = (UPLO == 'L') ? j     : jc;
-        const int i_hi = (UPLO == 'L') ? jc+jb : j + 1;
+    for (ptrdiff_t j = jc; j < jc + jb; ++j) {
+        const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
         T *cj = c + (size_t)j * ldc;
         const T *Aj = a + (size_t)j * lda;
         const T *Bj = b + (size_t)j * ldb;
-        for (int i = i_lo; i < i_hi; ++i) {
+        for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
             const T *Ai = a + (size_t)i * lda;
             const T *Bi = b + (size_t)i * ldb;
             T s = ZERO;
-            for (int l = 0; l < K; ++l) s += Ai[l] * Bj[l] + Bi[l] * Aj[l];
+            for (ptrdiff_t l = 0; l < K; ++l) s += Ai[l] * Bj[l] + Bi[l] * Aj[l];
             cj[i] += alpha * s;
         }
     }
 }
 
-void ysyr2k_beta_scale(int j_start, int j_end, int N, T beta,
-                       T *c, int ldc, char UPLO)
+void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, T beta,
+                       T *c, ptrdiff_t ldc, char UPLO)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        const int i_lo = (UPLO == 'L') ? j : 0;
-        const int i_hi = (UPLO == 'L') ? N : j + 1;
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
         T *cj = c + (size_t)j * ldc;
-        if (beta == ZERO) for (int i = i_lo; i < i_hi; ++i) cj[i] = ZERO;
-        else              for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
+        if (beta == ZERO) for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = ZERO;
+        else              for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
     }
 }
 
-void ysyr2k_block(int jc, int jb, int N, int K, T alpha, T beta,
-                  const T *a, int lda, const T *b, int ldb,
-                  T *c, int ldc, char UPLO, char TR)
+void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha, T beta,
+                  const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
+                  T *c, ptrdiff_t ldc, char UPLO, char TR)
 {
     const char NN[1] = {'N'};
     const char TN[1] = {'T'};
 
-    for (int j = jc; j < jc + jb; ++j) {
-        const int i_lo = (UPLO == 'L') ? j : 0;
-        const int i_hi = (UPLO == 'L') ? N : j + 1;
+    for (ptrdiff_t j = jc; j < jc + jb; ++j) {
+        const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
         T *cj = c + (size_t)j * ldc;
-        if (beta == ZERO)      for (int i = i_lo; i < i_hi; ++i) cj[i]  = ZERO;
-        else if (beta != ONE)  for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
+        if (beta == ZERO)      for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i]  = ZERO;
+        else if (beta != ONE)  for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
     }
 
     /* TRANS='N': flat per-column rank-2k over each column's FULL stored
@@ -106,15 +107,15 @@ void ysyr2k_block(int jc, int jb, int N, int K, T alpha, T beta,
      * threading is unaffected. TRANS='T' keeps the dot diagonal + ygemm
      * trailing: its register-accumulated dot already beats the reference. */
     if (TR == 'N') {
-        for (int j = jc; j < jc + jb; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
+        for (ptrdiff_t j = jc; j < jc + jb; ++j) {
+            const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
+            const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
             T *cj = c + (size_t)j * ldc;
-            for (int l = 0; l < K; ++l) {
+            for (ptrdiff_t l = 0; l < K; ++l) {
                 const T t1 = alpha * A_(j, l);
                 const T t2 = alpha * B_(j, l);
                 const T *al = a + (size_t)l * lda, *bl = b + (size_t)l * ldb;
-                for (int i = i_lo; i < i_hi; ++i)
+                for (ptrdiff_t i = i_lo; i < i_hi; ++i)
                     cj[i] += bl[i] * t1 + al[i] * t2;
             }
         }
@@ -124,9 +125,9 @@ void ysyr2k_block(int jc, int jb, int N, int K, T alpha, T beta,
     syr2k_diag_add_t(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO);
 
     if (UPLO == 'L') {
-        const int trailing = N - jc - jb;
+        const ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
-            const int j0 = jc + jb;
+            const ptrdiff_t j0 = jc + jb;
             ygemm_serial(TN, NN, &trailing, &jb, &K, &alpha,
                          &A_(0, j0), &lda, &B_(0, jc), &ldb, &ONE,
                          &C_(j0, jc), &ldc, 1, 1);
@@ -148,17 +149,17 @@ void ysyr2k_block(int jc, int jb, int N, int K, T alpha, T beta,
 
 void ysyr2k_serial(
     const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, const ptrdiff_t *lda_,
+    const T *b, const ptrdiff_t *ldb_,
     const T *beta_,
-    T *c, const int *ldc_,
+    T *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len)
 {
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = (char)toupper((unsigned char)*uplo);
     char TR = (char)toupper((unsigned char)*trans);
@@ -172,9 +173,9 @@ void ysyr2k_serial(
         return;
     }
 
-    const int nb = ysyr2k_nb();
-    for (int jc = 0; jc < N; jc += nb) {
-        const int jb = (N - jc < nb) ? (N - jc) : nb;
+    const ptrdiff_t nb = ysyr2k_nb();
+    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
+        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
         ysyr2k_block(jc, jb, N, K, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
     }
 }

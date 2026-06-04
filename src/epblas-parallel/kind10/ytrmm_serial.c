@@ -20,29 +20,30 @@
 #include "ytrmm_kernel.h"
 #include <stdlib.h>
 #include <ctype.h>
+#include <stddef.h>
 
 typedef ytrmm_T T;
 
-static int env_int(const char *name, int dflt) {
+static ptrdiff_t env_int(const char *name, ptrdiff_t dflt) {
     const char *s = getenv(name);
     if (!s || !*s) return dflt;
-    int v = atoi(s);
+    ptrdiff_t v = atoi(s);
     return v > 0 ? v : dflt;
 }
-static int g_nb_trmm = 0;
-int ytrmm_nb(void) {
+static ptrdiff_t g_nb_trmm = 0;
+ptrdiff_t ytrmm_nb(void) {
     if (g_nb_trmm == 0) g_nb_trmm = env_int("YTRMM_NB", 32);
     return g_nb_trmm;
 }
 
 extern void ygemm_serial(
     const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
+    const ptrdiff_t *m, const ptrdiff_t *n, const ptrdiff_t *k,
     const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
+    const T *a, const ptrdiff_t *lda,
+    const T *b, const ptrdiff_t *ldb,
     const T *beta,
-    T *c, const int *ldc,
+    T *c, const ptrdiff_t *ldc,
     size_t transa_len, size_t transb_len);
 
 static inline char up(const char *p) {
@@ -57,20 +58,20 @@ static inline T cconj(T a) { return ~a; }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
-static inline T A_op(const T *a, int lda, int row, int col, int conj_flag) {
+static inline T A_op(const T *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, ptrdiff_t conj_flag) {
     return conj_flag ? cconj(A_(row, col)) : A_(row, col);
 }
 
 /* ── Scalar column-range cores (SIDE='L') ───────────────────────── */
 
-void ytrmm_lln_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void ytrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int k = M - 1; k >= 0; --k) {
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (ptrdiff_t k = M - 1; k >= 0; --k) {
             if (B_(k, j) != ZERO) {
                 T temp = alpha * B_(k, j);
-                for (int i = M - 1; i > k; --i)
+                for (ptrdiff_t i = M - 1; i > k; --i)
                     B_(i, j) += temp * A_(i, k);
                 if (nounit) temp *= A_(k, k);
                 B_(k, j) = temp;
@@ -79,14 +80,14 @@ void ytrmm_lln_core(int j_start, int j_end, int M, T alpha,
     }
 }
 
-void ytrmm_lun_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void ytrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int k = 0; k < M; ++k) {
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (ptrdiff_t k = 0; k < M; ++k) {
             if (B_(k, j) != ZERO) {
                 T temp = alpha * B_(k, j);
-                for (int i = 0; i < k; ++i)
+                for (ptrdiff_t i = 0; i < k; ++i)
                     B_(i, j) += temp * A_(i, k);
                 if (nounit) temp *= A_(k, k);
                 B_(k, j) = temp;
@@ -95,30 +96,30 @@ void ytrmm_lun_core(int j_start, int j_end, int M, T alpha,
     }
 }
 
-void ytrmm_llTC_core(int j_start, int j_end, int M, T alpha,
-                     const T *a, int lda, T *b, int ldb,
-                     int nounit, int conj_flag)
+void ytrmm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+                     ptrdiff_t nounit, ptrdiff_t conj_flag)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = 0; i < M; ++i) {
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (ptrdiff_t i = 0; i < M; ++i) {
             T t = B_(i, j);
             if (nounit) t *= A_op(a, lda, i, i, conj_flag);
-            for (int k = i + 1; k < M; ++k)
+            for (ptrdiff_t k = i + 1; k < M; ++k)
                 t += A_op(a, lda, k, i, conj_flag) * B_(k, j);
             B_(i, j) = alpha * t;
         }
     }
 }
 
-void ytrmm_luTC_core(int j_start, int j_end, int M, T alpha,
-                     const T *a, int lda, T *b, int ldb,
-                     int nounit, int conj_flag)
+void ytrmm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+                     ptrdiff_t nounit, ptrdiff_t conj_flag)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = M - 1; i >= 0; --i) {
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (ptrdiff_t i = M - 1; i >= 0; --i) {
             T t = B_(i, j);
             if (nounit) t *= A_op(a, lda, i, i, conj_flag);
-            for (int k = 0; k < i; ++k)
+            for (ptrdiff_t k = 0; k < i; ++k)
                 t += A_op(a, lda, k, i, conj_flag) * B_(k, j);
             B_(i, j) = alpha * t;
         }
@@ -127,89 +128,89 @@ void ytrmm_luTC_core(int j_start, int j_end, int M, T alpha,
 
 /* ── Scalar row-range cores (SIDE='R') ──────────────────────────── */
 
-void ytrmm_rln_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void ytrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
 {
-    for (int j = 0; j < N; ++j) {
+    for (ptrdiff_t j = 0; j < N; ++j) {
         T t = alpha;
         if (nounit) t *= A_(j, j);
         if (t != ONE)
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= t;
-        for (int k = j + 1; k < N; ++k) {
+            for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= t;
+        for (ptrdiff_t k = j + 1; k < N; ++k) {
             if (A_(k, j) != ZERO) {
                 const T akj = alpha * A_(k, j);
-                for (int i = i_start; i < i_end; ++i)
+                for (ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) += akj * B_(i, k);
             }
         }
     }
 }
 
-void ytrmm_run_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void ytrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
 {
-    for (int j = N - 1; j >= 0; --j) {
+    for (ptrdiff_t j = N - 1; j >= 0; --j) {
         T t = alpha;
         if (nounit) t *= A_(j, j);
         if (t != ONE)
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= t;
-        for (int k = 0; k < j; ++k) {
+            for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= t;
+        for (ptrdiff_t k = 0; k < j; ++k) {
             if (A_(k, j) != ZERO) {
                 const T akj = alpha * A_(k, j);
-                for (int i = i_start; i < i_end; ++i)
+                for (ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) += akj * B_(i, k);
             }
         }
     }
 }
 
-void ytrmm_rlTC_core(int i_start, int i_end, int N, T alpha,
-                     const T *a, int lda, T *b, int ldb,
-                     int nounit, int conj_flag)
+void ytrmm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+                     ptrdiff_t nounit, ptrdiff_t conj_flag)
 {
-    for (int k = N - 1; k >= 0; --k) {
-        for (int j = k + 1; j < N; ++j) {
+    for (ptrdiff_t k = N - 1; k >= 0; --k) {
+        for (ptrdiff_t j = k + 1; j < N; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
             if (ajk != ZERO) {
                 const T scaled = alpha * ajk;
-                for (int i = i_start; i < i_end; ++i)
+                for (ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) += scaled * B_(i, k);
             }
         }
         T t = alpha;
         if (nounit) t *= A_op(a, lda, k, k, conj_flag);
         if (t != ONE)
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= t;
+            for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= t;
     }
 }
 
-void ytrmm_ruTC_core(int i_start, int i_end, int N, T alpha,
-                     const T *a, int lda, T *b, int ldb,
-                     int nounit, int conj_flag)
+void ytrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+                     ptrdiff_t nounit, ptrdiff_t conj_flag)
 {
-    for (int k = 0; k < N; ++k) {
-        for (int j = 0; j < k; ++j) {
+    for (ptrdiff_t k = 0; k < N; ++k) {
+        for (ptrdiff_t j = 0; j < k; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
             if (ajk != ZERO) {
                 const T scaled = alpha * ajk;
-                for (int i = i_start; i < i_end; ++i)
+                for (ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) += scaled * B_(i, k);
             }
         }
         T t = alpha;
         if (nounit) t *= A_op(a, lda, k, k, conj_flag);
         if (t != ONE)
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= t;
+            for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= t;
     }
 }
 
 /* ── Blocked SIDE='L' worker ────────────────────────────────────── */
 
-void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, int j_start, int j_end,
-                           int M, int nb, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t j_end,
+                           ptrdiff_t M, ptrdiff_t nb, T alpha,
+                           const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
 {
-    const int my_N = j_end - j_start;
+    const ptrdiff_t my_N = j_end - j_start;
     if (my_N <= 0) return;
 
     const char NN[1] = {'N'};
@@ -218,9 +219,9 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, int j_start, int j_end,
     T *B_chunk = &B_(0, j_start);
 
     if (V == YLLN) {
-        int ic = ((M - 1) / nb) * nb;
+        ptrdiff_t ic = ((M - 1) / nb) * nb;
         while (ic >= 0) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+            const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             ytrmm_lln_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
@@ -232,13 +233,13 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, int j_start, int j_end,
             ic -= nb;
         }
     } else if (V == YLUN) {
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+        for (ptrdiff_t ic = 0; ic < M; ic += nb) {
+            const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             ytrmm_lun_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            const int trailing = M - (ic + ib);
+            const ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
-                const int j0 = ic + ib;
+                const ptrdiff_t j0 = ic + ib;
                 ygemm_serial(NN, NN, &ib, &my_N, &trailing, &alpha,
                              &A_(ic, j0), &lda,
                              &B_chunk[j0], &ldb, &ONE,
@@ -246,15 +247,15 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, int j_start, int j_end,
             }
         }
     } else if (V == YLLT || V == YLLC) {
-        const int conj_flag = (V == YLLC) ? 1 : 0;
+        const ptrdiff_t conj_flag = (V == YLLC) ? 1 : 0;
         const char *gemm_trans = conj_flag ? CN : TN;
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+        for (ptrdiff_t ic = 0; ic < M; ic += nb) {
+            const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             ytrmm_llTC_core(j_start, j_end, ib, alpha,
                             &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, conj_flag);
-            const int trailing = M - (ic + ib);
+            const ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
-                const int i0 = ic + ib;
+                const ptrdiff_t i0 = ic + ib;
                 ygemm_serial(gemm_trans, NN, &ib, &my_N, &trailing, &alpha,
                              &A_(i0, ic), &lda,
                              &B_chunk[i0], &ldb, &ONE,
@@ -262,11 +263,11 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, int j_start, int j_end,
             }
         }
     } else { /* YLUT or YLUC */
-        const int conj_flag = (V == YLUC) ? 1 : 0;
+        const ptrdiff_t conj_flag = (V == YLUC) ? 1 : 0;
         const char *gemm_trans = conj_flag ? CN : TN;
-        int ic = ((M - 1) / nb) * nb;
+        ptrdiff_t ic = ((M - 1) / nb) * nb;
         while (ic >= 0) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+            const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             ytrmm_luTC_core(j_start, j_end, ib, alpha,
                             &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, conj_flag);
             if (ic > 0) {
@@ -282,25 +283,25 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, int j_start, int j_end,
 
 /* ── Blocked SIDE='R' worker ────────────────────────────────────── */
 
-void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, int i_start, int i_end,
-                           int N, int nb, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t i_end,
+                           ptrdiff_t N, ptrdiff_t nb, T alpha,
+                           const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
 {
     const char NN[1] = {'N'};
     const char TN[1] = {'T'};
     const char CN[1] = {'C'};
-    const int my_M = i_end - i_start;
+    const ptrdiff_t my_M = i_end - i_start;
     if (my_M <= 0) return;
     T *B_chunk = &B_(i_start, 0);
 
     if (V == YRLN) {
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+        for (ptrdiff_t jc = 0; jc < N; jc += nb) {
+            const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
             ytrmm_rln_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-            const int trailing = N - (jc + jb);
+            const ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
-                const int k0 = jc + jb;
+                const ptrdiff_t k0 = jc + jb;
                 ygemm_serial(NN, NN, &my_M, &jb, &trailing, &alpha,
                              &B_chunk[(size_t)k0 * ldb], &ldb,
                              &A_(k0, jc), &lda, &ONE,
@@ -308,9 +309,9 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, int i_start, int i_end,
             }
         }
     } else if (V == YRUN) {
-        int jc = ((N - 1) / nb) * nb;
+        ptrdiff_t jc = ((N - 1) / nb) * nb;
         while (jc >= 0) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+            const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
             ytrmm_run_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
             if (jc > 0) {
@@ -322,11 +323,11 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, int i_start, int i_end,
             jc -= nb;
         }
     } else if (V == YRLT || V == YRLC) {
-        const int conj_flag = (V == YRLC) ? 1 : 0;
+        const ptrdiff_t conj_flag = (V == YRLC) ? 1 : 0;
         const char *gemm_trans = conj_flag ? CN : TN;
-        int jc = ((N - 1) / nb) * nb;
+        ptrdiff_t jc = ((N - 1) / nb) * nb;
         while (jc >= 0) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+            const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
             ytrmm_rlTC_core(i_start, i_end, jb, alpha,
                             &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj_flag);
             if (jc > 0) {
@@ -338,15 +339,15 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, int i_start, int i_end,
             jc -= nb;
         }
     } else { /* YRUT or YRUC */
-        const int conj_flag = (V == YRUC) ? 1 : 0;
+        const ptrdiff_t conj_flag = (V == YRUC) ? 1 : 0;
         const char *gemm_trans = conj_flag ? CN : TN;
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+        for (ptrdiff_t jc = 0; jc < N; jc += nb) {
+            const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
             ytrmm_ruTC_core(i_start, i_end, jb, alpha,
                             &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj_flag);
-            const int trailing = N - (jc + jb);
+            const ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
-                const int k0 = jc + jb;
+                const ptrdiff_t k0 = jc + jb;
                 ygemm_serial(NN, gemm_trans, &my_M, &jb, &trailing, &alpha,
                              &B_chunk[(size_t)k0 * ldb], &ldb,
                              &A_(jc, k0), &lda, &ONE,
@@ -360,33 +361,33 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, int i_start, int i_end,
 
 void ytrmm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
+    const T *a, const ptrdiff_t *lda_,
+    T *b, const ptrdiff_t *ldb_,
     size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
 {
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     const char SIDE = up(side);
     const char UPLO = up(uplo);
     const char TR = up(transa);
-    const int nounit = (up(diag) != 'U');
+    const ptrdiff_t nounit = (up(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
     if (alpha == ZERO) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = ZERO;
+        for (ptrdiff_t j = 0; j < N; ++j)
+            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = ZERO;
         return;
     }
 
-    const int nb = ytrmm_nb();
+    const ptrdiff_t nb = ytrmm_nb();
 
     if (SIDE == 'L') {
-        const int use_blocked = (M >= 2 * nb);
+        const ptrdiff_t use_blocked = (M >= 2 * nb);
         enum ytrmm_variant_L V;
         if (TR == 'N')      V = (UPLO == 'L') ? YLLN : YLUN;
         else if (TR == 'T') V = (UPLO == 'L') ? YLLT : YLUT;
@@ -404,7 +405,7 @@ void ytrmm_serial(
             }
         }
     } else {
-        const int use_blocked = (N >= 2 * nb);
+        const ptrdiff_t use_blocked = (N >= 2 * nb);
         enum ytrmm_variant_R V;
         if (TR == 'N')      V = (UPLO == 'L') ? YRLN : YRUN;
         else if (TR == 'T') V = (UPLO == 'L') ? YRLT : YRUT;

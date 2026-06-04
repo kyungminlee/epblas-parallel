@@ -67,7 +67,7 @@ static inline char up(const char *p) {
 #define ESBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
-static int esbmv_omp(int upper, ptrdiff_t n, ptrdiff_t k,
+static ptrdiff_t esbmv_omp(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
                      const T *restrict a, ptrdiff_t lda,
                      const T *restrict x, ptrdiff_t incx,
                      T alpha, T *restrict y, ptrdiff_t incy);
@@ -84,8 +84,8 @@ void esbmv_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L, one = 1.0L;
     const char UPLO = up(uplo);
@@ -93,11 +93,11 @@ void esbmv_(
     if (N == 0 || (alpha == zero && beta == one)) return;
 
     if (beta != one) {
-        int iy = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
         if (beta == zero) {
-            for (int i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
+            for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
         } else {
-            for (int i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+            for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
         }
     }
     if (alpha == zero) return;
@@ -118,23 +118,23 @@ void esbmv_(
     const ptrdiff_t s1 = lda - 1;
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T *base = &A_(0, i);
                 T s = base[K] * x[i];
-                const int rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
-                for (int d = 1; d <= rlen; ++d) s += base[K + (ptrdiff_t)d * s1] * x[i + d];
-                const int llen = (i < K) ? i : K;
-                for (int d = 1; d <= llen; ++d) s += base[K - d] * x[i - d];
+                const ptrdiff_t rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
+                for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[K + (ptrdiff_t)d * s1] * x[i + d];
+                const ptrdiff_t llen = (i < K) ? i : K;
+                for (ptrdiff_t d = 1; d <= llen; ++d) s += base[K - d] * x[i - d];
                 y[i] += alpha * s;
             }
         } else {
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T *base = &A_(0, i);
                 T s = base[0] * x[i];
-                const int llen = (i < K) ? i : K;
-                for (int d = 1; d <= llen; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
-                const int rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
-                for (int d = 1; d <= rlen; ++d) s += base[d] * x[i + d];
+                const ptrdiff_t llen = (i < K) ? i : K;
+                for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
+                const ptrdiff_t rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
+                for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[d] * x[i + d];
                 y[i] += alpha * s;
             }
         }
@@ -142,29 +142,29 @@ void esbmv_(
         const ptrdiff_t ix0 = (incx < 0) ? -(ptrdiff_t)(N - 1) * incx : 0;
         const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(N - 1) * incy : 0;
         if (UPLO == 'U') {
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T *base = &A_(0, i);
                 const ptrdiff_t xi = ix0 + (ptrdiff_t)i * incx;
                 T s = base[K] * x[xi];
-                const int rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
+                const ptrdiff_t rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
                 ptrdiff_t xx = xi + incx;
-                for (int d = 1; d <= rlen; ++d) { s += base[K + (ptrdiff_t)d * s1] * x[xx]; xx += incx; }
-                const int llen = (i < K) ? i : K;
+                for (ptrdiff_t d = 1; d <= rlen; ++d) { s += base[K + (ptrdiff_t)d * s1] * x[xx]; xx += incx; }
+                const ptrdiff_t llen = (i < K) ? i : K;
                 xx = xi - incx;
-                for (int d = 1; d <= llen; ++d) { s += base[K - d] * x[xx]; xx -= incx; }
+                for (ptrdiff_t d = 1; d <= llen; ++d) { s += base[K - d] * x[xx]; xx -= incx; }
                 y[iy0 + (ptrdiff_t)i * incy] += alpha * s;
             }
         } else {
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T *base = &A_(0, i);
                 const ptrdiff_t xi = ix0 + (ptrdiff_t)i * incx;
                 T s = base[0] * x[xi];
-                const int llen = (i < K) ? i : K;
+                const ptrdiff_t llen = (i < K) ? i : K;
                 ptrdiff_t xx = xi - incx;
-                for (int d = 1; d <= llen; ++d) { s += base[-(ptrdiff_t)d * s1] * x[xx]; xx -= incx; }
-                const int rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
+                for (ptrdiff_t d = 1; d <= llen; ++d) { s += base[-(ptrdiff_t)d * s1] * x[xx]; xx -= incx; }
+                const ptrdiff_t rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
                 xx = xi + incx;
-                for (int d = 1; d <= rlen; ++d) { s += base[d] * x[xx]; xx += incx; }
+                for (ptrdiff_t d = 1; d <= rlen; ++d) { s += base[d] * x[xx]; xx += incx; }
                 y[iy0 + (ptrdiff_t)i * incy] += alpha * s;
             }
         }
@@ -179,7 +179,7 @@ void esbmv_(
  * no zero-fill, no reduction, no barrier (x and y distinct). Branch hoisted out
  * of the i-loop; lda-1 anti-diagonal stride for same-triangle neighbours,
  * contiguous for the reflected ones. */
-static void sbmv_rowgather(int upper, ptrdiff_t n, ptrdiff_t k,
+static void sbmv_rowgather(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
                            ptrdiff_t lo, ptrdiff_t hi,
                            const T *restrict a, ptrdiff_t lda,
                            const T *restrict x, T alpha,
@@ -214,15 +214,15 @@ static void sbmv_rowgather(int upper, ptrdiff_t n, ptrdiff_t k,
  * y distinct) -- no barrier, no scratch beyond the strided-x gather buffer.
  * Returns 1 if handled, 0 to fall back. Carved out (noinline) so its bookkeeping
  * does not pressure the serial gather's x87 allocation. */
-__attribute__((noinline)) static int esbmv_omp(
-    int upper, ptrdiff_t n, ptrdiff_t k,
+__attribute__((noinline)) static ptrdiff_t esbmv_omp(
+    ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
     if (n < ESBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > ESBMV_MAX_CPUS) nthreads = ESBMV_MAX_CPUS;
 
     /* Negative-increment base adjustment so x[i*incx], y[i*incy] walk logically. */
@@ -242,7 +242,7 @@ __attribute__((noinline)) static int esbmv_omp(
 
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
+        ptrdiff_t tid = omp_get_thread_num();
         ptrdiff_t lo = (n * (ptrdiff_t)tid) / nthreads;
         ptrdiff_t hi = (n * (ptrdiff_t)(tid + 1)) / nthreads;
         sbmv_rowgather(upper, n, k, lo, hi, a, lda, xptr, alpha, y, incy);

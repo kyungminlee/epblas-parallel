@@ -46,11 +46,11 @@ static inline char up(const char *p) {
 
 #define YTRSV_BLOCKED_NB_DEFAULT 64
 
-static int ytrsv_blocked_nb(void) {
-    static int cached = 0;
+static ptrdiff_t ytrsv_blocked_nb(void) {
+    static ptrdiff_t cached = 0;
     if (cached == 0) {
         const char *s = getenv("YTRSV_NB");
-        int v = (s && *s) ? atoi(s) : 0;
+        ptrdiff_t v = (s && *s) ? atoi(s) : 0;
         cached = (v > 0) ? v : YTRSV_BLOCKED_NB_DEFAULT;
     }
     return cached;
@@ -58,16 +58,16 @@ static int ytrsv_blocked_nb(void) {
 
 void ytrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
+    const ptrdiff_t *n_,
+    const T *restrict a, const ptrdiff_t *lda_,
+    T *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void ytrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
+    const ptrdiff_t *n_,
+    const T *restrict a, const ptrdiff_t *lda_,
+    T *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void ytrsv_(
@@ -77,41 +77,43 @@ void ytrsv_(
     T *restrict x, const int *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
-    const int N = *n_;
-    const int incx = *incx_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_;
 
     if (N == 0) return;
 
 #ifdef _OPENMP
-    const int in_par = omp_in_parallel();
+    const ptrdiff_t in_par = omp_in_parallel();
 #else
-    const int in_par = 0;
+    const ptrdiff_t in_par = 0;
 #endif
     if (incx == 1 && N >= 2 * ytrsv_blocked_nb() && !in_par
         && blas_omp_max_threads() > 1) {
-        ytrsv_blocked_(uplo, trans, diag, n_, a, lda_, x, incx_,
+        const ptrdiff_t n_pt = *n_, lda_pt = *lda_, incx_pt = *incx_;
+        ytrsv_blocked_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt,
                        uplo_len, trans_len, diag_len);
         return;
     }
 
-    ytrsv_serial_(uplo, trans, diag, n_, a, lda_, x, incx_,
+    const ptrdiff_t n_pt = *n_, lda_pt = *lda_, incx_pt = *incx_;
+    ytrsv_serial_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt,
                   uplo_len, trans_len, diag_len);
 }
 
 void ytrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
+    const ptrdiff_t *n_,
+    const T *restrict a, const ptrdiff_t *lda_,
+    T *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     const char TR   = up(trans);
     const char DIAG = up(diag);
-    const int nounit = (DIAG != 'U');
+    const ptrdiff_t nounit = (DIAG != 'U');
 
     if (N == 0) return;
 
@@ -124,7 +126,7 @@ void ytrsv_serial_(
                  * memory traffic on the complex AXPY inner. (Same trick as
                  * etrsv LN; doubles the saving here since complex x is
                  * 20 bytes vs 10 for real.) */
-                int i = 0;
+                ptrdiff_t i = 0;
                 for (; i + 1 < N; i += 2) {
                     if (nounit) x[i] /= A_(i, i);
                     const T xi = x[i];
@@ -133,7 +135,7 @@ void ytrsv_serial_(
                     const T xi1 = x[i + 1];
                     const T *a0 = &A_(0, i);
                     const T *a1 = &A_(0, i + 1);
-                    for (int k = i + 2; k < N; ++k) {
+                    for (ptrdiff_t k = i + 2; k < N; ++k) {
                         x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
                     }
                 }
@@ -141,11 +143,11 @@ void ytrsv_serial_(
                     if (nounit) x[i] /= A_(i, i);
                     const T xi = x[i];
                     const T *ai = &A_(0, i);
-                    for (int k = i + 1; k < N; ++k) x[k] -= xi * ai[k];
+                    for (ptrdiff_t k = i + 1; k < N; ++k) x[k] -= xi * ai[k];
                 }
             } else {
                 /* UPLO='U': back-subst with J-unroll-by-2 pair (i, i-1). */
-                int i = N - 1;
+                ptrdiff_t i = N - 1;
                 for (; i - 1 >= 0; i -= 2) {
                     if (nounit) x[i] /= A_(i, i);
                     const T xi = x[i];
@@ -154,7 +156,7 @@ void ytrsv_serial_(
                     const T xi1 = x[i - 1];
                     const T *a0 = &A_(0, i);
                     const T *a1 = &A_(0, i - 1);
-                    for (int k = 0; k < i - 1; ++k) {
+                    for (ptrdiff_t k = 0; k < i - 1; ++k) {
                         x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
                     }
                 }
@@ -162,24 +164,24 @@ void ytrsv_serial_(
                     if (nounit) x[i] /= A_(i, i);
                     const T xi = x[i];
                     const T *ai = &A_(0, i);
-                    for (int k = 0; k < i; ++k) x[k] -= xi * ai[k];
+                    for (ptrdiff_t k = 0; k < i; ++k) x[k] -= xi * ai[k];
                 }
             }
         } else {
-            const int conj_a = (TR == 'C');
+            const ptrdiff_t conj_a = (TR == 'C');
             if (UPLO == 'L') {
                 /* Inner walk backward to match the outer's descent — under
                  * memory pressure the forward variant collapses to ~0.3×
                  * because x falls out of L1 between outer iters. See
                  * etrsv LTN / Addendum 18. */
-                for (int i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = N - 1; i >= 0; --i) {
                     T t = x[i];
                     const T *ai = &A_(0, i);
                     if (conj_a) {
-                        for (int k = N - 1; k > i; --k) t -= cconj(ai[k]) * x[k];
+                        for (ptrdiff_t k = N - 1; k > i; --k) t -= cconj(ai[k]) * x[k];
                         if (nounit) t /= cconj(ai[i]);
                     } else {
-                        for (int k = N - 1; k > i; --k) t -= ai[k] * x[k];
+                        for (ptrdiff_t k = N - 1; k > i; --k) t -= ai[k] * x[k];
                         if (nounit) t /= ai[i];
                     }
                     x[i] = t;
@@ -197,18 +199,18 @@ void ytrsv_serial_(
                  * disrupts gcc's scheduling and U-C regresses from ~1.00×
                  * to ~0.91× when unrolled. Keep it single-accumulator. */
                 if (conj_a) {
-                    for (int i = 0; i < N; ++i) {
+                    for (ptrdiff_t i = 0; i < N; ++i) {
                         T t = x[i];
                         const T *ai = &A_(0, i);
-                        for (int k = 0; k < i; ++k) t -= cconj(ai[k]) * x[k];
+                        for (ptrdiff_t k = 0; k < i; ++k) t -= cconj(ai[k]) * x[k];
                         if (nounit) t /= cconj(ai[i]);
                         x[i] = t;
                     }
                 } else {
-                    for (int i = 0; i < N; ++i) {
+                    for (ptrdiff_t i = 0; i < N; ++i) {
                         T t0 = x[i], t1 = ZERO;
                         const T *ai = &A_(0, i);
-                        int k = 0;
+                        ptrdiff_t k = 0;
                         for (; k + 1 < i; k += 2) {
                             t0 -= ai[k]     * x[k];
                             t1 -= ai[k + 1] * x[k + 1];
@@ -222,51 +224,76 @@ void ytrsv_serial_(
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        /* General-stride fallback — hoist matrix column to ai[k] and
+         * walk the strided vector with a running index (Class-B fix,
+         * memory project_ptrdiff_conversion_regressors). */
+        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (int i = 0; i < N; ++i) {
-                    const int ix = kx + i * incx;
+                ptrdiff_t ix = kx;
+                for (ptrdiff_t i = 0; i < N; ++i) {
+                    const T *ai = &A_(0, i);
                     if (x[ix] != ZERO) {
-                        if (nounit) x[ix] /= A_(i, i);
+                        if (nounit) x[ix] /= ai[i];
                         const T xi = x[ix];
-                        for (int k = i + 1; k < N; ++k) x[kx + k * incx] -= xi * A_(k, i);
+                        ptrdiff_t kk = ix + incx;
+                        for (ptrdiff_t k = i + 1; k < N; ++k) {
+                            x[kk] -= xi * ai[k];
+                            kk += incx;
+                        }
                     }
+                    ix += incx;
                 }
             } else {
-                for (int i = N - 1; i >= 0; --i) {
-                    const int ix = kx + i * incx;
+                ptrdiff_t ix = kx + (N - 1) * incx;
+                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                    const T *ai = &A_(0, i);
                     if (x[ix] != ZERO) {
-                        if (nounit) x[ix] /= A_(i, i);
+                        if (nounit) x[ix] /= ai[i];
                         const T xi = x[ix];
-                        for (int k = 0; k < i; ++k) x[kx + k * incx] -= xi * A_(k, i);
+                        ptrdiff_t kk = kx;
+                        for (ptrdiff_t k = 0; k < i; ++k) {
+                            x[kk] -= xi * ai[k];
+                            kk += incx;
+                        }
                     }
+                    ix -= incx;
                 }
             }
         } else {
-            const int conj_a = (TR == 'C');
+            const ptrdiff_t conj_a = (TR == 'C');
             if (UPLO == 'L') {
                 /* Inner walks backward to match Fortran reference; same
                  * cache-direction reasoning as the incx=1 LT/LC path
                  * (Addendum 18 / Rule 21). */
-                for (int i = N - 1; i >= 0; --i) {
-                    T t = x[kx + i * incx];
-                    for (int k = N - 1; k > i; --k) {
-                        const T aki = conj_a ? cconj(A_(k, i)) : A_(k, i);
-                        t -= aki * x[kx + k * incx];
+                ptrdiff_t ix = kx + (N - 1) * incx;
+                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                    const T *ai = &A_(0, i);
+                    T t = x[ix];
+                    ptrdiff_t xk = kx + (N - 1) * incx;
+                    for (ptrdiff_t k = N - 1; k > i; --k) {
+                        const T aki = conj_a ? cconj(ai[k]) : ai[k];
+                        t -= aki * x[xk];
+                        xk -= incx;
                     }
-                    if (nounit) t /= (conj_a ? cconj(A_(i, i)) : A_(i, i));
-                    x[kx + i * incx] = t;
+                    if (nounit) t /= (conj_a ? cconj(ai[i]) : ai[i]);
+                    x[ix] = t;
+                    ix -= incx;
                 }
             } else {
-                for (int i = 0; i < N; ++i) {
-                    T t = x[kx + i * incx];
-                    for (int k = 0; k < i; ++k) {
-                        const T aki = conj_a ? cconj(A_(k, i)) : A_(k, i);
-                        t -= aki * x[kx + k * incx];
+                ptrdiff_t ix = kx;
+                for (ptrdiff_t i = 0; i < N; ++i) {
+                    const T *ai = &A_(0, i);
+                    T t = x[ix];
+                    ptrdiff_t xk = kx;
+                    for (ptrdiff_t k = 0; k < i; ++k) {
+                        const T aki = conj_a ? cconj(ai[k]) : ai[k];
+                        t -= aki * x[xk];
+                        xk += incx;
                     }
-                    if (nounit) t /= (conj_a ? cconj(A_(i, i)) : A_(i, i));
-                    x[kx + i * incx] = t;
+                    if (nounit) t /= (conj_a ? cconj(ai[i]) : ai[i]);
+                    x[ix] = t;
+                    ix += incx;
                 }
             }
         }
@@ -283,30 +310,31 @@ void ytrsv_serial_(
 
 extern void ygemv_(
     const char *trans,
-    const int *m, const int *n,
+    const ptrdiff_t *m, const ptrdiff_t *n,
     const T *alpha,
-    const T *a, const int *lda,
-    const T *x, const int *incx,
+    const T *a, const ptrdiff_t *lda,
+    const T *x, const ptrdiff_t *incx,
     const T *beta,
-    T *y, const int *incy,
+    T *y, const ptrdiff_t *incy,
     size_t trans_len);
 
 void ytrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
+    const ptrdiff_t *n_,
+    const T *restrict a, const ptrdiff_t *lda_,
+    T *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
-    const int nb = ytrsv_blocked_nb();
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t lda = *lda_, incx = *incx_;
+    const ptrdiff_t nb = ytrsv_blocked_nb();
     const char UPLO = up(uplo);
     const char TR = up(trans);
 
     if (N == 0) return;
     if (incx != 1 || N < 2 * nb) {
-        ytrsv_serial_(uplo, trans, diag, n_, a, lda_, x, incx_,
+        const ptrdiff_t n_pt = *n_, lda_pt = *lda_, incx_pt = *incx_;
+        ytrsv_serial_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt,
                       uplo_len, trans_len, diag_len);
         return;
     }
@@ -317,41 +345,42 @@ void ytrsv_blocked_(
     const char TT[1] = {'T'};
     const char CC[1] = {'C'};
     const char *gemv_tr = (TR == 'C') ? CC : TT;
-    const int one_i = 1;
+    const ptrdiff_t one_i = 1;
 
 #ifdef _OPENMP
-    const int use_omp = (blas_omp_max_threads() > 1 && !omp_in_parallel());
+    const ptrdiff_t use_omp = (blas_omp_max_threads() > 1 && !omp_in_parallel());
 #else
-    const int use_omp = 0;
+    const ptrdiff_t use_omp = 0;
 #endif
 
 #ifdef _OPENMP
     #pragma omp parallel if(use_omp)
 #endif
     {
-        int tid = 0, nt = 1;
+        ptrdiff_t tid = 0, nt = 1;
 #ifdef _OPENMP
         if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
 #endif
 
         if (TR == 'N' && UPLO == 'L') {
-            for (int j = 0; j < N; j += nb) {
-                int jb = (N - j < nb) ? (N - j) : nb;
+            for (ptrdiff_t j = 0; j < N; j += nb) {
+                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
                 if (tid == 0) {
-                    ytrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), lda_,
+                    const ptrdiff_t lda_pt = *lda_;
+                    ytrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
                                   &x[j], &one_i, uplo_len, trans_len, diag_len);
                 }
 #ifdef _OPENMP
                 if (use_omp) { _Pragma("omp barrier"); }
 #endif
-                int mt = N - j - jb;
+                ptrdiff_t mt = N - j - jb;
                 if (mt > 0) {
-                    int j2 = j + jb;
+                    ptrdiff_t j2 = j + jb;
                     long long lo = (long long)mt * tid / nt;
                     long long hi = (long long)mt * (tid + 1) / nt;
-                    int m_slice = (int)(hi - lo);
+                    ptrdiff_t m_slice = (ptrdiff_t)(hi - lo);
                     if (m_slice > 0) {
-                        const int i_off = j2 + (int)lo;
+                        const ptrdiff_t i_off = j2 + (ptrdiff_t)lo;
                         ygemv_(NN, &m_slice, &jb, &neg_one,
                                &A_(i_off, j), lda_,
                                &x[j], &one_i, &one_v,
@@ -363,11 +392,12 @@ void ytrsv_blocked_(
 #endif
             }
         } else if (TR == 'N' && UPLO == 'U') {
-            int j = ((N - 1) / nb) * nb;
+            ptrdiff_t j = ((N - 1) / nb) * nb;
             while (j >= 0) {
-                int jb = (N - j < nb) ? (N - j) : nb;
+                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
                 if (tid == 0) {
-                    ytrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), lda_,
+                    const ptrdiff_t lda_pt = *lda_;
+                    ytrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
                                   &x[j], &one_i, uplo_len, trans_len, diag_len);
                 }
 #ifdef _OPENMP
@@ -376,9 +406,9 @@ void ytrsv_blocked_(
                 if (j > 0) {
                     long long lo = (long long)j * tid / nt;
                     long long hi = (long long)j * (tid + 1) / nt;
-                    int m_slice = (int)(hi - lo);
+                    ptrdiff_t m_slice = (ptrdiff_t)(hi - lo);
                     if (m_slice > 0) {
-                        const int i_off = (int)lo;
+                        const ptrdiff_t i_off = (ptrdiff_t)lo;
                         ygemv_(NN, &m_slice, &jb, &neg_one,
                                &A_(i_off, j), lda_,
                                &x[j], &one_i, &one_v,
@@ -391,11 +421,12 @@ void ytrsv_blocked_(
                 j -= nb;
             }
         } else if ((TR == 'T' || TR == 'C') && UPLO == 'L') {
-            int j = ((N - 1) / nb) * nb;
+            ptrdiff_t j = ((N - 1) / nb) * nb;
             while (j >= 0) {
-                int jb = (N - j < nb) ? (N - j) : nb;
+                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
                 if (tid == 0) {
-                    ytrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), lda_,
+                    const ptrdiff_t lda_pt = *lda_;
+                    ytrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
                                   &x[j], &one_i, uplo_len, trans_len, diag_len);
                 }
 #ifdef _OPENMP
@@ -404,9 +435,9 @@ void ytrsv_blocked_(
                 if (j > 0) {
                     long long lo = (long long)j * tid / nt;
                     long long hi = (long long)j * (tid + 1) / nt;
-                    int n_slice = (int)(hi - lo);
+                    ptrdiff_t n_slice = (ptrdiff_t)(hi - lo);
                     if (n_slice > 0) {
-                        const int n_off = (int)lo;
+                        const ptrdiff_t n_off = (ptrdiff_t)lo;
                         ygemv_(gemv_tr, &jb, &n_slice, &neg_one,
                                &A_(j, n_off), lda_,
                                &x[j], &one_i, &one_v,
@@ -420,23 +451,24 @@ void ytrsv_blocked_(
             }
         } else {
             /* (TR == 'T' || TR == 'C') && UPLO == 'U' */
-            for (int j = 0; j < N; j += nb) {
-                int jb = (N - j < nb) ? (N - j) : nb;
+            for (ptrdiff_t j = 0; j < N; j += nb) {
+                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
                 if (tid == 0) {
-                    ytrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), lda_,
+                    const ptrdiff_t lda_pt = *lda_;
+                    ytrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
                                   &x[j], &one_i, uplo_len, trans_len, diag_len);
                 }
 #ifdef _OPENMP
                 if (use_omp) { _Pragma("omp barrier"); }
 #endif
-                int mt = N - j - jb;
+                ptrdiff_t mt = N - j - jb;
                 if (mt > 0) {
-                    int j2 = j + jb;
+                    ptrdiff_t j2 = j + jb;
                     long long lo = (long long)mt * tid / nt;
                     long long hi = (long long)mt * (tid + 1) / nt;
-                    int n_slice = (int)(hi - lo);
+                    ptrdiff_t n_slice = (ptrdiff_t)(hi - lo);
                     if (n_slice > 0) {
-                        const int n_off = j2 + (int)lo;
+                        const ptrdiff_t n_off = j2 + (ptrdiff_t)lo;
                         ygemv_(gemv_tr, &jb, &n_slice, &neg_one,
                                &A_(j, n_off), lda_,
                                &x[j], &one_i, &one_v,

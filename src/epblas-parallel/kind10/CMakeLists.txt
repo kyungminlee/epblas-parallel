@@ -154,6 +154,14 @@ target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE c_std_99)
 target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
     -O3
     -ffp-contract=fast
+    # Force 16-byte hot-loop alignment. The int->ptrdiff_t index conversion
+    # widens integer instruction encodings by one byte each (incl->incq,
+    # cmpl->cmpq, movslq, REX prefixes), which shifts GCC's default nop-padding
+    # and lands a few hot loops off a 16-byte boundary (ieamax mod16 0->8,
+    # eynrm2 loop-body fetch). -falign-loops=16 pins them back, restoring
+    # parity; it is neutral on the routines that were already aligned and worse
+    # at 32 (over-align). See memory project_ptrdiff_conversion_regressors.
+    -falign-loops=16
     # Use Fortran-style complex arithmetic (skip NaN/Inf checks).
     # Without this, gcc emits __mulxc3/__divxc3 library calls for
     # _Complex long double — measurably slower than the gfortran

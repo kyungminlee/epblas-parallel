@@ -47,13 +47,13 @@ typedef long double etrsm_T;
  * 1/diag on the diagonal register-block and reading only the relevant
  * triangle. `offset` positions the diagonal; `unit` selects unit-diag. */
 void etrsm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, int unit);
+                   ptrdiff_t offset, etrsm_T *b, ptrdiff_t unit);
 void etrsm_iltcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, int unit);
+                   ptrdiff_t offset, etrsm_T *b, ptrdiff_t unit);
 void etrsm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, int unit);
+                   ptrdiff_t offset, etrsm_T *b, ptrdiff_t unit);
 void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, int unit);
+                   ptrdiff_t offset, etrsm_T *b, ptrdiff_t unit);
 
 /* ── Diagonal-aware TRSM micro-kernel (etrsm_kernel.c) ───────────────
  * Pairs the shared ob-convention GEMM substrate (etri_kernel.h) with the
@@ -61,7 +61,7 @@ void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
  * diagonal-inverting packers above (OpenBLAS contiguous-odd-tail
  * convention); see the header note on why the substrate is NOT par's
  * egemm. */
-void etrsm_solve_kernel(int left, int trans,
+void etrsm_solve_kernel(ptrdiff_t left, ptrdiff_t trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         const etrsm_T *ba, const etrsm_T *bb,
                         etrsm_T *C, ptrdiff_t ldc, ptrdiff_t offset);
@@ -70,24 +70,24 @@ void etrsm_solve_kernel(int left, int trans,
  * Run the full L3 nest for one slice of the partition axis: a column
  * band [js0, js1) of B for SIDE='L', or a row band [m_lo, m_hi) for
  * SIDE='R'. Ap/Bp are caller-owned per-thread scratch. */
-void etrsm_L_band(int upper, int trans, int unit,
-                  int M, int js0, int js1,
-                  int MC, int KC, int NC,
-                  const etrsm_T *a, int lda, etrsm_T *b, int ldb,
+void etrsm_L_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+                  ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
+                  ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
+                  const etrsm_T *a, ptrdiff_t lda, etrsm_T *b, ptrdiff_t ldb,
                   etrsm_T *Ap, etrsm_T *Bp);
-void etrsm_R_band(int upper, int trans, int unit,
-                  int N, int m_lo, int m_hi,
-                  int MC, int KC, int NC,
-                  const etrsm_T *a, int lda, etrsm_T *b, int ldb,
+void etrsm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+                  ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
+                  ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
+                  const etrsm_T *a, ptrdiff_t lda, etrsm_T *b, ptrdiff_t ldb,
                   etrsm_T *Ap, etrsm_T *Bp);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as etrsm_. */
 void etrsm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_,
     const etrsm_T *alpha_,
-    const etrsm_T *a, const int *lda_,
-    etrsm_T *b, const int *ldb_,
+    const etrsm_T *a, const ptrdiff_t *lda_,
+    etrsm_T *b, const ptrdiff_t *ldb_,
     size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ETRSM_KERNEL_H */

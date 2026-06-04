@@ -32,8 +32,8 @@ void yher_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, lda = *lda_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_, lda = *lda_;
     const TR alpha = *alpha_;
     const TR rzero = 0.0L;
     const TC czero = 0.0L + 0.0Li;
@@ -43,15 +43,15 @@ void yher_(
 
     if (incx == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= YHER_OMP_MIN && blas_omp_max_threads() > 1
+        const ptrdiff_t use_omp = (N >= YHER_OMP_MIN && blas_omp_max_threads() > 1
                              && !omp_in_parallel());
 #else
-        const int use_omp = 0;
+        const ptrdiff_t use_omp = 0;
 #endif
         /* Branch on use_omp at C source level (Add-16). schedule(static, 1)
          * for triangular load balance (Rule 49). */
 #define YHER_BODY                                                            \
-        for (int j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
             const TC xj = x[j];                                              \
             if (xj != czero) {                                               \
                 /* t = alpha * conj(x[j]); A(i,j) += t * x[i].               \
@@ -60,10 +60,10 @@ void yher_(
                 const TC t = alpha * cconj(xj);                              \
                 TC *aj = &A_(0, j);                                          \
                 if (UPLO == 'L') {                                           \
-                    for (int i = j + 1; i < N; ++i) aj[i] += t * x[i];       \
+                    for (ptrdiff_t i = j + 1; i < N; ++i) aj[i] += t * x[i];       \
                     aj[j] = __real__ aj[j] + __real__ (t * x[j]);            \
                 } else {                                                     \
-                    for (int i = 0; i < j; ++i) aj[i] += t * x[i];           \
+                    for (ptrdiff_t i = 0; i < j; ++i) aj[i] += t * x[i];           \
                     aj[j] = __real__ aj[j] + __real__ (t * x[j]);            \
                 }                                                            \
             }                                                                \
@@ -78,19 +78,27 @@ void yher_(
         }
 #undef YHER_BODY
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        for (int j = 0; j < N; ++j) {
-            const TC xj = x[kx + j * incx];
+        /* General-stride fallback — hoist the matrix column to aj[i] and
+         * walk the strided vector with a running index (Class-B fix,
+         * memory project_ptrdiff_conversion_regressors). */
+        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t jx = kx;
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            const TC xj = x[jx];
             if (xj != czero) {
                 const TC t = alpha * cconj(xj);
+                TC *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i) A_(i, j) += t * x[kx + i * incx];
-                    A_(j, j) = __real__ A_(j, j) + __real__ (t * x[kx + j * incx]);
+                    ptrdiff_t ix = jx + incx;
+                    for (ptrdiff_t i = j + 1; i < N; ++i) { aj[i] += t * x[ix]; ix += incx; }
+                    aj[j] = __real__ aj[j] + __real__ (t * xj);
                 } else {
-                    for (int i = 0; i < j; ++i) A_(i, j) += t * x[kx + i * incx];
-                    A_(j, j) = __real__ A_(j, j) + __real__ (t * x[kx + j * incx]);
+                    ptrdiff_t ix = kx;
+                    for (ptrdiff_t i = 0; i < j; ++i) { aj[i] += t * x[ix]; ix += incx; }
+                    aj[j] = __real__ aj[j] + __real__ (t * xj);
                 }
             }
+            jx += incx;
         }
     }
 }
