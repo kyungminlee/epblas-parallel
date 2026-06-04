@@ -6,6 +6,21 @@ separate static archive `${LIB_PREFIX}blas_openblas` (not wired into the
 public `epblas-parallel::${LIB_PREFIX}blas` composite). Tested standalone
 against the migrated baseline via `tests/epblas-openblas/`.
 
+> **kind16 (`__float128`) sibling.** `src/epblas-openblas/kind16/` is a
+> faithful hand-port of this kind10 tree — same algorithm, threading, and
+> thresholds, differing only by the mechanical quad substitution set
+> (`long double`→`__float128`, `_Complex long double`→`__complex128`,
+> literal `L`→`Q`, zero imaginary literals → `(__complex128)` casts,
+> `sqrtl/ldexpl/conjl/creall`→`*q`, `fabsl`→`__builtin_fabsf128`,
+> `<quadmath.h>` added alongside the kept `<math.h>`, prefixes
+> `e→q`/`y→x`/`ie→iq`/`iy→ix`/`ey→qx`/`ye→xq`). All **75 routines** are
+> ported and pass the consistency suite **75/75** against the
+> `eplinalg::qblas` migrated baseline (`ctest -R
+> 'epblas_openblas_fuzz_(q|x|iq|ix)'`). The two trees are kept in sync by
+> hand — see `docs/adr/0002-openblas-kind16-faithful-handport.md`. The
+> per-routine table below is kind10-specific (bench numbers not re-gathered
+> for kind16; the algorithm is identical at both precisions).
+
 Naming map (project convention, matches `blas/src/`):
 - `d*`  (double real)             → `e*`
 - `z*`  (double complex)          → `y*`

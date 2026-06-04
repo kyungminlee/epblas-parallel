@@ -32,7 +32,9 @@ these targets — `find_package(epblas-parallel)`.
 
 **epblas-openblas**:
 The experimental reference library. OpenBLAS `D`/`Z` reference
-kernels ported to extended precision, currently `kind10` only.
+kernels ported to extended precision (`kind10` and `kind16`; the
+`kind16` tree is a faithful hand-port of `kind10` — see
+[[docs/adr/0002-openblas-kind16-faithful-handport.md]]).
 Ships as `lib{e,q,m}blas_openblas.a` and is **never** wired into
 the [[composite]] — it exists solely for A/B comparisons against
 [[epblas-parallel]] and the [[migrated archive]]. Reached as
@@ -103,8 +105,8 @@ matching `eplinalg::<prefix>blas` per-target package to be on
 (best-effort across the target set). The shipped `epblas-parallel`
 and `epblas-openblas` packages export the targets that were actually
 built (`epblas-parallel::eblas` for kind10, `epblas-parallel::qblas`
-for kind16, `epblas-parallel::mblas` for multifloats; openblas is
-kind10-only at present).
+for kind16, `epblas-parallel::mblas` for multifloats; openblas
+ships kind10 and kind16).
 
 | Package | Exports | Role |
 |---|---|---|

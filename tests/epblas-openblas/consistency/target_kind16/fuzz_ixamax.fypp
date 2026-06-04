@@ -1,0 +1,2 @@
+#:set routine = 'ixamax'
+#:include 'fuzz_iamax_complex_body.fypp'

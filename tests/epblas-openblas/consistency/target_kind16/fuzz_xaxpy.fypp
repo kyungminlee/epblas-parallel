@@ -1,0 +1,2 @@
+#:set routine = 'xaxpy'
+#:include 'fuzz_axpy_complex_body.fypp'

@@ -1,0 +1,2 @@
+#:set routine = 'xgemm'
+#:include 'fuzz_gemm_complex_body.fypp'

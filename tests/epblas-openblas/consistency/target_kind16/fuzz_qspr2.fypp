@@ -1,0 +1,2 @@
+#:set routine = 'qspr2'
+#:include 'fuzz_spr2_body.fypp'
