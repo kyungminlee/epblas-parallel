@@ -1,3 +1,4 @@
+#include <stddef.h>
 /* yscal — kind10 complex: X := α·X (α and X both complex).
  *
  * Manual __real__/__imag__ expansion with imag-part products written
@@ -12,7 +13,7 @@ typedef _Complex long double T;
 
 void yscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
 {
-    const int n = *n_, incx = *incx_;
+    const ptrdiff_t n = *n_, incx = *incx_;
     if (n <= 0) return;
     const long double ar = __real__ *alpha_;
     const long double ai = __imag__ *alpha_;
@@ -27,8 +28,8 @@ void yscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
             p[1] = xi * ar + xr * ai;
         }
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        for (int i = 0; i < n; ++i) {
+        ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        for (ptrdiff_t i = 0; i < n; ++i) {
             const long double xr = base[2*ix], xi = base[2*ix + 1];
             base[2*ix]     = xr * ar - xi * ai;
             base[2*ix + 1] = xi * ar + xr * ai;

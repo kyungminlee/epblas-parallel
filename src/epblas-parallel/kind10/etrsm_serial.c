@@ -34,7 +34,7 @@ typedef etrsm_T T;
 #define MR 2
 #define NR 2
 
-static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit,
+static inline void pack_trsm_a_lside_forward(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -48,7 +48,7 @@ static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit,
     }
 }
 
-static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit,
+static inline void pack_trsm_a_lside_backward(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -61,7 +61,7 @@ static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit,
     }
 }
 
-static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit,
+static inline void pack_trsm_a_rside_forward(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -75,7 +75,7 @@ static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit,
     }
 }
 
-static inline void pack_trsm_a_rside_backward(int upper, int trans, int unit,
+static inline void pack_trsm_a_rside_backward(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -90,32 +90,32 @@ static inline void pack_trsm_a_rside_backward(int upper, int trans, int unit,
 }
 
 /* ── SIDE='L' driver: port of trsm_L.c for one N-band [js0..js1) ───── */
-void etrsm_L_band(int upper, int trans, int unit,
-                        int M, int js0, int js1,
-                        int MC, int KC, int NC,
-                        const T *a, int lda,
-                        T *b, int ldb,
+void etrsm_L_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+                        ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
+                        ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
+                        const T *a, ptrdiff_t lda,
+                        T *b, ptrdiff_t ldb,
                         T *Ap, T *Bp)
 {
     const T dm1 = -1.0L;
-    int m = M;
+    ptrdiff_t m = M;
     /* Pick which (uplo, trans) branch (forward vs backward ls). Forward
      * = !UPPER+!TRANS || UPPER+TRANS (ls walks 0..m). */
-    const int forward = (!upper && !trans) || (upper && trans);
+    const ptrdiff_t forward = (!upper && !trans) || (upper && trans);
     /* TRSM_KERNEL trans flag: forward branch → LT (kt=1); backward → LN (kt=0).
      * See trsm_L.c #define logic at top of file. */
-    const int kt = forward ? 1 : 0;
+    const ptrdiff_t kt = forward ? 1 : 0;
 
-    for (int js = js0; js < js1; js += NC) {
-        int min_j = js1 - js;
+    for (ptrdiff_t js = js0; js < js1; js += NC) {
+        ptrdiff_t min_j = js1 - js;
         if (min_j > NC) min_j = NC;
 
         if (forward) {
             /* trsm_L.c lines 119-182 (forward ls walk). */
-            for (int ls = 0; ls < m; ls += KC) {
-                int min_l = m - ls;
+            for (ptrdiff_t ls = 0; ls < m; ls += KC) {
+                ptrdiff_t min_l = m - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = min_l;
+                ptrdiff_t min_i = min_l;
                 if (min_i > MC) min_i = MC;
 
                 /* TRSM_I*COPY of A diagonal block [ls..ls+min_l, ls..ls+min_l].
@@ -128,8 +128,8 @@ void etrsm_L_band(int upper, int trans, int unit,
                                           /*offset=*/0, Ap);
 
                 /* jjs loop: pack B-strip [ls..ls+min_l, jjs..jjs+min_jj] then TRSM_KERNEL. */
-                for (int jjs = js; jjs < js + min_j; jjs += NR) {
-                    int min_jj = js + min_j - jjs;
+                for (ptrdiff_t jjs = js; jjs < js + min_j; jjs += NR) {
+                    ptrdiff_t min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
                     etri_ncopy(min_l, min_jj,
                                       &b[(size_t)ls + (size_t)jjs * ldb], ldb,
@@ -143,7 +143,7 @@ void etrsm_L_band(int upper, int trans, int unit,
 
                 /* is loop: more A rows from the same KC-band (still
                  * containing the diagonal entries below it). */
-                for (int is = ls + min_i; is < ls + min_l; is += MC) {
+                for (ptrdiff_t is = ls + min_i; is < ls + min_l; is += MC) {
                     min_i = ls + min_l - is;
                     if (min_i > MC) min_i = MC;
                     pack_trsm_a_lside_forward(upper, trans, unit,
@@ -160,7 +160,7 @@ void etrsm_L_band(int upper, int trans, int unit,
                 }
 
                 /* is loop: rows entirely below the diagonal — pure GEMM. */
-                for (int is = ls + min_l; is < m; is += MC) {
+                for (ptrdiff_t is = ls + min_l; is < m; is += MC) {
                     min_i = m - is;
                     if (min_i > MC) min_i = MC;
                     if (!trans) {
@@ -177,12 +177,12 @@ void etrsm_L_band(int upper, int trans, int unit,
             }
         } else {
             /* trsm_L.c lines 184-248 (backward ls walk: ls from m down). */
-            for (int ls = m; ls > 0; ls -= KC) {
-                int min_l = ls;
+            for (ptrdiff_t ls = m; ls > 0; ls -= KC) {
+                ptrdiff_t min_l = ls;
                 if (min_l > KC) min_l = KC;
-                int start_is = ls - min_l;
+                ptrdiff_t start_is = ls - min_l;
                 while (start_is + MC < ls) start_is += MC;
-                int min_i = ls - start_is;
+                ptrdiff_t min_i = ls - start_is;
                 if (min_i > MC) min_i = MC;
 
                 /* Pack diagonal block — note OpenBLAS passes
@@ -197,8 +197,8 @@ void etrsm_L_band(int upper, int trans, int unit,
                                            lda,
                                            /*offset=*/start_is - (ls - min_l), Ap);
 
-                for (int jjs = js; jjs < js + min_j; jjs += NR) {
-                    int min_jj = js + min_j - jjs;
+                for (ptrdiff_t jjs = js; jjs < js + min_j; jjs += NR) {
+                    ptrdiff_t min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
                     etri_ncopy(min_l, min_jj,
                                       &b[(size_t)(ls - min_l) + (size_t)jjs * ldb], ldb,
@@ -211,7 +211,7 @@ void etrsm_L_band(int upper, int trans, int unit,
                 }
 
                 /* is loop: rows above start_is, within [ls-min_l, ls). */
-                for (int is = start_is - MC; is >= ls - min_l; is -= MC) {
+                for (ptrdiff_t is = start_is - MC; is >= ls - min_l; is -= MC) {
                     min_i = ls - is;
                     if (min_i > MC) min_i = MC;
                     pack_trsm_a_lside_backward(upper, trans, unit,
@@ -229,7 +229,7 @@ void etrsm_L_band(int upper, int trans, int unit,
                 }
 
                 /* is loop: rows entirely above the diagonal band. */
-                for (int is = 0; is < ls - min_l; is += MC) {
+                for (ptrdiff_t is = 0; is < ls - min_l; is += MC) {
                     min_i = ls - min_l - is;
                     if (min_i > MC) min_i = MC;
                     if (!trans) {
@@ -249,22 +249,22 @@ void etrsm_L_band(int upper, int trans, int unit,
 }
 
 /* ── SIDE='R' driver: port of trsm_R.c for one M-band [m_lo..m_hi) ──── */
-void etrsm_R_band(int upper, int trans, int unit,
-                        int N, int m_lo, int m_hi,
-                        int MC, int KC, int NC,
-                        const T *a, int lda,
-                        T *b, int ldb,
+void etrsm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+                        ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
+                        ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
+                        const T *a, ptrdiff_t lda,
+                        T *b, ptrdiff_t ldb,
                         T *Ap, T *Bp)
 {
     const T dm1 = -1.0L;
-    const int m_band = m_hi - m_lo;
+    const ptrdiff_t m_band = m_hi - m_lo;
     if (m_band <= 0) return;
     /* SIDE=R forward direction = UPPER+!TRANS || !UPPER+TRANS (js walks
      * up; for each js, ls walks 0..js then js..js+min_j). */
-    const int forward = (upper && !trans) || (!upper && trans);
+    const ptrdiff_t forward = (upper && !trans) || (!upper && trans);
     /* TRSM_KERNEL trans flag (left=0): forward branch → RN (kt=0);
      * backward → RT (kt=1). See trsm_R.c #define logic. */
-    const int kt = forward ? 0 : 1;
+    const ptrdiff_t kt = forward ? 0 : 1;
 
     /* sa = B-tile pack (Ap); sb = A pack (Bp) — matches trsm_R.c naming. */
     T *sa = Ap;
@@ -272,23 +272,23 @@ void etrsm_R_band(int upper, int trans, int unit,
 
     if (forward) {
         /* trsm_R.c lines 115-229 (forward js walk). */
-        for (int js = 0; js < N; js += NC) {
-            int min_j = N - js;
+        for (ptrdiff_t js = 0; js < N; js += NC) {
+            ptrdiff_t min_j = N - js;
             if (min_j > NC) min_j = NC;
 
             /* ls loop part 1: A-cols [ls, ls+min_l) entirely above the
              * diagonal of B's js-band — pure GEMM. */
-            for (int ls = 0; ls < js; ls += KC) {
-                int min_l = js - ls;
+            for (ptrdiff_t ls = 0; ls < js; ls += KC) {
+                ptrdiff_t min_l = js - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = m_band;
+                ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
                 etri_tcopy(min_l, min_i,
                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
 
-                for (int jjs = js; jjs < js + min_j; jjs += NR) {
-                    int min_jj = js + min_j - jjs;
+                for (ptrdiff_t jjs = js; jjs < js + min_j; jjs += NR) {
+                    ptrdiff_t min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
                         etri_ncopy(min_l, min_jj,
@@ -304,7 +304,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                                        &b[(size_t)m_lo + (size_t)jjs * ldb], ldb);
                 }
 
-                for (int is = min_i; is < m_band; is += MC) {
+                for (ptrdiff_t is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
                     etri_tcopy(min_l, min_i,
@@ -317,10 +317,10 @@ void etrsm_R_band(int upper, int trans, int unit,
 
             /* ls loop part 2: A-cols [ls, ls+min_l) intersecting the
              * diagonal — TRSM packers + TRSM_KERNEL. */
-            for (int ls = js; ls < js + min_j; ls += KC) {
-                int min_l = js + min_j - ls;
+            for (ptrdiff_t ls = js; ls < js + min_j; ls += KC) {
+                ptrdiff_t min_l = js + min_j - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = m_band;
+                ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
                 etri_tcopy(min_l, min_i,
@@ -339,8 +339,8 @@ void etrsm_R_band(int upper, int trans, int unit,
                                    /*offset=*/0);
 
                 /* Off-diagonal A pack to the right of the diagonal block. */
-                for (int jjs = 0; jjs < min_j - min_l - ls + js; jjs += NR) {
-                    int min_jj = min_j - min_l - ls + js - jjs;
+                for (ptrdiff_t jjs = 0; jjs < min_j - min_l - ls + js; jjs += NR) {
+                    ptrdiff_t min_jj = min_j - min_l - ls + js - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
                         etri_ncopy(min_l, min_jj,
@@ -357,7 +357,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                 }
 
                 /* is loop: more M-rows of B with same A-packs. */
-                for (int is = min_i; is < m_band; is += MC) {
+                for (ptrdiff_t is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
                     etri_tcopy(min_l, min_i,
@@ -377,23 +377,23 @@ void etrsm_R_band(int upper, int trans, int unit,
         }
     } else {
         /* trsm_R.c lines 232-352 (backward js walk: js from N down). */
-        for (int js = N; js > 0; js -= NC) {
-            int min_j = js;
+        for (ptrdiff_t js = N; js > 0; js -= NC) {
+            ptrdiff_t min_j = js;
             if (min_j > NC) min_j = NC;
 
             /* ls loop part 1: A-cols [ls, ls+min_l) entirely below the
              * diagonal of B's js-band — pure GEMM. */
-            for (int ls = js; ls < N; ls += KC) {
-                int min_l = N - ls;
+            for (ptrdiff_t ls = js; ls < N; ls += KC) {
+                ptrdiff_t min_l = N - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = m_band;
+                ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
                 etri_tcopy(min_l, min_i,
                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
 
-                for (int jjs = js; jjs < js + min_j; jjs += NR) {
-                    int min_jj = min_j + js - jjs;
+                for (ptrdiff_t jjs = js; jjs < js + min_j; jjs += NR) {
+                    ptrdiff_t min_jj = min_j + js - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
                         etri_ncopy(min_l, min_jj,
@@ -409,7 +409,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                                        &b[(size_t)m_lo + (size_t)(jjs - min_j) * ldb], ldb);
                 }
 
-                for (int is = min_i; is < m_band; is += MC) {
+                for (ptrdiff_t is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
                     etri_tcopy(min_l, min_i,
@@ -422,13 +422,13 @@ void etrsm_R_band(int upper, int trans, int unit,
 
             /* ls loop part 2: walk down the diagonal band, from
              * start_ls to (js-min_j) in steps of -KC. */
-            int start_ls = js - min_j;
+            ptrdiff_t start_ls = js - min_j;
             while (start_ls + KC < js) start_ls += KC;
 
-            for (int ls = start_ls; ls >= js - min_j; ls -= KC) {
-                int min_l = js - ls;
+            for (ptrdiff_t ls = start_ls; ls >= js - min_j; ls -= KC) {
+                ptrdiff_t min_l = js - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = m_band;
+                ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
                 etri_tcopy(min_l, min_i,
@@ -452,8 +452,8 @@ void etrsm_R_band(int upper, int trans, int unit,
 
                 /* Off-diagonal A pack to the left of the diagonal
                  * block: A-cols [js-min_j, ls). */
-                for (int jjs = 0; jjs < min_j - js + ls; jjs += NR) {
-                    int min_jj = min_j - js + ls - jjs;
+                for (ptrdiff_t jjs = 0; jjs < min_j - js + ls; jjs += NR) {
+                    ptrdiff_t min_jj = min_j - js + ls - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
                         etri_ncopy(min_l, min_jj,
@@ -470,7 +470,7 @@ void etrsm_R_band(int upper, int trans, int unit,
                 }
 
                 /* is loop: more M-rows of B with same A-packs. */
-                for (int is = min_i; is < m_band; is += MC) {
+                for (ptrdiff_t is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
                     etri_tcopy(min_l, min_i,
@@ -500,23 +500,23 @@ void etrsm_R_band(int upper, int trans, int unit,
  */
 void etrsm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
+    const T *a, const ptrdiff_t *lda_,
+    T *b, const ptrdiff_t *ldb_,
     size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
 {
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
 
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
 
-    const int lside = (toupper((unsigned char)*side)   == 'L');
-    const int upper = (toupper((unsigned char)*uplo)   == 'U');
+    const ptrdiff_t lside = (toupper((unsigned char)*side)   == 'L');
+    const ptrdiff_t upper = (toupper((unsigned char)*uplo)   == 'U');
     const char trc  = (char)toupper((unsigned char)*transa);
-    const int trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
-    const int unit  = (toupper((unsigned char)*diag) == 'U');
+    const ptrdiff_t trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
+    const ptrdiff_t unit  = (toupper((unsigned char)*diag) == 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -524,8 +524,8 @@ void etrsm_serial(
     if (alpha != 1.0L) egemm_beta_prepass(M, N, alpha, b, ldb);
     if (alpha == 0.0L) return;
 
-    const int K_eff = lside ? M : N;
-    int MC, KC, NC;
+    const ptrdiff_t K_eff = lside ? M : N;
+    ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);

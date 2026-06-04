@@ -40,11 +40,11 @@ static inline char up(const char *p) {
 #ifdef _OPENMP
 /* Sqrt-balanced contiguous column partition (OpenBLAS symv_partition, mask=3,
  * min_width=4): per-column work grows with j for UPPER, shrinks for LOWER. */
-static int yhpmv_partition(int upper, ptrdiff_t n, int nthreads, ptrdiff_t *range)
+static ptrdiff_t yhpmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
 {
-    const int mask = 3, min_width = 4;
+    const ptrdiff_t mask = 3, min_width = 4;
     const double dnum = (double)n * (double)n / (double)nthreads;
-    int num_cpu = 0;
+    ptrdiff_t num_cpu = 0;
     range[0] = 0;
     ptrdiff_t i = 0;
     while (i < n) {
@@ -84,8 +84,8 @@ void yhpmv_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, incy = *incy_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
     const char UPLO = up(uplo);
@@ -93,28 +93,28 @@ void yhpmv_(
     if (N == 0 || (alpha == zero && beta == one)) return;
 
     if (beta != one) {
-        int iy = (incy < 0) ? -(N - 1) * incy : 0;
-        if (beta == zero) for (int i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
-        else              for (int i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
+        if (beta == zero) for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
+        else              for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
     }
     if (alpha == zero) return;
 
-    int kk = 0;
+    ptrdiff_t kk = 0;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if ((size_t)N * (size_t)N > YHPMV_OMP_MIN
             && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
-            int nthreads = blas_omp_max_threads();
+            ptrdiff_t nthreads = blas_omp_max_threads();
             if (nthreads > YHPMV_MAX_CPUS) nthreads = YHPMV_MAX_CPUS;
             ptrdiff_t range[YHPMV_MAX_CPUS + 1];
-            int num_cpu = yhpmv_partition(UPLO == 'U', N, nthreads, range);
+            ptrdiff_t num_cpu = yhpmv_partition(UPLO == 'U', N, nthreads, range);
             T *buf = (num_cpu > 1)
                 ? (T *)calloc((size_t)num_cpu * (size_t)N, sizeof(T)) : NULL;
             if (buf) {
                 const ptrdiff_t n = N;
                 #pragma omp parallel num_threads(num_cpu)
                 {
-                    int t = omp_get_thread_num();
+                    ptrdiff_t t = omp_get_thread_num();
                     ptrdiff_t m_from = range[t], m_to = range[t + 1];
                     T *restrict slot = buf + (size_t)t * (size_t)n;
                     if (UPLO == 'U') {
@@ -146,7 +146,7 @@ void yhpmv_(
                  * LOWER thread [range[t],n). Fold into one slot, then alpha-AXPY. */
                 if (UPLO == 'U') {
                     T *restrict target = buf + (size_t)(num_cpu - 1) * (size_t)n;
-                    for (int t = 0; t < num_cpu - 1; ++t) {
+                    for (ptrdiff_t t = 0; t < num_cpu - 1; ++t) {
                         const T *restrict src = buf + (size_t)t * (size_t)n;
                         ptrdiff_t len = range[t + 1];
                         for (ptrdiff_t k = 0; k < len; ++k) target[k] += src[k];
@@ -154,7 +154,7 @@ void yhpmv_(
                     for (ptrdiff_t k = 0; k < n; ++k) y[k] += alpha * target[k];
                 } else {
                     T *restrict target = buf;
-                    for (int t = 1; t < num_cpu; ++t) {
+                    for (ptrdiff_t t = 1; t < num_cpu; ++t) {
                         const T *restrict src = buf + (size_t)t * (size_t)n;
                         for (ptrdiff_t k = range[t]; k < n; ++k) target[k] += src[k];
                     }
@@ -167,11 +167,11 @@ void yhpmv_(
         }
 #endif
         if (UPLO == 'U') {
-            for (int j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[j];
                 T t2 = zero;
-                int k = kk;
-                for (int i = 0; i < j; ++i) {
+                ptrdiff_t k = kk;
+                for (ptrdiff_t i = 0; i < j; ++i) {
                     y[i] += t1 * ap[k];
                     t2 += cconj(ap[k]) * x[i];
                     ++k;
@@ -180,12 +180,12 @@ void yhpmv_(
                 kk += j + 1;
             }
         } else {
-            for (int j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[j];
                 T t2 = zero;
                 y[j] += t1 * (TR)__real__ ap[kk];
-                int k = kk + 1;
-                for (int i = j + 1; i < N; ++i) {
+                ptrdiff_t k = kk + 1;
+                for (ptrdiff_t i = j + 1; i < N; ++i) {
                     y[i] += t1 * ap[k];
                     t2 += cconj(ap[k]) * x[i];
                     ++k;
@@ -195,15 +195,15 @@ void yhpmv_(
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         if (UPLO == 'U') {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jx = kx, jy = ky;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero;
-                int ix = kx, iy = ky;
-                for (int k = kk; k < kk + j; ++k) {
+                ptrdiff_t ix = kx, iy = ky;
+                for (ptrdiff_t k = kk; k < kk + j; ++k) {
                     y[iy] += t1 * ap[k];
                     t2 += cconj(ap[k]) * x[ix];
                     ix += incx; iy += incy;
@@ -213,13 +213,13 @@ void yhpmv_(
                 kk += j + 1;
             }
         } else {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jx = kx, jy = ky;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero;
                 y[jy] += t1 * (TR)__real__ ap[kk];
-                int ix = jx, iy = jy;
-                for (int k = kk + 1; k < kk + N - j; ++k) {
+                ptrdiff_t ix = jx, iy = jy;
+                for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
                     ix += incx; iy += incy;
                     y[iy] += t1 * ap[k];
                     t2 += cconj(ap[k]) * x[ix];

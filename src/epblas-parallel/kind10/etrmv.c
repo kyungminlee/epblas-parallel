@@ -36,24 +36,24 @@ void etrmv_(
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
     const char DIAG = up(diag);
-    const int nounit = (DIAG != 'U');
+    const ptrdiff_t nounit = (DIAG != 'U');
 
     if (N == 0) return;
     const T zero = 0.0L;
 
     if (incx == 1) {
 #ifdef _OPENMP
-        const int nt = blas_omp_max_threads();
-        const int use_omp = (N >= ETRMV_OMP_MIN && nt > 1 && !omp_in_parallel());
+        const ptrdiff_t nt = blas_omp_max_threads();
+        const ptrdiff_t use_omp = (N >= ETRMV_OMP_MIN && nt > 1 && !omp_in_parallel());
 #else
-        const int use_omp = 0;
-        const int nt = 1;
+        const ptrdiff_t use_omp = 0;
+        const ptrdiff_t nt = 1;
 #endif
         if (use_omp) {
             /* TR='T' is straightforward: each j writes a single x[j]
@@ -73,11 +73,11 @@ void etrmv_(
                     {
                         if (UPLO == 'L') {
                             #pragma omp for schedule(static, 1)
-                            for (int j = 0; j < N; ++j) {
+                            for (ptrdiff_t j = 0; j < N; ++j) {
                                 T temp = nounit ? (x[j] * A_(j, j)) : x[j];
                                 const T *aj = &A_(0, j);
                                 T s0 = zero, s1 = zero;
-                                int i = j + 1;
+                                ptrdiff_t i = j + 1;
                                 for (; i + 1 < N; i += 2) {
                                     s0 += aj[i]     * x[i];
                                     s1 += aj[i + 1] * x[i + 1];
@@ -88,11 +88,11 @@ void etrmv_(
                             }
                         } else {
                             #pragma omp for schedule(static, 1)
-                            for (int j = 0; j < N; ++j) {
+                            for (ptrdiff_t j = 0; j < N; ++j) {
                                 T temp = nounit ? (x[j] * A_(j, j)) : x[j];
                                 const T *aj = &A_(0, j);
                                 T s0 = zero, s1 = zero;
-                                int i = j - 1;
+                                ptrdiff_t i = j - 1;
                                 for (; i - 1 >= 0; i -= 2) {
                                     s0 += aj[i]     * x[i];
                                     s1 += aj[i - 1] * x[i - 1];
@@ -103,7 +103,7 @@ void etrmv_(
                             }
                         }
                         #pragma omp for schedule(static)
-                        for (int i = 0; i < N; ++i) x[i] = y_buf[i];
+                        for (ptrdiff_t i = 0; i < N; ++i) x[i] = y_buf[i];
                     }
 #endif
                     free(y_buf);
@@ -118,33 +118,33 @@ void etrmv_(
 #ifdef _OPENMP
                     #pragma omp parallel
                     {
-                        const int tid = omp_get_thread_num();
+                        const ptrdiff_t tid = omp_get_thread_num();
                         T *y_priv = &y_priv_all[(size_t)tid * N];
-                        for (int k = 0; k < N; ++k) y_priv[k] = zero;
+                        for (ptrdiff_t k = 0; k < N; ++k) y_priv[k] = zero;
 
                         if (UPLO == 'L') {
                             #pragma omp for schedule(static, 1)
-                            for (int j = 0; j < N; ++j) {
+                            for (ptrdiff_t j = 0; j < N; ++j) {
                                 const T xj = x[j];
                                 const T *aj = &A_(0, j);
                                 y_priv[j] += xj * (nounit ? aj[j] : (T)1.0L);
-                                for (int i = j + 1; i < N; ++i)
+                                for (ptrdiff_t i = j + 1; i < N; ++i)
                                     y_priv[i] += xj * aj[i];
                             }
                         } else {
                             #pragma omp for schedule(static, 1)
-                            for (int j = 0; j < N; ++j) {
+                            for (ptrdiff_t j = 0; j < N; ++j) {
                                 const T xj = x[j];
                                 const T *aj = &A_(0, j);
-                                for (int i = 0; i < j; ++i)
+                                for (ptrdiff_t i = 0; i < j; ++i)
                                     y_priv[i] += xj * aj[i];
                                 y_priv[j] += xj * (nounit ? aj[j] : (T)1.0L);
                             }
                         }
                         #pragma omp for schedule(static)
-                        for (int i = 0; i < N; ++i) {
+                        for (ptrdiff_t i = 0; i < N; ++i) {
                             T s = zero;
-                            for (int t = 0; t < nt; ++t)
+                            for (ptrdiff_t t = 0; t < nt; ++t)
                                 s += y_priv_all[(size_t)t * N + i];
                             x[i] = s;
                         }
@@ -169,7 +169,7 @@ void etrmv_(
                  * separately. Halves x memory traffic on the AXPY inner.
                  * Previously LNN sat at 0.90-0.94x of migrated; unrolling
                  * closes the gap. */
-                int j = N - 1;
+                ptrdiff_t j = N - 1;
                 for (; j - 1 >= 0; j -= 2) {
                     const T t0 = x[j];
                     const T t1 = x[j - 1];
@@ -177,7 +177,7 @@ void etrmv_(
                     const T *a1 = &A_(0, j - 1);
                     /* Inner i=N-1..j+1 — backward (Rule 21).
                      * Both columns contribute to each x[i]. */
-                    for (int i = N - 1; i > j; --i)
+                    for (ptrdiff_t i = N - 1; i > j; --i)
                         x[i] = (x[i] + t0 * a0[i]) + t1 * a1[i];
                     /* Boundary i=j: scale x[j] (was t0), then add t1*A(j,j-1). */
                     T xj = nounit ? t0 * A_(j, j) : t0;
@@ -190,7 +190,7 @@ void etrmv_(
                     const T temp = x[j];
                     if (temp != zero) {
                         const T *aj = &A_(0, j);
-                        for (int i = N - 1; i > j; --i) x[i] += temp * aj[i];
+                        for (ptrdiff_t i = N - 1; i > j; --i) x[i] += temp * aj[i];
                     }
                     if (nounit) x[j] *= A_(j, j);
                 }
@@ -202,13 +202,13 @@ void etrmv_(
                  * two column contributions. Halves x memory traffic on the
                  * AXPY-like inner. Without this, UNN at N=1024 sat at
                  * 0.58x of migrated. */
-                int j = 0;
+                ptrdiff_t j = 0;
                 for (; j + 1 < N; j += 2) {
                     const T t0 = x[j];
                     const T t1 = x[j + 1];
                     const T *a0 = &A_(0, j);
                     const T *a1 = &A_(0, j + 1);
-                    for (int i = 0; i < j; ++i)
+                    for (ptrdiff_t i = 0; i < j; ++i)
                         x[i] = (x[i] + t0 * a0[i]) + t1 * a1[i];
                     /* At i=j: x[j] += t1*A(j,j+1), with prior diag scale. */
                     T xj = nounit ? t0 * A_(j, j) : t0;
@@ -219,7 +219,7 @@ void etrmv_(
                     const T temp = x[j];
                     if (temp != zero) {
                         const T *aj = &A_(0, j);
-                        for (int i = 0; i < j; ++i) x[i] += temp * aj[i];
+                        for (ptrdiff_t i = 0; i < j; ++i) x[i] += temp * aj[i];
                     }
                     if (nounit) x[j] *= A_(j, j);
                 }
@@ -227,13 +227,13 @@ void etrmv_(
         } else {  /* TRANS = 'T' */
             if (UPLO == 'L') {
                 /* j forward: dot product over i>j into x[j]. */
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[j];
                     if (nounit) temp *= A_(j, j);
                     const T *aj = &A_(0, j);
                     /* 2-chain dot product (x87 latency-hiding). */
                     T s0 = zero, s1 = zero;
-                    int i = j + 1;
+                    ptrdiff_t i = j + 1;
                     for (; i + 1 < N; i += 2) {
                         s0 += aj[i]     * x[i];
                         s1 += aj[i + 1] * x[i + 1];
@@ -251,12 +251,12 @@ void etrmv_(
                  * already beats migrated at measured N because of
                  * x87 latency hiding, the backward walk keeps the
                  * direction consistent with the Fortran reference. */
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T temp = x[j];
                     if (nounit) temp *= A_(j, j);
                     const T *aj = &A_(0, j);
                     T s0 = zero, s1 = zero;
-                    int i = j - 1;
+                    ptrdiff_t i = j - 1;
                     for (; i - 1 >= 0; i -= 2) {
                         s0 += aj[i]     * x[i];
                         s1 += aj[i - 1] * x[i - 1];
@@ -269,42 +269,76 @@ void etrmv_(
         }
     } else {
         /* General-stride fallback. */
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'L') {
-                /* Inner walks backward to match Fortran etrmv.f
-                 * (DO 70 I = N,J+1,-1). Sub-class C / Rule 21. */
-                for (int j = N - 1; j >= 0; --j) {
+                /* Inner walks backward to match Fortran etrmv.f (DO 70
+                 * I=N,J+1,-1). J-unroll-by-2 (mirrors the incx==1 path):
+                 * fuse columns j and j-1 into one strided-x read-modify-
+                 * write per row i, halving the strided-x traffic that
+                 * dominates this light real scatter — the residual int->
+                 * ptrdiff_t regression on the un-unrolled single-column
+                 * form (the running-index hoist made it WORSE; halving x
+                 * traffic is the real lever). Sub-class C / Rule 21.
+                 * memory project_ptrdiff_conversion_regressors. */
+                ptrdiff_t j = N - 1;
+                for (; j - 1 >= 0; j -= 2) {
+                    const T t0 = x[kx + j * incx];
+                    const T t1 = x[kx + (j - 1) * incx];
+                    const T *a0 = &A_(0, j);
+                    const T *a1 = &A_(0, j - 1);
+                    for (ptrdiff_t i = N - 1; i > j; --i)
+                        x[kx + i * incx] = (x[kx + i * incx] + t0 * a0[i]) + t1 * a1[i];
+                    T xj = nounit ? t0 * a0[j] : t0;
+                    x[kx + j * incx] = xj + t1 * a1[j];
+                    if (nounit) x[kx + (j - 1) * incx] = t1 * a1[j - 1];
+                }
+                for (; j >= 0; --j) {
                     const T temp = x[kx + j * incx];
                     if (temp != zero) {
-                        for (int i = N - 1; i > j; --i) x[kx + i * incx] += temp * A_(i, j);
+                        const T *aj = &A_(0, j);
+                        for (ptrdiff_t i = N - 1; i > j; --i) x[kx + i * incx] += temp * aj[i];
                     }
                     if (nounit) x[kx + j * incx] *= A_(j, j);
                 }
             } else {
-                for (int j = 0; j < N; ++j) {
+                /* UNN: symmetric j-unroll-by-2 (fuse columns j and j+1). */
+                ptrdiff_t j = 0;
+                for (; j + 1 < N; j += 2) {
+                    const T t0 = x[kx + j * incx];
+                    const T t1 = x[kx + (j + 1) * incx];
+                    const T *a0 = &A_(0, j);
+                    const T *a1 = &A_(0, j + 1);
+                    for (ptrdiff_t i = 0; i < j; ++i)
+                        x[kx + i * incx] = (x[kx + i * incx] + t0 * a0[i]) + t1 * a1[i];
+                    T xj = nounit ? t0 * a0[j] : t0;
+                    x[kx + j * incx] = xj + t1 * a1[j];
+                    if (nounit) x[kx + (j + 1) * incx] = t1 * a1[j + 1];
+                }
+                for (; j < N; ++j) {
                     const T temp = x[kx + j * incx];
                     if (temp != zero) {
-                        for (int i = 0; i < j; ++i) x[kx + i * incx] += temp * A_(i, j);
+                        const T *aj = &A_(0, j);
+                        for (ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] += temp * aj[i];
                     }
                     if (nounit) x[kx + j * incx] *= A_(j, j);
                 }
             }
         } else {
             if (UPLO == 'L') {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[kx + j * incx];
                     if (nounit) temp *= A_(j, j);
-                    for (int i = j + 1; i < N; ++i) temp += A_(i, j) * x[kx + i * incx];
+                    for (ptrdiff_t i = j + 1; i < N; ++i) temp += A_(i, j) * x[kx + i * incx];
                     x[kx + j * incx] = temp;
                 }
             } else {
                 /* Inner walks backward to match Fortran reference
                  * (DO 110 I = J-1,1,-1). Sub-class D / Rule 21. */
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T temp = x[kx + j * incx];
                     if (nounit) temp *= A_(j, j);
-                    for (int i = j - 1; i >= 0; --i) temp += A_(i, j) * x[kx + i * incx];
+                    for (ptrdiff_t i = j - 1; i >= 0; --i) temp += A_(i, j) * x[kx + i * incx];
                     x[kx + j * incx] = temp;
                 }
             }

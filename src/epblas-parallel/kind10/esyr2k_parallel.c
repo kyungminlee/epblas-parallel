@@ -53,17 +53,18 @@ void esyr2k_(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        esyr2k_serial(uplo_p, trans_p, n_, k_, alpha_, a, lda_, b, ldb_,
-                      beta_, c, ldc_, uplo_len, trans_len);
+        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
+        esyr2k_serial(uplo_p, trans_p, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt,
+                      beta_, c, &ldc_pt, uplo_len, trans_len);
         return;
     }
 #endif
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
+    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const int uplo  = (char)toupper((unsigned char)*uplo_p);
-    const int trans = (char)toupper((unsigned char)*trans_p);
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t uplo  = (char)toupper((unsigned char)*uplo_p);
+    const ptrdiff_t trans = (char)toupper((unsigned char)*trans_p);
 
     if (N <= 0) return;
 
@@ -73,17 +74,17 @@ void esyr2k_(
 
     if (K == 0 || alpha == 0.0L) return;
 
-    int MC, KC, NC;
+    ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
 
 #ifdef _OPENMP
-    int nthreads = omp_get_max_threads();
+    ptrdiff_t nthreads = omp_get_max_threads();
     if (nthreads < 1) nthreads = 1;
 #else
-    int nthreads = 1;
+    ptrdiff_t nthreads = 1;
 #endif
 
     /* SYR2K does ~ N^2 · K flops; tiny-cutoff sized to match egemm. */
@@ -97,8 +98,8 @@ void esyr2k_(
     T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
     T **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
-    int alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
-    for (int t = 0; alloc_ok && t < nthreads; ++t) {
+    ptrdiff_t alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
+    for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_A_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         Ap_B_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (!Ap_A_arr[t] || !Ap_B_arr[t]) alloc_ok = 0;
@@ -109,31 +110,31 @@ void esyr2k_(
 #endif
         {
 #ifdef _OPENMP
-            const int tid = omp_get_thread_num();
-            const int nth = omp_get_num_threads();
+            const ptrdiff_t tid = omp_get_thread_num();
+            const ptrdiff_t nth = omp_get_num_threads();
 #else
-            const int tid = 0, nth = 1;
+            const ptrdiff_t tid = 0, nth = 1;
 #endif
             T *Ap_A = Ap_A_arr[tid];
             T *Ap_B = Ap_B_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks. */
-            const int m_chunk = egemm_round_up((N + nth - 1) / nth, MR);
-            const int m_lo = tid * m_chunk;
-            int m_hi = m_lo + m_chunk;
+            const ptrdiff_t m_chunk = egemm_round_up((N + nth - 1) / nth, MR);
+            const ptrdiff_t m_lo = tid * m_chunk;
+            ptrdiff_t m_hi = m_lo + m_chunk;
             if (m_hi > N) m_hi = N;
 
-            for (int js = 0; js < N; js += NC) {
-                const int jb = (N - js < NC) ? (N - js) : NC;
+            for (ptrdiff_t js = 0; js < N; js += NC) {
+                const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
 
                 /* UPLO clip of this thread's [m_lo, m_hi] for this js-band. */
-                int m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
-                int m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
+                ptrdiff_t m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
-                for (int ls = 0; ls < K; ls += KC) {
-                    const int pb = (K - ls < KC) ? (K - ls) : KC;
+                for (ptrdiff_t ls = 0; ls < K; ls += KC) {
+                    const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
 
                     /* Pack the two shared B-side panels (A and B). */
 #ifdef _OPENMP
@@ -151,8 +152,8 @@ void esyr2k_(
                     }
                     /* implicit barrier at end of `single` → Bp safe to read */
 
-                    for (int is = m_lo_eff; is < m_hi_eff; is += MC) {
-                        const int min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+                    for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
+                        const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
                         if (trans == 'N') {
                             etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap_A);
@@ -182,8 +183,8 @@ void esyr2k_(
         }
     }
 
-    for (int t = 0; t < nthreads && Ap_A_arr; ++t) free(Ap_A_arr[t]);
-    for (int t = 0; t < nthreads && Ap_B_arr; ++t) free(Ap_B_arr[t]);
+    for (ptrdiff_t t = 0; t < nthreads && Ap_A_arr; ++t) free(Ap_A_arr[t]);
+    for (ptrdiff_t t = 0; t < nthreads && Ap_B_arr; ++t) free(Ap_B_arr[t]);
     free(Ap_A_arr);
     free(Ap_B_arr);
     free(Bp_A);

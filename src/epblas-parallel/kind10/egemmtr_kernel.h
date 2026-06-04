@@ -30,53 +30,53 @@ typedef long double egemmtr_T;
 #define EGEMMTR_NR 2
 
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-int egemmtr_trans_code(const char *p);
+ptrdiff_t egemmtr_trans_code(const char *p);
 
-int egemmtr_round_up(int v, int m);
+ptrdiff_t egemmtr_round_up(ptrdiff_t v, ptrdiff_t m);
 
 /* Cache-block sizes (env-overridable EGEMMTR_MC/KC/NC); lazy-initialized. */
-void egemmtr_block_sizes(int *MC, int *KC, int *NC);
+void egemmtr_block_sizes(ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
 
 /* C := beta*C over the UPLO triangle of columns [j_start, j_end). */
-void egemmtr_beta_scale(int j_start, int j_end, int N, char UPLO,
-                        egemmtr_T beta, egemmtr_T *c, int ldc);
+void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, char UPLO,
+                        egemmtr_T beta, egemmtr_T *c, ptrdiff_t ldc);
 
 /* Packers (egemm-style, take separate A and B). */
-void egemmtr_pack_A(const egemmtr_T *restrict A, int lda,
-                    int ic, int pc, int ib, int pb, int ta,
+void egemmtr_pack_A(const egemmtr_T *restrict A, ptrdiff_t lda,
+                    ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb, ptrdiff_t ta,
                     egemmtr_T *restrict Ap);
-void egemmtr_pack_B(const egemmtr_T *restrict B, int ldb,
-                    int pc, int jc, int pb, int jb, int tb,
+void egemmtr_pack_B(const egemmtr_T *restrict B, ptrdiff_t ldb,
+                    ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, ptrdiff_t tb,
                     egemmtr_T *restrict Bp);
 
 /* Rectangular macro-tile (entirely inside the stored triangle). */
-void egemmtr_macro_kernel_rect(int ib, int jb, int pb, egemmtr_T alpha,
+void egemmtr_macro_kernel_rect(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_T alpha,
                                const egemmtr_T *restrict Ap,
                                const egemmtr_T *restrict Bp,
-                               egemmtr_T *restrict C, int ldc);
+                               egemmtr_T *restrict C, ptrdiff_t ldc);
 
 /* Triangle-aware macro-tile (crosses the diagonal). */
-void egemmtr_macro_kernel_tri(int ib, int jb, int pb, egemmtr_T alpha,
+void egemmtr_macro_kernel_tri(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_T alpha,
                               const egemmtr_T *restrict Ap,
                               const egemmtr_T *restrict Bp,
-                              egemmtr_T *restrict C, int ldc,
-                              int row_base, int col_base, char UPLO);
+                              egemmtr_T *restrict C, ptrdiff_t ldc,
+                              ptrdiff_t row_base, ptrdiff_t col_base, char UPLO);
 
 /* O(N²·K) scalar fallback (alloc failure path). */
-void egemmtr_scalar_fallback(int N, int K, char UPLO, int ta, int tb,
+void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, ptrdiff_t ta, ptrdiff_t tb,
                              egemmtr_T alpha,
-                             const egemmtr_T *a, int lda,
-                             const egemmtr_T *b, int ldb,
-                             egemmtr_T *c, int ldc);
+                             const egemmtr_T *a, ptrdiff_t lda,
+                             const egemmtr_T *b, ptrdiff_t ldb,
+                             egemmtr_T *c, ptrdiff_t ldc);
 
 /* Pure single-thread entry. Same signature as egemmtr_ — no OpenMP. */
 void egemmtr_serial(const char *uplo, const char *transa, const char *transb,
-                    const int *n_, const int *k_,
+                    const ptrdiff_t *n_, const ptrdiff_t *k_,
                     const egemmtr_T *alpha_,
-                    const egemmtr_T *a, const int *lda_,
-                    const egemmtr_T *b, const int *ldb_,
+                    const egemmtr_T *a, const ptrdiff_t *lda_,
+                    const egemmtr_T *b, const ptrdiff_t *ldb_,
                     const egemmtr_T *beta_,
-                    egemmtr_T *c, const int *ldc_,
+                    egemmtr_T *c, const ptrdiff_t *ldc_,
                     size_t uplo_len, size_t ta_len, size_t tb_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_EGEMMTR_KERNEL_H */

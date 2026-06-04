@@ -3,17 +3,18 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include <stddef.h>
 #endif
 typedef long double T;
 
 /* Σ|x| over a contiguous logical range. 6-accumulator unroll matches NETLIB
  * DASUM and masks the ~3-cycle x87 fadd latency. */
-static T easum_kernel(int n, const T *x, int incx)
+static T easum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
     T s0 = 0.0L, s1 = 0.0L;
     if (incx == 1) {
         T s2 = 0.0L, s3 = 0.0L, s4 = 0.0L, s5 = 0.0L;
-        int i = 0;
+        ptrdiff_t i = 0;
         for (; i + 5 < n; i += 6) {
             s0 += fabsl(x[i    ]);
             s1 += fabsl(x[i + 1]);
@@ -26,7 +27,7 @@ static T easum_kernel(int n, const T *x, int incx)
         s1 = 0.0L;
         for (; i < n; ++i) s0 += fabsl(x[i]);
     } else {
-        for (int i = 0, ix = 0; i < n; ++i, ix += incx) s0 += fabsl(x[ix]);
+        for (ptrdiff_t i = 0, ix = 0; i < n; ++i, ix += incx) s0 += fabsl(x[ix]);
     }
     return s0 + s1;
 }
@@ -39,23 +40,23 @@ static T easum_kernel(int n, const T *x, int incx)
  * bit-identical, but within fuzz tolerance for a sum of magnitudes. */
 #define EASUM_OMP_MIN 10000
 #define EASUM_MAX_CPUS 64
-__attribute__((noinline)) static int easum_omp(int n, const T *x, T *out)
+__attribute__((noinline)) static ptrdiff_t easum_omp(ptrdiff_t n, const T *x, T *out)
 {
     if (n <= EASUM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EASUM_MAX_CPUS) nthreads = EASUM_MAX_CPUS;
     T partial[EASUM_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
+        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
+        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
         if (lo < hi) partial[tid] = easum_kernel(hi - lo, x + lo, 1);
     }
     T s = 0.0L;
-    for (int i = 0; i < nthreads; ++i) s += partial[i];
+    for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }
@@ -63,7 +64,7 @@ __attribute__((noinline)) static int easum_omp(int n, const T *x, T *out)
 
 T easum_(const int *n_, const T *x, const int *incx_)
 {
-    const int n = *n_, incx = *incx_;
+    const ptrdiff_t n = *n_, incx = *incx_;
     if (n < 1 || incx < 1) return 0.0L;
 #ifdef _OPENMP
     if (incx == 1) {

@@ -23,6 +23,7 @@
 #include "egemm_kernel.h"
 #include <stdlib.h>
 #include <ctype.h>
+#include <stddef.h>
 
 typedef esymm_T T;
 
@@ -44,17 +45,17 @@ typedef esymm_T T;
  * with posX/posY playing swapped roles — one routine serves both. No tail
  * padding: ragged MR/NR panels are consumed only by kernel_edge, which reads
  * just the real rows/cols (see egemm_macro_kernel). */
-static void esymm_pack_u(int m, int n, const T *a, int lda,
-                         int posX, int posY, T *b)
+static void esymm_pack_u(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
+                         ptrdiff_t posX, ptrdiff_t posY, T *b)
 {
-    int js = n >> 1;
+    ptrdiff_t js = n >> 1;
     while (js > 0) {
-        int offset = posX - posY;
+        ptrdiff_t offset = posX - posY;
         const T *ao1 = (offset >  0) ? a + (size_t)posY + (size_t)(posX + 0) * lda
                                      : a + (size_t)(posX + 0) + (size_t)posY * lda;
         const T *ao2 = (offset > -1) ? a + (size_t)posY + (size_t)(posX + 1) * lda
                                      : a + (size_t)(posX + 1) + (size_t)posY * lda;
-        for (int i = m; i > 0; --i) {
+        for (ptrdiff_t i = m; i > 0; --i) {
             b[0] = ao1[0]; b[1] = ao2[0]; b += 2;
             ao1 += (offset >  0) ? 1 : lda;
             ao2 += (offset > -1) ? 1 : lda;
@@ -67,10 +68,10 @@ static void esymm_pack_u(int m, int n, const T *a, int lda,
         /* Lone trailing strip: write the single column at panel stride MR
          * (kernel_edge reads Apanel[p*MR], so the odd panel keeps the same
          * stride as a full one — unlike OpenBLAS, which packs it contiguous). */
-        int offset = posX - posY;
+        ptrdiff_t offset = posX - posY;
         const T *ao1 = (offset > 0) ? a + (size_t)posY + (size_t)(posX + 0) * lda
                                     : a + (size_t)(posX + 0) + (size_t)posY * lda;
-        for (int i = m; i > 0; --i) {
+        for (ptrdiff_t i = m; i > 0; --i) {
             b[0] = ao1[0]; b += MR;
             ao1 += (offset > 0) ? 1 : lda;
             offset--;
@@ -78,17 +79,17 @@ static void esymm_pack_u(int m, int n, const T *a, int lda,
     }
 }
 
-static void esymm_pack_l(int m, int n, const T *a, int lda,
-                         int posX, int posY, T *b)
+static void esymm_pack_l(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
+                         ptrdiff_t posX, ptrdiff_t posY, T *b)
 {
-    int js = n >> 1;
+    ptrdiff_t js = n >> 1;
     while (js > 0) {
-        int offset = posX - posY;
+        ptrdiff_t offset = posX - posY;
         const T *ao1 = (offset >  0) ? a + (size_t)(posX + 0) + (size_t)posY * lda
                                      : a + (size_t)posY + (size_t)(posX + 0) * lda;
         const T *ao2 = (offset > -1) ? a + (size_t)(posX + 1) + (size_t)posY * lda
                                      : a + (size_t)posY + (size_t)(posX + 1) * lda;
-        for (int i = m; i > 0; --i) {
+        for (ptrdiff_t i = m; i > 0; --i) {
             b[0] = ao1[0]; b[1] = ao2[0]; b += 2;
             ao1 += (offset >  0) ? lda : 1;
             ao2 += (offset > -1) ? lda : 1;
@@ -99,10 +100,10 @@ static void esymm_pack_l(int m, int n, const T *a, int lda,
     }
     if (n & 1) {
         /* Lone trailing strip at panel stride MR — see esymm_pack_u. */
-        int offset = posX - posY;
+        ptrdiff_t offset = posX - posY;
         const T *ao1 = (offset > 0) ? a + (size_t)(posX + 0) + (size_t)posY * lda
                                     : a + (size_t)posY + (size_t)(posX + 0) * lda;
-        for (int i = m; i > 0; --i) {
+        for (ptrdiff_t i = m; i > 0; --i) {
             b[0] = ao1[0]; b += MR;
             ao1 += (offset > 0) ? lda : 1;
             offset--;
@@ -110,8 +111,8 @@ static void esymm_pack_l(int m, int n, const T *a, int lda,
     }
 }
 
-void esymm_pack_a_sym(const T *a, int lda,
-                      int ic, int pc, int ib, int pb,
+void esymm_pack_a_sym(const T *a, ptrdiff_t lda,
+                      ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
                       char uplo, T *Ap)
 {
     /* SIDE=L: A is the M×K symmetric operand. Rows (ib) form the panel/strip
@@ -120,8 +121,8 @@ void esymm_pack_a_sym(const T *a, int lda,
     else             esymm_pack_l(pb, ib, a, lda, ic, pc, Ap);
 }
 
-void esymm_pack_b_sym(const T *a, int lda,
-                      int pc, int jc, int pb, int jb,
+void esymm_pack_b_sym(const T *a, ptrdiff_t lda,
+                      ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
                       char uplo, T *Bp)
 {
     /* SIDE=R: A is the K×N symmetric operand in the B slot. Columns (jb) form
@@ -133,17 +134,17 @@ void esymm_pack_b_sym(const T *a, int lda,
 
 void esymm_serial(
     const char *side, const char *uplo,
-    const int *m_, const int *n_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, const ptrdiff_t *lda_,
+    const T *b, const ptrdiff_t *ldb_,
     const T *beta_,
-    T *c, const int *ldc_,
+    T *c, const ptrdiff_t *ldc_,
     size_t side_len, size_t uplo_len)
 {
     (void)side_len; (void)uplo_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const char SIDE = (char)toupper((unsigned char)*side);
     const char UPLO = (char)toupper((unsigned char)*uplo);
@@ -154,9 +155,9 @@ void esymm_serial(
     if (alpha == 0.0L) return;
 
     /* K is the contraction dim = the symmetric matrix's side. */
-    const int K = (SIDE == 'L') ? M : N;
+    const ptrdiff_t K = (SIDE == 'L') ? M : N;
 
-    int MC, KC, NC;
+    ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * KC * sizeof(T);
@@ -164,10 +165,10 @@ void esymm_serial(
     T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
-        for (int jc = 0; jc < N; jc += NC) {
-            const int jb = (N - jc < NC) ? (N - jc) : NC;
-            for (int pc = 0; pc < K; pc += KC) {
-                const int pb = (K - pc < KC) ? (K - pc) : KC;
+        for (ptrdiff_t jc = 0; jc < N; jc += NC) {
+            const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+            for (ptrdiff_t pc = 0; pc < K; pc += KC) {
+                const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
                 /* Pack the K×N (jc-band) right operand. SIDE='L': regular B.
                  * SIDE='R': the symmetric A goes in the B slot. */
                 if (SIDE == 'L')
@@ -175,8 +176,8 @@ void esymm_serial(
                 else
                     esymm_pack_b_sym(a, lda, pc, jc, pb, jb, UPLO, Bp);
 
-                for (int ic = 0; ic < M; ic += MC) {
-                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                for (ptrdiff_t ic = 0; ic < M; ic += MC) {
+                    const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
                     /* Pack the M×K (ic-block) left operand. SIDE='L': the
                      * symmetric A. SIDE='R': regular B in the A slot. */
                     if (SIDE == 'L')

@@ -2,18 +2,19 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include <stddef.h>
 #endif
 typedef long double T;
 
 /* Σ x·y over a contiguous logical range. 5-accumulator unroll matches NETLIB
  * DDOT, masks the ~3-cycle x87 fadd latency. Unit-stride fast path; strided
  * walk handles arbitrary (possibly negative) increments for the serial case. */
-static T edot_kernel(int n, const T *x, int incx, const T *y, int incy)
+static T edot_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdiff_t incy)
 {
     T s = 0.0L;
     if (incx == 1 && incy == 1) {
         T s0 = 0.0L, s1 = 0.0L, s2 = 0.0L, s3 = 0.0L, s4 = 0.0L;
-        int i = 0;
+        ptrdiff_t i = 0;
         for (; i + 4 < n; i += 5) {
             s0 += x[i    ] * y[i    ];
             s1 += x[i + 1] * y[i + 1];
@@ -24,9 +25,9 @@ static T edot_kernel(int n, const T *x, int incx, const T *y, int incy)
         s = s0 + s1 + s2 + s3 + s4;
         for (; i < n; ++i) s += x[i] * y[i];
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (int i = 0; i < n; ++i) { s += x[ix] * y[iy]; ix += incx; iy += incy; }
+        ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
+        for (ptrdiff_t i = 0; i < n; ++i) { s += x[ix] * y[iy]; ix += incx; iy += incy; }
     }
     return s;
 }
@@ -37,23 +38,23 @@ static T edot_kernel(int n, const T *x, int incx, const T *y, int incy)
  * region bookkeeping off the serial kernel's x87 allocation. */
 #define EDOT_OMP_MIN 10000
 #define EDOT_MAX_CPUS 64
-__attribute__((noinline)) static int edot_omp(int n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static ptrdiff_t edot_omp(ptrdiff_t n, const T *x, const T *y, T *out)
 {
     if (n <= EDOT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EDOT_MAX_CPUS) nthreads = EDOT_MAX_CPUS;
     T partial[EDOT_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
+        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
+        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
         if (lo < hi) partial[tid] = edot_kernel(hi - lo, x + lo, 1, y + lo, 1);
     }
     T s = 0.0L;
-    for (int i = 0; i < nthreads; ++i) s += partial[i];
+    for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }
@@ -62,7 +63,7 @@ __attribute__((noinline)) static int edot_omp(int n, const T *x, const T *y, T *
 T edot_(const int *n_, const T *x, const int *incx_,
         const T *y, const int *incy_)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return 0.0L;
 #ifdef _OPENMP
     if (incx == 1 && incy == 1) {

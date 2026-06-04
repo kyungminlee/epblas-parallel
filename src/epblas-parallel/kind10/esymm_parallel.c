@@ -44,14 +44,15 @@ void esymm_(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        esymm_serial(side, uplo, m_, n_, alpha_, a, lda_, b, ldb_, beta_,
-                     c, ldc_, side_len, uplo_len);
+        const ptrdiff_t m_pt = *m_, n_pt = *n_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
+        esymm_serial(side, uplo, &m_pt, &n_pt, alpha_, a, &lda_pt, b, &ldb_pt, beta_,
+                     c, &ldc_pt, side_len, uplo_len);
         return;
     }
 #endif
     (void)side_len; (void)uplo_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const char SIDE = (char)toupper((unsigned char)*side);
     const char UPLO = (char)toupper((unsigned char)*uplo);
@@ -67,16 +68,16 @@ void esymm_(
      * touches its own rows — for both the beta pass and the kernel writes —
      * so no barrier is needed between them. */
 
-    const int K = (SIDE == 'L') ? M : N;
+    const ptrdiff_t K = (SIDE == 'L') ? M : N;
 
-    int MC, KC, NC;
+    ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K, &MC, &KC, &NC);
 
 #ifdef _OPENMP
-    int nthreads = omp_get_max_threads();
+    ptrdiff_t nthreads = omp_get_max_threads();
     if (nthreads < 1) nthreads = 1;
 #else
-    int nthreads = 1;
+    ptrdiff_t nthreads = 1;
 #endif
     /* Tiny problems: the team setup + Bp barrier cost outweighs the split. */
     if ((long)M * (long)N * (long)K < 64L * 64L * 64L) nthreads = 1;
@@ -89,8 +90,8 @@ void esymm_(
      * would deadlock the others at the Bp barrier. */
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
-    int alloc_ok = (Bp && Ap_arr);
-    for (int t = 0; alloc_ok && t < nthreads; ++t) {
+    ptrdiff_t alloc_ok = (Bp && Ap_arr);
+    for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (!Ap_arr[t]) alloc_ok = 0;
     }
@@ -100,31 +101,31 @@ void esymm_(
 #endif
         {
 #ifdef _OPENMP
-            const int tid = omp_get_thread_num();
-            const int nth = omp_get_num_threads();
+            const ptrdiff_t tid = omp_get_thread_num();
+            const ptrdiff_t nth = omp_get_num_threads();
 #else
-            const int tid = 0, nth = 1;
+            const ptrdiff_t tid = 0, nth = 1;
 #endif
             T *Ap = Ap_arr[tid];
 
-            const int m_chunk = egemm_round_up((M + nth - 1) / nth, MR);
-            const int m_lo = tid * m_chunk;
-            int m_hi = m_lo + m_chunk;
+            const ptrdiff_t m_chunk = egemm_round_up((M + nth - 1) / nth, MR);
+            const ptrdiff_t m_lo = tid * m_chunk;
+            ptrdiff_t m_hi = m_lo + m_chunk;
             if (m_hi > M) m_hi = M;
 
             /* C := beta*C over this thread's rows only (handles beta 0/1). */
             if (beta != 1.0L && m_lo < m_hi) {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T *cj = &c[(size_t)j * ldc];
-                    if (beta == 0.0L) for (int i = m_lo; i < m_hi; ++i) cj[i]  = 0.0L;
-                    else              for (int i = m_lo; i < m_hi; ++i) cj[i] *= beta;
+                    if (beta == 0.0L) for (ptrdiff_t i = m_lo; i < m_hi; ++i) cj[i]  = 0.0L;
+                    else              for (ptrdiff_t i = m_lo; i < m_hi; ++i) cj[i] *= beta;
                 }
             }
 
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
+            for (ptrdiff_t jc = 0; jc < N; jc += NC) {
+                const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+                for (ptrdiff_t pc = 0; pc < K; pc += KC) {
+                    const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
 #ifdef _OPENMP
                     #pragma omp barrier
                     #pragma omp single
@@ -137,8 +138,8 @@ void esymm_(
                     }
                     /* implicit barrier at end of `single` → Bp safe to read */
 
-                    for (int ic = m_lo; ic < m_hi; ic += MC) {
-                        const int ib = (m_hi - ic < MC) ? (m_hi - ic) : MC;
+                    for (ptrdiff_t ic = m_lo; ic < m_hi; ic += MC) {
+                        const ptrdiff_t ib = (m_hi - ic < MC) ? (m_hi - ic) : MC;
                         if (SIDE == 'L')
                             esymm_pack_a_sym(a, lda, ic, pc, ib, pb, UPLO, Ap);
                         else
@@ -152,7 +153,7 @@ void esymm_(
         }
     }
 
-    for (int t = 0; t < nthreads && Ap_arr; ++t) free(Ap_arr[t]);
+    for (ptrdiff_t t = 0; t < nthreads && Ap_arr; ++t) free(Ap_arr[t]);
     free(Ap_arr);
     free(Bp);
 }

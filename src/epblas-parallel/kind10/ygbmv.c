@@ -58,10 +58,10 @@ static inline char up(const char *p) {
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 #ifdef _OPENMP
-static int ygbmv_n_omp(int m, int n, int kl, int ku,
-                       const T *restrict a, int lda,
-                       const T *restrict x, int incx,
-                       T alpha, T *restrict y, int incy);
+static ptrdiff_t ygbmv_n_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
+                       const T *restrict a, ptrdiff_t lda,
+                       const T *restrict x, ptrdiff_t incx,
+                       T alpha, T *restrict y, ptrdiff_t incy);
 #endif
 
 void ygbmv_(
@@ -76,23 +76,23 @@ void ygbmv_(
     size_t trans_len)
 {
     (void)trans_len;
-    const int M = *m_, N = *n_;
-    const int KL = *kl_, KU = *ku_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t KL = *kl_, KU = *ku_;
+    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
     const char TR = up(trans);
-    const int noconj = (TR == 'T');
+    const ptrdiff_t noconj = (TR == 'T');
 
     if (M == 0 || N == 0 || (alpha == zero && beta == one)) return;
 
-    const int leny = (TR == 'N') ? M : N;
-    const int lenx = (TR == 'N') ? N : M;
+    const ptrdiff_t leny = (TR == 'N') ? M : N;
+    const ptrdiff_t lenx = (TR == 'N') ? N : M;
 
     if (beta != one) {
-        int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-        if (beta == zero) for (int i = 0; i < leny; ++i) { y[iy] = zero; iy += incy; }
-        else              for (int i = 0; i < leny; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+        ptrdiff_t iy = (incy < 0) ? -(leny - 1) * incy : 0;
+        if (beta == zero) for (ptrdiff_t i = 0; i < leny; ++i) { y[iy] = zero; iy += incy; }
+        else              for (ptrdiff_t i = 0; i < leny; ++i) { y[iy] = beta * y[iy]; iy += incy; }
     }
     if (alpha == zero) return;
 
@@ -110,43 +110,43 @@ void ygbmv_(
          * a register-resident complex x87 scalar. A(i,j) = base[j*s1], an lda-1
          * anti-diagonal walk; j ranges over row i's band. No conjugation (A*x). */
         if (incx == 1 && incy == 1) {
-            for (int i = 0; i < M; ++i) {
-                const int j_lo = (i - KL > 0) ? (i - KL) : 0;
-                const int j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
+            for (ptrdiff_t i = 0; i < M; ++i) {
+                const ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
+                const ptrdiff_t j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
                 const T *base = a + (KU + i);
                 T s = zero;
-                for (int j = j_lo; j < j_hi; ++j) s += base[(ptrdiff_t)j * s1] * x[j];
+                for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += base[(ptrdiff_t)j * s1] * x[j];
                 y[i] += alpha * s;
             }
         } else {
             const ptrdiff_t ix0 = (incx < 0) ? -(ptrdiff_t)(lenx - 1) * incx : 0;
             const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(leny - 1) * incy : 0;
-            for (int i = 0; i < M; ++i) {
-                const int j_lo = (i - KL > 0) ? (i - KL) : 0;
-                const int j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
+            for (ptrdiff_t i = 0; i < M; ++i) {
+                const ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
+                const ptrdiff_t j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
                 const T *base = a + (KU + i);
                 T s = zero;
                 ptrdiff_t xx = ix0 + (ptrdiff_t)j_lo * incx;
-                for (int j = j_lo; j < j_hi; ++j) { s += base[(ptrdiff_t)j * s1] * x[xx]; xx += incx; }
+                for (ptrdiff_t j = j_lo; j < j_hi; ++j) { s += base[(ptrdiff_t)j * s1] * x[xx]; xx += incx; }
                 y[iy0 + (ptrdiff_t)i * incy] += alpha * s;
             }
         }
     } else if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= YGBMV_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t use_omp = (N >= YGBMV_OMP_MIN && blas_omp_max_threads() > 1);
 #else
-        const int use_omp = 0;
+        const ptrdiff_t use_omp = 0;
 #endif
         /* Branch on use_omp in C source — `if(use_omp)` on the pragma still
          * outlines the loop body (egbmv Addendum 16), so duplicate it instead. */
 #define YGBMV_T_BODY                                                          \
-        for (int j = 0; j < N; ++j) {                                         \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                         \
             T s = zero;                                                       \
-            const int i_lo = (j - KU > 0) ? (j - KU) : 0;                     \
-            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;             \
-            const int k = KU - j;                                            \
-            if (noconj) for (int i = i_lo; i < i_hi; ++i) s += A_(k + i, j) * x[i];        \
-            else        for (int i = i_lo; i < i_hi; ++i) s += cconj(A_(k + i, j)) * x[i]; \
+            const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;                     \
+            const ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;             \
+            const ptrdiff_t k = KU - j;                                            \
+            if (noconj) for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += A_(k + i, j) * x[i];        \
+            else        for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += cconj(A_(k + i, j)) * x[i]; \
             y[j] += alpha * s;                                               \
         }
         if (use_omp) {
@@ -160,19 +160,19 @@ void ygbmv_(
 #undef YGBMV_T_BODY
     } else {
         /* Strided Trans/ConjTrans gather. */
-        int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
-        int ky = (incy < 0) ? -(leny - 1) * incy : 0;
-        int jy = ky;
-        for (int j = 0; j < N; ++j) {
+        ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
+        ptrdiff_t jy = ky;
+        for (ptrdiff_t j = 0; j < N; ++j) {
             T s = zero;
-            int ix = kx;
-            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-            const int k = KU - j;
+            ptrdiff_t ix = kx;
+            const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
+            const ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+            const ptrdiff_t k = KU - j;
             if (noconj) {
-                for (int i = i_lo; i < i_hi; ++i) { s += A_(k + i, j) * x[ix]; ix += incx; }
+                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += A_(k + i, j) * x[ix]; ix += incx; }
             } else {
-                for (int i = i_lo; i < i_hi; ++i) { s += cconj(A_(k + i, j)) * x[ix]; ix += incx; }
+                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += cconj(A_(k + i, j)) * x[ix]; ix += incx; }
             }
             y[jy] += alpha * s;
             jy += incy;
@@ -209,15 +209,15 @@ static void gbmv_n_rowgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t k
  * dependence (x and y distinct) -- no barrier, no scratch beyond the strided-x
  * gather buffer. Returns 1 if handled, 0 to fall back. Carved out (noinline) so
  * its bookkeeping does not pressure the serial gather's x87 allocation. */
-__attribute__((noinline)) static int ygbmv_n_omp(
-    int m, int n, int kl, int ku,
-    const T *restrict a, int lda,
-    const T *restrict x, int incx,
-    T alpha, T *restrict y, int incy)
+__attribute__((noinline)) static ptrdiff_t ygbmv_n_omp(
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict x, ptrdiff_t incx,
+    T alpha, T *restrict y, ptrdiff_t incy)
 {
     if (m < YGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > YGBMV_MAX_CPUS) nthreads = YGBMV_MAX_CPUS;
 
     /* Negative-increment base adjustment so x[i*incx], y[i*incy] walk logically.
@@ -232,13 +232,13 @@ __attribute__((noinline)) static int ygbmv_n_omp(
     if (incx != 1) {
         xbuf = (T *)malloc((size_t)n * sizeof(T));
         if (!xbuf) return 0;
-        for (int i = 0; i < n; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
+        for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
         xptr = xbuf;
     }
 
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
+        ptrdiff_t tid = omp_get_thread_num();
         ptrdiff_t lo = ((ptrdiff_t)m * tid) / nthreads;
         ptrdiff_t hi = ((ptrdiff_t)m * (tid + 1)) / nthreads;
         gbmv_n_rowgather(m, n, kl, ku, lo, hi, a, lda, xptr, alpha, y, (ptrdiff_t)incy);

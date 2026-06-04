@@ -31,42 +31,42 @@
 typedef _Complex long double ysymm_T;
 
 /* Block/panel size (env YSYMM_NB; otherwise 32). */
-int ysymm_nb(void);
+ptrdiff_t ysymm_nb(void);
 
 /* alpha==0 quick path: C := beta*C over columns [j_start, j_end), rows
  * [0, M). */
-void ysymm_beta_only(int j_start, int j_end, int M, ysymm_T beta,
-                     ysymm_T *c, int ldc);
+void ysymm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ysymm_T beta,
+                     ysymm_T *c, ptrdiff_t ldc);
 
 /* SIDE='L', M <= nb single-block fast path, one column range [j_start,
  * j_end): inlined scalar ZSYMM with beta folded into the diagonal write. */
-void ysymm_L_singleblock(int j_start, int j_end, int M,
+void ysymm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
                          ysymm_T alpha, ysymm_T beta,
-                         const ysymm_T *a, int lda,
-                         const ysymm_T *b, int ldb,
-                         ysymm_T *c, int ldc, char UPLO);
+                         const ysymm_T *a, ptrdiff_t lda,
+                         const ysymm_T *b, ptrdiff_t ldb,
+                         ysymm_T *c, ptrdiff_t ldc, char UPLO);
 
 /* SIDE='L' general path, one column panel [jc, jc+jb): beta pre-scale +
  * I/K block loops (ygemm_serial trailing) + scalar diagonal block. */
-void ysymm_L_panel(int jc, int jb, int M, ysymm_T alpha, ysymm_T beta,
-                   const ysymm_T *a, int lda, const ysymm_T *b, int ldb,
-                   ysymm_T *c, int ldc, char UPLO, int nb);
+void ysymm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, ysymm_T alpha, ysymm_T beta,
+                   const ysymm_T *a, ptrdiff_t lda, const ysymm_T *b, ptrdiff_t ldb,
+                   ysymm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
 /* SIDE='R' general path, one row panel [ic, ic+ib): beta pre-scale +
  * J/K block loops (ygemm_serial trailing) + scalar diagonal block. */
-void ysymm_R_panel(int ic, int ib, int N, ysymm_T alpha, ysymm_T beta,
-                   const ysymm_T *a, int lda, const ysymm_T *b, int ldb,
-                   ysymm_T *c, int ldc, char UPLO, int nb);
+void ysymm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, ysymm_T alpha, ysymm_T beta,
+                   const ysymm_T *a, ptrdiff_t lda, const ysymm_T *b, ptrdiff_t ldb,
+                   ysymm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ysymm_. */
 void ysymm_serial(
     const char *side, const char *uplo,
-    const int *m_, const int *n_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_,
     const ysymm_T *alpha_,
-    const ysymm_T *a, const int *lda_,
-    const ysymm_T *b, const int *ldb_,
+    const ysymm_T *a, const ptrdiff_t *lda_,
+    const ysymm_T *b, const ptrdiff_t *ldb_,
     const ysymm_T *beta_,
-    ysymm_T *c, const int *ldc_,
+    ysymm_T *c, const ptrdiff_t *ldc_,
     size_t side_len, size_t uplo_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YSYMM_KERNEL_H */

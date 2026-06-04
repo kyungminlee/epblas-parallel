@@ -41,15 +41,16 @@ void yherk_(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        yherk_serial(uplo, trans, n_, k_, alpha_, a, lda_, beta_, c, ldc_,
+        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldc_pt = *ldc_;
+        yherk_serial(uplo, trans, &n_pt, &k_pt, alpha_, a, &lda_pt, beta_, c, &ldc_pt,
                      uplo_len, trans_len);
         return;
     }
 #endif
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
+    const ptrdiff_t N = *n_, K = *k_;
     const TR alpha = *alpha_, beta = *beta_;
-    const int ldc = *ldc_;
+    const ptrdiff_t ldc = *ldc_;
     const char UPLO = (char)toupper((unsigned char)*uplo);
     const char TR_c = (char)toupper((unsigned char)*trans);
 
@@ -59,27 +60,27 @@ void yherk_(
 
     if (alpha == rzero || K == 0) {
         if (beta == rone) {
-            for (int j = 0; j < N; ++j) c[(size_t)j * ldc + j] = __real__ c[(size_t)j * ldc + j];
+            for (ptrdiff_t j = 0; j < N; ++j) c[(size_t)j * ldc + j] = __real__ c[(size_t)j * ldc + j];
             return;
         }
 #ifdef _OPENMP
-        const int use_omp = (N >= YHERK_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t use_omp = (N >= YHERK_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (ptrdiff_t j = 0; j < N; ++j)
             yherk_beta_scale(j, j + 1, N, beta, c, ldc, UPLO);
         return;
     }
 
-    const int nb = yherk_nb();
-    const int lda = *lda_;
+    const ptrdiff_t nb = yherk_nb();
+    const ptrdiff_t lda = *lda_;
 
 #ifdef _OPENMP
-    const int use_omp = (N >= YHERK_OMP_MIN && blas_omp_max_threads() > 1);
+    const ptrdiff_t use_omp = (N >= YHERK_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (int jc = 0; jc < N; jc += nb) {
-        const int jb = (N - jc < nb) ? (N - jc) : nb;
+    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
+        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
         yherk_block(jc, jb, N, K, alpha, beta, a, lda, c, ldc, UPLO, TR_c);
     }
 }

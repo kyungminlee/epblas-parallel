@@ -53,7 +53,7 @@ static inline char up(const char *p) {
 #define ETBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
-static int etbmv_omp(int upper, int trans, int nounit, ptrdiff_t n, ptrdiff_t k,
+static ptrdiff_t etbmv_omp(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit, ptrdiff_t n, ptrdiff_t k,
                      const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
 #endif
 
@@ -65,19 +65,19 @@ void etbmv_(
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, incx = *incx_;
+    const ptrdiff_t N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
-    const int nounit = (up(diag) != 'U');
+    const ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 
 #ifdef _OPENMP
     /* Cheap inline gate first: at OMP=1 (or below threshold) short-circuit
      * before the noinline call's argument marshalling (outlining tax). */
-    const int omp_min = (TR == 'T') ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
+    const ptrdiff_t omp_min = (TR == 'T') ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
     if (N >= omp_min && blas_omp_max_threads() > 1
         && etbmv_omp(UPLO == 'U', TR == 'T', nounit, N, K, a, lda, x, incx))
         return;
@@ -93,38 +93,38 @@ void etbmv_(
              * an unread input. base[k +- d*s1] walks the lda-1 anti-diagonal. */
             const ptrdiff_t s1 = lda - 1;
             if (UPLO == 'U') {
-                for (int i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < N; ++i) {
                     const T *base = &A_(0, i);
-                    const int len = (N - 1 - i < K) ? (N - 1 - i) : K;
+                    const ptrdiff_t len = (N - 1 - i < K) ? (N - 1 - i) : K;
                     T s = nounit ? base[K] * x[i] : x[i];
-                    for (int d = 1; d <= len; ++d) s += base[K + (ptrdiff_t)d * s1] * x[i + d];
+                    for (ptrdiff_t d = 1; d <= len; ++d) s += base[K + (ptrdiff_t)d * s1] * x[i + d];
                     x[i] = s;
                 }
             } else {
-                for (int i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = N - 1; i >= 0; --i) {
                     const T *base = &A_(0, i);
-                    const int len = (i < K) ? i : K;
+                    const ptrdiff_t len = (i < K) ? i : K;
                     T s = nounit ? base[0] * x[i] : x[i];
-                    for (int d = 1; d <= len; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
+                    for (ptrdiff_t d = 1; d <= len; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
                     x[i] = s;
                 }
             }
         } else {
             if (UPLO == 'U') {
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[j];
-                    const int L = K - j;
+                    const ptrdiff_t L = K - j;
                     if (nounit) tmp *= A_(K, j);
-                    const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    for (int i = j - 1; i >= i_lo; --i) tmp += A_(L + i, j) * x[i];
+                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    for (ptrdiff_t i = j - 1; i >= i_lo; --i) tmp += A_(L + i, j) * x[i];
                     x[j] = tmp;
                 }
             } else {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[j];
                     if (nounit) tmp *= A_(0, j);
-                    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    for (int i = j + 1; i < i_hi; ++i) tmp += A_(i - j, j) * x[i];
+                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += A_(i - j, j) * x[i];
                     x[j] = tmp;
                 }
             }
@@ -138,39 +138,39 @@ void etbmv_(
             const ptrdiff_t off0 = (incx < 0) ? -(ptrdiff_t)(N - 1) * incx : 0;
             const ptrdiff_t s1 = lda - 1;
             if (UPLO == 'U') {
-                for (int i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < N; ++i) {
                     const T *base = &A_(0, i);
-                    const int len = (N - 1 - i < K) ? (N - 1 - i) : K;
+                    const ptrdiff_t len = (N - 1 - i < K) ? (N - 1 - i) : K;
                     const ptrdiff_t ii = off0 + (ptrdiff_t)i * incx;
                     T s = nounit ? base[K] * x[ii] : x[ii];
                     ptrdiff_t ix = ii + incx;
-                    for (int d = 1; d <= len; ++d) { s += base[K + (ptrdiff_t)d * s1] * x[ix]; ix += incx; }
+                    for (ptrdiff_t d = 1; d <= len; ++d) { s += base[K + (ptrdiff_t)d * s1] * x[ix]; ix += incx; }
                     x[ii] = s;
                 }
             } else {
-                for (int i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = N - 1; i >= 0; --i) {
                     const T *base = &A_(0, i);
-                    const int len = (i < K) ? i : K;
+                    const ptrdiff_t len = (i < K) ? i : K;
                     const ptrdiff_t ii = off0 + (ptrdiff_t)i * incx;
                     T s = nounit ? base[0] * x[ii] : x[ii];
                     ptrdiff_t ix = ii - incx;
-                    for (int d = 1; d <= len; ++d) { s += base[-(ptrdiff_t)d * s1] * x[ix]; ix -= incx; }
+                    for (ptrdiff_t d = 1; d <= len; ++d) { s += base[-(ptrdiff_t)d * s1] * x[ix]; ix -= incx; }
                     x[ii] = s;
                 }
             }
         } else {
-            int kx = (incx < 0) ? -(N - 1) * incx : 0;
+            ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
             if (UPLO == 'U') {
                 kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     kx -= incx;
-                    int ix = kx;
-                    const int L = K - j;
+                    ptrdiff_t ix = kx;
+                    const ptrdiff_t L = K - j;
                     if (nounit) tmp *= A_(K, j);
-                    const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    for (int i = j - 1; i >= i_lo; --i) {
+                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                         tmp += A_(L + i, j) * x[ix];
                         ix -= incx;
                     }
@@ -178,14 +178,14 @@ void etbmv_(
                     jx -= incx;
                 }
             } else {
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[jx];
                     kx += incx;
-                    int ix = kx;
+                    ptrdiff_t ix = kx;
                     if (nounit) tmp *= A_(0, j);
-                    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    for (int i = j + 1; i < i_hi; ++i) {
+                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                         tmp += A_(i - j, j) * x[ix];
                         ix += incx;
                     }
@@ -206,7 +206,7 @@ void etbmv_(
  * dependence — no per-thread buffer beyond the shared y, no zero-fill, no
  * reduction. Branch hoisted out of the i-loop; lda-1 (NoTrans anti-diagonal
  * stride) vs contiguous (Trans). */
-static void tbmv_rowgather(int upper, int trans, int nounit,
+static void tbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit,
                            ptrdiff_t n, ptrdiff_t k, ptrdiff_t lo, ptrdiff_t hi,
                            const T *restrict a, ptrdiff_t lda,
                            const T *restrict x, T *restrict y)
@@ -255,14 +255,14 @@ static void tbmv_rowgather(int upper, int trans, int nounit,
  * [lo,hi): it gathers y[lo,hi) reading x, a barrier, then copies its own range
  * back to x. No cross-thread data dependence beyond the single read/write
  * barrier — near-linear scaling. Returns 1 if handled, 0 to fall back. */
-__attribute__((noinline)) static int etbmv_omp(
-    int upper, int trans, int nounit, ptrdiff_t n, ptrdiff_t k,
+__attribute__((noinline)) static ptrdiff_t etbmv_omp(
+    ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit, ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx)
 {
     ptrdiff_t omp_min = trans ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
     if (n < omp_min || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > ETBMV_MAX_CPUS) nthreads = ETBMV_MAX_CPUS;
 
     if (incx < 0) x -= (n - 1) * incx;
@@ -282,7 +282,7 @@ __attribute__((noinline)) static int etbmv_omp(
 
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
+        ptrdiff_t tid = omp_get_thread_num();
         ptrdiff_t lo = (n * (ptrdiff_t)tid) / nthreads;
         ptrdiff_t hi = (n * (ptrdiff_t)(tid + 1)) / nthreads;
         tbmv_rowgather(upper, trans, nounit, n, k, lo, hi, a, lda, xptr, y);

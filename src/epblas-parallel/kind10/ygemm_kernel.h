@@ -35,40 +35,40 @@
 typedef _Complex long double ygemm_T;
 
 /* C := beta*C pre-pass over the full M×N tile (handles K==0 / alpha==0). */
-void ygemm_beta_prepass(int M, int N, ygemm_T beta, ygemm_T *c, int ldc);
+void ygemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, ygemm_T beta, ygemm_T *c, ptrdiff_t ldc);
 
 /* ── Orientation cores: serial work over columns [j_start, j_end) of C.
  *    One per (TRANSA, TRANSB) class; conjugation is a runtime flag. ── */
 
 /* TA='N', TB='N': rank-1 update over l, K-unrolled by 2. */
-void ygemm_nn_core(int j_start, int j_end, int M, int K, ygemm_T alpha,
-                   const ygemm_T *a, int lda, const ygemm_T *b, int ldb,
-                   ygemm_T *c, int ldc);
+void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, ygemm_T alpha,
+                   const ygemm_T *a, ptrdiff_t lda, const ygemm_T *b, ptrdiff_t ldb,
+                   ygemm_T *c, ptrdiff_t ldc);
 
 /* TA in {'T','C'}, TB='N': dot of A col i and B col j. */
-void ygemm_tn_core(int j_start, int j_end, int M, int K, ygemm_T alpha,
-                   const ygemm_T *a, int lda, const ygemm_T *b, int ldb,
-                   ygemm_T *c, int ldc, int conj_a);
+void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, ygemm_T alpha,
+                   const ygemm_T *a, ptrdiff_t lda, const ygemm_T *b, ptrdiff_t ldb,
+                   ygemm_T *c, ptrdiff_t ldc, ptrdiff_t conj_a);
 
 /* TA='N', TB in {'T','C'}: rank-1 update over l, K-unrolled by 2. */
-void ygemm_nt_core(int j_start, int j_end, int M, int K, ygemm_T alpha,
-                   const ygemm_T *a, int lda, const ygemm_T *b, int ldb,
-                   ygemm_T *c, int ldc, int conj_b);
+void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, ygemm_T alpha,
+                   const ygemm_T *a, ptrdiff_t lda, const ygemm_T *b, ptrdiff_t ldb,
+                   ygemm_T *c, ptrdiff_t ldc, ptrdiff_t conj_b);
 
 /* Both transposed: A col i × B row j, dot-product form. */
-void ygemm_tt_core(int j_start, int j_end, int M, int K, ygemm_T alpha,
-                   const ygemm_T *a, int lda, const ygemm_T *b, int ldb,
-                   ygemm_T *c, int ldc, int conj_a, int conj_b);
+void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, ygemm_T alpha,
+                   const ygemm_T *a, ptrdiff_t lda, const ygemm_T *b, ptrdiff_t ldb,
+                   ygemm_T *c, ptrdiff_t ldc, ptrdiff_t conj_a, ptrdiff_t conj_b);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ygemm_. */
 void ygemm_serial(
     const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_, const ptrdiff_t *k_,
     const ygemm_T *alpha_,
-    const ygemm_T *a, const int *lda_,
-    const ygemm_T *b, const int *ldb_,
+    const ygemm_T *a, const ptrdiff_t *lda_,
+    const ygemm_T *b, const ptrdiff_t *ldb_,
     const ygemm_T *beta_,
-    ygemm_T *c, const int *ldc_,
+    ygemm_T *c, const ptrdiff_t *ldc_,
     size_t transa_len, size_t transb_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YGEMM_KERNEL_H */

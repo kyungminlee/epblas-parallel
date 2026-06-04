@@ -43,22 +43,23 @@ void etrsm_(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        etrsm_serial(side, uplo, transa, diag, m_, n_, alpha_, a, lda_,
-                     b, ldb_, side_len, uplo_len, transa_len, diag_len);
+        const ptrdiff_t m_pt = *m_, n_pt = *n_, lda_pt = *lda_, ldb_pt = *ldb_;
+        etrsm_serial(side, uplo, transa, diag, &m_pt, &n_pt, alpha_, a, &lda_pt,
+                     b, &ldb_pt, side_len, uplo_len, transa_len, diag_len);
         return;
     }
 #endif
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
 
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
+    const ptrdiff_t M = *m_, N = *n_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
 
-    const int lside = (toupper((unsigned char)*side)   == 'L');
-    const int upper = (toupper((unsigned char)*uplo)   == 'U');
+    const ptrdiff_t lside = (toupper((unsigned char)*side)   == 'L');
+    const ptrdiff_t upper = (toupper((unsigned char)*uplo)   == 'U');
     const char trc  = (char)toupper((unsigned char)*transa);
-    const int trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
-    const int unit  = (toupper((unsigned char)*diag) == 'U');
+    const ptrdiff_t trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
+    const ptrdiff_t unit  = (toupper((unsigned char)*diag) == 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -66,18 +67,18 @@ void etrsm_(
     if (alpha != 1.0L) egemm_beta_prepass(M, N, alpha, b, ldb);
     if (alpha == 0.0L) return;
 
-    const int K_eff = lside ? M : N;
-    int MC, KC, NC;
+    const ptrdiff_t K_eff = lside ? M : N;
+    ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
 
 #ifdef _OPENMP
-    int nthreads = omp_get_max_threads();
+    ptrdiff_t nthreads = omp_get_max_threads();
     if (nthreads < 1) nthreads = 1;
 #else
-    int nthreads = 1;
+    ptrdiff_t nthreads = 1;
 #endif
 
     /* Small problems: one thread (the parallel-region setup isn't worth
@@ -85,7 +86,7 @@ void etrsm_(
     long mnk = (long)M * (long)N * (long)K_eff;
     if (mnk < 64L * 64L * 64L) nthreads = 1;
 
-    const int partition_axis = lside ? N : M;
+    const ptrdiff_t partition_axis = lside ? N : M;
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
 
@@ -96,14 +97,14 @@ void etrsm_(
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
     if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
-    int alloc_ok = 1;
-    for (int t = 0; t < nthreads; ++t) {
+    ptrdiff_t alloc_ok = 1;
+    for (ptrdiff_t t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         Bp_arr[t] = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
         if (!Ap_arr[t] || !Bp_arr[t]) { alloc_ok = 0; break; }
     }
     if (!alloc_ok) {
-        for (int t = 0; t < nthreads; ++t) {
+        for (ptrdiff_t t = 0; t < nthreads; ++t) {
             if (Ap_arr) free(Ap_arr[t]);
             if (Bp_arr) free(Bp_arr[t]);
         }
@@ -116,27 +117,27 @@ void etrsm_(
 #endif
     {
 #ifdef _OPENMP
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
 #else
-        int tid = 0, nth = 1;
+        ptrdiff_t tid = 0, nth = 1;
 #endif
         T *Ap = Ap_arr[tid];
         T *Bp = Bp_arr[tid];
 
         if (lside) {
-            int chunk = egemm_round_up((N + nth - 1) / nth, NR);
-            int js0 = tid * chunk;
-            int js1 = js0 + chunk;
+            ptrdiff_t chunk = egemm_round_up((N + nth - 1) / nth, NR);
+            ptrdiff_t js0 = tid * chunk;
+            ptrdiff_t js1 = js0 + chunk;
             if (js0 > N) js0 = N;
             if (js1 > N) js1 = N;
             if (js0 < js1)
                 etrsm_L_band(upper, trans, unit, M, js0, js1,
                              MC, KC, NC, a, lda, b, ldb, Ap, Bp);
         } else {
-            int chunk = egemm_round_up((M + nth - 1) / nth, MR);
-            int m_lo = tid * chunk;
-            int m_hi = m_lo + chunk;
+            ptrdiff_t chunk = egemm_round_up((M + nth - 1) / nth, MR);
+            ptrdiff_t m_lo = tid * chunk;
+            ptrdiff_t m_hi = m_lo + chunk;
             if (m_lo > M) m_lo = M;
             if (m_hi > M) m_hi = M;
             if (m_lo < m_hi)
@@ -145,7 +146,7 @@ void etrsm_(
         }
     }
 
-    for (int t = 0; t < nthreads; ++t) {
+    for (ptrdiff_t t = 0; t < nthreads; ++t) {
         free(Ap_arr[t]);
         free(Bp_arr[t]);
     }

@@ -22,77 +22,77 @@ void etbsv_(
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, incx = *incx_;
+    const ptrdiff_t N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, incx = *incx_;
     const T zero = 0.0L;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
-    const int nounit = (up(diag) != 'U');
+    const ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (x[j] != zero) {
-                        const int L = K - j;
+                        const ptrdiff_t L = K - j;
                         if (nounit) x[j] /= A_(K, j);
                         const T tmp = x[j];
-                        const int i_lo = (j - K > 0) ? (j - K) : 0;
+                        const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
                         /* Inner iterations are independent (each writes a
                          * distinct x[i] using a constant tmp); walk forward
                          * for the hardware prefetcher. The migrated walks
                          * backward but hits the same ~0.84× floor. */
-                        for (int i = i_lo; i < j; ++i) x[i] -= tmp * A_(L + i, j);
+                        for (ptrdiff_t i = i_lo; i < j; ++i) x[i] -= tmp * A_(L + i, j);
                     }
                 }
             } else {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[j] != zero) {
                         if (nounit) x[j] /= A_(0, j);
                         const T tmp = x[j];
-                        const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (int i = j + 1; i < i_hi; ++i) x[i] -= tmp * A_(i - j, j);
+                        const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                        for (ptrdiff_t i = j + 1; i < i_hi; ++i) x[i] -= tmp * A_(i - j, j);
                     }
                 }
             }
         } else {
             if (UPLO == 'U') {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[j];
-                    const int L = K - j;
-                    const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    for (int i = i_lo; i < j; ++i) tmp -= A_(L + i, j) * x[i];
+                    const ptrdiff_t L = K - j;
+                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= A_(L + i, j) * x[i];
                     if (nounit) tmp /= A_(K, j);
                     x[j] = tmp;
                 }
             } else {
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[j];
-                    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    for (int i = i_hi - 1; i > j; --i) tmp -= A_(i - j, j) * x[i];
+                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= A_(i - j, j) * x[i];
                     if (nounit) tmp /= A_(0, j);
                     x[j] = tmp;
                 }
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
                 kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     kx -= incx;
                     if (x[jx] != zero) {
-                        int ix = kx;
-                        const int L = K - j;
+                        ptrdiff_t ix = kx;
+                        const ptrdiff_t L = K - j;
                         if (nounit) x[jx] /= A_(K, j);
                         const T tmp = x[jx];
-                        const int i_lo = (j - K > 0) ? (j - K) : 0;
-                        for (int i = j - 1; i >= i_lo; --i) {
+                        const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                        for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                             x[ix] -= tmp * A_(L + i, j);
                             ix -= incx;
                         }
@@ -100,15 +100,15 @@ void etbsv_(
                     jx -= incx;
                 }
             } else {
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     kx += incx;
                     if (x[jx] != zero) {
-                        int ix = kx;
+                        ptrdiff_t ix = kx;
                         if (nounit) x[jx] /= A_(0, j);
                         const T tmp = x[jx];
-                        const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (int i = j + 1; i < i_hi; ++i) {
+                        const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                        for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                             x[ix] -= tmp * A_(i - j, j);
                             ix += incx;
                         }
@@ -118,13 +118,13 @@ void etbsv_(
             }
         } else {
             if (UPLO == 'U') {
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[jx];
-                    int ix = kx;
-                    const int L = K - j;
-                    const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    for (int i = i_lo; i < j; ++i) {
+                    ptrdiff_t ix = kx;
+                    const ptrdiff_t L = K - j;
+                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    for (ptrdiff_t i = i_lo; i < j; ++i) {
                         tmp -= A_(L + i, j) * x[ix];
                         ix += incx;
                     }
@@ -135,12 +135,12 @@ void etbsv_(
                 }
             } else {
                 kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[jx];
-                    int ix = kx;
-                    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    for (int i = i_hi - 1; i > j; --i) {
+                    ptrdiff_t ix = kx;
+                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    for (ptrdiff_t i = i_hi - 1; i > j; --i) {
                         tmp -= A_(i - j, j) * x[ix];
                         ix -= incx;
                     }

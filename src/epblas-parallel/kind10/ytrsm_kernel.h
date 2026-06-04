@@ -35,59 +35,59 @@ typedef _Complex long double ytrsm_T;
 enum ytrsm_variant { YLLN, YLUN, YLLT, YLUT, YLLC, YLUC };
 
 /* Env-tunable block size for the SIDE='L' blocked path (YTRSM_NB). */
-int ytrsm_nb(void);
+ptrdiff_t ytrsm_nb(void);
 
 /* ── SIDE='L' column-range cores: serial work over columns
  *    [j_start, j_end) of B; A is M×M. ──────────────────────────── */
-void ytrsm_lln_core(int j_start, int j_end, int M, ytrsm_T alpha,
-                    const ytrsm_T *a, int lda, ytrsm_T *b, int ldb, int nounit);
-void ytrsm_lun_core(int j_start, int j_end, int M, ytrsm_T alpha,
-                    const ytrsm_T *a, int lda, ytrsm_T *b, int ldb, int nounit);
+void ytrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ytrsm_T alpha,
+                    const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb, ptrdiff_t nounit);
+void ytrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ytrsm_T alpha,
+                    const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb, ptrdiff_t nounit);
 /* (L, L, T or C): conj_flag selects 'C' over 'T'. */
-void ytrsm_llTC_core(int j_start, int j_end, int M, ytrsm_T alpha,
-                     const ytrsm_T *a, int lda, ytrsm_T *b, int ldb,
-                     int nounit, int conj_flag);
+void ytrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ytrsm_T alpha,
+                     const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+                     ptrdiff_t nounit, ptrdiff_t conj_flag);
 /* (L, U, T or C). */
-void ytrsm_luTC_core(int j_start, int j_end, int M, ytrsm_T alpha,
-                     const ytrsm_T *a, int lda, ytrsm_T *b, int ldb,
-                     int nounit, int conj_flag);
+void ytrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ytrsm_T alpha,
+                     const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+                     ptrdiff_t nounit, ptrdiff_t conj_flag);
 
 /* ── SIDE='R' row-range cores: serial work over rows [i_start, i_end)
  *    of B; A is N×N. ────────────────────────────────────────────── */
-void ytrsm_rln_core(int i_start, int i_end, int N, ytrsm_T alpha,
-                    const ytrsm_T *a, int lda, ytrsm_T *b, int ldb, int nounit);
-void ytrsm_run_core(int i_start, int i_end, int N, ytrsm_T alpha,
-                    const ytrsm_T *a, int lda, ytrsm_T *b, int ldb, int nounit);
-void ytrsm_rlTC_core(int i_start, int i_end, int N, ytrsm_T alpha,
-                     const ytrsm_T *a, int lda, ytrsm_T *b, int ldb,
-                     int nounit, int conj_flag);
-void ytrsm_ruTC_core(int i_start, int i_end, int N, ytrsm_T alpha,
-                     const ytrsm_T *a, int lda, ytrsm_T *b, int ldb,
-                     int nounit, int conj_flag);
+void ytrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrsm_T alpha,
+                    const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb, ptrdiff_t nounit);
+void ytrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrsm_T alpha,
+                    const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb, ptrdiff_t nounit);
+void ytrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrsm_T alpha,
+                     const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+                     ptrdiff_t nounit, ptrdiff_t conj_flag);
+void ytrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrsm_T alpha,
+                     const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+                     ptrdiff_t nounit, ptrdiff_t conj_flag);
 
 /* Per-thread serial blocked-TRSM on a column slice [j_start, j_end) of B
  * (SIDE='L'). Trailing updates call ygemm_serial. */
-void ytrsm_blocked_chunk(enum ytrsm_variant V, int j_start, int j_end,
-                         int M, int nb, ytrsm_T alpha,
-                         const ytrsm_T *a, int lda, ytrsm_T *b, int ldb,
-                         int nounit);
+void ytrsm_blocked_chunk(enum ytrsm_variant V, ptrdiff_t j_start, ptrdiff_t j_end,
+                         ptrdiff_t M, ptrdiff_t nb, ytrsm_T alpha,
+                         const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+                         ptrdiff_t nounit);
 
 /* Per-thread serial blocked-TRSM on a row band [i_start, i_end) of B
  * (SIDE='R'). Blocks the triangular column (N) axis: the bulk cross-block
  * update runs through ygemm_serial, only the jb×jb diagonal block goes
  * through the naive R cores. (upper, trans, conj) select the variant. */
-void ytrsm_R_blocked_chunk(int upper, int trans, int conj,
-                           int i_start, int i_end, int N, int nb, ytrsm_T alpha,
-                           const ytrsm_T *a, int lda, ytrsm_T *b, int ldb,
-                           int nounit);
+void ytrsm_R_blocked_chunk(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj,
+                           ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ptrdiff_t nb, ytrsm_T alpha,
+                           const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+                           ptrdiff_t nounit);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ytrsm_. */
 void ytrsm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_,
     const ytrsm_T *alpha_,
-    const ytrsm_T *a, const int *lda_,
-    ytrsm_T *b, const int *ldb_,
+    const ytrsm_T *a, const ptrdiff_t *lda_,
+    ytrsm_T *b, const ptrdiff_t *ldb_,
     size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YTRSM_KERNEL_H */

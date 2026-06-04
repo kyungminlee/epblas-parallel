@@ -43,22 +43,22 @@ typedef long double esymm_T;
  *
  * `uplo` is 'U' or 'L' (already upper-cased by the caller).
  */
-void esymm_pack_a_sym(const esymm_T *a, int lda,
-                      int ic, int pc, int ib, int pb,
+void esymm_pack_a_sym(const esymm_T *a, ptrdiff_t lda,
+                      ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
                       char uplo, esymm_T *Ap);
-void esymm_pack_b_sym(const esymm_T *a, int lda,
-                      int pc, int jc, int pb, int jb,
+void esymm_pack_b_sym(const esymm_T *a, ptrdiff_t lda,
+                      ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
                       char uplo, esymm_T *Bp);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as esymm_. */
 void esymm_serial(
     const char *side, const char *uplo,
-    const int *m_, const int *n_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_,
     const esymm_T *alpha_,
-    const esymm_T *a, const int *lda_,
-    const esymm_T *b, const int *ldb_,
+    const esymm_T *a, const ptrdiff_t *lda_,
+    const esymm_T *b, const ptrdiff_t *ldb_,
     const esymm_T *beta_,
-    esymm_T *c, const int *ldc_,
+    esymm_T *c, const ptrdiff_t *ldc_,
     size_t side_len, size_t uplo_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ESYMM_KERNEL_H */

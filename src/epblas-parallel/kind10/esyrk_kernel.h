@@ -57,11 +57,11 @@ void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyrk_T alpha,
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as esyrk_. */
 void esyrk_serial(
     const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
     const esyrk_T *alpha_,
-    const esyrk_T *a, const int *lda_,
+    const esyrk_T *a, const ptrdiff_t *lda_,
     const esyrk_T *beta_,
-    esyrk_T *c, const int *ldc_,
+    esyrk_T *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ESYRK_KERNEL_H */

@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
+#include <stddef.h>
 #endif
 
 typedef egemm_T T;
@@ -55,17 +56,18 @@ void egemm_(
      * the wedge; it is also slightly faster (no per-call team setup) and
      * hardens egemm against oversubscription if OMP_NESTED is ever set. */
     if (omp_in_parallel()) {
-        egemm_serial(transa, transb, m_, n_, k_, alpha_, a, lda_,
-                     b, ldb_, beta_, c, ldc_, transa_len, transb_len);
+        const ptrdiff_t m_pt = *m_, n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
+        egemm_serial(transa, transb, &m_pt, &n_pt, &k_pt, alpha_, a, &lda_pt,
+                     b, &ldb_pt, beta_, c, &ldc_pt, transa_len, transb_len);
         return;
     }
 #endif
 
-    const int M = *m_, N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t M = *m_, N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = egemm_trans_code(transa, transa_len);
-    const int tb = egemm_trans_code(transb, transb_len);
+    const ptrdiff_t ta = egemm_trans_code(transa, transa_len);
+    const ptrdiff_t tb = egemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
@@ -81,12 +83,12 @@ void egemm_(
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static)
 #endif
-        for (int j2 = 0; j2 < N; ++j2)
+        for (ptrdiff_t j2 = 0; j2 < N; ++j2)
             egemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
-    int MC, KC, NC;
+    ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K, &MC, &KC, &NC);
 #ifdef _OPENMP
     /* This entry partitions the ic loop across the team via `omp for`, so the
@@ -97,9 +99,9 @@ void egemm_(
      * `nthr` blocks. The cap is local to this threaded entry; the shared
      * policy (used by the serial path and the L3 routines, which partition
      * other axes) is untouched. Only shrinks MC; stays a multiple of MR. */
-    const int nthr = omp_get_max_threads();
+    const ptrdiff_t nthr = omp_get_max_threads();
     if (nthr > 1) {
-        int cap = egemm_round_up((M + nthr - 1) / nthr, MR);
+        ptrdiff_t cap = egemm_round_up((M + nthr - 1) / nthr, MR);
         if (cap < MR) cap = MR;
         if (MC > cap) MC = cap;
     }
@@ -125,10 +127,10 @@ void egemm_(
     {
         T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (Ap) {
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
+            for (ptrdiff_t jc = 0; jc < N; jc += NC) {
+                const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+                for (ptrdiff_t pc = 0; pc < K; pc += KC) {
+                    const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
 #ifdef _OPENMP
                     #pragma omp single
 #endif
@@ -138,8 +140,8 @@ void egemm_(
 #ifdef _OPENMP
                     #pragma omp for schedule(static)
 #endif
-                    for (int ic = 0; ic < M; ic += MC) {
-                        const int ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (ptrdiff_t ic = 0; ic < M; ic += MC) {
+                        const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
                         egemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         egemm_macro_kernel(ib, jb, pb, alpha, Ap, Bp,
                                            &c[(size_t)jc * ldc + ic], ldc);

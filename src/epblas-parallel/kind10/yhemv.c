@@ -39,8 +39,8 @@ void yhemv_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 
@@ -48,11 +48,11 @@ void yhemv_(
 
     if (beta != ONE) {
         if (incy == 1) {
-            if (beta == ZERO) for (int i = 0; i < N; ++i) y[i] = ZERO;
-            else              for (int i = 0; i < N; ++i) y[i] *= beta;
+            if (beta == ZERO) for (ptrdiff_t i = 0; i < N; ++i) y[i] = ZERO;
+            else              for (ptrdiff_t i = 0; i < N; ++i) y[i] *= beta;
         } else {
-            int iy = (incy < 0) ? -(N - 1) * incy : 0;
-            for (int i = 0; i < N; ++i) {
+            ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 if (beta == ZERO) y[iy] = ZERO;
                 else              y[iy] *= beta;
                 iy += incy;
@@ -64,11 +64,11 @@ void yhemv_(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int nt = blas_omp_max_threads();
-        const int use_omp = (N >= YHEMV_OMP_MIN && nt > 1 && !omp_in_parallel());
+        const ptrdiff_t nt = blas_omp_max_threads();
+        const ptrdiff_t use_omp = (N >= YHEMV_OMP_MIN && nt > 1 && !omp_in_parallel());
 #else
-        const int use_omp = 0;
-        const int nt = 1;
+        const ptrdiff_t use_omp = 0;
+        const ptrdiff_t nt = 1;
 #endif
         if (use_omp) {
             /* Parallel column-walk with per-thread private y, then reduce.
@@ -80,18 +80,18 @@ void yhemv_(
 #ifdef _OPENMP
                 #pragma omp parallel
                 {
-                    const int tid = omp_get_thread_num();
+                    const ptrdiff_t tid = omp_get_thread_num();
                     T *y_priv = &y_priv_all[(size_t)tid * N];
-                    for (int k = 0; k < N; ++k) y_priv[k] = ZERO;
+                    for (ptrdiff_t k = 0; k < N; ++k) y_priv[k] = ZERO;
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
-                        for (int j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < N; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = ZERO;
                             const T *aj = &A_(0, j);
                             y_priv[j] += temp1 * __real__ aj[j];
-                            for (int k = j + 1; k < N; ++k) {
+                            for (ptrdiff_t k = j + 1; k < N; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += cconj(aj[k]) * x[k];
                             }
@@ -99,11 +99,11 @@ void yhemv_(
                         }
                     } else {
                         #pragma omp for schedule(static, 1)
-                        for (int j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < N; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = ZERO;
                             const T *aj = &A_(0, j);
-                            for (int k = 0; k < j; ++k) {
+                            for (ptrdiff_t k = 0; k < j; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += cconj(aj[k]) * x[k];
                             }
@@ -112,9 +112,9 @@ void yhemv_(
                     }
 
                     #pragma omp for schedule(static)
-                    for (int i = 0; i < N; ++i) {
+                    for (ptrdiff_t i = 0; i < N; ++i) {
                         T s = ZERO;
-                        for (int t = 0; t < nt; ++t)
+                        for (ptrdiff_t t = 0; t < nt; ++t)
                             s += y_priv_all[(size_t)t * N + i];
                         y[i] += s;
                     }
@@ -125,23 +125,23 @@ void yhemv_(
             }
         }
         if (UPLO == 'L') {
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = ZERO;
                 const T *ai = &A_(0, i);
                 y[i] += temp1 * __real__ ai[i];
-                for (int k = i + 1; k < N; ++k) {
+                for (ptrdiff_t k = i + 1; k < N; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += cconj(ai[k]) * x[k];
                 }
                 y[i] += alpha * temp2;
             }
         } else {
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = ZERO;
                 const T *ai = &A_(0, i);
-                for (int k = 0; k < i; ++k) {
+                for (ptrdiff_t k = 0; k < i; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += cconj(ai[k]) * x[k];
                 }
@@ -149,28 +149,41 @@ void yhemv_(
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
+        /* General-stride fallback — hoist the matrix column to ai[k] and
+         * walk the strided vectors with running indices (Class-B fix,
+         * memory project_ptrdiff_conversion_regressors). */
+        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         if (UPLO == 'L') {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = alpha * x[kx + i * incx];
+            ptrdiff_t ix = kx, iy = ky;
+            for (ptrdiff_t i = 0; i < N; ++i) {
+                const T temp1 = alpha * x[ix];
                 T temp2 = ZERO;
-                y[ky + i * incy] += temp1 * __real__ A_(i, i);
-                for (int k = i + 1; k < N; ++k) {
-                    y[ky + k * incy] += temp1 * A_(k, i);
-                    temp2 += cconj(A_(k, i)) * x[kx + k * incx];
+                const T *ai = &A_(0, i);
+                y[iy] += temp1 * __real__ ai[i];
+                ptrdiff_t jx = ix + incx, jy = iy + incy;
+                for (ptrdiff_t k = i + 1; k < N; ++k) {
+                    y[jy] += temp1 * ai[k];
+                    temp2 += cconj(ai[k]) * x[jx];
+                    jx += incx; jy += incy;
                 }
-                y[ky + i * incy] += alpha * temp2;
+                y[iy] += alpha * temp2;
+                ix += incx; iy += incy;
             }
         } else {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = alpha * x[kx + i * incx];
+            ptrdiff_t ix = kx, iy = ky;
+            for (ptrdiff_t i = 0; i < N; ++i) {
+                const T temp1 = alpha * x[ix];
                 T temp2 = ZERO;
-                for (int k = 0; k < i; ++k) {
-                    y[ky + k * incy] += temp1 * A_(k, i);
-                    temp2 += cconj(A_(k, i)) * x[kx + k * incx];
+                const T *ai = &A_(0, i);
+                ptrdiff_t jx = kx, jy = ky;
+                for (ptrdiff_t k = 0; k < i; ++k) {
+                    y[jy] += temp1 * ai[k];
+                    temp2 += cconj(ai[k]) * x[jx];
+                    jx += incx; jy += incy;
                 }
-                y[ky + i * incy] += temp1 * __real__ A_(i, i) + alpha * temp2;
+                y[iy] += temp1 * __real__ ai[i] + alpha * temp2;
+                ix += incx; iy += incy;
             }
         }
     }

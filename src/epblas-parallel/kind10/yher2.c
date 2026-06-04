@@ -45,34 +45,34 @@ static inline char up(const char *p) {
  * endpoints), which keeps t1/t2 register-resident (fld=9/iter).  Diagonal and
  * off-diagonal entries are disjoint, so the order is bit-identical. */
 __attribute__((noinline))
-static void yher2_contig_U(int j0, int j1, T alpha,
+static void yher2_contig_U(ptrdiff_t j0, ptrdiff_t j1, T alpha,
                            const T *restrict x, const T *restrict y,
-                           T *restrict a, int lda)
+                           T *restrict a, ptrdiff_t lda)
 {
-    for (int j = j0; j < j1; ++j) {
+    for (ptrdiff_t j = j0; j < j1; ++j) {
         T *aj = &A_(0, j);
         if (x[j] != ZERO || y[j] != ZERO) {
             const T t1 = alpha * cconj(y[j]);
             const T t2 = cconj(alpha * x[j]);
             const R dadd = __real__ (x[j] * t1 + y[j] * t2);
-            for (int i = 0; i < j; ++i) aj[i] += x[i] * t1 + y[i] * t2;
+            for (ptrdiff_t i = 0; i < j; ++i) aj[i] += x[i] * t1 + y[i] * t2;
             aj[j] = __real__ aj[j] + dadd;
         }
     }
 }
 
 __attribute__((noinline))
-static void yher2_contig_L(int j0, int j1, int N, T alpha,
+static void yher2_contig_L(ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, T alpha,
                            const T *restrict x, const T *restrict y,
-                           T *restrict a, int lda)
+                           T *restrict a, ptrdiff_t lda)
 {
-    for (int j = j0; j < j1; ++j) {
+    for (ptrdiff_t j = j0; j < j1; ++j) {
         T *aj = &A_(0, j);
         if (x[j] != ZERO || y[j] != ZERO) {
             const T t1 = alpha * cconj(y[j]);
             const T t2 = cconj(alpha * x[j]);
             aj[j] = __real__ aj[j] + __real__ (x[j] * t1 + y[j] * t2);
-            for (int i = j + 1; i < N; ++i) aj[i] += x[i] * t1 + y[i] * t2;
+            for (ptrdiff_t i = j + 1; i < N; ++i) aj[i] += x[i] * t1 + y[i] * t2;
         }
     }
 }
@@ -87,8 +87,8 @@ void yher2_(
     size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, incy = *incy_, lda = *lda_;
+    const ptrdiff_t N = *n_;
+    const ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
@@ -96,10 +96,10 @@ void yher2_(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= YHER2_OMP_MIN && blas_omp_max_threads() > 1
+        const ptrdiff_t use_omp = (N >= YHER2_OMP_MIN && blas_omp_max_threads() > 1
                              && !omp_in_parallel());
 #else
-        const int use_omp = 0;
+        const ptrdiff_t use_omp = 0;
 #endif
         /* All column work runs through yher2_contig_{U,L}().  The serial path
          * issues ONE call over [0,N) — the hot loop is inlined there with no
@@ -113,11 +113,11 @@ void yher2_(
 #ifdef _OPENMP
             if (UPLO == 'L') {
                 #pragma omp parallel for schedule(static, 1)
-                for (int j = 0; j < N; ++j)
+                for (ptrdiff_t j = 0; j < N; ++j)
                     yher2_contig_L(j, j + 1, N, alpha, x, y, a, lda);
             } else {
                 #pragma omp parallel for schedule(static, 1)
-                for (int j = 0; j < N; ++j)
+                for (ptrdiff_t j = 0; j < N; ++j)
                     yher2_contig_U(j, j + 1, alpha, x, y, a, lda);
             }
 #endif
@@ -127,24 +127,36 @@ void yher2_(
             yher2_contig_U(0, N, alpha, x, y, a, lda);
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        for (int j = 0; j < N; ++j) {
-            const T xj = x[kx + j * incx];
-            const T yj = y[ky + j * incy];
+        /* General-stride fallback — hoist the matrix column to aj[i] and
+         * walk the strided vectors with running indices (Class-B fix,
+         * memory project_ptrdiff_conversion_regressors). */
+        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t jx = kx, jy = ky;
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            const T xj = x[jx];
+            const T yj = y[jy];
             if (xj != ZERO || yj != ZERO) {
                 const T temp1 = alpha * cconj(yj);
                 const T temp2 = cconj(alpha * xj);
+                T *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i)
-                        A_(i, j) += x[kx + i * incx] * temp1 + y[ky + i * incy] * temp2;
-                    A_(j, j) = __real__ A_(j, j) + __real__ (xj * temp1 + yj * temp2);
+                    ptrdiff_t ix = jx + incx, iy = jy + incy;
+                    for (ptrdiff_t i = j + 1; i < N; ++i) {
+                        aj[i] += x[ix] * temp1 + y[iy] * temp2;
+                        ix += incx; iy += incy;
+                    }
+                    aj[j] = __real__ aj[j] + __real__ (xj * temp1 + yj * temp2);
                 } else {
-                    for (int i = 0; i < j; ++i)
-                        A_(i, j) += x[kx + i * incx] * temp1 + y[ky + i * incy] * temp2;
-                    A_(j, j) = __real__ A_(j, j) + __real__ (xj * temp1 + yj * temp2);
+                    ptrdiff_t ix = kx, iy = ky;
+                    for (ptrdiff_t i = 0; i < j; ++i) {
+                        aj[i] += x[ix] * temp1 + y[iy] * temp2;
+                        ix += incx; iy += incy;
+                    }
+                    aj[j] = __real__ aj[j] + __real__ (xj * temp1 + yj * temp2);
                 }
             }
+            jx += incx; jy += incy;
         }
     }
 }

@@ -23,6 +23,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include <stddef.h>
 #endif
 
 typedef egemmtr_T T;
@@ -31,7 +32,7 @@ typedef egemmtr_T T;
 #define NR EGEMMTR_NR
 #define EGEMMTR_OMP_MIN 32
 
-static inline int imin(int a, int b) { return a < b ? a : b; }
+static inline ptrdiff_t imin(ptrdiff_t a, ptrdiff_t b) { return a < b ? a : b; }
 
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
@@ -48,18 +49,19 @@ void egemmtr_(const char *uplo, const char *transa, const char *transb,
     /* Already inside a team → run serially in this thread, no nested
      * region (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        egemmtr_serial(uplo, transa, transb, n_, k_, alpha_, a, lda_, b, ldb_,
-                       beta_, c, ldc_, uplo_len, ta_len, tb_len);
+        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
+        egemmtr_serial(uplo, transa, transb, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt,
+                       beta_, c, &ldc_pt, uplo_len, ta_len, tb_len);
         return;
     }
 #endif
     (void)uplo_len; (void)ta_len; (void)tb_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = (char)toupper((unsigned char)*uplo);
-    const int ta = egemmtr_trans_code(transa);
-    const int tb = egemmtr_trans_code(transb);
+    const ptrdiff_t ta = egemmtr_trans_code(transa);
+    const ptrdiff_t tb = egemmtr_trans_code(transb);
 
     if (N <= 0) return;
     const T zero = 0.0L, one = 1.0L;
@@ -67,10 +69,10 @@ void egemmtr_(const char *uplo, const char *transa, const char *transb,
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const int use_omp0 = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t use_omp0 = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (ptrdiff_t j = 0; j < N; ++j)
             egemmtr_beta_scale(j, j + 1, N, UPLO, beta, c, ldc);
         return;
     }
@@ -79,14 +81,14 @@ void egemmtr_(const char *uplo, const char *transa, const char *transb,
      * always assume beta=1. */
     if (beta != one) {
 #ifdef _OPENMP
-        const int use_omp_beta = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const ptrdiff_t use_omp_beta = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp_beta) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (ptrdiff_t j = 0; j < N; ++j)
             egemmtr_beta_scale(j, j + 1, N, UPLO, beta, c, ldc);
     }
 
-    int MC, KC, NC;
+    ptrdiff_t MC, KC, NC;
     egemmtr_block_sizes(&MC, &KC, &NC);
     if (NC > N) NC = N;
     if (NC < NR) NC = NR;
@@ -103,16 +105,16 @@ void egemmtr_(const char *uplo, const char *transa, const char *transb,
      * LOCAL to this threaded entry — egemmtr_block_sizes and egemmtr_serial keep
      * MC=64, and it is a no-op once N/MC_default already gives enough blocks
      * (large N) since we only ever lower MC. */
-    const int nthr = blas_omp_max_threads();
+    const ptrdiff_t nthr = blas_omp_max_threads();
     if (N >= EGEMMTR_OMP_MIN && nthr > 1) {
-        int cap = egemmtr_round_up((N + 3 * nthr - 1) / (3 * nthr), MR);
+        ptrdiff_t cap = egemmtr_round_up((N + 3 * nthr - 1) / (3 * nthr), MR);
         if (cap < 32) cap = 32;        /* keep the register kernel amortized */
         if (MC > cap) MC = cap;
     }
 #endif
 
-    const int sa_rows = egemmtr_round_up(MC, MR);
-    const int sb_cols = egemmtr_round_up(NC, NR);
+    const ptrdiff_t sa_rows = egemmtr_round_up(MC, MR);
+    const ptrdiff_t sb_cols = egemmtr_round_up(NC, NR);
     const size_t ap_bytes = (size_t)sa_rows * KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * sb_cols * sizeof(T);
 
@@ -123,16 +125,16 @@ void egemmtr_(const char *uplo, const char *transa, const char *transb,
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const ptrdiff_t use_omp = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel if(use_omp)
 #endif
     {
         T *Ap = (T *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (Ap) {
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = imin(NC, N - jc);
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = imin(KC, K - pc);
+            for (ptrdiff_t jc = 0; jc < N; jc += NC) {
+                const ptrdiff_t jb = imin(NC, N - jc);
+                for (ptrdiff_t pc = 0; pc < K; pc += KC) {
+                    const ptrdiff_t pb = imin(KC, K - pc);
 
 #ifdef _OPENMP
                     #pragma omp single
@@ -143,10 +145,10 @@ void egemmtr_(const char *uplo, const char *transa, const char *transb,
 #ifdef _OPENMP
                     #pragma omp for schedule(static, 1)
 #endif
-                    for (int ic = 0; ic < N; ic += MC) {
-                        const int ib = imin(MC, N - ic);
+                    for (ptrdiff_t ic = 0; ic < N; ic += MC) {
+                        const ptrdiff_t ib = imin(MC, N - ic);
 
-                        int tile_class;
+                        ptrdiff_t tile_class;
                         if (UPLO == 'L') {
                             if (ic + ib <= jc)        tile_class = 0;
                             else if (ic >= jc + jb)   tile_class = 2;

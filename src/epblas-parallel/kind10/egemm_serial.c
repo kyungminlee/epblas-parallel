@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <stddef.h>
 
 typedef egemm_T T;
 
@@ -48,14 +49,14 @@ typedef egemm_T T;
 
 /* ── Block sizes ──────────────────────────────────────────────── */
 
-static int env_int(const char *name, int dflt) {
+static ptrdiff_t env_int(const char *name, ptrdiff_t dflt) {
     const char *s = getenv(name);
     if (!s || !*s) return dflt;
-    int v = atoi(s);
+    ptrdiff_t v = atoi(s);
     return v > 0 ? v : dflt;
 }
 
-static int g_mc = 0, g_kc = 0, g_nc = 0;
+static ptrdiff_t g_mc = 0, g_kc = 0, g_nc = 0;
 static long g_l2_bytes = 0;        /* adaptive-MC cache target (see below) */
 static void init_blocks(void) {
     if (g_mc) return;
@@ -65,36 +66,36 @@ static void init_blocks(void) {
      * Detect this core's L2 at runtime rather than hardcoding one machine's
      * size — a wrong target bloats Ap past L2 (e.g. a 768K target on a 256K
      * L2 core blew Ap to 768K at K=256, ~1% slower). Override with EBLAS_L2_KB. */
-    int l2_kb = env_int("EBLAS_L2_KB", 0);
+    ptrdiff_t l2_kb = env_int("EBLAS_L2_KB", 0);
     if (l2_kb <= 0) {
         long sz = sysconf(_SC_LEVEL2_CACHE_SIZE);
-        l2_kb = (sz > 0) ? (int)(sz / 1024) : 256;
+        l2_kb = (sz > 0) ? (ptrdiff_t)(sz / 1024) : 256;
     }
     g_l2_bytes = (long)l2_kb * 1024L;
     g_mc = env_int("EBLAS_MC", 64);  /* set last: g_mc!=0 is the init flag */
 }
 
-int egemm_trans_code(const char *p, size_t len) {
+ptrdiff_t egemm_trans_code(const char *p, size_t len) {
     (void)len;
     char c = (char)toupper((unsigned char)*p);
     return (c == 'C') ? 'T' : c;  /* real: 'C' ≡ 'T' */
 }
 
-int egemm_round_up(int v, int m) { return ((v + m - 1) / m) * m; }
+ptrdiff_t egemm_round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 /*
  * OpenBLAS-style adaptive MC: when K fits in one panel, grow MC so
  * MC*KC stays roughly L2-sized (rounded to MR). Helps small-K shapes
  * where the default MC under-uses cache.
  */
-void egemm_choose_blocks(int K, int *MC_out, int *KC_out, int *NC_out) {
+void egemm_choose_blocks(ptrdiff_t K, ptrdiff_t *MC_out, ptrdiff_t *KC_out, ptrdiff_t *NC_out) {
     init_blocks();
-    int MC = g_mc, KC = g_kc, NC = g_nc;
+    ptrdiff_t MC = g_mc, KC = g_kc, NC = g_nc;
     if (K > 0 && K <= KC) {
         long target_mc = g_l2_bytes / ((long)K * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * g_mc) target_mc = 4L * g_mc;
-            MC = egemm_round_up((int)target_mc, MR);
+            MC = egemm_round_up((ptrdiff_t)target_mc, MR);
             if (MC < g_mc) MC = g_mc;
         }
     }
@@ -103,11 +104,11 @@ void egemm_choose_blocks(int K, int *MC_out, int *KC_out, int *NC_out) {
 
 /* ── beta pre-pass ────────────────────────────────────────────── */
 
-void egemm_beta_prepass(int M, int N, T beta, T *c, int ldc) {
-    for (int j = 0; j < N; ++j) {
+void egemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, T beta, T *c, ptrdiff_t ldc) {
+    for (ptrdiff_t j = 0; j < N; ++j) {
         T *cj = &c[(size_t)j * ldc];
-        if (beta == 0.0L)      for (int i = 0; i < M; ++i) cj[i]  = 0.0L;
-        else if (beta != 1.0L) for (int i = 0; i < M; ++i) cj[i] *= beta;
+        if (beta == 0.0L)      for (ptrdiff_t i = 0; i < M; ++i) cj[i]  = 0.0L;
+        else if (beta != 1.0L) for (ptrdiff_t i = 0; i < M; ++i) cj[i] *= beta;
     }
 }
 
@@ -119,27 +120,27 @@ void egemm_beta_prepass(int M, int N, T beta, T *c, int ldc) {
  *
  * The last panel is zero-padded to MR rows when ib % MR != 0.
  */
-void egemm_pack_A(const T *restrict A, int lda,
-                  int ic, int pc, int ib, int pb,
-                  int ta, T *restrict Ap)
+void egemm_pack_A(const T *restrict A, ptrdiff_t lda,
+                  ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
+                  ptrdiff_t ta, T *restrict Ap)
 {
-    const int npanel = (ib + MR - 1) / MR;
-    for (int q = 0; q < npanel; ++q) {
-        const int i0 = ic + q * MR;
-        const int rows = (q == npanel - 1) ? (ib - q * MR) : MR;
+    const ptrdiff_t npanel = (ib + MR - 1) / MR;
+    for (ptrdiff_t q = 0; q < npanel; ++q) {
+        const ptrdiff_t i0 = ic + q * MR;
+        const ptrdiff_t rows = (q == npanel - 1) ? (ib - q * MR) : MR;
         T *Apanel = &Ap[(size_t)q * pb * MR];
         if (ta == 'N') {
-            for (int p = 0; p < pb; ++p) {
+            for (ptrdiff_t p = 0; p < pb; ++p) {
                 const T *src = &A[(size_t)(pc + p) * lda + i0];
                 T *dst = &Apanel[(size_t)p * MR];
-                int ii;
+                ptrdiff_t ii;
                 for (ii = 0; ii < rows; ++ii) dst[ii] = src[ii];
                 for (; ii < MR; ++ii) dst[ii] = 0.0L;
             }
         } else {
-            for (int p = 0; p < pb; ++p) {
+            for (ptrdiff_t p = 0; p < pb; ++p) {
                 T *dst = &Apanel[(size_t)p * MR];
-                int ii;
+                ptrdiff_t ii;
                 for (ii = 0; ii < rows; ++ii)
                     dst[ii] = A[(size_t)(i0 + ii) * lda + (pc + p)];
                 for (; ii < MR; ++ii) dst[ii] = 0.0L;
@@ -152,28 +153,28 @@ void egemm_pack_A(const T *restrict A, int lda,
  * Pack op(B)(pc..pc+pb, jc..jc+jb) into Bp as a stack of NR-col panels.
  * Panel layout:  Bp[(jj_panel * pb + p) * NR + jj] = op(B)[pc + p, jc + jj_panel*NR + jj].
  */
-void egemm_pack_B(const T *restrict B, int ldb,
-                  int pc, int jc, int pb, int jb,
-                  int tb, T *restrict Bp)
+void egemm_pack_B(const T *restrict B, ptrdiff_t ldb,
+                  ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
+                  ptrdiff_t tb, T *restrict Bp)
 {
-    const int npanel = (jb + NR - 1) / NR;
-    for (int q = 0; q < npanel; ++q) {
-        const int j0 = jc + q * NR;
-        const int cols = (q == npanel - 1) ? (jb - q * NR) : NR;
+    const ptrdiff_t npanel = (jb + NR - 1) / NR;
+    for (ptrdiff_t q = 0; q < npanel; ++q) {
+        const ptrdiff_t j0 = jc + q * NR;
+        const ptrdiff_t cols = (q == npanel - 1) ? (jb - q * NR) : NR;
         T *Bpanel = &Bp[(size_t)q * pb * NR];
         if (tb == 'N') {
-            for (int p = 0; p < pb; ++p) {
+            for (ptrdiff_t p = 0; p < pb; ++p) {
                 T *dst = &Bpanel[(size_t)p * NR];
-                int jj;
+                ptrdiff_t jj;
                 for (jj = 0; jj < cols; ++jj)
                     dst[jj] = B[(size_t)(j0 + jj) * ldb + (pc + p)];
                 for (; jj < NR; ++jj) dst[jj] = 0.0L;
             }
         } else {
-            for (int p = 0; p < pb; ++p) {
+            for (ptrdiff_t p = 0; p < pb; ++p) {
                 const T *src = &B[(size_t)(pc + p) * ldb + j0];
                 T *dst = &Bpanel[(size_t)p * NR];
-                int jj;
+                ptrdiff_t jj;
                 for (jj = 0; jj < cols; ++jj) dst[jj] = src[jj];
                 for (; jj < NR; ++jj) dst[jj] = 0.0L;
             }
@@ -189,17 +190,17 @@ void egemm_pack_B(const T *restrict B, int ldb,
  * K loop; each iteration loads MR A-elements and NR B-elements from
  * packed buffers and issues MR*NR independent multiply-adds.
  */
-static inline void kernel_2x2(int pb, T alpha,
+static inline void kernel_2x2(ptrdiff_t pb, T alpha,
                               const T *restrict Apanel,
                               const T *restrict Bpanel,
-                              T *restrict C, int ldc)
+                              T *restrict C, ptrdiff_t ldc)
 {
     T c00 = 0.0L, c01 = 0.0L, c10 = 0.0L, c11 = 0.0L;
     /* K-loop unrolled by 4 (matches the OpenBLAS-overlay kernel): amortizes
      * the loop-counter/pointer arithmetic over 4 MR×NR MAC-sets and widens
      * gcc's scheduling window for the x87 accumulator chains. */
     const T *ap = Apanel, *bp = Bpanel;
-    int p = pb;
+    ptrdiff_t p = pb;
     for (; p >= 4; p -= 4) {
         c00 += ap[0] * bp[0]; c10 += ap[1] * bp[0];
         c01 += ap[0] * bp[1]; c11 += ap[1] * bp[1];
@@ -227,16 +228,16 @@ static inline void kernel_2x2(int pb, T alpha,
 }
 
 /* Edge tile: arbitrary mr ∈ [1, MR], nr ∈ [1, NR] — scalar fallback. */
-static void kernel_edge(int mr, int nr, int pb, T alpha,
+static void kernel_edge(ptrdiff_t mr, ptrdiff_t nr, ptrdiff_t pb, T alpha,
                         const T *restrict Apanel,
                         const T *restrict Bpanel,
-                        T *restrict C, int ldc)
+                        T *restrict C, ptrdiff_t ldc)
 {
-    for (int jj = 0; jj < nr; ++jj) {
+    for (ptrdiff_t jj = 0; jj < nr; ++jj) {
         T *cj = &C[(size_t)jj * ldc];
-        for (int ii = 0; ii < mr; ++ii) {
+        for (ptrdiff_t ii = 0; ii < mr; ++ii) {
             T sum = 0.0L;
-            for (int p = 0; p < pb; ++p)
+            for (ptrdiff_t p = 0; p < pb; ++p)
                 sum += Apanel[(size_t)p * MR + ii] *
                        Bpanel[(size_t)p * NR + jj];
             cj[ii] += alpha * sum;
@@ -245,19 +246,19 @@ static void kernel_edge(int mr, int nr, int pb, T alpha,
 }
 
 /* Drive one (ib, jb, pb) macro-tile via MR×NR sub-tiles. */
-void egemm_macro_kernel(int ib, int jb, int pb, T alpha,
+void egemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, T alpha,
                         const T *restrict Ap, const T *restrict Bp,
-                        T *restrict C, int ldc)
+                        T *restrict C, ptrdiff_t ldc)
 {
-    const int npA = (ib + MR - 1) / MR;
-    const int npB = (jb + NR - 1) / NR;
-    for (int q = 0; q < npB; ++q) {
-        const int jj0  = q * NR;
-        const int nr_q = (q == npB - 1) ? (jb - jj0) : NR;
+    const ptrdiff_t npA = (ib + MR - 1) / MR;
+    const ptrdiff_t npB = (jb + NR - 1) / NR;
+    for (ptrdiff_t q = 0; q < npB; ++q) {
+        const ptrdiff_t jj0  = q * NR;
+        const ptrdiff_t nr_q = (q == npB - 1) ? (jb - jj0) : NR;
         const T *Bpanel = &Bp[(size_t)q * pb * NR];
-        for (int r = 0; r < npA; ++r) {
-            const int ii0  = r * MR;
-            const int mr_r = (r == npA - 1) ? (ib - ii0) : MR;
+        for (ptrdiff_t r = 0; r < npA; ++r) {
+            const ptrdiff_t ii0  = r * MR;
+            const ptrdiff_t mr_r = (r == npA - 1) ? (ib - ii0) : MR;
             const T *Apanel = &Ap[(size_t)r * pb * MR];
             T *Ctile = &C[(size_t)jj0 * ldc + ii0];
             if (mr_r == MR && nr_q == NR) {
@@ -276,16 +277,16 @@ void egemm_macro_kernel(int ib, int jb, int pb, T alpha,
  * overhead the blocked path can never recover here; this explicit
  * reference body matches migrated at ~1.0× across all sizes.
  */
-void egemm_fast_col(int j2, int M, int K, T alpha,
-                    const T *a, int lda, const T *b, int ldb,
-                    T *c, int ldc)
+void egemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, T alpha,
+                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
+                    T *c, ptrdiff_t ldc)
 {
     T *cj = &c[(size_t)j2 * ldc];
     const T *bj = &b[(size_t)j2 * ldb];
-    for (int i2 = 0; i2 < M; ++i2) {
+    for (ptrdiff_t i2 = 0; i2 < M; ++i2) {
         const T *ai = &a[(size_t)i2 * lda];
         T acc = 0.0L;
-        for (int l = 0; l < K; ++l) acc += ai[l] * bj[l];
+        for (ptrdiff_t l = 0; l < K; ++l) acc += ai[l] * bj[l];
         cj[i2] += alpha * acc;
     }
 }
@@ -294,19 +295,19 @@ void egemm_fast_col(int j2, int M, int K, T alpha,
 
 void egemm_serial(
     const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+    const ptrdiff_t *m_, const ptrdiff_t *n_, const ptrdiff_t *k_,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, const ptrdiff_t *lda_,
+    const T *b, const ptrdiff_t *ldb_,
     const T *beta_,
-    T *c, const int *ldc_,
+    T *c, const ptrdiff_t *ldc_,
     size_t transa_len, size_t transb_len)
 {
-    const int M = *m_, N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const ptrdiff_t M = *m_, N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = egemm_trans_code(transa, transa_len);
-    const int tb = egemm_trans_code(transb, transb_len);
+    const ptrdiff_t ta = egemm_trans_code(transa, transa_len);
+    const ptrdiff_t tb = egemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
@@ -316,12 +317,12 @@ void egemm_serial(
     /* TN no-pack fast path only for skinny problems; otherwise the blocked
      * packed path below is faster per FLOP (4-way accumulator ILP). */
     if (ta == 'T' && tb == 'N' && egemm_tn_use_fast(M, N, K)) {
-        for (int j2 = 0; j2 < N; ++j2)
+        for (ptrdiff_t j2 = 0; j2 < N; ++j2)
             egemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
-    int MC, KC, NC;
+    ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * KC * sizeof(T);
@@ -329,13 +330,13 @@ void egemm_serial(
     T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
-        for (int jc = 0; jc < N; jc += NC) {
-            const int jb = (N - jc < NC) ? (N - jc) : NC;
-            for (int pc = 0; pc < K; pc += KC) {
-                const int pb = (K - pc < KC) ? (K - pc) : KC;
+        for (ptrdiff_t jc = 0; jc < N; jc += NC) {
+            const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+            for (ptrdiff_t pc = 0; pc < K; pc += KC) {
+                const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
                 egemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                for (int ic = 0; ic < M; ic += MC) {
-                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                for (ptrdiff_t ic = 0; ic < M; ic += MC) {
+                    const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
                     egemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                     egemm_macro_kernel(ib, jb, pb, alpha, Ap, Bp,
                                        &c[(size_t)jc * ldc + ic], ldc);

@@ -55,20 +55,20 @@ typedef long double esyr2k_T;
  * skips the diagonal block; the off-diagonal B·A^T strips land in C directly. */
 void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_T alpha,
                      const esyr2k_T *a, const esyr2k_T *b,
-                     esyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag);
+                     esyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag);
 void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_T alpha,
                      const esyr2k_T *a, const esyr2k_T *b,
-                     esyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag);
+                     esyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as esyr2k_. */
 void esyr2k_serial(
     const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
     const esyr2k_T *alpha_,
-    const esyr2k_T *a, const int *lda_,
-    const esyr2k_T *b, const int *ldb_,
+    const esyr2k_T *a, const ptrdiff_t *lda_,
+    const esyr2k_T *b, const ptrdiff_t *ldb_,
     const esyr2k_T *beta_,
-    esyr2k_T *c, const int *ldc_,
+    esyr2k_T *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ESYR2K_KERNEL_H */

@@ -1,3 +1,4 @@
+#include <stddef.h>
 /* yerot — kind10: complex Givens with real c, s. */
 typedef _Complex long double T;
 typedef long double R;
@@ -5,7 +6,7 @@ typedef long double R;
 void yerot_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
             const R *c_, const R *s_)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const R c = *c_, s = *s_;
     if (n <= 0) return;
     /* Real coefficients on complex data: treat each complex element as two
@@ -22,9 +23,9 @@ void yerot_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
             py[i] = c * yi - s * xi;
         }
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (int i = 0; i < n; ++i) {
+        ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
+        for (ptrdiff_t i = 0; i < n; ++i) {
             R *px = (R *)&x[ix], *py = (R *)&y[iy];
             R xr = px[0], xi = px[1], yr = py[0], yi = py[1];
             px[0] = c * xr + s * yr; px[1] = c * xi + s * yi;

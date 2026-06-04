@@ -32,30 +32,30 @@ typedef _Complex long double yher2k_TC;
 typedef long double          yher2k_TR;
 
 /* Env-tunable block size (YHER2K_NB). */
-int yher2k_nb(void);
+ptrdiff_t yher2k_nb(void);
 
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's columns
  * (diagonal kept real), the scalar Hermitian rank-2 diagonal add, and the
  * two trailing ygemm_serial conjugate-transpose updates. */
-void yher2k_block(int jc, int jb, int N, int K, yher2k_TC alpha, yher2k_TR beta,
-                  const yher2k_TC *a, int lda, const yher2k_TC *b, int ldb,
-                  yher2k_TC *c, int ldc, char UPLO, char TR_c);
+void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, yher2k_TC alpha, yher2k_TR beta,
+                  const yher2k_TC *a, ptrdiff_t lda, const yher2k_TC *b, ptrdiff_t ldb,
+                  yher2k_TC *c, ptrdiff_t ldc, char UPLO, char TR_c);
 
 /* C := beta*C over the columns [j_start, j_end) keeping the diagonal real —
  * the alpha==0 / K==0 quick path (and the per-block pre-scale). beta==1
  * realifies only the diagonal entry. */
-void yher2k_beta_scale(int j_start, int j_end, int N, yher2k_TR beta,
-                       yher2k_TC *c, int ldc, char UPLO);
+void yher2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, yher2k_TR beta,
+                       yher2k_TC *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as yher2k_. */
 void yher2k_serial(
     const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
     const yher2k_TC *alpha_,
-    const yher2k_TC *a, const int *lda_,
-    const yher2k_TC *b, const int *ldb_,
+    const yher2k_TC *a, const ptrdiff_t *lda_,
+    const yher2k_TC *b, const ptrdiff_t *ldb_,
     const yher2k_TR *beta_,
-    yher2k_TC *c, const int *ldc_,
+    yher2k_TC *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YHER2K_KERNEL_H */

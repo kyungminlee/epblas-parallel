@@ -30,26 +30,26 @@ typedef _Complex long double ygemmtr_T;
 
 /* C := beta*C over the triangle of columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. `upper` selects the stored triangle. */
-void ygemmtr_beta_scale(int j_start, int j_end, int N, int upper,
-                        ygemmtr_T beta, ygemmtr_T *c, int ldc);
+void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, ptrdiff_t upper,
+                        ygemmtr_T beta, ygemmtr_T *c, ptrdiff_t ldc);
 
 /* One triangle column j of C := alpha·op(A)·op(B) + beta·C. The resolved
  * transpose/conjugate flags are passed in (computed once by the entry). */
-void ygemmtr_col(int j, int N, int K, int upper,
+void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, ptrdiff_t upper,
                  ygemmtr_T alpha, ygemmtr_T beta,
-                 const ygemmtr_T *a, int lda,
-                 const ygemmtr_T *b, int ldb,
-                 ygemmtr_T *c, int ldc,
-                 int trans_a, int conj_a, int trans_b, int conj_b);
+                 const ygemmtr_T *a, ptrdiff_t lda,
+                 const ygemmtr_T *b, ptrdiff_t ldb,
+                 ygemmtr_T *c, ptrdiff_t ldc,
+                 ptrdiff_t trans_a, ptrdiff_t conj_a, ptrdiff_t trans_b, ptrdiff_t conj_b);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ygemmtr_. */
 void ygemmtr_serial(const char *uplo, const char *transa, const char *transb,
-                    const int *n_, const int *k_,
+                    const ptrdiff_t *n_, const ptrdiff_t *k_,
                     const ygemmtr_T *alpha_,
-                    const ygemmtr_T *a, const int *lda_,
-                    const ygemmtr_T *b, const int *ldb_,
+                    const ygemmtr_T *a, const ptrdiff_t *lda_,
+                    const ygemmtr_T *b, const ptrdiff_t *ldb_,
                     const ygemmtr_T *beta_,
-                    ygemmtr_T *c, const int *ldc_,
+                    ygemmtr_T *c, const ptrdiff_t *ldc_,
                     size_t uplo_len, size_t ta_len, size_t tb_len);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YGEMMTR_KERNEL_H */

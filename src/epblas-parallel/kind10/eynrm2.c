@@ -5,11 +5,12 @@
  */
 #include <math.h>
 #include <float.h>
+#include <stddef.h>
 typedef _Complex long double T;
 typedef long double R;
 
 static R btsml, btbig, bssml, bsbig, maxN;
-static int blue_inited = 0;
+static ptrdiff_t blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
 {
@@ -26,13 +27,13 @@ static inline R ldabs(R x) { return x < 0 ? -x : x; }
 
 R eynrm2_(const int *n_, const T *x, const int *incx_)
 {
-    const int n = *n_, incx = *incx_;
+    const ptrdiff_t n = *n_, incx = *incx_;
     if (n <= 0) return 0.0L;
     if (!blue_inited) blue_init();
 
     R abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    int notbig = 1;
-    int ix = (incx < 0) ? -(n - 1) * incx : 0;
+    ptrdiff_t notbig = 1;
+    ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
     /* Hot loop transcribed from the epblas-openblas port: a complex element
      * is two reals read through `p[c]`, and the three-way Blue bucketing is
      * inlined here with the accumulators as plain locals.  This exact shape
@@ -41,9 +42,9 @@ R eynrm2_(const int *n_, const T *x, const int *incx_)
      * rare-path constant spills.  An earlier by-pointer/macro form spilled
      * `amed` instead, costing a per-element 80-bit load/store (~1.8x slower).
      * Same ops in the same order, so bit-identical to the reference. */
-    for (int i = 0; i < n; ++i) {
+    for (ptrdiff_t i = 0; i < n; ++i) {
         const R *p = (const R *)&x[ix];
-        for (int c = 0; c < 2; ++c) {
+        for (ptrdiff_t c = 0; c < 2; ++c) {
             R ax = ldabs(p[c]);
             if (ax > btbig) {
                 R t = ax * bsbig;
