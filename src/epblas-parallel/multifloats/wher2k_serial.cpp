@@ -1,22 +1,25 @@
 /*
- * wher2k — multifloats complex (DD) Hermitian rank-2k.
- *   C := alpha · A · Bᴴ + conj(alpha) · B · Aᴴ + beta · C  (TRANS='N')
- *   C := alpha · Aᴴ · B + conj(alpha) · Bᴴ · A + beta · C  (TRANS='C')
- * alpha complex, beta real. Diagonal of C stays real.
+ * wher2k_serial — multifloats complex (DD) Hermitian rank-2k update, pure
+ * single-thread worker. Owns ALL the numerics; no OpenMP on this path.
+ *
+ *   C := alpha · A · Bᴴ + conj(alpha) · B · Aᴴ + beta · C  (TR='N')
+ *   C := alpha · Aᴴ · B + conj(alpha) · Bᴴ · A + beta · C  (TR='C')
+ *   alpha complex, beta real. The diagonal of C stays real.
+ *
+ * Blocked: AVX2 SIMD (or scalar) rank-2 diagonal kernel + two conjugate-
+ * transpose wgemm trailing calls per off-diagonal wing. The trailing gemms
+ * route through wgemm_serial (no nested OpenMP) so wher2k_parallel.cpp can call
+ * the block worker from inside its own omp region.
  */
-
+#include "wher2k_kernel.h"
+#include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
 #include <immintrin.h>
-#include "../common/blas_omp.h"
 #endif
 
 namespace mf = multifloats;
@@ -25,16 +28,12 @@ using T = mf::complex64x2;
 
 namespace {
 
-#define WHER2K_OMP_MIN 32
-
 int env_int(const char *name, int dflt) {
     const char *s = std::getenv(name);
     if (!s || !*s) return dflt;
     int v = std::atoi(s);
     return v > 0 ? v : dflt;
 }
-int g_nb = 0;
-int her2k_nb(void) { if (g_nb == 0) g_nb = env_int("WHER2K_NB", 64); return g_nb; }
 
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
@@ -47,7 +46,6 @@ const T cone { rone,  rzero };
 
 inline bool dd_iszero(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (R x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
 
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
@@ -55,16 +53,6 @@ inline T cmul(T const &a, T const &b) {
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 inline T rcmul(R const &r, T const &z) { return T{ r * z.re, r * z.im }; }
-
-extern "C" void wgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -390,7 +378,98 @@ inline void diag_dispatch(int jc, int jb, int K, T alpha,
 
 } /* anonymous namespace */
 
-extern "C" void wher2k_(
+int wher2k_block_nb(void) {
+    static int nb = 0;
+    if (nb == 0) nb = env_int("WHER2K_NB", 64);
+    return nb;
+}
+
+void wher2k_zero_diag_im(int j, T *c, int ldc) {
+    c[static_cast<std::size_t>(j) * ldc + j].im = rzero;
+}
+
+void wher2k_scale_col(int j, int N, char UPLO, R beta, T *c, int ldc) {
+    const int i_lo = (UPLO == 'L') ? j : 0;
+    const int i_hi = (UPLO == 'L') ? N : j + 1;
+    T *cj = c + static_cast<std::size_t>(j) * ldc;
+    if (dd_iszero(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
+    else {
+        for (int i = i_lo; i < i_hi; ++i) {
+            if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
+            else        cj[i] = rcmul(beta, cj[i]);
+        }
+    }
+}
+
+void wher2k_block(int jc, int jb, int N, int K, char UPLO, char TR,
+                  T alpha, R beta, const T *a, int lda, const T *b, int ldb,
+                  T *c, int ldc)
+{
+    /* Beta-scale this block's own triangle columns (real-diag preservation). */
+    for (int j = jc; j < jc + jb; ++j) {
+        const int i_lo = (UPLO == 'L') ? j : 0;
+        const int i_hi = (UPLO == 'L') ? N : j + 1;
+        T *cj = c + static_cast<std::size_t>(j) * ldc;
+        if (dd_iszero(beta)) {
+            for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
+        } else if (!dd_isone(beta)) {
+            for (int i = i_lo; i < i_hi; ++i) {
+                if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
+                else        cj[i] = rcmul(beta, cj[i]);
+            }
+        } else {
+            cj[j].im = rzero;
+        }
+    }
+
+    diag_dispatch(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR);
+
+    const char NN[1] = {'N'};
+    const char CN[1] = {'C'};
+    const T alpha_conj = cconj(alpha);
+
+    if (UPLO == 'L') {
+        const int trailing = N - jc - jb;
+        if (trailing > 0) {
+            const int j0 = jc + jb;
+            if (TR == 'N') {
+                wgemm_serial(NN, CN, &trailing, &jb, &K, &alpha,
+                             &A_(j0, 0), &lda, &B_(jc, 0), &ldb,
+                             &cone, &C_(j0, jc), &ldc, 1, 1);
+                wgemm_serial(NN, CN, &trailing, &jb, &K, &alpha_conj,
+                             &B_(j0, 0), &ldb, &A_(jc, 0), &lda,
+                             &cone, &C_(j0, jc), &ldc, 1, 1);
+            } else {
+                wgemm_serial(CN, NN, &trailing, &jb, &K, &alpha,
+                             &A_(0, j0), &lda, &B_(0, jc), &ldb,
+                             &cone, &C_(j0, jc), &ldc, 1, 1);
+                wgemm_serial(CN, NN, &trailing, &jb, &K, &alpha_conj,
+                             &B_(0, j0), &ldb, &A_(0, jc), &lda,
+                             &cone, &C_(j0, jc), &ldc, 1, 1);
+            }
+        }
+    } else {
+        if (jc > 0) {
+            if (TR == 'N') {
+                wgemm_serial(NN, CN, &jc, &jb, &K, &alpha,
+                             &A_(0, 0), &lda, &B_(jc, 0), &ldb,
+                             &cone, &C_(0, jc), &ldc, 1, 1);
+                wgemm_serial(NN, CN, &jc, &jb, &K, &alpha_conj,
+                             &B_(0, 0), &ldb, &A_(jc, 0), &lda,
+                             &cone, &C_(0, jc), &ldc, 1, 1);
+            } else {
+                wgemm_serial(CN, NN, &jc, &jb, &K, &alpha,
+                             &A_(0, 0), &lda, &B_(0, jc), &ldb,
+                             &cone, &C_(0, jc), &ldc, 1, 1);
+                wgemm_serial(CN, NN, &jc, &jb, &K, &alpha_conj,
+                             &B_(0, 0), &ldb, &A_(0, jc), &lda,
+                             &cone, &C_(0, jc), &ldc, 1, 1);
+            }
+        }
+    }
+}
+
+extern "C" void wher2k_serial(
     const char *uplo, const char *trans,
     const int *n_, const int *k_,
     const T *alpha_,
@@ -410,100 +489,19 @@ extern "C" void wher2k_(
 
     if (N == 0) return;
 
-    const char NN[1] = {'N'};
-    const char CN[1] = {'C'};
-    const T alpha_conj = cconj(alpha);
-
-    if (cdd_iszero(alpha) || K == 0) {
+    if ((dd_iszero(alpha.re) && dd_iszero(alpha.im)) || K == 0) {
         if (dd_isone(beta)) {
-            for (int j = 0; j < N; ++j) c[static_cast<std::size_t>(j) * ldc + j].im = rzero;
+            for (int j = 0; j < N; ++j) wher2k_zero_diag_im(j, c, ldc);
             return;
         }
-#ifdef _OPENMP
-        const bool use_omp = (N >= WHER2K_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            if (dd_iszero(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-            else {
-                for (int i = i_lo; i < i_hi; ++i) {
-                    if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
-                    else        cj[i] = rcmul(beta, cj[i]);
-                }
-            }
-        }
+        for (int j = 0; j < N; ++j) wher2k_scale_col(j, N, UPLO, beta, c, ldc);
         return;
     }
 
-    const int nb = her2k_nb();
-
-#ifdef _OPENMP
-    const bool use_omp = (N >= WHER2K_OMP_MIN && blas_omp_max_threads() > 1);
-    #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
-#endif
+    const int nb = wher2k_block_nb();
     for (int jc = 0; jc < N; jc += nb) {
         const int jb = (N - jc < nb) ? (N - jc) : nb;
-
-        for (int j = jc; j < jc + jb; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            if (dd_iszero(beta)) {
-                for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-            } else if (!dd_isone(beta)) {
-                for (int i = i_lo; i < i_hi; ++i) {
-                    if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
-                    else        cj[i] = rcmul(beta, cj[i]);
-                }
-            } else {
-                cj[j].im = rzero;
-            }
-        }
-
-        diag_dispatch(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
-
-        if (UPLO == 'L') {
-            const int trailing = N - jc - jb;
-            if (trailing > 0) {
-                const int j0 = jc + jb;
-                if (TR_c == 'N') {
-                    wgemm_(NN, CN, &trailing, &jb, &K, &alpha,
-                           &A_(j0, 0), &lda, &B_(jc, 0), &ldb,
-                           &cone, &C_(j0, jc), &ldc, 1, 1);
-                    wgemm_(NN, CN, &trailing, &jb, &K, &alpha_conj,
-                           &B_(j0, 0), &ldb, &A_(jc, 0), &lda,
-                           &cone, &C_(j0, jc), &ldc, 1, 1);
-                } else {
-                    wgemm_(CN, NN, &trailing, &jb, &K, &alpha,
-                           &A_(0, j0), &lda, &B_(0, jc), &ldb,
-                           &cone, &C_(j0, jc), &ldc, 1, 1);
-                    wgemm_(CN, NN, &trailing, &jb, &K, &alpha_conj,
-                           &B_(0, j0), &ldb, &A_(0, jc), &lda,
-                           &cone, &C_(j0, jc), &ldc, 1, 1);
-                }
-            }
-        } else {
-            if (jc > 0) {
-                if (TR_c == 'N') {
-                    wgemm_(NN, CN, &jc, &jb, &K, &alpha,
-                           &A_(0, 0), &lda, &B_(jc, 0), &ldb,
-                           &cone, &C_(0, jc), &ldc, 1, 1);
-                    wgemm_(NN, CN, &jc, &jb, &K, &alpha_conj,
-                           &B_(0, 0), &ldb, &A_(jc, 0), &lda,
-                           &cone, &C_(0, jc), &ldc, 1, 1);
-                } else {
-                    wgemm_(CN, NN, &jc, &jb, &K, &alpha,
-                           &A_(0, 0), &lda, &B_(0, jc), &ldb,
-                           &cone, &C_(0, jc), &ldc, 1, 1);
-                    wgemm_(CN, NN, &jc, &jb, &K, &alpha_conj,
-                           &B_(0, 0), &ldb, &A_(0, jc), &lda,
-                           &cone, &C_(0, jc), &ldc, 1, 1);
-                }
-            }
-        }
+        wher2k_block(jc, jb, N, K, UPLO, TR_c, alpha, beta, a, lda, b, ldb, c, ldc);
     }
 }
 
