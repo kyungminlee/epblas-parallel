@@ -1,54 +1,38 @@
 /*
- * mtrsm — multifloats real (double-double) triangular solve.
+ * mtrsm_serial.cpp — multifloats real (double-double) triangular solve,
+ * single-thread core. Owns ALL the numerics shared by the serial and parallel
+ * entries:
  *
- * Solves one of:
- *   op(A) · X = α · B          (SIDE='L')
- *   X · op(A) = α · B          (SIDE='R')
+ *   - scalar column "core" kernels for SIDE='L' (LLN/LUN/LLT/LUT) and the
+ *     SIDE='R' cores (RLN/RUN/RLT/RUT),
+ *   - the AVX2 4-wide SIMD diagonal kernels (SIDE='L' packed-SoA and SIDE='R'
+ *     4-row chunks), under MBLAS_SIMD_DD,
+ *   - the block-size policy and the blocked SIDE='L' chunk worker, whose
+ *     trailing-matrix update routes through mgemm_serial (no nested OpenMP),
+ *   - the per-slice workers mtrsm_L_slice / mtrsm_R_slice (declared in
+ *     mtrsm_kernel.h) that the parallel entry fans across a team, plus the
+ *     public `mtrsm_serial` entry.
  *
- * where op(A) ∈ {A, Aᵀ, Aᴴ}; for real DD types Aᴴ ≡ Aᵀ. A is M×M
- * (or N×N) triangular (upper or lower; optionally unit-diagonal).
- * B is overwritten with the solution X.
- *
- * Implementation stages (this file lands stages 1+2 together, with
- * stage 3 — SIMD diagonal kernel — in a follow-up):
- *
- *   1. Scalar unblocked, all 16 distinct variants. C++ scalar code
- *      with multifloats overloaded operators inlined into the hot
- *      loop — already beats migrated heavily because the migrated
- *      mtrsm goes through gfortran elementals (one call per DD op).
- *
- *   2. Blocked SIDE='L' (4 variants) with mgemm trailing update +
- *      coarse-N parallelism (one outer omp parallel, threads
- *      partition columns of B). mgemm inside each thread runs with
- *      a 1-thread inner team due to OMP_NESTED=false default — so
- *      we get SIMD GEMM trailing-update for free.
- *
- *   3. SIMD 4-wide AVX2 diagonal kernel — separate follow-up.
- *
- * Fortran ABI: extern "C" symbol `mtrsm_`. Character args have
- * hidden trailing size_t lengths.
+ * There is NO OpenMP on this path. Threading lives entirely in
+ * mtrsm_parallel.cpp; both paths drive these workers, so a static partition
+ * is bitwise-identical to the serial sweep.
  */
 
+#include "mtrsm_kernel.h"
+#include "mgemm_kernel.h"   /* mgemm_serial for the trailing update */
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"   /* dd_mul, dd_add, dd_neg primitives */
 #include <immintrin.h>
-#include "../common/blas_omp.h"
 #endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
 namespace {
-
-#define MTRSM_OMP_N_MIN 32
 
 int env_int(const char *name, int dflt) {
     const char *s = std::getenv(name);
@@ -63,26 +47,11 @@ int trsm_nb(void) {
     return g_nb_trsm;
 }
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-
 const T zero_dd{0.0, 0.0};
 const T one_dd {1.0, 0.0};
 
 inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
-
-/* mgemm extern — we call it for trailing-matrix updates. */
-extern "C" void mgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -600,12 +569,6 @@ inline void simd_trsm_r4_rut(int ib, int N, T alpha,
 
 enum trsm_r_op { TRSM_RLN, TRSM_RUN, TRSM_RLT, TRSM_RUT };
 
-/* Forward decl scalar tails (defined below). */
-inline void mtrsm_rln_core(int, int, int, T, const T*, int, T*, int, int);
-inline void mtrsm_run_core(int, int, int, T, const T*, int, T*, int, int);
-inline void mtrsm_rlt_core(int, int, int, T, const T*, int, T*, int, int);
-inline void mtrsm_rut_core(int, int, int, T, const T*, int, T*, int, int);
-
 inline void mtrsm_simd_diag_R(trsm_r_op op, int M, int N, T alpha,
                               const T *a, int lda, T *b, int ldb, int nounit)
 {
@@ -618,12 +581,11 @@ inline void mtrsm_simd_diag_R(trsm_r_op op, int M, int N, T alpha,
         case TRSM_RUT: simd_trsm_r4_rut(ib, N, alpha, a, lda, b, ldb, nounit); break;
         }
     }
-    /* Scalar tail rows: each *_core processes full B[i:M, *]. Need to constrain
-     * to i ∈ [M4, M). The scalar cores take (j_start, j_end) for SIDE='L', but
-     * SIDE='R' cores use j_end as N and process all M rows. We need a row-range
-     * variant. Simplest: directly inline the scalar logic over rows [M4, M). */
+    /* Scalar tail rows i ∈ [M4, M): the SIDE='R' diagonal walks all rows of
+     * B identically, so the tail is just the same recurrence over the
+     * non-4-aligned rows. */
     if (M4 < M) {
-        const int Mt = M;  /* keep names consistent */
+        const int Mt = M;
         switch (op) {
         case TRSM_RLN: {
             for (int j = N - 1; j >= 0; --j) {
@@ -683,16 +645,9 @@ inline void mtrsm_simd_diag_R(trsm_r_op op, int M, int N, T alpha,
 
 #endif  /* MBLAS_SIMD_DD */
 
-inline void mtrsm_rln_core(int j_start, int j_end, int M, T alpha,
+inline void mtrsm_rln_core(int N, int M, T alpha,
                            const T *a, int lda, T *b, int ldb, int nounit)
 {
-    /* For SIDE='R', the algorithm reorders columns of B (j loop is
-     * outermost over A's columns), so j_start/j_end indicate which
-     * B-rows this thread owns. (Actually for SIDE='R' the natural
-     * partition is rows of B, not columns.) Handled by callers. */
-    (void)j_start; (void)j_end;
-    /* Serial implementation matches reference DTRSM 'R','L','N': */
-    const int N = j_end;  /* placeholder — see caller */
     for (int j = N - 1; j >= 0; --j) {
         if (!dd_isone(alpha)) for (int i = 0; i < M; ++i) B_(i, j) = B_(i, j) * alpha;
         for (int k = j + 1; k < N; ++k) {
@@ -709,11 +664,9 @@ inline void mtrsm_rln_core(int j_start, int j_end, int M, T alpha,
     }
 }
 
-inline void mtrsm_run_core(int j_start, int j_end, int M, T alpha,
+inline void mtrsm_run_core(int N, int M, T alpha,
                            const T *a, int lda, T *b, int ldb, int nounit)
 {
-    (void)j_start;
-    const int N = j_end;
     for (int j = 0; j < N; ++j) {
         if (!dd_isone(alpha)) for (int i = 0; i < M; ++i) B_(i, j) = B_(i, j) * alpha;
         for (int k = 0; k < j; ++k) {
@@ -730,11 +683,9 @@ inline void mtrsm_run_core(int j_start, int j_end, int M, T alpha,
     }
 }
 
-inline void mtrsm_rlt_core(int j_start, int j_end, int M, T alpha,
+inline void mtrsm_rlt_core(int N, int M, T alpha,
                            const T *a, int lda, T *b, int ldb, int nounit)
 {
-    (void)j_start;
-    const int N = j_end;
     for (int k = 0; k < N; ++k) {
         if (nounit) {
             const T inv = one_dd / A_(k, k);
@@ -751,11 +702,9 @@ inline void mtrsm_rlt_core(int j_start, int j_end, int M, T alpha,
     }
 }
 
-inline void mtrsm_rut_core(int j_start, int j_end, int M, T alpha,
+inline void mtrsm_rut_core(int N, int M, T alpha,
                            const T *a, int lda, T *b, int ldb, int nounit)
 {
-    (void)j_start;
-    const int N = j_end;
     for (int k = N - 1; k >= 0; --k) {
         if (nounit) {
             const T inv = one_dd / A_(k, k);
@@ -772,66 +721,8 @@ inline void mtrsm_rut_core(int j_start, int j_end, int M, T alpha,
     }
 }
 
-/* Standalone unblocked SIDE='L' entries: wrap _core in own parallel region. */
-#ifdef _OPENMP
-#define MTRSM_OMP_WRAP(name, core)                                          \
-    void name(int M, int N, T alpha,                                        \
-              const T *a, int lda, T *b, int ldb, int nounit)               \
-    {                                                                       \
-        if (N >= MTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {            \
-            _Pragma("omp parallel")                                         \
-            {                                                               \
-                int tid = omp_get_thread_num();                             \
-                int nt  = omp_get_num_threads();                            \
-                int js  = static_cast<int>((long long)N * tid / nt);        \
-                int je  = static_cast<int>((long long)N * (tid + 1) / nt);  \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit);             \
-            }                                                               \
-        } else {                                                            \
-            core(0, N, M, alpha, a, lda, b, ldb, nounit);                   \
-        }                                                                   \
-    }
-#else
-#define MTRSM_OMP_WRAP(name, core)                                          \
-    void name(int M, int N, T alpha,                                        \
-              const T *a, int lda, T *b, int ldb, int nounit)               \
-    {                                                                       \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
-    }
-#endif
-
-MTRSM_OMP_WRAP(mtrsm_lln, mtrsm_lln_core)
-MTRSM_OMP_WRAP(mtrsm_lun, mtrsm_lun_core)
-MTRSM_OMP_WRAP(mtrsm_llt, mtrsm_llt_core)
-MTRSM_OMP_WRAP(mtrsm_lut, mtrsm_lut_core)
-
-/* SIDE='R' kernels just take the full N — no column partitioning. */
-void mtrsm_rln(int M, int N, T alpha,
-               const T *a, int lda, T *b, int ldb, int nounit) {
-    mtrsm_rln_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-}
-void mtrsm_run(int M, int N, T alpha,
-               const T *a, int lda, T *b, int ldb, int nounit) {
-    mtrsm_run_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-}
-void mtrsm_rlt(int M, int N, T alpha,
-               const T *a, int lda, T *b, int ldb, int nounit) {
-    mtrsm_rlt_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-}
-void mtrsm_rut(int M, int N, T alpha,
-               const T *a, int lda, T *b, int ldb, int nounit) {
-    mtrsm_rut_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-}
-
-/* ── Blocked SIDE='L' variants: coarse-grain parallelism across N.
- *
- * One outer omp parallel partitions columns of B across threads.
- * Each thread runs serial blocked-TRSM on its own column chunk:
- *   - mgemm trailing update (auto runs single-threaded internally due
- *     to OMP_NESTED=false → no inner team. The SIMD micro-kernel
- *     still runs at full SIMD width per call.)
- *   - scalar core diagonal solve on the thread's column range.
- */
+/* ── Blocked SIDE='L' chunk worker: serial blocked-TRSM over one column slice
+ * [j_start, j_end). The mgemm trailing update routes through mgemm_serial. */
 
 inline void prescale_chunk(int j_start, int j_end, int M, T alpha,
                            T *b, int ldb)
@@ -883,10 +774,10 @@ void blocked_chunk(trsm_variant V, int j_start, int j_end,
         for (int ic = 0; ic < M; ic += nb) {
             const int ib = (M - ic < nb) ? (M - ic) : nb;
             if (ic > 0) {
-                mgemm_(NN, NN, &ib, &my_N, &ic, &m_one,
-                       &A_(ic, 0), &lda,
-                       B_chunk, &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial(NN, NN, &ib, &my_N, &ic, &m_one,
+                             &A_(ic, 0), &lda,
+                             B_chunk, &ldb, &one,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             DIAG_SOLVE(SLLN, mtrsm_lln_core, ib, one_dd);
         }
@@ -897,10 +788,10 @@ void blocked_chunk(trsm_variant V, int j_start, int j_end,
             const int trailing = M - (ic + ib);
             if (trailing > 0) {
                 const int j0 = ic + ib;
-                mgemm_(NN, NN, &ib, &my_N, &trailing, &m_one,
-                       &A_(ic, j0), &lda,
-                       &B_chunk[j0], &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial(NN, NN, &ib, &my_N, &trailing, &m_one,
+                             &A_(ic, j0), &lda,
+                             &B_chunk[j0], &ldb, &one,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             DIAG_SOLVE(SLUN, mtrsm_lun_core, ib, one_dd);
             ic -= nb;
@@ -912,10 +803,10 @@ void blocked_chunk(trsm_variant V, int j_start, int j_end,
             const int trailing = M - (ic + ib);
             if (trailing > 0) {
                 const int i0 = ic + ib;
-                mgemm_(TN, NN, &ib, &my_N, &trailing, &m_one,
-                       &A_(i0, ic), &lda,
-                       &B_chunk[i0], &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial(TN, NN, &ib, &my_N, &trailing, &m_one,
+                             &A_(i0, ic), &lda,
+                             &B_chunk[i0], &ldb, &one,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             DIAG_SOLVE(SLLT, mtrsm_llt_core, ib, one_dd);
             ic -= nb;
@@ -924,10 +815,10 @@ void blocked_chunk(trsm_variant V, int j_start, int j_end,
         for (int ic = 0; ic < M; ic += nb) {
             const int ib = (M - ic < nb) ? (M - ic) : nb;
             if (ic > 0) {
-                mgemm_(TN, NN, &ib, &my_N, &ic, &m_one,
-                       &A_(0, ic), &lda,
-                       B_chunk, &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial(TN, NN, &ib, &my_N, &ic, &m_one,
+                             &A_(0, ic), &lda,
+                             B_chunk, &ldb, &one,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             DIAG_SOLVE(SLUT, mtrsm_lut_core, ib, one_dd);
         }
@@ -935,42 +826,66 @@ void blocked_chunk(trsm_variant V, int j_start, int j_end,
 #undef DIAG_SOLVE
 }
 
-void blocked_dispatch(trsm_variant V, int M, int N, T alpha,
-                      const T *a, int lda, T *b, int ldb, int nounit)
-{
-    const int nb = trsm_nb();
-#ifdef _OPENMP
-    if (N >= MTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt  = omp_get_num_threads();
-            int js  = static_cast<int>((long long)N * tid / nt);
-            int je  = static_cast<int>((long long)N * (tid + 1) / nt);
-            blocked_chunk(V, js, je, M, nb, alpha, a, lda, b, ldb, nounit);
-        }
-        return;
-    }
-#endif
-    blocked_chunk(V, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-}
-
-void blocked_lln(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    blocked_dispatch(LLN, M, N, alpha, a, lda, b, ldb, nounit);
-}
-void blocked_lun(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    blocked_dispatch(LUN, M, N, alpha, a, lda, b, ldb, nounit);
-}
-void blocked_llt(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    blocked_dispatch(LLT, M, N, alpha, a, lda, b, ldb, nounit);
-}
-void blocked_lut(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    blocked_dispatch(LUT, M, N, alpha, a, lda, b, ldb, nounit);
+/* Map (UPLO, TR) → blocked variant. */
+inline trsm_variant l_variant(char UPLO, char TR) {
+    if (TR == 'N') return (UPLO == 'L') ? LLN : LUN;
+    return (UPLO == 'L') ? LLT : LUT;
 }
 
 }  // namespace
 
-extern "C" void mtrsm_(
+/* ── Exposed surface (mtrsm_kernel.h). ─────────────────────────────────── */
+
+int mtrsm_block_nb(void) { return trsm_nb(); }
+
+void mtrsm_zero_B(int M, int N, T *b, int ldb)
+{
+    for (int j = 0; j < N; ++j)
+        for (int i = 0; i < M; ++i) B_(i, j) = zero_dd;
+}
+
+void mtrsm_L_slice(char UPLO, char TR, int use_blocked,
+                   int j_start, int j_end, int M, int nb, T alpha,
+                   const T *a, int lda, T *b, int ldb, int nounit)
+{
+    if (j_start >= j_end) return;
+    const trsm_variant V = l_variant(UPLO, TR);
+    if (use_blocked) {
+        blocked_chunk(V, j_start, j_end, M, nb, alpha, a, lda, b, ldb, nounit);
+        return;
+    }
+    switch (V) {
+    case LLN: mtrsm_lln_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    case LUN: mtrsm_lun_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    case LLT: mtrsm_llt_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    case LUT: mtrsm_lut_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    }
+}
+
+void mtrsm_R_slice(char UPLO, char TR, int row_lo, int row_hi,
+                   int N, T alpha,
+                   const T *a, int lda, T *b, int ldb, int nounit)
+{
+    const int Mslice = row_hi - row_lo;
+    if (Mslice <= 0) return;
+    T *b_slice = b + row_lo;
+#ifdef MBLAS_SIMD_DD
+    trsm_r_op op;
+    if (TR == 'N') op = (UPLO == 'L') ? TRSM_RLN : TRSM_RUN;
+    else           op = (UPLO == 'L') ? TRSM_RLT : TRSM_RUT;
+    mtrsm_simd_diag_R(op, Mslice, N, alpha, a, lda, b_slice, ldb, nounit);
+#else
+    if (TR == 'N') {
+        if (UPLO == 'L') mtrsm_rln_core(N, Mslice, alpha, a, lda, b_slice, ldb, nounit);
+        else             mtrsm_run_core(N, Mslice, alpha, a, lda, b_slice, ldb, nounit);
+    } else {
+        if (UPLO == 'L') mtrsm_rlt_core(N, Mslice, alpha, a, lda, b_slice, ldb, nounit);
+        else             mtrsm_rut_core(N, Mslice, alpha, a, lda, b_slice, ldb, nounit);
+    }
+#endif
+}
+
+extern "C" void mtrsm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
     const int *m_, const int *n_,
     const T *alpha_,
@@ -983,6 +898,9 @@ extern "C" void mtrsm_(
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
+    auto up = [](const char *p) {
+        return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
+    };
     const char SIDE = up(side);
     const char UPLO = up(uplo);
     char TR = up(transa);
@@ -991,85 +909,15 @@ extern "C" void mtrsm_(
 
     if (M == 0 || N == 0) return;
 
-    if (dd_iszero(alpha)) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = zero_dd;
-        return;
-    }
+    if (dd_iszero(alpha)) { mtrsm_zero_B(M, N, b, ldb); return; }
 
     if (SIDE == 'L') {
-        const int use_blocked = (M >= 2 * trsm_nb());
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_lln(M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrsm_lln(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_lun(M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrsm_lun(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        } else {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_llt(M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrsm_llt(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_lut(M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrsm_lut(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        }
+        const int nb = trsm_nb();
+        const int use_blocked = (M >= 2 * nb);
+        mtrsm_L_slice(UPLO, TR, use_blocked, 0, N, M, nb, alpha,
+                      a, lda, b, ldb, nounit);
     } else {
-        /* SIDE='R': partition over rows of B. The j (column) loop walks
-         * the diagonal serially, but every row of B is processed
-         * identically — each thread takes a disjoint row slice and the
-         * work is race-free with no barriers.
-         *
-         * Round slice boundaries to multiples of 4 where possible so
-         * the SIMD 4-row chunks inside mtrsm_simd_diag_R stay aligned;
-         * the last thread absorbs any non-4-aligned tail. */
-#ifdef _OPENMP
-        const int use_omp = (M >= MTRSM_OMP_N_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
-#else
-        const int use_omp = 0;
-#endif
-
-#ifdef MBLAS_SIMD_DD
-        trsm_r_op op;
-        if (TR == 'N') op = (UPLO == 'L') ? TRSM_RLN : TRSM_RUN;
-        else           op = (UPLO == 'L') ? TRSM_RLT : TRSM_RUT;
-#endif
-
-#ifdef _OPENMP
-        #pragma omp parallel if(use_omp)
-#endif
-        {
-            int tid = 0, nt = 1;
-#ifdef _OPENMP
-            if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
-#endif
-            int i_lo = (int)((long long)M * tid / nt);
-            int i_hi = (int)((long long)M * (tid + 1) / nt);
-            /* Round i_lo down to a multiple of 4 (except thread 0), and
-             * i_hi up to a multiple of 4 — except the last thread, which
-             * absorbs the M&3 tail. This keeps SIMD chunks aligned for
-             * interior threads. */
-            if (tid > 0)      i_lo &= ~3;
-            if (tid < nt - 1) i_hi &= ~3;
-            const int Mslice = i_hi - i_lo;
-            if (Mslice > 0) {
-                T *b_slice = b + i_lo;
-#ifdef MBLAS_SIMD_DD
-                mtrsm_simd_diag_R(op, Mslice, N, alpha, a, lda, b_slice, ldb, nounit);
-#else
-                if (TR == 'N') {
-                    if (UPLO == 'L') mtrsm_rln_core(0, N, Mslice, alpha, a, lda, b_slice, ldb, nounit);
-                    else             mtrsm_run_core(0, N, Mslice, alpha, a, lda, b_slice, ldb, nounit);
-                } else {
-                    if (UPLO == 'L') mtrsm_rlt_core(0, N, Mslice, alpha, a, lda, b_slice, ldb, nounit);
-                    else             mtrsm_rut_core(0, N, Mslice, alpha, a, lda, b_slice, ldb, nounit);
-                }
-#endif
-            }
-        }
+        mtrsm_R_slice(UPLO, TR, 0, M, N, alpha, a, lda, b, ldb, nounit);
     }
 }
 
