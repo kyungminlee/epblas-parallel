@@ -1,31 +1,33 @@
 /*
- * mgemmtr — multifloats real (DD) triangular GEMM update.
+ * mgemmtr_serial.cpp — multifloats real (DD / float64x2) triangular GEMM
+ * update, single-thread core.
+ *
  *   C := alpha · op(A) · op(B) + beta · C   (only UPLO triangle of C)
+ *
+ * Owns ALL the numerics shared by the serial and parallel entries: the block-
+ * size policy, the scalar diagonal-triangle update, and the two per-block
+ * cores (declared in mgemmtr_kernel.h), plus the public `mgemmtr_serial`
+ * entry. The off-diagonal rectangle is routed through `mgemm_serial` (the SIMD
+ * kernel), so there is no nested OpenMP on this path.
  *
  * Structure mirrors msyrk: blocked over jc with block size nb.
  *   - Per jc-block: scale the triangle slice in cols [jc, jc+jb).
- *   - Off-diagonal rect (UPPER: rows above; LOWER: rows below) goes
- *     through mgemm, which carries the SIMD kernel.
  *   - jb×jb diagonal triangle handled by a scalar local update.
- * Rectangular portion is where most of the work lives once N ≥ ~3·nb,
- * so the SIMD kernel in mgemm captures it. The triangle is O(nb·N·K),
- * the rect is O(½·N²·K), and mgemm runs ~3.8× the unblocked rank-1.
+ *   - Off-diagonal rect (UPPER: rows above; LOWER: rows below) goes through
+ *     mgemm_serial, which carries the SIMD kernel.
+ *
+ * Both mgemmtr_serial and the parallel mgemmtr_ drive numerics through these
+ * cores, so the two paths are bitwise-identical.
  */
-#include <cstddef>
+#include "mgemmtr_kernel.h"
+#include "mgemm_kernel.h"
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#include "../common/blas_omp.h"
-#endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
 namespace {
-
-#define MGEMMTR_OMP_MIN 32
 
 inline char up(const char *p) { return (char)std::toupper((unsigned char)*p); }
 const T zero_dd{0.0, 0.0};
@@ -41,28 +43,10 @@ int env_int(const char *name, int dflt) {
 }
 
 int g_nb = 0;
-int gemmtr_nb(void) {
-    if (g_nb == 0) g_nb = env_int("MGEMMTR_NB", 64);
-    return g_nb;
-}
-
-} /* anonymous */
 
 #define A_(i, j)  a[(std::size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(std::size_t)(j) * ldb + (i)]
 #define C_(i, j)  c[(std::size_t)(j) * ldc + (i)]
-
-extern "C" void mgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
-
-namespace {
 
 /* Scalar update of the jb×jb diagonal triangle at (jc, jc).
  * Assumes beta-scaling on C[is..ie, j] already done. */
@@ -113,7 +97,71 @@ inline void diag_add(int jc, int jb, int K, T alpha,
 
 } /* anonymous */
 
-extern "C" void mgemmtr_(
+int mgemmtr_block_nb(void) {
+    if (g_nb == 0) g_nb = env_int("MGEMMTR_NB", 64);
+    return g_nb;
+}
+
+void mgemmtr_beta_core(int j0, int j1, int N, bool upper,
+                       T beta, T *c, int ldc)
+{
+    for (int j = j0; j < j1; ++j) {
+        const int is = upper ? 0 : j;
+        const int ie = upper ? (j + 1) : N;
+        T *cj = &C_(0, j);
+        if (dd_iszero(beta)) for (int i = is; i < ie; ++i) cj[i] = zero_dd;
+        else                 for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
+    }
+}
+
+void mgemmtr_block_core(int jc, int jb, int N, int K,
+                        T alpha, T beta,
+                        const T *a, int lda,
+                        const T *b, int ldb,
+                        T *c, int ldc,
+                        bool upper, char ta, char tb)
+{
+    const char NN[1] = {'N'};
+    const char TN[1] = {'T'};
+    const char *ta_s = (ta == 'N') ? NN : TN;
+    const char *tb_s = (tb == 'N') ? NN : TN;
+
+    /* Beta-scale the triangle slice for cols [jc, jc+jb). */
+    for (int j = jc; j < jc + jb; ++j) {
+        const int is = upper ? 0 : j;
+        const int ie = upper ? (j + 1) : N;
+        T *cj = &C_(0, j);
+        if (dd_iszero(beta))      for (int i = is; i < ie; ++i) cj[i] = zero_dd;
+        else if (!dd_isone(beta)) for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
+    }
+
+    /* Diagonal jb×jb triangle: scalar. */
+    diag_add(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, upper, ta, tb);
+
+    /* Off-diagonal rectangle: routed through mgemm_serial (SIMD). */
+    if (upper) {
+        if (jc > 0) {
+            const int m = jc;
+            const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
+            const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
+            mgemm_serial(ta_s, tb_s, &m, &jb, &K, &alpha,
+                         ablk, &lda, bblk, &ldb,
+                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+        }
+    } else {
+        const int trailing = N - jc - jb;
+        if (trailing > 0) {
+            const int r0 = jc + jb;
+            const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
+            const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
+            mgemm_serial(ta_s, tb_s, &trailing, &jb, &K, &alpha,
+                         ablk, &lda, bblk, &ldb,
+                         &one_dd, &C_(r0, jc), &ldc, 1, 1);
+        }
+    }
+}
+
+extern "C" void mgemmtr_serial(
     const char *uplo, const char *transa, const char *transb,
     const int *n_, const int *k_,
     const T *alpha_,
@@ -135,68 +183,15 @@ extern "C" void mgemmtr_(
 
     if (dd_iszero(alpha) || K == 0) {
         if (dd_isone(beta)) return;
-#ifdef _OPENMP
-        const bool use_omp0 = (N >= MGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp0) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            const int is = upper ? 0 : j;
-            const int ie = upper ? (j + 1) : N;
-            T *cj = &C_(0, j);
-            if (dd_iszero(beta)) for (int i = is; i < ie; ++i) cj[i] = zero_dd;
-            else                 for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
-        }
+        mgemmtr_beta_core(0, N, N, upper, beta, c, ldc);
         return;
     }
 
-    const int nb = gemmtr_nb();
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-    const char *ta_s = (ta == 'N') ? NN : TN;
-    const char *tb_s = (tb == 'N') ? NN : TN;
-
-#ifdef _OPENMP
-    const bool use_omp = (N >= MGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
-    #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
-#endif
+    const int nb = mgemmtr_block_nb();
     for (int jc = 0; jc < N; jc += nb) {
         const int jb = (N - jc < nb) ? (N - jc) : nb;
-
-        /* Beta-scale the triangle slice for cols [jc, jc+jb). */
-        for (int j = jc; j < jc + jb; ++j) {
-            const int is = upper ? 0 : j;
-            const int ie = upper ? (j + 1) : N;
-            T *cj = &C_(0, j);
-            if (dd_iszero(beta))      for (int i = is; i < ie; ++i) cj[i] = zero_dd;
-            else if (!dd_isone(beta)) for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
-        }
-
-        /* Diagonal jb×jb triangle: scalar. */
-        diag_add(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, upper, ta, tb);
-
-        /* Off-diagonal rectangle: routed through mgemm (SIMD). */
-        if (upper) {
-            if (jc > 0) {
-                const int m = jc;
-                /* C[0:m, jc:jc+jb] += alpha * op(A)[0:m, :] * op(B)[:, jc:jc+jb] */
-                const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
-                const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-                mgemm_(ta_s, tb_s, &m, &jb, &K, &alpha,
-                       ablk, &lda, bblk, &ldb,
-                       &one_dd, &C_(0, jc), &ldc, 1, 1);
-            }
-        } else {
-            const int trailing = N - jc - jb;
-            if (trailing > 0) {
-                const int r0 = jc + jb;
-                /* C[r0:N, jc:jc+jb] += alpha * op(A)[r0:N, :] * op(B)[:, jc:jc+jb] */
-                const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
-                const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-                mgemm_(ta_s, tb_s, &trailing, &jb, &K, &alpha,
-                       ablk, &lda, bblk, &ldb,
-                       &one_dd, &C_(r0, jc), &ldc, 1, 1);
-            }
-        }
+        mgemmtr_block_core(jc, jb, N, K, alpha, beta,
+                           a, lda, b, ldb, c, ldc, upper, ta, tb);
     }
 }
 
