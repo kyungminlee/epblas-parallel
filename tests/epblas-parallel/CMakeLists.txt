@@ -113,6 +113,14 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
                 ${_composite}
                 ${_migrated_archive}
                 eplinalg::blas)
+            # The multifloats migrated reference (mblas) calls the
+            # multifloats Fortran module (dd_mul_dd, …); fp80/quad
+            # references are intrinsic and need no runtime. Mirror the
+            # fuzz_common link so perf drivers resolve those symbols.
+            if(TARGET multifloatsf AND "${_target}" STREQUAL "multifloats")
+                target_link_libraries(${_name} PRIVATE
+                    $<BUILD_INTERFACE:multifloatsf>)
+            endif()
             target_compile_options(${_name} PRIVATE
                 -ffunction-sections -fdata-sections)
             target_link_options(${_name} PRIVATE
