@@ -9,7 +9,6 @@
 # the upstream FetchContent target `multifloats`.
 
 set(_kernels
-    wsymm.cpp
     whemm.cpp
     msyr2k.cpp
     wsyr2k.cpp
@@ -120,6 +119,8 @@ set(_split_sources
     wherk_serial.cpp
     msymm_parallel.cpp
     msymm_serial.cpp
+    wsymm_parallel.cpp
+    wsymm_serial.cpp
 )
 
 set(_routines "")
@@ -127,7 +128,7 @@ foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.cpp$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
-list(APPEND _routines mgemm wgemm mgemmtr wgemmtr mtrsm wtrsm mtrmm wtrmm msyrk wsyrk wherk msymm)
+list(APPEND _routines mgemm wgemm mgemmtr wgemmtr mtrsm wtrsm mtrmm wtrmm msyrk wsyrk wherk msymm wsymm)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
 add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_split_sources})
