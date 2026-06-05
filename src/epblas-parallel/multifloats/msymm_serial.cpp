@@ -1,29 +1,28 @@
 /*
- * msymm — multifloats real (DD) symmetric matrix multiply.
+ * msymm_serial — multifloats real (DD) symmetric matrix multiply, pure
+ * single-thread worker. Owns ALL the numerics; no OpenMP on this path.
  *
- * Blocked: AVX2 4-wide SIMD diagonal kernel + mgemm trailing update.
+ * Blocked: AVX2 4-wide SIMD diagonal kernel + mgemm_serial trailing update.
  *
- * SIMD design (mirrors mtrsm.cpp's diagonal-block strategy):
- *   - Pack 4 columns of B and C into SoA stack scratch (bh/bl + ch/cl).
- *   - Run the rank-1 i,k inner kernel with A as scalar broadcasts
- *     and B,C as 4-wide SIMD lanes (4 columns of C updated in parallel).
- *   - Unpack C back into the user's column-major C; B is read-only.
+ * SIMD design (mirrors mtrsm's diagonal-block strategy):
+ *   - SIDE='L': pack 4 columns of B and C into SoA stack scratch, run the
+ *     rank-1 i,k inner kernel with A as scalar broadcasts and B,C as 4-wide
+ *     SIMD lanes (4 columns of C updated in parallel), unpack C back.
+ *   - SIDE='R': hold 4 rows of C in 2 ymm regs across the k loop.
  *
- * Falls back to a scalar diag for the per-call tail (<4 columns) or
- * when SIMD is disabled.
+ * The leading/trailing rank-k wings route through mgemm_serial (no nested
+ * OpenMP) so msymm_parallel.cpp can call the block workers from inside its
+ * own omp region.
  */
+#include "msymm_kernel.h"
+#include "mgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
 #include <immintrin.h>
-#include "../common/blas_omp.h"
 #endif
 
 namespace mf = multifloats;
@@ -31,16 +30,12 @@ using T = mf::float64x2;
 
 namespace {
 
-#define MSYMM_OMP_MIN 32
-
 int env_int(const char *name, int dflt) {
     const char *s = std::getenv(name);
     if (!s || !*s) return dflt;
     int v = std::atoi(s);
     return v > 0 ? v : dflt;
 }
-int g_nb = 0;
-int symm_nb(void) { if (g_nb == 0) g_nb = env_int("MSYMM_NB", 64); return g_nb; }
 
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
@@ -50,16 +45,6 @@ const T zero_dd{0.0, 0.0};
 const T one_dd {1.0, 0.0};
 inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
-
-extern "C" void mgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -394,7 +379,103 @@ inline void diag_L_dispatch(int ic, int ib, int N, T alpha,
 
 } /* anonymous namespace */
 
-extern "C" void msymm_(
+int msymm_block_nb(void) {
+    static int nb = 0;
+    if (nb == 0) nb = env_int("MSYMM_NB", 64);
+    return nb;
+}
+
+void msymm_scale_col(int j, int M, T beta, T *c, int ldc) {
+    T *cj = c + static_cast<std::size_t>(j) * ldc;
+    if (dd_iszero(beta)) for (int i = 0; i < M; ++i) cj[i] = zero_dd;
+    else                 for (int i = 0; i < M; ++i) cj[i] = cj[i] * beta;
+}
+
+void msymm_block_L(int ic, int ib, int M, int N, char UPLO,
+                   T alpha, T beta, const T *a, int lda, const T *b, int ldb,
+                   T *c, int ldc)
+{
+    const char NN[1] = {'N'};
+    const char TN[1] = {'T'};
+
+    /* beta-scale this block's rows across all columns */
+    for (int j = 0; j < N; ++j) {
+        T *cj = c + static_cast<std::size_t>(j) * ldc;
+        if (dd_iszero(beta))      for (int i = ic; i < ic + ib; ++i) cj[i] = zero_dd;
+        else if (!dd_isone(beta)) for (int i = ic; i < ic + ib; ++i) cj[i] = cj[i] * beta;
+    }
+    if (UPLO == 'L') {
+        if (ic > 0) {
+            mgemm_serial(NN, NN, &ib, &N, &ic, &alpha,
+                         &A_(ic, 0), &lda, &B_(0, 0), &ldb,
+                         &one_dd, &C_(ic, 0), &ldc, 1, 1);
+        }
+        diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        const int trailing = M - ic - ib;
+        if (trailing > 0) {
+            mgemm_serial(TN, NN, &ib, &N, &trailing, &alpha,
+                         &A_(ic + ib, ic), &lda, &B_(ic + ib, 0), &ldb,
+                         &one_dd, &C_(ic, 0), &ldc, 1, 1);
+        }
+    } else {
+        if (ic > 0) {
+            mgemm_serial(TN, NN, &ib, &N, &ic, &alpha,
+                         &A_(0, ic), &lda, &B_(0, 0), &ldb,
+                         &one_dd, &C_(ic, 0), &ldc, 1, 1);
+        }
+        diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        const int trailing = M - ic - ib;
+        if (trailing > 0) {
+            mgemm_serial(NN, NN, &ib, &N, &trailing, &alpha,
+                         &A_(ic, ic + ib), &lda, &B_(ic + ib, 0), &ldb,
+                         &one_dd, &C_(ic, 0), &ldc, 1, 1);
+        }
+    }
+}
+
+void msymm_block_R(int jc, int jb, int M, int N, char UPLO,
+                   T alpha, T beta, const T *a, int lda, const T *b, int ldb,
+                   T *c, int ldc)
+{
+    const char NN[1] = {'N'};
+    const char TN[1] = {'T'};
+
+    /* beta-scale this block's columns over all rows */
+    for (int j = jc; j < jc + jb; ++j) {
+        T *cj = c + static_cast<std::size_t>(j) * ldc;
+        if (dd_iszero(beta))      for (int i = 0; i < M; ++i) cj[i] = zero_dd;
+        else if (!dd_isone(beta)) for (int i = 0; i < M; ++i) cj[i] = cj[i] * beta;
+    }
+    if (UPLO == 'L') {
+        if (jc > 0) {
+            mgemm_serial(NN, TN, &M, &jb, &jc, &alpha,
+                         &B_(0, 0), &ldb, &A_(jc, 0), &lda,
+                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+        }
+        diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        const int trailing = N - jc - jb;
+        if (trailing > 0) {
+            mgemm_serial(NN, NN, &M, &jb, &trailing, &alpha,
+                         &B_(0, jc + jb), &ldb, &A_(jc + jb, jc), &lda,
+                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+        }
+    } else {
+        if (jc > 0) {
+            mgemm_serial(NN, NN, &M, &jb, &jc, &alpha,
+                         &B_(0, 0), &ldb, &A_(0, jc), &lda,
+                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+        }
+        diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        const int trailing = N - jc - jb;
+        if (trailing > 0) {
+            mgemm_serial(NN, TN, &M, &jb, &trailing, &alpha,
+                         &B_(0, jc + jb), &ldb, &A_(jc, jc + jb), &lda,
+                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+        }
+    }
+}
+
+extern "C" void msymm_serial(
     const char *side, const char *uplo,
     const int *m_, const int *n_,
     const T *alpha_,
@@ -413,105 +494,22 @@ extern "C" void msymm_(
 
     if (M == 0 || N == 0) return;
 
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-
     if (dd_iszero(alpha)) {
         if (dd_isone(beta)) return;
-#ifdef _OPENMP
-        const int axis = (SIDE == 'L') ? M : N;
-        const bool use_omp = (axis >= MSYMM_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            if (dd_iszero(beta)) for (int i = 0; i < M; ++i) cj[i] = zero_dd;
-            else                 for (int i = 0; i < M; ++i) cj[i] = cj[i] * beta;
-        }
+        for (int j = 0; j < N; ++j) msymm_scale_col(j, M, beta, c, ldc);
         return;
     }
 
-    const int nb = symm_nb();
-
+    const int nb = msymm_block_nb();
     if (SIDE == 'L') {
-#ifdef _OPENMP
-        const bool use_omp = (M >= MSYMM_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
-#endif
         for (int ic = 0; ic < M; ic += nb) {
             const int ib = (M - ic < nb) ? (M - ic) : nb;
-            for (int j = 0; j < N; ++j) {
-                T *cj = c + static_cast<std::size_t>(j) * ldc;
-                if (dd_iszero(beta))      for (int i = ic; i < ic + ib; ++i) cj[i] = zero_dd;
-                else if (!dd_isone(beta)) for (int i = ic; i < ic + ib; ++i) cj[i] = cj[i] * beta;
-            }
-            if (UPLO == 'L') {
-                if (ic > 0) {
-                    mgemm_(NN, NN, &ib, &N, &ic, &alpha,
-                           &A_(ic, 0), &lda, &B_(0, 0), &ldb,
-                           &one_dd, &C_(ic, 0), &ldc, 1, 1);
-                }
-                diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
-                const int trailing = M - ic - ib;
-                if (trailing > 0) {
-                    mgemm_(TN, NN, &ib, &N, &trailing, &alpha,
-                           &A_(ic + ib, ic), &lda, &B_(ic + ib, 0), &ldb,
-                           &one_dd, &C_(ic, 0), &ldc, 1, 1);
-                }
-            } else {
-                if (ic > 0) {
-                    mgemm_(TN, NN, &ib, &N, &ic, &alpha,
-                           &A_(0, ic), &lda, &B_(0, 0), &ldb,
-                           &one_dd, &C_(ic, 0), &ldc, 1, 1);
-                }
-                diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
-                const int trailing = M - ic - ib;
-                if (trailing > 0) {
-                    mgemm_(NN, NN, &ib, &N, &trailing, &alpha,
-                           &A_(ic, ic + ib), &lda, &B_(ic + ib, 0), &ldb,
-                           &one_dd, &C_(ic, 0), &ldc, 1, 1);
-                }
-            }
+            msymm_block_L(ic, ib, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     } else {
-#ifdef _OPENMP
-        const bool use_omp = (N >= MSYMM_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
-#endif
         for (int jc = 0; jc < N; jc += nb) {
             const int jb = (N - jc < nb) ? (N - jc) : nb;
-            for (int j = jc; j < jc + jb; ++j) {
-                T *cj = c + static_cast<std::size_t>(j) * ldc;
-                if (dd_iszero(beta))      for (int i = 0; i < M; ++i) cj[i] = zero_dd;
-                else if (!dd_isone(beta)) for (int i = 0; i < M; ++i) cj[i] = cj[i] * beta;
-            }
-            if (UPLO == 'L') {
-                if (jc > 0) {
-                    mgemm_(NN, TN, &M, &jb, &jc, &alpha,
-                           &B_(0, 0), &ldb, &A_(jc, 0), &lda,
-                           &one_dd, &C_(0, jc), &ldc, 1, 1);
-                }
-                diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
-                const int trailing = N - jc - jb;
-                if (trailing > 0) {
-                    mgemm_(NN, NN, &M, &jb, &trailing, &alpha,
-                           &B_(0, jc + jb), &ldb, &A_(jc + jb, jc), &lda,
-                           &one_dd, &C_(0, jc), &ldc, 1, 1);
-                }
-            } else {
-                if (jc > 0) {
-                    mgemm_(NN, NN, &M, &jb, &jc, &alpha,
-                           &B_(0, 0), &ldb, &A_(0, jc), &lda,
-                           &one_dd, &C_(0, jc), &ldc, 1, 1);
-                }
-                diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
-                const int trailing = N - jc - jb;
-                if (trailing > 0) {
-                    mgemm_(NN, TN, &M, &jb, &trailing, &alpha,
-                           &B_(0, jc + jb), &ldb, &A_(jc, jc + jb), &lda,
-                           &one_dd, &C_(0, jc), &ldc, 1, 1);
-                }
-            }
+            msymm_block_R(jc, jb, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     }
 }
