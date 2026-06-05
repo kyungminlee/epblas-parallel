@@ -1,20 +1,28 @@
 /*
- * xtrsm — kind16 complex (COMPLEX(KIND=16) / `__complex128`)
- *         triangular solve.
+ * xtrsm_ / xtrsm_blocked_ — kind16 complex (COMPLEX(KIND=16) /
+ * __complex128) triangular solve, public Fortran entries. THREADING
+ * ORCHESTRATION ONLY: all numerics (uplo decode, conjugate / A_op helpers,
+ * the eight solve cores) live in xtrsm_serial.c, shared through
+ * xtrsm_kernel.h.
  *
  * Unblocked Netlib reference algorithm with OpenMP coarse-grain
  * parallelism. SIDE='L' partitions columns of B across threads;
  * SIDE='R' partitions rows of B. Both partition axes carry no
  * cross-thread dependence.
  *
- * No blocking / no xgemm trailing update: at kind16, every op lowers
- * to a libquadmath call so blocking adds dispatch overhead without
- * accelerating the arithmetic. See doc/design.md §10.
+ * No blocking / no xgemm trailing update in the default entry: at kind16,
+ * every op lowers to a libquadmath call so blocking adds dispatch overhead
+ * without accelerating the arithmetic. See doc/design.md §10.
  *
  * TRANSA='C' is handled as a distinct case from 'T' (conjugate vs
  * plain transpose).
+ *
+ * xtrsm_blocked_ adds a LAPACK-blocked SIDE='L' path wrapped in a SINGLE
+ * `#pragma omp parallel` region; trailing updates route through
+ * xgemm_serial_.
  */
 
+#include "xtrsm_kernel.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -45,7 +53,7 @@
  * xtrsv_blocked's Amdahl ceiling = M/nb for the dispatch heuristic. */
 #define XTRSM_XTRSV_LOOP_NB_HINT     64
 
-typedef __complex128 T;
+typedef xtrsm_T T;
 
 extern void xtrsv_(
     const char *uplo, const char *trans, const char *diag,
@@ -80,168 +88,25 @@ static int xtrsm_xtrsv_loop_max(int M) {
     }
     if (env_val >= 0) return env_val;
 
+#ifdef _OPENMP
     const int max_nt     = blas_omp_max_threads() - 1;
+#else
+    const int max_nt     = 1 - 1;
+#endif
     const int max_amdahl = M / XTRSM_XTRSV_LOOP_NB_HINT;
     int v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
     if (v < 1) v = 1;
     return v;
 }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
-
 static const T ZERO = 0.0Q + 0.0Qi;
 static const T ONE  = 1.0Q + 0.0Qi;
-
-static inline T cconj(T a) { return conjq(a); }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
-static inline T A_op(const T *a, int lda, int row, int col, int conj_flag) {
-    return conj_flag ? cconj(A_(row, col)) : A_(row, col);
-}
-
-/* ── SIDE = 'L' column-range cores ──────────────────────────────── */
-
-static inline void xtrsm_lln_core(int j_start, int j_end, int M, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        if (alpha != ONE) for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (int k = 0; k < M; ++k) {
-            if (B_(k, j) != ZERO) {
-                if (nounit) B_(k, j) /= A_(k, k);
-                const T bk = B_(k, j);
-                for (int i = k + 1; i < M; ++i)
-                    B_(i, j) -= bk * A_(i, k);
-            }
-        }
-    }
-}
-
-static inline void xtrsm_lun_core(int j_start, int j_end, int M, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        if (alpha != ONE) for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (int k = M - 1; k >= 0; --k) {
-            if (B_(k, j) != ZERO) {
-                if (nounit) B_(k, j) /= A_(k, k);
-                const T bk = B_(k, j);
-                for (int i = 0; i < k; ++i)
-                    B_(i, j) -= bk * A_(i, k);
-            }
-        }
-    }
-}
-
-static inline void xtrsm_llTC_core(int j_start, int j_end, int M, T alpha,
-                                   const T *a, int lda, T *b, int ldb,
-                                   int nounit, int conj_flag)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = M - 1; i >= 0; --i) {
-            T t = alpha * B_(i, j);
-            for (int k = i + 1; k < M; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
-            if (nounit) t /= A_op(a, lda, i, i, conj_flag);
-            B_(i, j) = t;
-        }
-    }
-}
-
-static inline void xtrsm_luTC_core(int j_start, int j_end, int M, T alpha,
-                                   const T *a, int lda, T *b, int ldb,
-                                   int nounit, int conj_flag)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = 0; i < M; ++i) {
-            T t = alpha * B_(i, j);
-            for (int k = 0; k < i; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
-            if (nounit) t /= A_op(a, lda, i, i, conj_flag);
-            B_(i, j) = t;
-        }
-    }
-}
-
-/* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
-
-static inline void xtrsm_rln_core(int i_start, int i_end, int N, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = N - 1; j >= 0; --j) {
-        if (alpha != ONE) for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (int k = j + 1; k < N; ++k) {
-            if (A_(k, j) != ZERO) {
-                const T akj = A_(k, j);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
-            }
-        }
-        if (nounit) {
-            const T inv = ONE / A_(j, j);
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= inv;
-        }
-    }
-}
-
-static inline void xtrsm_run_core(int i_start, int i_end, int N, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = 0; j < N; ++j) {
-        if (alpha != ONE) for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (int k = 0; k < j; ++k) {
-            if (A_(k, j) != ZERO) {
-                const T akj = A_(k, j);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
-            }
-        }
-        if (nounit) {
-            const T inv = ONE / A_(j, j);
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= inv;
-        }
-    }
-}
-
-static inline void xtrsm_rlTC_core(int i_start, int i_end, int N, T alpha,
-                                   const T *a, int lda, T *b, int ldb,
-                                   int nounit, int conj_flag)
-{
-    for (int k = 0; k < N; ++k) {
-        if (nounit) {
-            const T inv = ONE / A_op(a, lda, k, k, conj_flag);
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= inv;
-        }
-        for (int j = k + 1; j < N; ++j) {
-            const T ajk = A_op(a, lda, j, k, conj_flag);
-            if (ajk != ZERO) {
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
-            }
-        }
-        if (alpha != ONE) for (int i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
-    }
-}
-
-static inline void xtrsm_ruTC_core(int i_start, int i_end, int N, T alpha,
-                                   const T *a, int lda, T *b, int ldb,
-                                   int nounit, int conj_flag)
-{
-    for (int k = N - 1; k >= 0; --k) {
-        if (nounit) {
-            const T inv = ONE / A_op(a, lda, k, k, conj_flag);
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= inv;
-        }
-        for (int j = 0; j < k; ++j) {
-            const T ajk = A_op(a, lda, j, k, conj_flag);
-            if (ajk != ZERO) {
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
-            }
-        }
-        if (alpha != ONE) for (int i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
-    }
-}
-
-/* ── OMP wrappers ────────────────────────────────────────────────── */
+/* ── OMP wrappers ──────────────────────────────────────────────────
+ * The cores are the externals from xtrsm_kernel.h. */
 
 #ifdef _OPENMP
 #define XTRSM_OMP_WRAP_L(name, core)                                        \
@@ -350,10 +215,10 @@ void xtrsm_(
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    const char TR = up(transa);
-    const int nounit = (up(diag) != 'U');
+    const char SIDE = xtrsm_uplo(side);
+    const char UPLO = xtrsm_uplo(uplo);
+    const char TR = xtrsm_uplo(transa);
+    const int nounit = (xtrsm_uplo(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -417,21 +282,21 @@ void xtrsm_(
 /* ── Block-parallel SIDE='L' variant ─────────────────────────────────
  *
  * LAPACK-blocked algorithm: walk the diagonal of A in NB×NB blocks;
- * for each block, call the unblocked xtrsm_ on the small diagonal
- * sub-problem (this re-enters with M=ib and parallelizes over B's
- * columns internally), then issue a parallel xgemm for the trailing
- * matrix update.
+ * for each block, solve the small diagonal sub-problem via the core,
+ * then issue a trailing xgemm for the matrix update. The whole walk
+ * lives inside ONE `#pragma omp parallel` region. Threads partition the
+ * column range of B once and stay on their slice through pre-scale,
+ * every diagonal sub-solve, and every trailing xgemm. No barriers
+ * needed: each operation reads and writes only the thread's own column
+ * slice, so the work is race-free even with no inter-thread sync.
  *
- * At kind16 every scalar op is a libquadmath call (~100 ns). The
- * existing xtrsm_ column-parallel scheme scales with N (cols of B);
- * the blocked variant adds parallelism across M (rows of B) through
- * the trailing xgemm, useful when N is small relative to thread count
- * or M dominates. Pre-scales B by alpha once (manually parallel),
- * then runs the block loop with alpha=1.
+ * Inner work routes through xgemm_serial_ and the xtrsm_*_core helpers
+ * (which have no OMP), so we never call an OMP-using function from
+ * inside an OMP region.
  *
- * SIDE='R' is left to the unblocked xtrsm_ — same structural reason
- * as SIDE='L' but the matrix-multiply trailing update needs xgemm
- * with the right transpose, and SIDE='R' is rarely the bottleneck.
+ * SIDE='R' and small-M (M < 2·NB) fall back to xtrsm_, which has its
+ * own omp_in_parallel guard so the fallback is safe even when called
+ * from inside another parallel region.
  */
 
 extern void xgemm_serial_(
@@ -456,26 +321,6 @@ static int xtrsm_blocked_nb(void) {
     return cached;
 }
 
-/* Single-parallel-region xtrsm_blocked. SIDE='L', stride-1 on B.
- *
- * The whole walk lives inside ONE `#pragma omp parallel` region.
- * Threads partition the column range of B once and stay on their
- * slice through pre-scale, every diagonal sub-solve, and every
- * trailing xgemm. No barriers needed: each operation reads and
- * writes only the thread's own column slice, so the work is
- * race-free even with no inter-thread synchronization.
- *
- * Replaces the previous "prescale parallel-for + N/nb separate
- * xgemm fork-joins" shape with a single fork-join. Aligns with the
- * rule that we don't call OMP-using functions from inside an OMP
- * region: inner work routes through xgemm_serial_ and the static
- * xtrsm_*_core helpers (which have no OMP).
- *
- * SIDE='R' and small-M (M < 2·NB) fall back to xtrsm_, which has
- * its own omp_in_parallel guard so the fallback is safe even when
- * xtrsm_blocked_ is itself called from inside another parallel
- * region.
- */
 void xtrsm_blocked_(
     const char *side, const char *uplo, const char *transa, const char *diag,
     const int *m_, const int *n_,
@@ -489,10 +334,10 @@ void xtrsm_blocked_(
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     const int nb = xtrsm_blocked_nb();
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    const char TR   = up(transa);
-    const int nounit = (up(diag) != 'U');
+    const char SIDE = xtrsm_uplo(side);
+    const char UPLO = xtrsm_uplo(uplo);
+    const char TR   = xtrsm_uplo(transa);
+    const int nounit = (xtrsm_uplo(diag) != 'U');
     const int cflag = (TR == 'C') ? 1 : 0;
 
     if (M == 0 || N == 0) return;

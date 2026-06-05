@@ -1,13 +1,14 @@
 /*
- * qtrsm — kind16 (REAL(KIND=16) / `__float128`) triangular solve.
+ * qtrsm_ / qtrsm_blocked_ — kind16 (REAL(KIND=16) / __float128) triangular
+ * solve, public Fortran entries. THREADING ORCHESTRATION ONLY: all numerics
+ * (uplo decode + the eight solve cores) live in qtrsm_serial.c, shared
+ * through qtrsm_kernel.h.
  *
  * Solves one of:
  *   op(A) · X = alpha · B          (SIDE='L')
  *   X · op(A) = alpha · B          (SIDE='R')
  *
- * where op(A) ∈ {A, Aᵀ}; for real types Aᴴ ≡ Aᵀ. A is M×M (or N×N)
- * triangular (upper or lower; optionally unit-diagonal). B is overwritten
- * with the solution X.
+ * where op(A) ∈ {A, Aᵀ}; for real types Aᴴ ≡ Aᵀ. B is overwritten with X.
  *
  * Three forms of parallelism:
  *
@@ -26,9 +27,10 @@
  *     Threads partition B columns once and stay on their slice through
  *     pre-scale, every diagonal sub-solve, and every trailing qgemm.
  *     No barriers needed (each operation is local to the thread's
- *     column slice).
+ *     column slice). Trailing updates route through qgemm_serial_.
  */
 
+#include "qtrsm_kernel.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -43,11 +45,11 @@
  * ms of libquadmath, vastly exceeding ~5 µs OpenMP fork-join cost. */
 #define QTRSM_OMP_MIN 2
 
-/* qtrsv-loop fast path thresholds (see qtrsm_xtrsv_loop_max below). */
+/* qtrsv-loop fast path thresholds (see qtrsm_qtrsv_loop_max below). */
 #define QTRSM_QTRSV_LOOP_M_MIN       128
 #define QTRSM_QTRSV_LOOP_NB_HINT     64
 
-typedef __float128 T;
+typedef qtrsm_T T;
 
 extern void qtrsv_(
     const char *uplo, const char *trans, const char *diag,
@@ -75,155 +77,22 @@ static int qtrsm_qtrsv_loop_max(int M) {
     }
     if (env_val >= 0) return env_val;
 
+#ifdef _OPENMP
     const int max_nt     = blas_omp_max_threads() - 1;
+#else
+    const int max_nt     = 1 - 1;
+#endif
     const int max_amdahl = M / QTRSM_QTRSV_LOOP_NB_HINT;
     int v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
     if (v < 1) v = 1;
     return v;
 }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
-
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
-/* ── SIDE = 'L' column-range cores ──────────────────────────────── */
-
-static inline void qtrsm_lln_core(int j_start, int j_end, int M, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        if (alpha != 1.0Q) for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (int k = 0; k < M; ++k) {
-            if (B_(k, j) != 0.0Q) {
-                if (nounit) B_(k, j) /= A_(k, k);
-                const T bk = B_(k, j);
-                for (int i = k + 1; i < M; ++i)
-                    B_(i, j) -= bk * A_(i, k);
-            }
-        }
-    }
-}
-
-static inline void qtrsm_lun_core(int j_start, int j_end, int M, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        if (alpha != 1.0Q) for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (int k = M - 1; k >= 0; --k) {
-            if (B_(k, j) != 0.0Q) {
-                if (nounit) B_(k, j) /= A_(k, k);
-                const T bk = B_(k, j);
-                for (int i = 0; i < k; ++i)
-                    B_(i, j) -= bk * A_(i, k);
-            }
-        }
-    }
-}
-
-static inline void qtrsm_llt_core(int j_start, int j_end, int M, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = M - 1; i >= 0; --i) {
-            T t = alpha * B_(i, j);
-            for (int k = i + 1; k < M; ++k) t -= A_(k, i) * B_(k, j);
-            if (nounit) t /= A_(i, i);
-            B_(i, j) = t;
-        }
-    }
-}
-
-static inline void qtrsm_lut_core(int j_start, int j_end, int M, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = 0; i < M; ++i) {
-            T t = alpha * B_(i, j);
-            for (int k = 0; k < i; ++k) t -= A_(k, i) * B_(k, j);
-            if (nounit) t /= A_(i, i);
-            B_(i, j) = t;
-        }
-    }
-}
-
-/* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
-
-static inline void qtrsm_rln_core(int i_start, int i_end, int N, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = N - 1; j >= 0; --j) {
-        if (alpha != 1.0Q) for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (int k = j + 1; k < N; ++k) {
-            if (A_(k, j) != 0.0Q) {
-                const T akj = A_(k, j);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
-            }
-        }
-        if (nounit) {
-            const T inv = 1.0Q / A_(j, j);
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= inv;
-        }
-    }
-}
-
-static inline void qtrsm_run_core(int i_start, int i_end, int N, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int j = 0; j < N; ++j) {
-        if (alpha != 1.0Q) for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (int k = 0; k < j; ++k) {
-            if (A_(k, j) != 0.0Q) {
-                const T akj = A_(k, j);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
-            }
-        }
-        if (nounit) {
-            const T inv = 1.0Q / A_(j, j);
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= inv;
-        }
-    }
-}
-
-static inline void qtrsm_rlt_core(int i_start, int i_end, int N, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int k = 0; k < N; ++k) {
-        if (nounit) {
-            const T inv = 1.0Q / A_(k, k);
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= inv;
-        }
-        for (int j = k + 1; j < N; ++j) {
-            if (A_(j, k) != 0.0Q) {
-                const T ajk = A_(j, k);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
-            }
-        }
-        if (alpha != 1.0Q) for (int i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
-    }
-}
-
-static inline void qtrsm_rut_core(int i_start, int i_end, int N, T alpha,
-                                  const T *a, int lda, T *b, int ldb, int nounit)
-{
-    for (int k = N - 1; k >= 0; --k) {
-        if (nounit) {
-            const T inv = 1.0Q / A_(k, k);
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= inv;
-        }
-        for (int j = 0; j < k; ++j) {
-            if (A_(j, k) != 0.0Q) {
-                const T ajk = A_(j, k);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
-            }
-        }
-        if (alpha != 1.0Q) for (int i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
-    }
-}
-
-/* ── OMP wrappers: one parallel region per call, manual partition. ── */
+/* ── OMP wrappers: one parallel region per call, manual partition. ──
+ * The cores are the externals from qtrsm_kernel.h. */
 
 #ifdef _OPENMP
 #define QTRSM_OMP_WRAP_L(name, core)                                        \
@@ -290,11 +159,11 @@ void qtrsm_(
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const char SIDE   = up(side);
-    const char UPLO   = up(uplo);
-    char TR           = up(transa);
+    const char SIDE   = qtrsm_uplo(side);
+    const char UPLO   = qtrsm_uplo(uplo);
+    char TR           = qtrsm_uplo(transa);
     if (TR == 'C') TR = 'T';   /* real type: conj-trans ≡ trans */
-    const int nounit = (up(diag) != 'U');
+    const int nounit = (qtrsm_uplo(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -396,11 +265,11 @@ void qtrsm_blocked_(
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     const int nb = qtrsm_blocked_nb();
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    char TR = up(transa);
+    const char SIDE = qtrsm_uplo(side);
+    const char UPLO = qtrsm_uplo(uplo);
+    char TR = qtrsm_uplo(transa);
     if (TR == 'C') TR = 'T';
-    const int nounit = (up(diag) != 'U');
+    const int nounit = (qtrsm_uplo(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

@@ -8,23 +8,6 @@
 # blocking / packing added cost without speedup at this precision.
 
 set(_kernels
-    qgemm.c
-    xgemm.c
-    qgemmtr.c
-    xgemmtr.c
-    qtrsm.c
-    xtrsm.c
-    qtrmm.c
-    xtrmm.c
-    qsyrk.c
-    xsyrk.c
-    xherk.c
-    qsymm.c
-    xsymm.c
-    xhemm.c
-    qsyr2k.c
-    xsyr2k.c
-    xher2k.c
     qgemv.c
     xgemv.c
     qger.c
@@ -93,14 +76,66 @@ set(_kernels
     xrotg.c
 )
 
+# L3 routines are each split across two translation units (mirroring
+# kind10): the public Fortran entry (parallel driver, *_parallel.c) and an
+# internal single-thread worker (*_serial.c). The *_serial worker is (a)
+# reused by L3 routines that call it from inside their own parallel region
+# (qtrsm/xtrsm trailing GEMM updates call qgemm_serial_/xgemm_serial_), and
+# (b) the fully-serial path its own driver delegates to under the
+# omp_in_parallel() nesting guard. kind16 is arithmetic-bound (every
+# __float128 op lowers to a libquadmath call), so unlike kind10 there is NO
+# packing/blocking — hence no *_pack.c / *_kernel.c, only the *_parallel.c /
+# *_serial.c pair plus an include-only *_kernel.h. Only the bare routine
+# names (qgemm, xgemm, …) are Fortran-callable overlays, so these sources
+# are added to the build but NOT name-derived; the names are appended by
+# hand below (mirrors kind10).
+set(_split_sources
+    qgemm_parallel.c
+    qgemm_serial.c
+    xgemm_parallel.c
+    xgemm_serial.c
+    qgemmtr_parallel.c
+    qgemmtr_serial.c
+    xgemmtr_parallel.c
+    xgemmtr_serial.c
+    qtrsm_parallel.c
+    qtrsm_serial.c
+    xtrsm_parallel.c
+    xtrsm_serial.c
+    qtrmm_parallel.c
+    qtrmm_serial.c
+    xtrmm_parallel.c
+    xtrmm_serial.c
+    qsyrk_parallel.c
+    qsyrk_serial.c
+    xsyrk_parallel.c
+    xsyrk_serial.c
+    xherk_parallel.c
+    xherk_serial.c
+    qsymm_parallel.c
+    qsymm_serial.c
+    xsymm_parallel.c
+    xsymm_serial.c
+    xhemm_parallel.c
+    xhemm_serial.c
+    qsyr2k_parallel.c
+    qsyr2k_serial.c
+    xsyr2k_parallel.c
+    xsyr2k_serial.c
+    xher2k_parallel.c
+    xher2k_serial.c
+)
+
 set(_routines "")
 foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.c$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
+list(APPEND _routines qgemm xgemm qgemmtr xgemmtr qtrsm xtrsm qtrmm xtrmm
+                      qsyrk xsyrk xherk qsymm xsymm xhemm qsyr2k xsyr2k xher2k)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
-add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels})
+add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_split_sources})
 add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
 
 target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE c_std_99)

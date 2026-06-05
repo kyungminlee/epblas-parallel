@@ -1,26 +1,24 @@
 /*
- * xsymm — kind16 complex (`__complex128`) symmetric matrix multiply.
- * NOT Hermitian — no conjugate. For Hermitian see xhemm.
+ * xsymm_serial.c — kind16 complex (`__complex128`) symmetric matrix multiply,
+ * serial core. NOT Hermitian — no conjugate.
  *
- *   C := alpha · A · B + beta · C          (SIDE='L', A is M×M sym)
- *   C := alpha · B · A + beta · C          (SIDE='R', A is N×N sym)
+ * Owns ALL the numerics shared by the serial and parallel entries: the
+ * uplo-char decode and the per-column compute core (declared in
+ * xsymm_kernel.h), plus the public `xsymm_serial_` Fortran entry. No OpenMP
+ * anywhere on this call path — safe to invoke from inside another function's
+ * `#pragma omp parallel` region.
  *
- * Unblocked Netlib reference with omp-parallel-for over columns of C.
+ * Both xsymm_serial_ and the parallel xsymm_ drive numerics through
+ * xsymm_core, so the two paths are bitwise-identical.
  */
 
-#include <stddef.h>
+#include "xsymm_kernel.h"
 #include <ctype.h>
 #include <quadmath.h>
-#ifdef _OPENMP
-#include <omp.h>
-#include "../common/blas_omp.h"
-#endif
 
-#define XSYMM_OMP_MIN 32
+typedef xsymm_T T;
 
-typedef __complex128 T;
-
-static inline char up(const char *p) {
+char xsymm_uplo(const char *p) {
     return (char)toupper((unsigned char)*p);
 }
 
@@ -31,44 +29,16 @@ static const T ONE  = 1.0Q + 0.0Qi;
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
-void xsymm_(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
-    const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
-    const T *beta_,
-    T *c, const int *ldc_,
-    size_t side_len, size_t uplo_len)
+void xsymm_core(
+    int j0, int j1,
+    char SIDE, char UPLO,
+    int M, int N,
+    T alpha, T beta,
+    const T *a, int lda,
+    const T *b, int ldb,
+    T *c, int ldc)
 {
-    (void)side_len; (void)uplo_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-
-    if (M == 0 || N == 0) return;
-
-    if (alpha == ZERO) {
-        if (beta == ONE) return;
-#ifdef _OPENMP
-        const int use_omp = (N >= XSYMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            T *cj = c + (size_t)j * ldc;
-            if (beta == ZERO) for (int i = 0; i < M; ++i) cj[i] = ZERO;
-            else              for (int i = 0; i < M; ++i) cj[i] *= beta;
-        }
-        return;
-    }
-
-#ifdef _OPENMP
-    const int use_omp = (N >= XSYMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-    #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-    for (int j = 0; j < N; ++j) {
+    for (int j = j0; j < j1; ++j) {
         T *cj = c + (size_t)j * ldc;
 
         if (beta == ZERO)      for (int i = 0; i < M; ++i) cj[i]  = ZERO;
@@ -134,6 +104,38 @@ void xsymm_(
             }
         }
     }
+}
+
+void xsymm_serial_(
+    const char *side, const char *uplo,
+    const int *m_, const int *n_,
+    const T *alpha_,
+    const T *a, const int *lda_,
+    const T *b, const int *ldb_,
+    const T *beta_,
+    T *c, const int *ldc_,
+    size_t side_len, size_t uplo_len)
+{
+    (void)side_len; (void)uplo_len;
+    const int M = *m_, N = *n_;
+    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const T alpha = *alpha_, beta = *beta_;
+    const char SIDE = xsymm_uplo(side);
+    const char UPLO = xsymm_uplo(uplo);
+
+    if (M == 0 || N == 0) return;
+
+    if (alpha == ZERO) {
+        if (beta == ONE) return;
+        for (int j = 0; j < N; ++j) {
+            T *cj = c + (size_t)j * ldc;
+            if (beta == ZERO) for (int i = 0; i < M; ++i) cj[i] = ZERO;
+            else              for (int i = 0; i < M; ++i) cj[i] *= beta;
+        }
+        return;
+    }
+
+    xsymm_core(0, N, SIDE, UPLO, M, N, alpha, beta, a, lda, b, ldb, c, ldc);
 }
 
 #undef A_

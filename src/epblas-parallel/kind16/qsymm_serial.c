@@ -1,29 +1,24 @@
 /*
- * qsymm — kind16 (REAL(KIND=16)) symmetric matrix multiply.
+ * qsymm_serial.c — kind16 (REAL(KIND=16) / __float128) symmetric matrix
+ * multiply, serial core.
  *
- *   C := alpha · A · B + beta · C          (SIDE='L', A is M×M sym)
- *   C := alpha · B · A + beta · C          (SIDE='R', A is N×N sym)
+ * Owns ALL the numerics shared by the serial and parallel entries: the
+ * uplo-char decode and the per-column compute core (declared in
+ * qsymm_kernel.h), plus the public `qsymm_serial_` Fortran entry. No OpenMP
+ * anywhere on this call path — safe to invoke from inside another function's
+ * `#pragma omp parallel` region.
  *
- * UPLO selects which triangle of A is stored. The other half is the
- * reflection (A(i,k) = A(k,i)).
- *
- * Unblocked Netlib reference with omp-parallel-for over columns of C.
- * Each column j is independent — partition N across threads.
+ * Both qsymm_serial_ and the parallel qsymm_ drive numerics through
+ * qsymm_core, so the two paths are bitwise-identical.
  */
 
-#include <stddef.h>
+#include "qsymm_kernel.h"
 #include <ctype.h>
 #include <quadmath.h>
-#ifdef _OPENMP
-#include <omp.h>
-#include "../common/blas_omp.h"
-#endif
 
-#define QSYMM_OMP_MIN 32
+typedef qsymm_T T;
 
-typedef __float128 T;
-
-static inline char up(const char *p) {
+char qsymm_uplo(const char *p) {
     return (char)toupper((unsigned char)*p);
 }
 
@@ -31,46 +26,18 @@ static inline char up(const char *p) {
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
-void qsymm_(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
-    const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
-    const T *beta_,
-    T *c, const int *ldc_,
-    size_t side_len, size_t uplo_len)
+void qsymm_core(
+    int j0, int j1,
+    char SIDE, char UPLO,
+    int M, int N,
+    T alpha, T beta,
+    const T *a, int lda,
+    const T *b, int ldb,
+    T *c, int ldc)
 {
-    (void)side_len; (void)uplo_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-
-    if (M == 0 || N == 0) return;
-
     const T zero = 0.0Q, one = 1.0Q;
 
-    if (alpha == zero) {
-        if (beta == one) return;
-#ifdef _OPENMP
-        const int use_omp = (N >= QSYMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            T *cj = c + (size_t)j * ldc;
-            if (beta == zero) for (int i = 0; i < M; ++i) cj[i]  = zero;
-            else              for (int i = 0; i < M; ++i) cj[i] *= beta;
-        }
-        return;
-    }
-
-#ifdef _OPENMP
-    const int use_omp = (N >= QSYMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-    #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-    for (int j = 0; j < N; ++j) {
+    for (int j = j0; j < j1; ++j) {
         T *cj = c + (size_t)j * ldc;
 
         /* beta scale C[:,j] up front. */
@@ -143,6 +110,40 @@ void qsymm_(
             }
         }
     }
+}
+
+void qsymm_serial_(
+    const char *side, const char *uplo,
+    const int *m_, const int *n_,
+    const T *alpha_,
+    const T *a, const int *lda_,
+    const T *b, const int *ldb_,
+    const T *beta_,
+    T *c, const int *ldc_,
+    size_t side_len, size_t uplo_len)
+{
+    (void)side_len; (void)uplo_len;
+    const int M = *m_, N = *n_;
+    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const T alpha = *alpha_, beta = *beta_;
+    const char SIDE = qsymm_uplo(side);
+    const char UPLO = qsymm_uplo(uplo);
+
+    if (M == 0 || N == 0) return;
+
+    const T zero = 0.0Q, one = 1.0Q;
+
+    if (alpha == zero) {
+        if (beta == one) return;
+        for (int j = 0; j < N; ++j) {
+            T *cj = c + (size_t)j * ldc;
+            if (beta == zero) for (int i = 0; i < M; ++i) cj[i]  = zero;
+            else              for (int i = 0; i < M; ++i) cj[i] *= beta;
+        }
+        return;
+    }
+
+    qsymm_core(0, N, SIDE, UPLO, M, N, alpha, beta, a, lda, b, ldb, c, ldc);
 }
 
 #undef A_
