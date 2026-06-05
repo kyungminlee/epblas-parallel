@@ -1,22 +1,24 @@
 /*
- * msyr2k — multifloats real (DD) symmetric rank-2k.
+ * msyr2k_serial — multifloats real (DD) symmetric rank-2k update, pure
+ * single-thread worker. Owns ALL the numerics; no OpenMP on this path.
+ *
  *   C := alpha · (A · Bᵀ + B · Aᵀ) + beta · C        (TRANS='N')
  *   C := alpha · (Aᵀ · B + Bᵀ · A) + beta · C        (TRANS='T'/'C')
- * Blocked: scalar diagonal + two mgemm trailing calls per off-diag.
+ *
+ * Blocked: AVX2 SIMD (or scalar) rank-2 diagonal kernel + two mgemm trailing
+ * calls per off-diagonal wing. The trailing gemms route through mgemm_serial
+ * (no nested OpenMP) so msyr2k_parallel.cpp can call the block worker from
+ * inside its own omp region.
  */
-
+#include "msyr2k_kernel.h"
+#include "mgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
 #include <immintrin.h>
-#include "../common/blas_omp.h"
 #endif
 
 namespace mf = multifloats;
@@ -24,16 +26,12 @@ using T = mf::float64x2;
 
 namespace {
 
-#define MSYR2K_OMP_MIN 32
-
 int env_int(const char *name, int dflt) {
     const char *s = std::getenv(name);
     if (!s || !*s) return dflt;
     int v = std::atoi(s);
     return v > 0 ? v : dflt;
 }
-int g_nb = 0;
-int syr2k_nb(void) { if (g_nb == 0) g_nb = env_int("MSYR2K_NB", 64); return g_nb; }
 
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
@@ -43,16 +41,6 @@ const T zero_dd{0.0, 0.0};
 const T one_dd {1.0, 0.0};
 inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
-
-extern "C" void mgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -289,7 +277,80 @@ inline void diag_dispatch(int jc, int jb, int K, T alpha,
 
 } /* anonymous namespace */
 
-extern "C" void msyr2k_(
+int msyr2k_block_nb(void) {
+    static int nb = 0;
+    if (nb == 0) nb = env_int("MSYR2K_NB", 64);
+    return nb;
+}
+
+void msyr2k_scale_col(int j, int N, char UPLO, T beta, T *c, int ldc) {
+    const int i_lo = (UPLO == 'L') ? j : 0;
+    const int i_hi = (UPLO == 'L') ? N : j + 1;
+    T *cj = c + static_cast<std::size_t>(j) * ldc;
+    if (dd_iszero(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
+    else                 for (int i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
+}
+
+void msyr2k_block(int jc, int jb, int N, int K, char UPLO, char TR,
+                  T alpha, T beta, const T *a, int lda, const T *b, int ldb,
+                  T *c, int ldc)
+{
+    /* Beta-scale this block's own triangle columns. */
+    for (int j = jc; j < jc + jb; ++j) {
+        const int i_lo = (UPLO == 'L') ? j : 0;
+        const int i_hi = (UPLO == 'L') ? N : j + 1;
+        T *cj = c + static_cast<std::size_t>(j) * ldc;
+        if (dd_iszero(beta))      for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
+        else if (!dd_isone(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
+    }
+
+    diag_dispatch(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR);
+
+    const char NN[1] = {'N'};
+    const char TN[1] = {'T'};
+
+    if (UPLO == 'L') {
+        const int trailing = N - jc - jb;
+        if (trailing > 0) {
+            const int j0 = jc + jb;
+            if (TR == 'N') {
+                mgemm_serial(NN, TN, &trailing, &jb, &K, &alpha,
+                             &A_(j0, 0), &lda, &B_(jc, 0), &ldb,
+                             &one_dd, &C_(j0, jc), &ldc, 1, 1);
+                mgemm_serial(NN, TN, &trailing, &jb, &K, &alpha,
+                             &B_(j0, 0), &ldb, &A_(jc, 0), &lda,
+                             &one_dd, &C_(j0, jc), &ldc, 1, 1);
+            } else {
+                mgemm_serial(TN, NN, &trailing, &jb, &K, &alpha,
+                             &A_(0, j0), &lda, &B_(0, jc), &ldb,
+                             &one_dd, &C_(j0, jc), &ldc, 1, 1);
+                mgemm_serial(TN, NN, &trailing, &jb, &K, &alpha,
+                             &B_(0, j0), &ldb, &A_(0, jc), &lda,
+                             &one_dd, &C_(j0, jc), &ldc, 1, 1);
+            }
+        }
+    } else {
+        if (jc > 0) {
+            if (TR == 'N') {
+                mgemm_serial(NN, TN, &jc, &jb, &K, &alpha,
+                             &A_(0, 0), &lda, &B_(jc, 0), &ldb,
+                             &one_dd, &C_(0, jc), &ldc, 1, 1);
+                mgemm_serial(NN, TN, &jc, &jb, &K, &alpha,
+                             &B_(0, 0), &ldb, &A_(jc, 0), &lda,
+                             &one_dd, &C_(0, jc), &ldc, 1, 1);
+            } else {
+                mgemm_serial(TN, NN, &jc, &jb, &K, &alpha,
+                             &A_(0, 0), &lda, &B_(0, jc), &ldb,
+                             &one_dd, &C_(0, jc), &ldc, 1, 1);
+                mgemm_serial(TN, NN, &jc, &jb, &K, &alpha,
+                             &B_(0, 0), &ldb, &A_(0, jc), &lda,
+                             &one_dd, &C_(0, jc), &ldc, 1, 1);
+            }
+        }
+    }
+}
+
+extern "C" void msyr2k_serial(
     const char *uplo, const char *trans,
     const int *n_, const int *k_,
     const T *alpha_,
@@ -309,83 +370,16 @@ extern "C" void msyr2k_(
 
     if (N == 0) return;
 
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-
     if (dd_iszero(alpha) || K == 0) {
         if (dd_isone(beta)) return;
-#ifdef _OPENMP
-        const bool use_omp = (N >= MSYR2K_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            if (dd_iszero(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
-            else                 for (int i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
-        }
+        for (int j = 0; j < N; ++j) msyr2k_scale_col(j, N, UPLO, beta, c, ldc);
         return;
     }
 
-    const int nb = syr2k_nb();
-
-#ifdef _OPENMP
-    const bool use_omp = (N >= MSYR2K_OMP_MIN && blas_omp_max_threads() > 1);
-    #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
-#endif
+    const int nb = msyr2k_block_nb();
     for (int jc = 0; jc < N; jc += nb) {
         const int jb = (N - jc < nb) ? (N - jc) : nb;
-
-        for (int j = jc; j < jc + jb; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            if (dd_iszero(beta))      for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
-            else if (!dd_isone(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
-        }
-
-        diag_dispatch(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR);
-
-        if (UPLO == 'L') {
-            const int trailing = N - jc - jb;
-            if (trailing > 0) {
-                const int j0 = jc + jb;
-                if (TR == 'N') {
-                    mgemm_(NN, TN, &trailing, &jb, &K, &alpha,
-                           &A_(j0, 0), &lda, &B_(jc, 0), &ldb,
-                           &one_dd, &C_(j0, jc), &ldc, 1, 1);
-                    mgemm_(NN, TN, &trailing, &jb, &K, &alpha,
-                           &B_(j0, 0), &ldb, &A_(jc, 0), &lda,
-                           &one_dd, &C_(j0, jc), &ldc, 1, 1);
-                } else {
-                    mgemm_(TN, NN, &trailing, &jb, &K, &alpha,
-                           &A_(0, j0), &lda, &B_(0, jc), &ldb,
-                           &one_dd, &C_(j0, jc), &ldc, 1, 1);
-                    mgemm_(TN, NN, &trailing, &jb, &K, &alpha,
-                           &B_(0, j0), &ldb, &A_(0, jc), &lda,
-                           &one_dd, &C_(j0, jc), &ldc, 1, 1);
-                }
-            }
-        } else {
-            if (jc > 0) {
-                if (TR == 'N') {
-                    mgemm_(NN, TN, &jc, &jb, &K, &alpha,
-                           &A_(0, 0), &lda, &B_(jc, 0), &ldb,
-                           &one_dd, &C_(0, jc), &ldc, 1, 1);
-                    mgemm_(NN, TN, &jc, &jb, &K, &alpha,
-                           &B_(0, 0), &ldb, &A_(jc, 0), &lda,
-                           &one_dd, &C_(0, jc), &ldc, 1, 1);
-                } else {
-                    mgemm_(TN, NN, &jc, &jb, &K, &alpha,
-                           &A_(0, 0), &lda, &B_(0, jc), &ldb,
-                           &one_dd, &C_(0, jc), &ldc, 1, 1);
-                    mgemm_(TN, NN, &jc, &jb, &K, &alpha,
-                           &B_(0, 0), &ldb, &A_(0, jc), &lda,
-                           &one_dd, &C_(0, jc), &ldc, 1, 1);
-                }
-            }
-        }
+        msyr2k_block(jc, jb, N, K, UPLO, TR, alpha, beta, a, lda, b, ldb, c, ldc);
     }
 }
 
