@@ -1,24 +1,29 @@
 /*
- * whemm — multifloats complex (DD) Hermitian matrix multiply.
+ * whemm_serial — multifloats complex (DD) Hermitian matrix multiply, pure
+ * single-thread worker. NOT symmetric (see wsymm). Owns ALL the numerics; no
+ * OpenMP on this path.
  *
- * AVX2 4-wide SIMD diag kernel + wgemm trailing. Same pack/unpack
- * shape as wsymm; the differences are (a) A(i,k) is conjugated
- * when used to update the off-diagonal C cell, since A is stored
- * Hermitian, and (b) the diagonal element A(i,i) is forced real.
+ * Same blocked SIMD strategy as wsymm: AVX2 4-wide pack of 4 columns of B and
+ * C into SoA scratch (one ymm-pair per limb × {re, im}), run the "read A_IK
+ * once, use twice" rank-1 kernel using simd_dd::cdd_mul / cdd_add, unpack C
+ * back. SIDE='R' holds 4 rows of C in registers across the k loop. The
+ * Hermitian differences vs wsymm are: (a) A(i,k) is conjugated when used to
+ * update the off-diagonal C cell, since A is stored Hermitian; (b) the
+ * diagonal element A(i,i) is forced real; (c) the leading/trailing gemm wings
+ * use conjugate-transpose 'C' (not 'T').
+ *
+ * The leading/trailing wings route through wgemm_serial (no nested OpenMP) so
+ * whemm_parallel.cpp can call the block workers from inside its own omp region.
  */
-
+#include "whemm_kernel.h"
+#include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
 #include <immintrin.h>
-#include "../common/blas_omp.h"
 #endif
 
 namespace mf = multifloats;
@@ -27,16 +32,12 @@ using T = mf::complex64x2;
 
 namespace {
 
-#define WHEMM_OMP_MIN 32
-
 int env_int(const char *name, int dflt) {
     const char *s = std::getenv(name);
     if (!s || !*s) return dflt;
     int v = std::atoi(s);
     return v > 0 ? v : dflt;
 }
-int g_nb = 0;
-int hemm_nb(void) { if (g_nb == 0) g_nb = env_int("WHEMM_NB", 64); return g_nb; }
 
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
@@ -61,25 +62,17 @@ inline T cmul(T const &a, T const &b) {
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 
-extern "C" void wgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
-
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
 #define C_(i, j)  c[static_cast<std::size_t>(j) * ldc + (i)]
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_dd::NR;
-constexpr int kMaxBlockM = 128;
+constexpr int kSimdLane = simd_dd::NR;   /* 4 */
+constexpr int kMaxBlockM = 128;          /* 4 cdd scratch × 128 × 4 = 16KB */
 
+/* Pack `count` cells from cm[ic..ic+count, j_start..j_start+j_count) into
+ * 4 SoA arrays {re_h, re_l, im_h, im_l}, indexed [0..count-1, 0..3]. */
 inline void pack_4col_cdd(int count, int row_start,
                           const T *m, int ldm, int j_start, int j_count,
                           double *rh, double *rl, double *ih, double *il)
@@ -95,8 +88,10 @@ inline void pack_4col_cdd(int count, int row_start,
     }
     for (int j = j_count; j < kSimdLane; ++j)
         for (int i = 0; i < count; ++i) {
-            rh[i * kSimdLane + j] = 0.0; rl[i * kSimdLane + j] = 0.0;
-            ih[i * kSimdLane + j] = 0.0; il[i * kSimdLane + j] = 0.0;
+            rh[i * kSimdLane + j] = 0.0;
+            rl[i * kSimdLane + j] = 0.0;
+            ih[i * kSimdLane + j] = 0.0;
+            il[i * kSimdLane + j] = 0.0;
         }
 }
 
@@ -116,17 +111,20 @@ inline void unpack_4col_cdd(int count, int row_start,
     }
 }
 
+/* Broadcast a complex DD scalar into 4 lane-wise ymm registers. */
 inline void broadcast_cdd(const T &v,
                           __m256d &rh, __m256d &rl,
                           __m256d &ih, __m256d &il)
 {
-    rh = _mm256_set1_pd(v.re.limbs[0]); rl = _mm256_set1_pd(v.re.limbs[1]);
-    ih = _mm256_set1_pd(v.im.limbs[0]); il = _mm256_set1_pd(v.im.limbs[1]);
+    rh = _mm256_set1_pd(v.re.limbs[0]);
+    rl = _mm256_set1_pd(v.re.limbs[1]);
+    ih = _mm256_set1_pd(v.im.limbs[0]);
+    il = _mm256_set1_pd(v.im.limbs[1]);
 }
 
-/* SIDE='L' Hermitian diag-block kernel.
+/* SIDE='L' Hermitian diag-block kernel, 4 column lanes.
  *
- * Differs from wsymm's by:
+ * Differs from wsymm's simd_symm_diag_L by:
  *  - cj[k] += temp1 · conj(A(i,k))   — A's im negated for this product
  *  - diagonal A(i,i) is real (im=0)  — only A.re used
  */
@@ -297,21 +295,24 @@ void hemm_diag_add_L(int ic, int ib, int N, T alpha,
 
 #ifdef MBLAS_SIMD_DD
 
+/* AoS→SoA for 4 complex DD cells from a column. Each cell is 4 doubles
+ * in memory: [re.hi, re.lo, im.hi, im.lo]. */
 inline void load_4cell_csoa(const T *col, int ofs,
                             __m256d &rh, __m256d &rl,
                             __m256d &ih, __m256d &il)
 {
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 1]));
-    __m256d v2 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 2]));
-    __m256d v3 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 3]));
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);
+    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs]));     /* c0 */
+    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 1])); /* c1 */
+    __m256d v2 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 2])); /* c2 */
+    __m256d v3 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 3])); /* c3 */
+    /* 4×4 transpose */
+    __m256d t0 = _mm256_unpacklo_pd(v0, v1);  /* [c0.rh, c1.rh, c0.ih, c1.ih] */
+    __m256d t1 = _mm256_unpackhi_pd(v0, v1);  /* [c0.rl, c1.rl, c0.il, c1.il] */
+    __m256d t2 = _mm256_unpacklo_pd(v2, v3);  /* [c2.rh, c3.rh, c2.ih, c3.ih] */
+    __m256d t3 = _mm256_unpackhi_pd(v2, v3);  /* [c2.rl, c3.rl, c2.il, c3.il] */
+    rh = _mm256_permute2f128_pd(t0, t2, 0x20);  /* [c0.rh, c1.rh, c2.rh, c3.rh] */
     rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);
+    ih = _mm256_permute2f128_pd(t0, t2, 0x31);  /* [c0.ih, c1.ih, c2.ih, c3.ih] */
     il = _mm256_permute2f128_pd(t1, t3, 0x31);
 }
 
@@ -319,11 +320,12 @@ inline void store_4cell_csoa(T *col, int ofs,
                              __m256d rh, __m256d rl,
                              __m256d ih, __m256d il)
 {
-    __m256d t0 = _mm256_unpacklo_pd(rh, rl);
-    __m256d t1 = _mm256_unpackhi_pd(rh, rl);
-    __m256d t2 = _mm256_unpacklo_pd(ih, il);
-    __m256d t3 = _mm256_unpackhi_pd(ih, il);
-    __m256d v0 = _mm256_permute2f128_pd(t0, t2, 0x20);
+    /* Inverse 4×4 transpose */
+    __m256d t0 = _mm256_unpacklo_pd(rh, rl);    /* [c0.rh, c0.rl, c2.rh, c2.rl] */
+    __m256d t1 = _mm256_unpackhi_pd(rh, rl);    /* [c1.rh, c1.rl, c3.rh, c3.rl] */
+    __m256d t2 = _mm256_unpacklo_pd(ih, il);    /* [c0.ih, c0.il, c2.ih, c2.il] */
+    __m256d t3 = _mm256_unpackhi_pd(ih, il);    /* [c1.ih, c1.il, c3.ih, c3.il] */
+    __m256d v0 = _mm256_permute2f128_pd(t0, t2, 0x20);  /* [c0.rh, c0.rl, c0.ih, c0.il] */
     __m256d v1 = _mm256_permute2f128_pd(t1, t3, 0x20);
     __m256d v2 = _mm256_permute2f128_pd(t0, t2, 0x31);
     __m256d v3 = _mm256_permute2f128_pd(t1, t3, 0x31);
@@ -479,7 +481,103 @@ inline void diag_L_dispatch(int ic, int ib, int N, T alpha,
 
 } /* anonymous namespace */
 
-extern "C" void whemm_(
+int whemm_block_nb(void) {
+    static int nb = 0;
+    if (nb == 0) nb = env_int("WHEMM_NB", 64);
+    return nb;
+}
+
+void whemm_scale_col(int j, int M, T beta, T *c, int ldc) {
+    T *cj = c + static_cast<std::size_t>(j) * ldc;
+    if (cdd_iszero(beta)) for (int i = 0; i < M; ++i) cj[i] = zero_cdd;
+    else                  for (int i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
+}
+
+void whemm_block_L(int ic, int ib, int M, int N, char UPLO,
+                   T alpha, T beta, const T *a, int lda, const T *b, int ldb,
+                   T *c, int ldc)
+{
+    const char NN[1] = {'N'};
+    const char CN[1] = {'C'};
+
+    /* beta-scale this block's rows across all columns */
+    for (int j = 0; j < N; ++j) {
+        T *cj = c + static_cast<std::size_t>(j) * ldc;
+        if (cdd_iszero(beta))      for (int i = ic; i < ic + ib; ++i) cj[i] = zero_cdd;
+        else if (!cdd_isone(beta)) for (int i = ic; i < ic + ib; ++i) cj[i] = cmul(cj[i], beta);
+    }
+    if (UPLO == 'L') {
+        if (ic > 0) {
+            wgemm_serial(NN, NN, &ib, &N, &ic, &alpha,
+                         &A_(ic, 0), &lda, &B_(0, 0), &ldb,
+                         &one_cdd, &C_(ic, 0), &ldc, 1, 1);
+        }
+        diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        const int trailing = M - ic - ib;
+        if (trailing > 0) {
+            wgemm_serial(CN, NN, &ib, &N, &trailing, &alpha,
+                         &A_(ic + ib, ic), &lda, &B_(ic + ib, 0), &ldb,
+                         &one_cdd, &C_(ic, 0), &ldc, 1, 1);
+        }
+    } else {
+        if (ic > 0) {
+            wgemm_serial(CN, NN, &ib, &N, &ic, &alpha,
+                         &A_(0, ic), &lda, &B_(0, 0), &ldb,
+                         &one_cdd, &C_(ic, 0), &ldc, 1, 1);
+        }
+        diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        const int trailing = M - ic - ib;
+        if (trailing > 0) {
+            wgemm_serial(NN, NN, &ib, &N, &trailing, &alpha,
+                         &A_(ic, ic + ib), &lda, &B_(ic + ib, 0), &ldb,
+                         &one_cdd, &C_(ic, 0), &ldc, 1, 1);
+        }
+    }
+}
+
+void whemm_block_R(int jc, int jb, int M, int N, char UPLO,
+                   T alpha, T beta, const T *a, int lda, const T *b, int ldb,
+                   T *c, int ldc)
+{
+    const char NN[1] = {'N'};
+    const char CN[1] = {'C'};
+
+    /* beta-scale this block's columns over all rows */
+    for (int j = jc; j < jc + jb; ++j) {
+        T *cj = c + static_cast<std::size_t>(j) * ldc;
+        if (cdd_iszero(beta))      for (int i = 0; i < M; ++i) cj[i] = zero_cdd;
+        else if (!cdd_isone(beta)) for (int i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
+    }
+    if (UPLO == 'L') {
+        if (jc > 0) {
+            wgemm_serial(NN, CN, &M, &jb, &jc, &alpha,
+                         &B_(0, 0), &ldb, &A_(jc, 0), &lda,
+                         &one_cdd, &C_(0, jc), &ldc, 1, 1);
+        }
+        diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        const int trailing = N - jc - jb;
+        if (trailing > 0) {
+            wgemm_serial(NN, NN, &M, &jb, &trailing, &alpha,
+                         &B_(0, jc + jb), &ldb, &A_(jc + jb, jc), &lda,
+                         &one_cdd, &C_(0, jc), &ldc, 1, 1);
+        }
+    } else {
+        if (jc > 0) {
+            wgemm_serial(NN, NN, &M, &jb, &jc, &alpha,
+                         &B_(0, 0), &ldb, &A_(0, jc), &lda,
+                         &one_cdd, &C_(0, jc), &ldc, 1, 1);
+        }
+        diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        const int trailing = N - jc - jb;
+        if (trailing > 0) {
+            wgemm_serial(NN, CN, &M, &jb, &trailing, &alpha,
+                         &B_(0, jc + jb), &ldb, &A_(jc, jc + jb), &lda,
+                         &one_cdd, &C_(0, jc), &ldc, 1, 1);
+        }
+    }
+}
+
+extern "C" void whemm_serial(
     const char *side, const char *uplo,
     const int *m_, const int *n_,
     const T *alpha_,
@@ -498,105 +596,22 @@ extern "C" void whemm_(
 
     if (M == 0 || N == 0) return;
 
-    const char NN[1] = {'N'};
-    const char CN[1] = {'C'};
-
     if (cdd_iszero(alpha)) {
         if (cdd_isone(beta)) return;
-#ifdef _OPENMP
-        const int axis = (SIDE == 'L') ? M : N;
-        const bool use_omp = (axis >= WHEMM_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            if (cdd_iszero(beta)) for (int i = 0; i < M; ++i) cj[i] = zero_cdd;
-            else                  for (int i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
-        }
+        for (int j = 0; j < N; ++j) whemm_scale_col(j, M, beta, c, ldc);
         return;
     }
 
-    const int nb = hemm_nb();
-
+    const int nb = whemm_block_nb();
     if (SIDE == 'L') {
-#ifdef _OPENMP
-        const bool use_omp = (M >= WHEMM_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
-#endif
         for (int ic = 0; ic < M; ic += nb) {
             const int ib = (M - ic < nb) ? (M - ic) : nb;
-            for (int j = 0; j < N; ++j) {
-                T *cj = c + static_cast<std::size_t>(j) * ldc;
-                if (cdd_iszero(beta))      for (int i = ic; i < ic + ib; ++i) cj[i] = zero_cdd;
-                else if (!cdd_isone(beta)) for (int i = ic; i < ic + ib; ++i) cj[i] = cmul(cj[i], beta);
-            }
-            if (UPLO == 'L') {
-                if (ic > 0) {
-                    wgemm_(NN, NN, &ib, &N, &ic, &alpha,
-                           &A_(ic, 0), &lda, &B_(0, 0), &ldb,
-                           &one_cdd, &C_(ic, 0), &ldc, 1, 1);
-                }
-                diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
-                const int trailing = M - ic - ib;
-                if (trailing > 0) {
-                    wgemm_(CN, NN, &ib, &N, &trailing, &alpha,
-                           &A_(ic + ib, ic), &lda, &B_(ic + ib, 0), &ldb,
-                           &one_cdd, &C_(ic, 0), &ldc, 1, 1);
-                }
-            } else {
-                if (ic > 0) {
-                    wgemm_(CN, NN, &ib, &N, &ic, &alpha,
-                           &A_(0, ic), &lda, &B_(0, 0), &ldb,
-                           &one_cdd, &C_(ic, 0), &ldc, 1, 1);
-                }
-                diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
-                const int trailing = M - ic - ib;
-                if (trailing > 0) {
-                    wgemm_(NN, NN, &ib, &N, &trailing, &alpha,
-                           &A_(ic, ic + ib), &lda, &B_(ic + ib, 0), &ldb,
-                           &one_cdd, &C_(ic, 0), &ldc, 1, 1);
-                }
-            }
+            whemm_block_L(ic, ib, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     } else {
-#ifdef _OPENMP
-        const bool use_omp = (N >= WHEMM_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
-#endif
         for (int jc = 0; jc < N; jc += nb) {
             const int jb = (N - jc < nb) ? (N - jc) : nb;
-            for (int j = jc; j < jc + jb; ++j) {
-                T *cj = c + static_cast<std::size_t>(j) * ldc;
-                if (cdd_iszero(beta))      for (int i = 0; i < M; ++i) cj[i] = zero_cdd;
-                else if (!cdd_isone(beta)) for (int i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
-            }
-            if (UPLO == 'L') {
-                if (jc > 0) {
-                    wgemm_(NN, CN, &M, &jb, &jc, &alpha,
-                           &B_(0, 0), &ldb, &A_(jc, 0), &lda,
-                           &one_cdd, &C_(0, jc), &ldc, 1, 1);
-                }
-                diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
-                const int trailing = N - jc - jb;
-                if (trailing > 0) {
-                    wgemm_(NN, NN, &M, &jb, &trailing, &alpha,
-                           &B_(0, jc + jb), &ldb, &A_(jc + jb, jc), &lda,
-                           &one_cdd, &C_(0, jc), &ldc, 1, 1);
-                }
-            } else {
-                if (jc > 0) {
-                    wgemm_(NN, NN, &M, &jb, &jc, &alpha,
-                           &B_(0, 0), &ldb, &A_(0, jc), &lda,
-                           &one_cdd, &C_(0, jc), &ldc, 1, 1);
-                }
-                diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
-                const int trailing = N - jc - jb;
-                if (trailing > 0) {
-                    wgemm_(NN, CN, &M, &jb, &trailing, &alpha,
-                           &B_(0, jc + jb), &ldb, &A_(jc, jc + jb), &lda,
-                           &one_cdd, &C_(0, jc), &ldc, 1, 1);
-                }
-            }
+            whemm_block_R(jc, jb, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     }
 }
