@@ -1,6 +1,29 @@
 /* xaxpy — kind16 complex: Y := α·X + Y. */
 #include <quadmath.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
 typedef __complex128 T;
+
+#ifdef _OPENMP
+/* Threaded elementwise AXPY — quad is compute-bound, so it threads (see
+ * qaxpy.c). Index-from-i covers every stride; serial fast-paths preserved. */
+#define XAXPY_OMP_MIN 128
+__attribute__((noinline)) static int xaxpy_omp(int n, T alpha,
+                                               const T *x, int incx,
+                                               T *y, int incy)
+{
+    if (n <= XAXPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    int ix0 = (incx < 0) ? (-n + 1) * incx : 0;
+    int iy0 = (incy < 0) ? (-n + 1) * incy : 0;
+    #pragma omp parallel for schedule(static) num_threads(nthreads)
+    for (int i = 0; i < n; ++i) y[iy0 + i * incy] += alpha * x[ix0 + i * incx];
+    return 1;
+}
+#endif
 
 void xaxpy_(const int *n_, const T *alpha_,
             const T *x, const int *incx_,
@@ -9,6 +32,9 @@ void xaxpy_(const int *n_, const T *alpha_,
     const int n = *n_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
     if (n <= 0) return;
+#ifdef _OPENMP
+    if (xaxpy_omp(n, alpha, x, incx, y, incy)) return;
+#endif
     if (incx == 1 && incy == 1) {
         const T *xe = x + n;
         T *yp = y;
