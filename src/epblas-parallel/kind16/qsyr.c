@@ -41,17 +41,36 @@ void qsyr_(
     if (incx == 1) {
 #ifdef _OPENMP
         const int use_omp = (N >= QSYR_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
+#else
+        const int use_omp = 0;
 #endif
-        for (int j = 0; j < N; ++j) {
-            const T xj = x[j];
-            if (xj != zero) {
-                const T t = alpha * xj;
-                T *aj = &A_(0, j);
-                if (UPLO == 'L') for (int i = j; i < N; ++i) aj[i] += t * x[i];
-                else             for (int i = 0; i <= j; ++i) aj[i] += t * x[i];
-            }
+        /* Branch on use_omp at C source level — `#pragma omp parallel for
+         * if(use_omp)` outlines unconditionally. */
+#define QSYR_BODY                                                            \
+        for (int j = 0; j < N; ++j) {                                        \
+            const T xj = x[j];                                               \
+            if (xj != zero) {                                                \
+                const T t = alpha * xj;                                      \
+                T *aj = &A_(0, j);                                           \
+                if (UPLO == 'L') {                                           \
+                    for (int i = j; i < N; ++i) aj[i] += t * x[i];           \
+                } else {                                                     \
+                    for (int i = 0; i <= j; ++i) aj[i] += t * x[i];          \
+                }                                                            \
+            }                                                                \
         }
+        if (use_omp) {
+#ifdef _OPENMP
+            /* schedule(static, 1): per-column work is linear in (N-j) (L) or
+             * j (U). Round-robin balances heavy and light columns; full-storage
+             * columns are lda-separated so there is no false sharing. */
+            #pragma omp parallel for schedule(static, 1)
+#endif
+            QSYR_BODY
+        } else {
+            QSYR_BODY
+        }
+#undef QSYR_BODY
     } else {
         int kx = (incx < 0) ? -(N - 1) * incx : 0;
         for (int j = 0; j < N; ++j) {

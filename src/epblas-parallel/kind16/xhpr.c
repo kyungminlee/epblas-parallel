@@ -42,7 +42,7 @@ void xhpr_(
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const int use_omp = (N >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
                 const int kk = (j * (j + 1)) / 2;
@@ -57,7 +57,7 @@ void xhpr_(
         } else {
 #ifdef _OPENMP
             const int use_omp = (N >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
                 const int kk = j * N - (j * (j - 1)) / 2;

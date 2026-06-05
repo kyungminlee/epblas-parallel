@@ -41,7 +41,7 @@ void qspr_(
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const int use_omp = (N >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (int j = 0; j < N; ++j) {
                 if (x[j] != zero) {
@@ -53,7 +53,7 @@ void qspr_(
         } else {
 #ifdef _OPENMP
             const int use_omp = (N >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (int j = 0; j < N; ++j) {
                 if (x[j] != zero) {

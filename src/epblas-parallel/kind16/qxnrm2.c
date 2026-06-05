@@ -4,6 +4,10 @@
  * Same as qnrm2 but processes Re/Im as two values per element.
  */
 #include <quadmath.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
 typedef __complex128 T;
@@ -37,21 +41,9 @@ static inline void blue_bucket(R ax, R *abig, R *amed, R *asml, int *notbig)
     }
 }
 
-R qxnrm2_(const int *n_, const T *x, const int *incx_)
+/* Combine the three magnitude buckets into the final norm (Anderson 2017). */
+static R qxnrm2_finalize(R abig, R amed, R asml)
 {
-    const int n = *n_, incx = *incx_;
-    if (n <= 0) return 0.0Q;
-    if (!blue_inited) blue_init();
-
-    R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
-    int notbig = 1;
-    int ix = (incx < 0) ? -(n - 1) * incx : 0;
-    for (int i = 0; i < n; ++i) {
-        blue_bucket(fabsq(__real__ x[ix]), &abig, &amed, &asml, &notbig);
-        blue_bucket(fabsq(__imag__ x[ix]), &abig, &amed, &asml, &notbig);
-        ix += incx;
-    }
-
     R scl, sumsq;
     if (abig > 0.0Q) {
         if (amed > 0.0Q || amed > maxN || amed != amed) {
@@ -77,4 +69,69 @@ R qxnrm2_(const int *n_, const T *x, const int *incx_)
         sumsq = amed;
     }
     return scl * sqrtq(sumsq);
+}
+
+#ifdef _OPENMP
+/* Bucket-accumulate a unit-stride chunk (Re+Im per element) into
+ * (abig, amed, asml). The notbig flag is chunk-local: asml is only consumed by
+ * the finalize when the GLOBAL abig==0 (every chunk kept notbig==1), so this is
+ * exact. */
+static void qxnrm2_bucket(int n, const T *x, R *abig_, R *amed_, R *asml_)
+{
+    R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
+    int notbig = 1;
+    for (int i = 0; i < n; ++i) {
+        blue_bucket(fabsq(__real__ x[i]), &abig, &amed, &asml, &notbig);
+        blue_bucket(fabsq(__imag__ x[i]), &abig, &amed, &asml, &notbig);
+    }
+    *abig_ = abig; *amed_ = amed; *asml_ = asml;
+}
+
+/* Threaded reduction for large unit-stride X (see qnrm2 for the rationale). */
+#define QXNRM2_OMP_MIN 128
+#define QXNRM2_MAX_CPUS 64
+__attribute__((noinline)) static int qxnrm2_omp(int n, const T *x, R *out)
+{
+    if (n <= QXNRM2_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > QXNRM2_MAX_CPUS) nthreads = QXNRM2_MAX_CPUS;
+    R pbig[QXNRM2_MAX_CPUS] = {0}, pmed[QXNRM2_MAX_CPUS] = {0}, psml[QXNRM2_MAX_CPUS] = {0};
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        int nth = omp_get_num_threads();
+        int lo = (int)((long long)n * tid / nth);
+        int hi = (int)((long long)n * (tid + 1) / nth);
+        if (lo < hi) qxnrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
+    }
+    R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
+    for (int i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
+    *out = qxnrm2_finalize(abig, amed, asml);
+    return 1;
+}
+#endif
+
+R qxnrm2_(const int *n_, const T *x, const int *incx_)
+{
+    const int n = *n_, incx = *incx_;
+    if (n <= 0) return 0.0Q;
+    if (!blue_inited) blue_init();
+
+#ifdef _OPENMP
+    if (incx == 1) {
+        R r;
+        if (qxnrm2_omp(n, x, &r)) return r;
+    }
+#endif
+
+    R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
+    int notbig = 1;
+    int ix = (incx < 0) ? -(n - 1) * incx : 0;
+    for (int i = 0; i < n; ++i) {
+        blue_bucket(fabsq(__real__ x[ix]), &abig, &amed, &asml, &notbig);
+        blue_bucket(fabsq(__imag__ x[ix]), &abig, &amed, &asml, &notbig);
+        ix += incx;
+    }
+    return qxnrm2_finalize(abig, amed, asml);
 }

@@ -6,11 +6,13 @@
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
+#include <stdlib.h>
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 
 #define XGBMV_OMP_MIN 64
+#define XGBMV_MAX_CPUS 256
 
 typedef __complex128 T;
 
@@ -19,6 +21,18 @@ static inline char up(const char *p) {
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
+
+#ifdef _OPENMP
+/* Threaded NoTrans band matvec (incx==incy==1). Every output row i is an
+ * independent band dot, so threads own disjoint y[lo,hi). NoTrans never
+ * conjugates. Bit-identical to the serial column-scatter: ax[j]=alpha*x[j]
+ * matches the reference's temp, and seeding the accumulator with y[i] then
+ * adding ax[j]*A(i,j) in ascending-j order reproduces the scatter's exact
+ * association. Returns 1 if handled, 0 to fall back. */
+static int xgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
+                       const T *restrict a, int lda,
+                       const T *restrict x, T *restrict y);
+#endif
 
 void xgbmv_(
     const char *trans,
@@ -53,6 +67,11 @@ void xgbmv_(
     if (alpha == zero) return;
 
     if (TR == 'N' && incx == 1 && incy == 1) {
+#ifdef _OPENMP
+        if (M >= XGBMV_OMP_MIN && blas_omp_max_threads() > 1
+            && xgbmv_n_omp(M, N, KL, KU, alpha, a, lda, x, y))
+            return;
+#endif
         for (int j = 0; j < N; ++j) {
             const T tmp = alpha * x[j];
             const int i_lo = (j - KU > 0) ? (j - KU) : 0;
@@ -118,5 +137,41 @@ void xgbmv_(
         }
     }
 }
+
+#ifdef _OPENMP
+__attribute__((noinline)) static int xgbmv_n_omp(
+    int M, int N, int KL, int KU, T alpha,
+    const T *restrict a, int lda,
+    const T *restrict x, T *restrict y)
+{
+    if (M < XGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > XGBMV_MAX_CPUS) nthreads = XGBMV_MAX_CPUS;
+
+    /* ax[j] = alpha*x[j] precomputed once (matches the scatter's temp exactly). */
+    T *ax = (T *)malloc((size_t)N * sizeof(T));
+    if (!ax) return 0;
+    for (int j = 0; j < N; ++j) ax[j] = alpha * x[j];
+
+    const ptrdiff_t s1 = (ptrdiff_t)lda - 1;
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        ptrdiff_t lo = ((ptrdiff_t)M * tid) / nthreads;
+        ptrdiff_t hi = ((ptrdiff_t)M * (tid + 1)) / nthreads;
+        for (ptrdiff_t i = lo; i < hi; ++i) {
+            ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
+            ptrdiff_t j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
+            const T *base = a + (KU + i);
+            T s = y[i];                       /* seed: post-beta y[i] */
+            for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += ax[j] * base[j * s1];
+            y[i] = s;
+        }
+    }
+    free(ax);
+    return 1;
+}
+#endif /* _OPENMP */
 
 #undef A_
