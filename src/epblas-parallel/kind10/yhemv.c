@@ -74,15 +74,13 @@ void yhemv_(
             /* Parallel column-walk with per-thread private y, then reduce.
              * Same pattern as esymv (Addendum 36). Hermitian conjugation
              * stays inside the column loop unchanged. */
-            T *y_priv_all = (T *)aligned_alloc(64,
-                (((size_t)nt * N * sizeof(T)) + 63) & ~(size_t)63);
+            T *y_priv_all = (T *)calloc((size_t)nt * (size_t)N, sizeof(T));
             if (y_priv_all) {
 #ifdef _OPENMP
-                #pragma omp parallel
+                #pragma omp parallel num_threads(nt)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * N];
-                    for (ptrdiff_t k = 0; k < N; ++k) y_priv[k] = ZERO;
+                    T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)

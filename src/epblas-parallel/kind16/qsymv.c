@@ -66,14 +66,12 @@ void qsymv_(
             /* Parallel two-pass with per-thread private y accumulator;
              * schedule(static,1) interleaves columns to balance the
              * triangular per-column work (linear in N-j for L, j for U). */
-            T *y_priv_all = (T *)aligned_alloc(64,
-                (((size_t)nt * N * sizeof(T)) + 63) & ~(size_t)63);
+            T *y_priv_all = (T *)calloc((size_t)nt * (size_t)N, sizeof(T));
             if (y_priv_all) {
-                #pragma omp parallel
+                #pragma omp parallel num_threads(nt)
                 {
                     const int tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * N];
-                    for (int k = 0; k < N; ++k) y_priv[k] = zero;
+                    T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)

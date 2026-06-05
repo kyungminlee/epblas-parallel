@@ -112,15 +112,13 @@ void etrmv_(
                 /* aligned_alloc fail → fall through to serial. */
             } else {
                 /* TR='N' — per-thread y_priv + reduction. */
-                T *y_priv_all = (T *)aligned_alloc(64,
-                    (((size_t)nt * N * sizeof(T)) + 63) & ~(size_t)63);
+                T *y_priv_all = (T *)calloc((size_t)nt * (size_t)N, sizeof(T));
                 if (y_priv_all) {
 #ifdef _OPENMP
-                    #pragma omp parallel
+                    #pragma omp parallel num_threads(nt)
                     {
                         const ptrdiff_t tid = omp_get_thread_num();
-                        T *y_priv = &y_priv_all[(size_t)tid * N];
-                        for (ptrdiff_t k = 0; k < N; ++k) y_priv[k] = zero;
+                        T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
 
                         if (UPLO == 'L') {
                             #pragma omp for schedule(static, 1)

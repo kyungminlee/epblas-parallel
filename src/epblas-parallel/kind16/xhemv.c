@@ -59,14 +59,12 @@ void xhemv_(
             /* Parallel column-walk with per-thread private y, then reduce
              * (same pattern as qsymv; Hermitian conjugation stays inside the
              * column loop unchanged). Faithful port of kind10 yhemv. */
-            T *y_priv_all = (T *)aligned_alloc(64,
-                (((size_t)nt * N * sizeof(T)) + 63) & ~(size_t)63);
+            T *y_priv_all = (T *)calloc((size_t)nt * (size_t)N, sizeof(T));
             if (y_priv_all) {
-                #pragma omp parallel
+                #pragma omp parallel num_threads(nt)
                 {
                     const int tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * N];
-                    for (int k = 0; k < N; ++k) y_priv[k] = zero;
+                    T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
