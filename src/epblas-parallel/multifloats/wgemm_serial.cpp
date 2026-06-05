@@ -1,28 +1,24 @@
 /*
- * wgemm — multifloats complex GEMM overlay (complex64x2).
+ * wgemm_serial.cpp — multifloats complex GEMM (complex64x2, complex double-
+ * double), single-thread core. Owns ALL the numerics shared by the serial
+ * and parallel entries: the trans decode, the block-size policy, the scalar
+ * and AVX2-SIMD complex packers and micro-kernels (declared in
+ * wgemm_kernel.h), plus the public `wgemm_serial` Fortran entry. No OpenMP
+ * anywhere on this call path — safe to invoke from inside another routine's
+ * parallel region.
  *
- * C++ implementation. multifloats POD `complex64x2` has fields .re/.im
- * of `float64x2`. We could go through `std::complex<float64x2>` for
- * fully overloaded arithmetic, but for the inner loop we want explicit
- * control over the four real multiplies — Gauss reduces to three, but
- * we'd accept that elsewhere; the unreduced form is the one
- * `cmuldd` does too, so use that.
- *
- * Exported with extern "C" → symbol `wgemm_`, matching the migrated
- * Fortran ABI on the POD `complex64x2` layout (4 doubles back-to-back,
- * the multifloats header's _Static_assert pins this).
+ * Math is bitwise-identical to the previous single wgemm.cpp: the parallel
+ * entry (wgemm_parallel.cpp) drives these exact leaves over a jc-partitioned
+ * team, so the two paths agree to the last bit.
  */
 
-#include <cstddef>
+#include "wgemm_kernel.h"
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef WBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
+#include <immintrin.h>
 #endif
 
 namespace mf = multifloats;
@@ -46,10 +42,6 @@ void init_blocks() {
     g_nc = env_int("MBLAS_NC", 256);
 }
 
-int trans_code(const char *p, std::size_t /*len*/) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im,
               a.re * b.im + a.im * b.re };
@@ -68,9 +60,22 @@ inline bool cisone(T const &a) {
         && a.im.limbs[0] == 0.0 && a.im.limbs[1] == 0.0;
 }
 
-void pack_A(const T * __restrict__ A, int lda,
-            int ic, int pc, int ib, int pb,
-            int ta, T * __restrict__ Ap)
+const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+
+}  // namespace
+
+int wgemm_trans_code(const char *p, std::size_t /*len*/) {
+    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
+}
+
+void wgemm_choose_blocks(int *MC, int *KC, int *NC) {
+    init_blocks();
+    *MC = g_mc; *KC = g_kc; *NC = g_nc;
+}
+
+void wgemm_pack_A(const T * __restrict__ A, int lda,
+                  int ic, int pc, int ib, int pb,
+                  int ta, T * __restrict__ Ap)
 {
     if (ta == 'N') {
         for (int p = 0; p < pb; ++p) {
@@ -93,9 +98,9 @@ void pack_A(const T * __restrict__ A, int lda,
     }
 }
 
-void pack_B(const T * __restrict__ B, int ldb,
-            int pc, int jc, int pb, int jb,
-            int tb, T * __restrict__ Bp)
+void wgemm_pack_B(const T * __restrict__ B, int ldb,
+                  int pc, int jc, int pb, int jb,
+                  int tb, T * __restrict__ Bp)
 {
     if (tb == 'N') {
         for (int j = 0; j < jb; ++j) {
@@ -118,9 +123,9 @@ void pack_B(const T * __restrict__ B, int ldb,
     }
 }
 
-void inner_kernel(int ib, int jb, int pb, T alpha,
-                  const T * __restrict__ Ap, const T * __restrict__ Bp,
-                  T * __restrict__ C, int ldc)
+void wgemm_inner_kernel(int ib, int jb, int pb, T alpha,
+                        const T * __restrict__ Ap, const T * __restrict__ Bp,
+                        T * __restrict__ C, int ldc)
 {
     for (int j = 0; j < jb; ++j) {
         T *cj = &C[static_cast<std::size_t>(j) * ldc];
@@ -132,8 +137,6 @@ void inner_kernel(int ib, int jb, int pb, T alpha,
         }
     }
 }
-
-const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 
 #ifdef WBLAS_SIMD_DD
 
@@ -154,12 +157,12 @@ const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
  */
 constexpr int wsimd_pack_W() { return simd_dd::NR * WGEMM_SIMD_NR_PAN; }
 
-void pack_B_soa_complex(const T * __restrict__ B, int ldb,
-                        int pc, int jc, int pb, int jb, int tb,
-                        double * __restrict__ Bp_rh,
-                        double * __restrict__ Bp_rl,
-                        double * __restrict__ Bp_ih,
-                        double * __restrict__ Bp_il)
+void wgemm_pack_B_soa_complex(const T * __restrict__ B, int ldb,
+                              int pc, int jc, int pb, int jb, int tb,
+                              double * __restrict__ Bp_rh,
+                              double * __restrict__ Bp_rl,
+                              double * __restrict__ Bp_ih,
+                              double * __restrict__ Bp_il)
 {
     const int W = wsimd_pack_W();
     const int npanels = (jb + W - 1) / W;
@@ -215,6 +218,8 @@ void pack_B_soa_complex(const T * __restrict__ B, int ldb,
         }
     }
 }
+
+int wgemm_simd_pack_W(void) { return wsimd_pack_W(); }
 
 /* Writeback one ymm-panel of complex DD accumulators into C. */
 static inline __attribute__((always_inline)) void
@@ -367,13 +372,13 @@ inner_kernel_simd_complex_t(int ib, int jb, int pb, T alpha,
     }
 }
 
-void inner_kernel_simd_complex(int ib, int jb, int pb, T alpha,
-                               const T * __restrict__ Ap,
-                               const double * __restrict__ Bp_rh,
-                               const double * __restrict__ Bp_rl,
-                               const double * __restrict__ Bp_ih,
-                               const double * __restrict__ Bp_il,
-                               T * __restrict__ C, int ldc)
+void wgemm_inner_kernel_simd_complex(int ib, int jb, int pb, T alpha,
+                                     const T * __restrict__ Ap,
+                                     const double * __restrict__ Bp_rh,
+                                     const double * __restrict__ Bp_rl,
+                                     const double * __restrict__ Bp_ih,
+                                     const double * __restrict__ Bp_il,
+                                     T * __restrict__ C, int ldc)
 {
     inner_kernel_simd_complex_t<WGEMM_SIMD_MR, WGEMM_SIMD_NR_PAN>(
         ib, jb, pb, alpha, Ap, Bp_rh, Bp_rl, Bp_ih, Bp_il, C, ldc);
@@ -381,9 +386,7 @@ void inner_kernel_simd_complex(int ib, int jb, int pb, T alpha,
 
 #endif /* WBLAS_SIMD_DD */
 
-}  // namespace
-
-extern "C" void wgemm_(
+extern "C" void wgemm_serial(
     const char *transa, const char *transb,
     const int *m_, const int *n_, const int *k_,
     const T *alpha_,
@@ -396,8 +399,8 @@ extern "C" void wgemm_(
     const int M = *m_, N = *n_, K = *k_;
     const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = trans_code(transa, transa_len);
-    const int tb = trans_code(transb, transb_len);
+    const int ta = wgemm_trans_code(transa, transa_len);
+    const int tb = wgemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
@@ -411,76 +414,65 @@ extern "C" void wgemm_(
     }
     if (ciszero(alpha) || K == 0) return;
 
-    init_blocks();
-    const int MC = g_mc, KC = g_kc, NC = g_nc;
+    int MC, KC, NC;
+    wgemm_choose_blocks(&MC, &KC, &NC);
 
-#ifdef _OPENMP
-    #pragma omp parallel
-#endif
-    {
-        T *Ap = static_cast<T *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(MC) * KC * sizeof(T)));
+    T *Ap = static_cast<T *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(MC) * KC * sizeof(T)));
 #ifdef WBLAS_SIMD_DD
-        const int W_simd = wsimd_pack_W();
-        const int NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
-        double *Bp_rh = static_cast<double *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-        double *Bp_rl = static_cast<double *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-        double *Bp_ih = static_cast<double *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-        double *Bp_il = static_cast<double *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-        if (Ap && Bp_rh && Bp_rl && Bp_ih && Bp_il) {
-#ifdef _OPENMP
-            #pragma omp for schedule(static)
-#endif
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
-                    pack_B_soa_complex(b, ldb, pc, jc, pb, jb, tb,
-                                       Bp_rh, Bp_rl, Bp_ih, Bp_il);
-                    for (int ic = 0; ic < M; ic += MC) {
-                        const int ib = (M - ic < MC) ? (M - ic) : MC;
-                        pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
-                        inner_kernel_simd_complex(ib, jb, pb, alpha, Ap,
-                                                  Bp_rh, Bp_rl, Bp_ih, Bp_il,
-                                                  &c[static_cast<std::size_t>(jc) * ldc + ic],
-                                                  ldc);
-                    }
+    const int W_simd = wgemm_simd_pack_W();
+    const int NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
+    double *Bp_rh = static_cast<double *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+    double *Bp_rl = static_cast<double *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+    double *Bp_ih = static_cast<double *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+    double *Bp_il = static_cast<double *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+    if (Ap && Bp_rh && Bp_rl && Bp_ih && Bp_il) {
+        for (int jc = 0; jc < N; jc += NC) {
+            const int jb = (N - jc < NC) ? (N - jc) : NC;
+            for (int pc = 0; pc < K; pc += KC) {
+                const int pb = (K - pc < KC) ? (K - pc) : KC;
+                wgemm_pack_B_soa_complex(b, ldb, pc, jc, pb, jb, tb,
+                                         Bp_rh, Bp_rl, Bp_ih, Bp_il);
+                for (int ic = 0; ic < M; ic += MC) {
+                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                    wgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
+                    wgemm_inner_kernel_simd_complex(ib, jb, pb, alpha, Ap,
+                                                    Bp_rh, Bp_rl, Bp_ih, Bp_il,
+                                                    &c[static_cast<std::size_t>(jc) * ldc + ic],
+                                                    ldc);
                 }
             }
         }
-        std::free(Ap);
-        std::free(Bp_rh);
-        std::free(Bp_rl);
-        std::free(Bp_ih);
-        std::free(Bp_il);
-#else
-        T *Bp = static_cast<T *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC * sizeof(T)));
-        if (Ap && Bp) {
-#ifdef _OPENMP
-            #pragma omp for schedule(static)
-#endif
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
-                    pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                    for (int ic = 0; ic < M; ic += MC) {
-                        const int ib = (M - ic < MC) ? (M - ic) : MC;
-                        pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
-                        inner_kernel(ib, jb, pb, alpha, Ap, Bp,
-                                     &c[static_cast<std::size_t>(jc) * ldc + ic],
-                                     ldc);
-                    }
-                }
-            }
-        }
-        std::free(Ap);
-        std::free(Bp);
-#endif /* WBLAS_SIMD_DD */
     }
+    std::free(Ap);
+    std::free(Bp_rh);
+    std::free(Bp_rl);
+    std::free(Bp_ih);
+    std::free(Bp_il);
+#else
+    T *Bp = static_cast<T *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(KC) * NC * sizeof(T)));
+    if (Ap && Bp) {
+        for (int jc = 0; jc < N; jc += NC) {
+            const int jb = (N - jc < NC) ? (N - jc) : NC;
+            for (int pc = 0; pc < K; pc += KC) {
+                const int pb = (K - pc < KC) ? (K - pc) : KC;
+                wgemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
+                for (int ic = 0; ic < M; ic += MC) {
+                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                    wgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
+                    wgemm_inner_kernel(ib, jb, pb, alpha, Ap, Bp,
+                                       &c[static_cast<std::size_t>(jc) * ldc + ic],
+                                       ldc);
+                }
+            }
+        }
+    }
+    std::free(Ap);
+    std::free(Bp);
+#endif /* WBLAS_SIMD_DD */
 }
