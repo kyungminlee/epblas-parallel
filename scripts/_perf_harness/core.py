@@ -141,7 +141,8 @@ KIND16 = (
     'xscal xqscal xaxpy xcopy xswap xqrot xdotu xdotc '
     'qxasum qgbmv xgbmv qsbmv xhbmv qspmv xhpmv qtbmv xtbmv '
     'qtbsv xtbsv qtpmv xtpmv qtpsv xtpsv qspr xhpr '
-    'iqamax ixamax qrotg qrotm qrotmg xrotg'
+    'iqamax ixamax qrotg qrotm qrotmg xrotg '
+    'qnrm2 qxnrm2'
 ).split()
 MULTIFLOATS = (
     'mgemm wgemm mgemmtr wgemmtr mtrsm wtrsm mtrmm wtrmm '
