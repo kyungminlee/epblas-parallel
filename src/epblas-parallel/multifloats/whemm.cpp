@@ -460,7 +460,7 @@ inline void diag_R_dispatch(int jc, int jb, int M, T alpha,
     simd_hemm_diag_R(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
     return;
 #else
-    diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
+    hemm_diag_add_R(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
 #endif
 }
 
@@ -474,7 +474,7 @@ inline void diag_L_dispatch(int ic, int ib, int N, T alpha,
         return;
     }
 #endif
-    diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
+    hemm_diag_add_L(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
 }
 
 } /* anonymous namespace */

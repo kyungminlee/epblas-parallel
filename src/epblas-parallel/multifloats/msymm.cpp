@@ -375,7 +375,7 @@ inline void diag_R_dispatch(int jc, int jb, int M, T alpha,
     simd_symm_diag_R(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
     return;
 #else
-    diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
+    symm_diag_add_R(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
 #endif
 }
 

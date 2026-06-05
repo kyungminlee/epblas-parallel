@@ -337,7 +337,7 @@ inline void diag_dispatch(int jc, int jb, int K, R alpha,
         return;
     }
 #endif
-    diag_dispatch(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
+    herk_diag_add(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
 }
 
 } /* anonymous namespace */
