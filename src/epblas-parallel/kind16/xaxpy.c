@@ -31,7 +31,10 @@ void xaxpy_(const int *n_, const T *alpha_,
 {
     const int n = *n_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
-    if (n <= 0) return;
+    /* BLAS contract (reference ZAXPY: DCABS1(alpha)==0 => RETURN): a zero
+     * scalar is a no-op, and must not turn a non-finite x into NaN in y.
+     * Matches the qaxpy/eaxpy/yaxpy twins. */
+    if (n <= 0 || alpha == (T)0.0Q) return;
 #ifdef _OPENMP
     if (xaxpy_omp(n, alpha, x, incx, y, incy)) return;
 #endif
