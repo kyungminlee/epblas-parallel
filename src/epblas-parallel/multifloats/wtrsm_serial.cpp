@@ -1,33 +1,35 @@
 /*
- * wtrsm — multifloats complex (complex64x2) triangular solve.
+ * wtrsm_serial.cpp — multifloats complex (complex64x2) triangular solve,
+ * single-thread core. Owns ALL the numerics shared by the serial and parallel
+ * entries:
  *
- * Direct port of mtrsm.cpp to complex DD. Same structure:
- *   - Scalar all-16 variants for SIDE='L' and SIDE='R'
- *   - Blocked SIDE='L' (4 variants) with wgemm trailing
- *   - Coarse-N parallelism (one outer omp parallel)
- *   - SIMD 4-wide AVX2 diagonal kernel using cdd_mul / cdd_add
+ *   - scalar column "core" kernels for SIDE='L' (LLN/LUN + LLT/LLC/LUT/LUC via
+ *     a conj flag) and the SIDE='R' cores (RLN/RUN + RLT/RLC/RUT/RUC),
+ *   - the AVX2 4-wide SIMD diagonal kernels (SIDE='L' packed-SoA and SIDE='R'
+ *     4-row chunks), under WBLAS_SIMD_DD,
+ *   - the block-size policy and the blocked SIDE='L' chunk worker, whose
+ *     trailing-matrix update routes through wgemm_serial (no nested OpenMP),
+ *   - the per-slice workers wtrsm_L_slice / wtrsm_R_slice (declared in
+ *     wtrsm_kernel.h) that the parallel entry fans across a team, plus the
+ *     public `wtrsm_serial` entry.
  *
- * Differences from mtrsm:
- *   - T is complex64x2 (.re, .im of float64x2)
- *   - TRANSA='C' is conjugate transpose (distinct from 'T')
- *   - All arithmetic via multifloats overloads (cmul/cadd/cdiv inline)
- *   - SIMD kernel uses 4 ymm regs per cell (re_h, re_l, im_h, im_l)
+ * There is NO OpenMP on this path. Threading lives entirely in
+ * wtrsm_parallel.cpp; both paths drive these workers, so a static partition
+ * is bitwise-identical to the serial sweep.
  *
- * Exported with extern "C" → symbol `wtrsm_`.
+ * Unlike the real (mtrsm) twin, TRANSA='C' (conjugate transpose) is kept
+ * DISTINCT from 'T' — the conj flag gates conj() on the A reads.
  */
 
+#include "wtrsm_kernel.h"
+#include "wgemm_kernel.h"   /* wgemm_serial for the trailing update */
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef WBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mgemm_simd_kernel.h"   /* dd_mul, dd_add, dd_neg, cdd_mul/add */
 #include <immintrin.h>
-#include "../common/blas_omp.h"
 #endif
 
 namespace mf = multifloats;
@@ -35,8 +37,6 @@ using R = mf::float64x2;
 using T = mf::complex64x2;
 
 namespace {
-
-#define WTRSM_OMP_N_MIN 32
 
 int env_int(const char *name, int dflt) {
     const char *s = std::getenv(name);
@@ -49,10 +49,6 @@ int g_nb_trsm = 0;
 int trsm_nb(void) {
     if (g_nb_trsm == 0) g_nb_trsm = env_int("WTRSM_NB", 64);
     return g_nb_trsm;
-}
-
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
 
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
@@ -81,16 +77,6 @@ inline T cdiv(T const &a, T const &b) {
     return T{ (a.re * b.re + a.im * b.im) / denom,
               (a.im * b.re - a.re * b.im) / denom };
 }
-
-extern "C" void wgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -301,9 +287,6 @@ inline void unpack_B_4col_complex(int M, T *b, int ldb,
     }
 }
 
-/* SIMD complex DD multiply: result += a · b (4-wide SoA) — actually
- * the primitives are in simd_dd::cdd_mul / cdd_add already. */
-
 /* Helper: load row k into 4 ymm regs from SoA scratch. */
 #define LOAD_ROW(idx, rh, rl, ih, il)                          \
     do {                                                       \
@@ -356,46 +339,6 @@ inline void simd_prescale_complex(int M, T alpha,
 inline void simd_neg_cdd(__m256d &rh, __m256d &rl, __m256d &ih, __m256d &il) {
     simd_dd::dd_neg(rh, rl);
     simd_dd::dd_neg(ih, il);
-}
-
-/* SIMD complex divide: result = a / b, all SoA scalars.
- * a / b = a · conj(b) / |b|² . We compute |b|² as DD-real, then
- * 1/|b|² (DD), then multiply. */
-inline void simd_cdd_inv(__m256d brh, __m256d brl, __m256d bih, __m256d bil,
-                         __m256d &irh, __m256d &irl, __m256d &iih, __m256d &iil)
-{
-    /* inv(b) = conj(b) / |b|²
-     * |b|² = b.re·b.re + b.im·b.im (DD real)
-     * inv.re = b.re / |b|²
-     * inv.im = -b.im / |b|²
-     */
-    __m256d sq1h, sq1l, sq2h, sq2l;
-    simd_dd::dd_mul(brh, brl, brh, brl, sq1h, sq1l);   /* re² */
-    simd_dd::dd_mul(bih, bil, bih, bil, sq2h, sq2l);   /* im² */
-    __m256d dh, dl;
-    simd_dd::dd_add(sq1h, sq1l, sq2h, sq2l, dh, dl);   /* |b|² */
-    /* invd = 1 / |b|² via Newton on the hi limb */
-    __m256d r0 = _mm256_div_pd(_mm256_set1_pd(1.0), dh);
-    /* one Newton iter on DD: r = r0 · (2 - d · r0)
-     * 2 - d·r0 ≈ 1 - dl·r0  (since dh·r0 ≈ 1)
-     * For DD precision, do it in DD: */
-    __m256d dr_h, dr_l;
-    simd_dd::dd_mul(dh, dl, r0, _mm256_setzero_pd(), dr_h, dr_l);
-    /* 2 - dr */
-    __m256d two = _mm256_set1_pd(2.0);
-    __m256d cor_h, cor_l;
-    {
-        __m256d nr_h = dr_h, nr_l = dr_l;
-        simd_dd::dd_neg(nr_h, nr_l);
-        simd_dd::dd_add(two, _mm256_setzero_pd(), nr_h, nr_l, cor_h, cor_l);
-    }
-    __m256d invh, invl;
-    simd_dd::dd_mul(_mm256_set1_pd(0.0), _mm256_setzero_pd(), _mm256_setzero_pd(), _mm256_setzero_pd(), invh, invl); /* placeholder */
-    simd_dd::dd_mul(cor_h, cor_l, r0, _mm256_setzero_pd(), invh, invl);
-    /* inv.re = b.re · invd ; inv.im = -b.im · invd */
-    simd_dd::dd_mul(brh, brl, invh, invl, irh, irl);
-    simd_dd::dd_mul(bih, bil, invh, invl, iih, iil);
-    simd_dd::dd_neg(iih, iil);
 }
 
 /* SIMD forward sub on (L, L, N): rank-1 form. */
@@ -911,130 +854,8 @@ inline void wtrsm_simd_diag_R(wtrsm_r_op op, int M, int N, T alpha,
 
 #endif  /* WBLAS_SIMD_DD */
 
-/* ── Standalone OMP wrapper for unblocked SIDE='L' entries. */
-
-#ifdef _OPENMP
-#define WTRSM_OMP_WRAP(name, core, extra)                                  \
-    void name(int M, int N, T alpha,                                       \
-              const T *a, int lda, T *b, int ldb, int nounit)              \
-    {                                                                      \
-        if (N >= WTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {           \
-            _Pragma("omp parallel")                                        \
-            {                                                              \
-                int tid = omp_get_thread_num();                            \
-                int nt  = omp_get_num_threads();                           \
-                int js  = static_cast<int>((long long)N * tid / nt);       \
-                int je  = static_cast<int>((long long)N * (tid + 1) / nt); \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit extra);      \
-            }                                                              \
-        } else {                                                           \
-            core(0, N, M, alpha, a, lda, b, ldb, nounit extra);            \
-        }                                                                  \
-    }
-#else
-#define WTRSM_OMP_WRAP(name, core, extra)                                  \
-    void name(int M, int N, T alpha,                                       \
-              const T *a, int lda, T *b, int ldb, int nounit)              \
-    {                                                                      \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit extra);                \
-    }
-#endif
-
-WTRSM_OMP_WRAP(wtrsm_lln, wtrsm_lln_core, )
-WTRSM_OMP_WRAP(wtrsm_lun, wtrsm_lun_core, )
-
-void wtrsm_llt(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit)
-{
-#ifdef _OPENMP
-    if (N >= WTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt = omp_get_num_threads();
-            int js = static_cast<int>((long long)N * tid / nt);
-            int je = static_cast<int>((long long)N * (tid + 1) / nt);
-            wtrsm_llTC_core(js, je, M, alpha, a, lda, b, ldb, nounit, 0);
-        }
-        return;
-    }
-#endif
-    wtrsm_llTC_core(0, N, M, alpha, a, lda, b, ldb, nounit, 0);
-}
-
-void wtrsm_lut(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit)
-{
-#ifdef _OPENMP
-    if (N >= WTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt = omp_get_num_threads();
-            int js = static_cast<int>((long long)N * tid / nt);
-            int je = static_cast<int>((long long)N * (tid + 1) / nt);
-            wtrsm_luTC_core(js, je, M, alpha, a, lda, b, ldb, nounit, 0);
-        }
-        return;
-    }
-#endif
-    wtrsm_luTC_core(0, N, M, alpha, a, lda, b, ldb, nounit, 0);
-}
-
-void wtrsm_llc(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit)
-{
-#ifdef _OPENMP
-    if (N >= WTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt = omp_get_num_threads();
-            int js = static_cast<int>((long long)N * tid / nt);
-            int je = static_cast<int>((long long)N * (tid + 1) / nt);
-            wtrsm_llTC_core(js, je, M, alpha, a, lda, b, ldb, nounit, 1);
-        }
-        return;
-    }
-#endif
-    wtrsm_llTC_core(0, N, M, alpha, a, lda, b, ldb, nounit, 1);
-}
-
-void wtrsm_luc(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit)
-{
-#ifdef _OPENMP
-    if (N >= WTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt = omp_get_num_threads();
-            int js = static_cast<int>((long long)N * tid / nt);
-            int je = static_cast<int>((long long)N * (tid + 1) / nt);
-            wtrsm_luTC_core(js, je, M, alpha, a, lda, b, ldb, nounit, 1);
-        }
-        return;
-    }
-#endif
-    wtrsm_luTC_core(0, N, M, alpha, a, lda, b, ldb, nounit, 1);
-}
-
-void wtrsm_rln(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    wtrsm_rln_core(M, N, alpha, a, lda, b, ldb, nounit);
-}
-void wtrsm_run(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    wtrsm_run_core(M, N, alpha, a, lda, b, ldb, nounit);
-}
-void wtrsm_rlt(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    wtrsm_rlTC_core(M, N, alpha, a, lda, b, ldb, nounit, 0);
-}
-void wtrsm_rut(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    wtrsm_ruTC_core(M, N, alpha, a, lda, b, ldb, nounit, 0);
-}
-void wtrsm_rlc(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    wtrsm_rlTC_core(M, N, alpha, a, lda, b, ldb, nounit, 1);
-}
-void wtrsm_ruc(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int nounit) {
-    wtrsm_ruTC_core(M, N, alpha, a, lda, b, ldb, nounit, 1);
-}
-
-/* ── Blocked SIDE='L': uses wgemm trailing update + coarse-N. */
+/* ── Blocked SIDE='L' chunk worker: serial blocked-TRSM over one column slice
+ * [j_start, j_end). The wgemm trailing update routes through wgemm_serial. */
 
 inline void prescale_chunk(int j_start, int j_end, int M, T alpha,
                            T *b, int ldb)
@@ -1084,10 +905,10 @@ void blocked_chunk(wtrsm_variant V, int j_start, int j_end,
         for (int ic = 0; ic < M; ic += nb) {
             const int ib = (M - ic < nb) ? (M - ic) : nb;
             if (ic > 0) {
-                wgemm_(NN, NN, &ib, &my_N, &ic, &m_one,
-                       &A_(ic, 0), &lda,
-                       B_chunk, &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
+                wgemm_serial(NN, NN, &ib, &my_N, &ic, &m_one,
+                             &A_(ic, 0), &lda,
+                             B_chunk, &ldb, &one,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             DIAG_C(CSLLN,
                 wtrsm_lln_core(j_start, j_end, ib, one,
@@ -1101,10 +922,10 @@ void blocked_chunk(wtrsm_variant V, int j_start, int j_end,
             const int trailing = M - (ic + ib);
             if (trailing > 0) {
                 const int j0 = ic + ib;
-                wgemm_(NN, NN, &ib, &my_N, &trailing, &m_one,
-                       &A_(ic, j0), &lda,
-                       &B_chunk[j0], &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
+                wgemm_serial(NN, NN, &ib, &my_N, &trailing, &m_one,
+                             &A_(ic, j0), &lda,
+                             &B_chunk[j0], &ldb, &one,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             DIAG_C(CSLUN,
                 wtrsm_lun_core(j_start, j_end, ib, one,
@@ -1121,10 +942,10 @@ void blocked_chunk(wtrsm_variant V, int j_start, int j_end,
             const int trailing = M - (ic + ib);
             if (trailing > 0) {
                 const int i0 = ic + ib;
-                wgemm_(trans_gemm, NN, &ib, &my_N, &trailing, &m_one,
-                       &A_(i0, ic), &lda,
-                       &B_chunk[i0], &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
+                wgemm_serial(trans_gemm, NN, &ib, &my_N, &trailing, &m_one,
+                             &A_(i0, ic), &lda,
+                             &B_chunk[i0], &ldb, &one,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             DIAG_C((conj_flag ? CSLLC : CSLLT),
                 wtrsm_llTC_core(j_start, j_end, ib, one,
@@ -1139,10 +960,10 @@ void blocked_chunk(wtrsm_variant V, int j_start, int j_end,
         for (int ic = 0; ic < M; ic += nb) {
             const int ib = (M - ic < nb) ? (M - ic) : nb;
             if (ic > 0) {
-                wgemm_(trans_gemm, NN, &ib, &my_N, &ic, &m_one,
-                       &A_(0, ic), &lda,
-                       B_chunk, &ldb, &one,
-                       &B_chunk[ic], &ldb, 1, 1);
+                wgemm_serial(trans_gemm, NN, &ib, &my_N, &ic, &m_one,
+                             &A_(0, ic), &lda,
+                             B_chunk, &ldb, &one,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             DIAG_C((conj_flag ? CSLUC : CSLUT),
                 wtrsm_luTC_core(j_start, j_end, ib, one,
@@ -1154,48 +975,73 @@ void blocked_chunk(wtrsm_variant V, int j_start, int j_end,
 #undef DIAG_C
 }
 
-void blocked_dispatch(wtrsm_variant V, int M, int N, T alpha,
-                      const T *a, int lda, T *b, int ldb, int nounit)
-{
-    const int nb = trsm_nb();
-#ifdef _OPENMP
-    if (N >= WTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt  = omp_get_num_threads();
-            int js  = static_cast<int>((long long)N * tid / nt);
-            int je  = static_cast<int>((long long)N * (tid + 1) / nt);
-            blocked_chunk(V, js, je, M, nb, alpha, a, lda, b, ldb, nounit);
-        }
-        return;
-    }
-#endif
-    blocked_chunk(V, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-}
-
-void blocked_wlln(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int n) {
-    blocked_dispatch(WLLN, M, N, alpha, a, lda, b, ldb, n);
-}
-void blocked_wlun(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int n) {
-    blocked_dispatch(WLUN, M, N, alpha, a, lda, b, ldb, n);
-}
-void blocked_wllt(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int n) {
-    blocked_dispatch(WLLT, M, N, alpha, a, lda, b, ldb, n);
-}
-void blocked_wlut(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int n) {
-    blocked_dispatch(WLUT, M, N, alpha, a, lda, b, ldb, n);
-}
-void blocked_wllc(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int n) {
-    blocked_dispatch(WLLC, M, N, alpha, a, lda, b, ldb, n);
-}
-void blocked_wluc(int M, int N, T alpha, const T *a, int lda, T *b, int ldb, int n) {
-    blocked_dispatch(WLUC, M, N, alpha, a, lda, b, ldb, n);
+/* Map (UPLO, TR) → blocked variant. */
+inline wtrsm_variant w_variant(char UPLO, char TR) {
+    if (TR == 'N') return (UPLO == 'L') ? WLLN : WLUN;
+    if (TR == 'C') return (UPLO == 'L') ? WLLC : WLUC;
+    return (UPLO == 'L') ? WLLT : WLUT;
 }
 
 }  // namespace
 
-extern "C" void wtrsm_(
+/* ── Exposed surface (wtrsm_kernel.h). ─────────────────────────────────── */
+
+int wtrsm_block_nb(void) { return trsm_nb(); }
+
+void wtrsm_zero_B(int M, int N, T *b, int ldb)
+{
+    for (int j = 0; j < N; ++j)
+        for (int i = 0; i < M; ++i) B_(i, j) = zero_cdd;
+}
+
+void wtrsm_L_slice(char UPLO, char TR, int use_blocked,
+                   int j_start, int j_end, int M, int nb, T alpha,
+                   const T *a, int lda, T *b, int ldb, int nounit)
+{
+    if (j_start >= j_end) return;
+    const wtrsm_variant V = w_variant(UPLO, TR);
+    if (use_blocked) {
+        blocked_chunk(V, j_start, j_end, M, nb, alpha, a, lda, b, ldb, nounit);
+        return;
+    }
+    switch (V) {
+    case WLLN: wtrsm_lln_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    case WLUN: wtrsm_lun_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    case WLLT: wtrsm_llTC_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit, 0); break;
+    case WLUT: wtrsm_luTC_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit, 0); break;
+    case WLLC: wtrsm_llTC_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit, 1); break;
+    case WLUC: wtrsm_luTC_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit, 1); break;
+    }
+}
+
+void wtrsm_R_slice(char UPLO, char TR, int row_lo, int row_hi,
+                   int N, T alpha,
+                   const T *a, int lda, T *b, int ldb, int nounit)
+{
+    const int Mslice = row_hi - row_lo;
+    if (Mslice <= 0) return;
+    T *b_slice = b + row_lo;
+#ifdef WBLAS_SIMD_DD
+    wtrsm_r_op op;
+    if (TR == 'N')      op = (UPLO == 'L') ? WTR_RLN : WTR_RUN;
+    else if (TR == 'C') op = (UPLO == 'L') ? WTR_RLC : WTR_RUC;
+    else                op = (UPLO == 'L') ? WTR_RLT : WTR_RUT;
+    wtrsm_simd_diag_R(op, Mslice, N, alpha, a, lda, b_slice, ldb, nounit);
+#else
+    if (TR == 'N') {
+        if (UPLO == 'L') wtrsm_rln_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit);
+        else             wtrsm_run_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit);
+    } else if (TR == 'C') {
+        if (UPLO == 'L') wtrsm_rlTC_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit, 1);
+        else             wtrsm_ruTC_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit, 1);
+    } else {
+        if (UPLO == 'L') wtrsm_rlTC_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit, 0);
+        else             wtrsm_ruTC_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit, 0);
+    }
+#endif
+}
+
+extern "C" void wtrsm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
     const int *m_, const int *n_,
     const T *alpha_,
@@ -1208,6 +1054,9 @@ extern "C" void wtrsm_(
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
+    auto up = [](const char *p) {
+        return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
+    };
     const char SIDE = up(side);
     const char UPLO = up(uplo);
     const char TR = up(transa);
@@ -1215,90 +1064,15 @@ extern "C" void wtrsm_(
 
     if (M == 0 || N == 0) return;
 
-    if (cdd_iszero(alpha)) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = zero_cdd;
-        return;
-    }
+    if (cdd_iszero(alpha)) { wtrsm_zero_B(M, N, b, ldb); return; }
 
     if (SIDE == 'L') {
-        const int use_blocked = (M >= 2 * trsm_nb());
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_wlln(M, N, alpha, a, lda, b, ldb, nounit);
-                else             wtrsm_lln(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_wlun(M, N, alpha, a, lda, b, ldb, nounit);
-                else             wtrsm_lun(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        } else if (TR == 'T') {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_wllt(M, N, alpha, a, lda, b, ldb, nounit);
-                else             wtrsm_llt(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_wlut(M, N, alpha, a, lda, b, ldb, nounit);
-                else             wtrsm_lut(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        } else {  /* 'C' */
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_wllc(M, N, alpha, a, lda, b, ldb, nounit);
-                else             wtrsm_llc(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_wluc(M, N, alpha, a, lda, b, ldb, nounit);
-                else             wtrsm_luc(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        }
+        const int nb = trsm_nb();
+        const int use_blocked = (M >= 2 * nb);
+        wtrsm_L_slice(UPLO, TR, use_blocked, 0, N, M, nb, alpha,
+                      a, lda, b, ldb, nounit);
     } else {
-        /* SIDE='R': partition over rows of B. The j (column) loop walks
-         * the diagonal serially, but every row of B is processed
-         * identically — each thread takes a disjoint row slice. Round
-         * slice boundaries to multiples of 4 where possible so the SIMD
-         * 4-row chunks stay aligned; the last thread absorbs any tail. */
-#ifdef _OPENMP
-        const int use_omp = (M >= WTRSM_OMP_N_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
-#else
-        const int use_omp = 0;
-#endif
-
-#ifdef WBLAS_SIMD_DD
-        wtrsm_r_op op;
-        if (TR == 'N')      op = (UPLO == 'L') ? WTR_RLN : WTR_RUN;
-        else if (TR == 'T') op = (UPLO == 'L') ? WTR_RLT : WTR_RUT;
-        else                op = (UPLO == 'L') ? WTR_RLC : WTR_RUC;
-#endif
-
-#ifdef _OPENMP
-        #pragma omp parallel if(use_omp)
-#endif
-        {
-            int tid = 0, nt = 1;
-#ifdef _OPENMP
-            if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
-#endif
-            int i_lo = (int)((long long)M * tid / nt);
-            int i_hi = (int)((long long)M * (tid + 1) / nt);
-            if (tid > 0)      i_lo &= ~3;
-            if (tid < nt - 1) i_hi &= ~3;
-            const int Mslice = i_hi - i_lo;
-            if (Mslice > 0) {
-                T *b_slice = b + i_lo;
-#ifdef WBLAS_SIMD_DD
-                wtrsm_simd_diag_R(op, Mslice, N, alpha, a, lda, b_slice, ldb, nounit);
-#else
-                if (TR == 'N') {
-                    if (UPLO == 'L') wtrsm_rln_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit);
-                    else             wtrsm_run_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit);
-                } else if (TR == 'T') {
-                    if (UPLO == 'L') wtrsm_rlTC_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit, 0);
-                    else             wtrsm_ruTC_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit, 0);
-                } else {
-                    if (UPLO == 'L') wtrsm_rlTC_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit, 1);
-                    else             wtrsm_ruTC_core(Mslice, N, alpha, a, lda, b_slice, ldb, nounit, 1);
-                }
-#endif
-            }
-        }
+        wtrsm_R_slice(UPLO, TR, 0, M, N, alpha, a, lda, b, ldb, nounit);
     }
 }
 
