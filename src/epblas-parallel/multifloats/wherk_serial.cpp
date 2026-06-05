@@ -1,22 +1,24 @@
 /*
- * wherk — multifloats complex (DD) Hermitian rank-k.
- * alpha/beta REAL, A/C complex. Diagonal of C stays real.
- * Blocked: scalar diagonal (with real-diagonal accumulation) +
- * wgemm trailing with conjugate transpose.
+ * wherk_serial — multifloats complex (DD) Hermitian rank-k update, pure
+ * single-thread worker. Owns ALL the numerics; no OpenMP on this path.
+ * alpha/beta REAL, A/C complex, the diagonal of C stays real. TRANS ∈ {N, C}.
+ *
+ * Blocked: AVX2 SIMD diagonal (real-alpha scaling, conjugated panel for TR='N',
+ * conjugated Ai for TR='C', real-diag preservation on unpack) + scalar diagonal
+ * fallback + wgemm_serial trailing with conjugate transpose.
+ *
+ * The trailing rank-k update routes through wgemm_serial (no nested OpenMP) so
+ * wherk_parallel.cpp can call wherk_block from inside its own omp region.
  */
-
+#include "wherk_kernel.h"
+#include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
 #include <immintrin.h>
-#include "../common/blas_omp.h"
 #endif
 
 namespace mf = multifloats;
@@ -25,25 +27,19 @@ using T = mf::complex64x2;
 
 namespace {
 
-#define WHERK_OMP_MIN 32
-
 int env_int(const char *name, int dflt) {
     const char *s = std::getenv(name);
     if (!s || !*s) return dflt;
     int v = std::atoi(s);
     return v > 0 ? v : dflt;
 }
-int g_nb = 0;
-int herk_nb(void) { if (g_nb == 0) g_nb = env_int("WHERK_NB", 64); return g_nb; }
 
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
 
 const R rzero{0.0, 0.0};
-const R rone {1.0, 0.0};
 const T czero{ rzero, rzero };
-const T cone { rone, rzero };
 
 inline bool dd_iszero(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (R x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
@@ -55,16 +51,6 @@ inline T cmul(T const &a, T const &b) {
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 inline T rcmul(R const &r, T const &z) { return T{ r * z.re, r * z.im }; }
-
-extern "C" void wgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define C_(i, j)  c[static_cast<std::size_t>(j) * ldc + (i)]
@@ -342,7 +328,87 @@ inline void diag_dispatch(int jc, int jb, int K, R alpha,
 
 } /* anonymous namespace */
 
-extern "C" void wherk_(
+int wherk_block_nb(void) {
+    static int nb = 0;
+    if (nb == 0) nb = env_int("WHERK_NB", 64);
+    return nb;
+}
+
+void wherk_zero_diag_im(int j, T *c, int ldc) {
+    c[static_cast<std::size_t>(j) * ldc + j].im = rzero;
+}
+
+void wherk_scale_col(int j, int N, char UPLO, R beta, T *c, int ldc) {
+    const int i_lo = (UPLO == 'L') ? j : 0;
+    const int i_hi = (UPLO == 'L') ? N : j + 1;
+    T *cj = c + static_cast<std::size_t>(j) * ldc;
+    if (dd_iszero(beta)) {
+        for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
+    } else {
+        for (int i = i_lo; i < i_hi; ++i) {
+            if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
+            else        cj[i] = rcmul(beta, cj[i]);
+        }
+    }
+}
+
+void wherk_block(int jc, int jb, int N, int K, char UPLO, char TR,
+                 R alpha, R beta, const T *a, int lda, T *c, int ldc)
+{
+    /* Beta-scale this block's own triangle columns (real-diag preservation). */
+    for (int j = jc; j < jc + jb; ++j) {
+        const int i_lo = (UPLO == 'L') ? j : 0;
+        const int i_hi = (UPLO == 'L') ? N : j + 1;
+        T *cj = c + static_cast<std::size_t>(j) * ldc;
+        if (dd_iszero(beta)) {
+            for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
+        } else if (!dd_isone(beta)) {
+            for (int i = i_lo; i < i_hi; ++i) {
+                if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
+                else        cj[i] = rcmul(beta, cj[i]);
+            }
+        } else {
+            cj[j].im = rzero;
+        }
+    }
+
+    diag_dispatch(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR);
+
+    const T alpha_c = T{ alpha, rzero };
+    const T cone { R{1.0, 0.0}, rzero };
+    const char NN[1] = {'N'};
+    const char CN[1] = {'C'};
+
+    if (UPLO == 'L') {
+        const int trailing = N - jc - jb;
+        if (trailing > 0) {
+            const int j0 = jc + jb;
+            if (TR == 'N') {
+                wgemm_serial(NN, CN, &trailing, &jb, &K, &alpha_c,
+                             &A_(j0, 0), &lda, &A_(jc, 0), &lda,
+                             &cone, &C_(j0, jc), &ldc, 1, 1);
+            } else {
+                wgemm_serial(CN, NN, &trailing, &jb, &K, &alpha_c,
+                             &A_(0, j0), &lda, &A_(0, jc), &lda,
+                             &cone, &C_(j0, jc), &ldc, 1, 1);
+            }
+        }
+    } else {
+        if (jc > 0) {
+            if (TR == 'N') {
+                wgemm_serial(NN, CN, &jc, &jb, &K, &alpha_c,
+                             &A_(0, 0), &lda, &A_(jc, 0), &lda,
+                             &cone, &C_(0, jc), &ldc, 1, 1);
+            } else {
+                wgemm_serial(CN, NN, &jc, &jb, &K, &alpha_c,
+                             &A_(0, 0), &lda, &A_(0, jc), &lda,
+                             &cone, &C_(0, jc), &ldc, 1, 1);
+            }
+        }
+    }
+}
+
+extern "C" void wherk_serial(
     const char *uplo, const char *trans,
     const int *n_, const int *k_,
     const R *alpha_,
@@ -360,91 +426,19 @@ extern "C" void wherk_(
 
     if (N == 0) return;
 
-    const T alpha_c = T{ alpha, rzero };
-    const char NN[1] = {'N'};
-    const char CN[1] = {'C'};
-
     if (dd_iszero(alpha) || K == 0) {
         if (dd_isone(beta)) {
-            for (int j = 0; j < N; ++j) {
-                T *cjj = &c[static_cast<std::size_t>(j) * ldc + j];
-                cjj->im = rzero;
-            }
+            for (int j = 0; j < N; ++j) wherk_zero_diag_im(j, c, ldc);
             return;
         }
-#ifdef _OPENMP
-        const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            if (dd_iszero(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-            else {
-                for (int i = i_lo; i < i_hi; ++i) {
-                    if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
-                    else        cj[i] = rcmul(beta, cj[i]);
-                }
-            }
-        }
+        for (int j = 0; j < N; ++j) wherk_scale_col(j, N, UPLO, beta, c, ldc);
         return;
     }
 
-    const int nb = herk_nb();
-
-#ifdef _OPENMP
-    const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_max_threads() > 1);
-    #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
-#endif
+    const int nb = wherk_block_nb();
     for (int jc = 0; jc < N; jc += nb) {
         const int jb = (N - jc < nb) ? (N - jc) : nb;
-
-        for (int j = jc; j < jc + jb; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            if (dd_iszero(beta)) {
-                for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-            } else if (!dd_isone(beta)) {
-                for (int i = i_lo; i < i_hi; ++i) {
-                    if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
-                    else        cj[i] = rcmul(beta, cj[i]);
-                }
-            } else {
-                cj[j].im = rzero;
-            }
-        }
-
-        diag_dispatch(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
-
-        if (UPLO == 'L') {
-            const int trailing = N - jc - jb;
-            if (trailing > 0) {
-                const int j0 = jc + jb;
-                if (TR_c == 'N') {
-                    wgemm_(NN, CN, &trailing, &jb, &K, &alpha_c,
-                           &A_(j0, 0), &lda, &A_(jc, 0), &lda,
-                           &cone, &C_(j0, jc), &ldc, 1, 1);
-                } else {
-                    wgemm_(CN, NN, &trailing, &jb, &K, &alpha_c,
-                           &A_(0, j0), &lda, &A_(0, jc), &lda,
-                           &cone, &C_(j0, jc), &ldc, 1, 1);
-                }
-            }
-        } else {
-            if (jc > 0) {
-                if (TR_c == 'N') {
-                    wgemm_(NN, CN, &jc, &jb, &K, &alpha_c,
-                           &A_(0, 0), &lda, &A_(jc, 0), &lda,
-                           &cone, &C_(0, jc), &ldc, 1, 1);
-                } else {
-                    wgemm_(CN, NN, &jc, &jb, &K, &alpha_c,
-                           &A_(0, 0), &lda, &A_(0, jc), &lda,
-                           &cone, &C_(0, jc), &ldc, 1, 1);
-                }
-            }
-        }
+        wherk_block(jc, jb, N, K, UPLO, TR_c, alpha, beta, a, lda, c, ldc);
     }
 }
 
