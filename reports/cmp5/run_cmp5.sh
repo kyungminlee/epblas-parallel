@@ -35,6 +35,15 @@ STAGE_E="${STAGE_E:-${HERE}/../../build}"
 TIMEOUT="${TIMEOUT:-300}"
 export BLAS_PERF_ITERS="${BLAS_PERF_ITERS:-200}"
 export BLAS_PERF_TIME_BUDGET="${BLAS_PERF_TIME_BUDGET:-0.3}"
+# Number of full interleaved passes over the whole surface. Each pass runs every
+# (routine × variant) once; aggregate.py min-merges the REPS readings per cell.
+# Looping passes on the OUTSIDE (rather than repeating a binary in place) spaces
+# successive readings of the same cell out in time, so thermal/drift/contention
+# transients land on different reps and the per-cell min cancels them — this is
+# the "interleaved min-of-N" methodology applied at full-surface scale. REPS=1
+# reproduces the old single-shot screen.
+REPS="${REPS:-1}"
+export BLAS_PERF_WARMUP="${BLAS_PERF_WARMUP:-2}"
 
 EP_DIR="${STAGE_E}/tests/epblas-openblas"
 PAR_DIR="${STAGE_E}/tests/epblas-parallel"
@@ -111,21 +120,24 @@ run_one() {
     rm -f "$TMP"
 }
 
-for ep_bin in "${ep_bins[@]}"; do
-    name=$(basename "$ep_bin")          # ep_perf_<routine>
-    routine="${name#ep_perf_}"
-    par_bin="$PAR_DIR/perf_${routine}"
-    if [[ ! -x "$par_bin" ]]; then
-        echo "[skip] no parallel-blas perf for $routine ($par_bin)" >> "$LOG"
-        continue
-    fi
-    run_one "epopenblas-omp1"    "ep_"  1 "$ep_bin"  "$routine"
-    run_one "epopenblas-omp4"    "ep_"  4 "$ep_bin"  "$routine"
-    run_one "parallel-blas-omp1" "par_" 1 "$par_bin" "$routine"
-    run_one "parallel-blas-omp4" "par_" 4 "$par_bin" "$routine"
+for rep in $(seq 1 "$REPS"); do
+    echo "[rep] $rep/$REPS" | tee -a "$LOG" >&2
+    for ep_bin in "${ep_bins[@]}"; do
+        name=$(basename "$ep_bin")          # ep_perf_<routine>
+        routine="${name#ep_perf_}"
+        par_bin="$PAR_DIR/perf_${routine}"
+        if [[ ! -x "$par_bin" ]]; then
+            (( rep == 1 )) && echo "[skip] no parallel-blas perf for $routine ($par_bin)" >> "$LOG"
+            continue
+        fi
+        run_one "epopenblas-omp1"    "ep_"  1 "$ep_bin"  "$routine"
+        run_one "epopenblas-omp4"    "ep_"  4 "$ep_bin"  "$routine"
+        run_one "parallel-blas-omp1" "par_" 1 "$par_bin" "$routine"
+        run_one "parallel-blas-omp4" "par_" 4 "$par_bin" "$routine"
+    done
 done
 
-echo "wrote $RAW; log $LOG"
+echo "wrote $RAW ($REPS reps); log $LOG"
 
 # Aggregation + summary tail: these are part of the pipeline, not a separate
 # step. Per-binary timeouts above are tolerated (partial data still aggregates);

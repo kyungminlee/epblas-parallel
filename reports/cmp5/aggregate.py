@@ -41,8 +41,21 @@ def main():
         for row in r:
             key = (row["routine"], row["key"], int(row["size"]))
             run = row["run_id"]
-            subject[key][run] = float(row["subject_ns"])
-            migrated[key][RUNID_TO_MIG[run]] = float(row["migrated_ns"])
+            # MIN-merge across repeated raw rows (the interleaved sweep emits one
+            # row per (cell, run_id) per rep; min-of-N is the authoritative
+            # reduction — it discards transient contention/drift, keeping the
+            # warmest reading). With a single rep this is a no-op (min of one).
+            s = float(row["subject_ns"])
+            mg = float(row["migrated_ns"])
+            mc = RUNID_TO_MIG[run]
+            if run in subject[key]:
+                subject[key][run] = min(subject[key][run], s)
+            else:
+                subject[key][run] = s
+            if mc in migrated[key]:
+                migrated[key][mc] = min(migrated[key][mc], mg)
+            else:
+                migrated[key][mc] = mg
 
     rows = []
     for k in sorted(subject):
