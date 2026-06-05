@@ -1,33 +1,39 @@
 /*
- * mtrmm — multifloats real (double-double) triangular multiply.
+ * mtrmm_serial.cpp — multifloats real (double-double) triangular multiply,
+ * single-thread core. Owns ALL the numerics shared by the serial and parallel
+ * entries:
  *
- * B := alpha · op(A) · B (SIDE='L') or B := alpha · B · op(A) (SIDE='R'),
- * where op(A) ∈ {A, Aᵀ}. Scalar-core diagonal blocks + mgemm trailing
- * update with coarse-N parallelism. No SIMD diagonal kernel (in
- * mtrsm that path was 5–13% of total; the SIMD gemm trailing
- * dominates and we get that for free via the mgemm_ call).
+ *   - scalar column "core" kernels for SIDE='L' (LLN/LUN/LLT/LUT) and the
+ *     SIDE='R' cores (RLN/RUN/RLT/RUT),
+ *   - the AVX2 4-wide SIMD diagonal kernels (SIDE='L' packed-SoA and SIDE='R'
+ *     4-row chunks), under MBLAS_SIMD_DD,
+ *   - the block-size policy and the blocked chunk workers for BOTH sides,
+ *     whose trailing-matrix update routes through mgemm_serial (no nested
+ *     OpenMP),
+ *   - the per-slice workers mtrmm_L_slice / mtrmm_R_slice (declared in
+ *     mtrmm_kernel.h) that the parallel entry fans across a team, plus the
+ *     public `mtrmm_serial` entry.
+ *
+ * There is NO OpenMP on this path. Threading lives entirely in
+ * mtrmm_parallel.cpp; both paths drive these workers, so a static partition
+ * is bitwise-identical to the serial sweep.
  */
 
+#include "mtrmm_kernel.h"
+#include "mgemm_kernel.h"   /* mgemm_serial for the trailing update */
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mgemm_simd_kernel.h"   /* dd_mul, dd_add primitives */
 #include <immintrin.h>
-#include "../common/blas_omp.h"
 #endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
 namespace {
-
-#define MTRMM_OMP_MIN 32
 
 int env_int(const char *name, int dflt) {
     const char *s = std::getenv(name);
@@ -42,25 +48,11 @@ int trmm_nb(void) {
     return g_nb_trmm;
 }
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-
 const T zero_dd{0.0, 0.0};
 const T one_dd {1.0, 0.0};
 
 inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
-
-extern "C" void mgemm_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    std::size_t transa_len, std::size_t transb_len);
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -604,58 +596,8 @@ inline void mtrmm_rut_core(int i_start, int i_end, int N, T alpha,
     }
 }
 
-/* ── Standalone OMP wrappers (small-M fallback). */
-
-#ifdef _OPENMP
-#define MTRMM_OMP_WRAP_L(name, core)                                       \
-    void name(int M, int N, T alpha,                                        \
-              const T *a, int lda, T *b, int ldb, int nounit) {             \
-        if (N >= MTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
-            _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                             \
-                int nt  = omp_get_num_threads();                            \
-                int js  = static_cast<int>(static_cast<long long>(N) * tid / nt);            \
-                int je  = static_cast<int>(static_cast<long long>(N) * (tid + 1) / nt);      \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit);             \
-            }                                                               \
-        } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }            \
-    }
-#define MTRMM_OMP_WRAP_R(name, core)                                       \
-    void name(int M, int N, T alpha,                                        \
-              const T *a, int lda, T *b, int ldb, int nounit) {             \
-        if (M >= MTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
-            _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                             \
-                int nt  = omp_get_num_threads();                            \
-                int is  = static_cast<int>(static_cast<long long>(M) * tid / nt);            \
-                int ie  = static_cast<int>(static_cast<long long>(M) * (tid + 1) / nt);      \
-                core(is, ie, N, alpha, a, lda, b, ldb, nounit);             \
-            }                                                               \
-        } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }            \
-    }
-#else
-#define MTRMM_OMP_WRAP_L(name, core)                                       \
-    void name(int M, int N, T alpha,                                        \
-              const T *a, int lda, T *b, int ldb, int nounit) {             \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
-    }
-#define MTRMM_OMP_WRAP_R(name, core)                                       \
-    void name(int M, int N, T alpha,                                        \
-              const T *a, int lda, T *b, int ldb, int nounit) {             \
-        core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
-    }
-#endif
-
-MTRMM_OMP_WRAP_L(mtrmm_lln, mtrmm_lln_core)
-MTRMM_OMP_WRAP_L(mtrmm_lun, mtrmm_lun_core)
-MTRMM_OMP_WRAP_L(mtrmm_llt, mtrmm_llt_core)
-MTRMM_OMP_WRAP_L(mtrmm_lut, mtrmm_lut_core)
-MTRMM_OMP_WRAP_R(mtrmm_rln, mtrmm_rln_core)
-MTRMM_OMP_WRAP_R(mtrmm_run, mtrmm_run_core)
-MTRMM_OMP_WRAP_R(mtrmm_rlt, mtrmm_rlt_core)
-MTRMM_OMP_WRAP_R(mtrmm_rut, mtrmm_rut_core)
-
-/* ── Blocked SIDE='L' ────────────────────────────────────────────── */
+/* ── Blocked SIDE='L' chunk worker: serial blocked-TRMM over one column slice
+ * [j_start, j_end). The mgemm trailing update routes through mgemm_serial. */
 
 enum trmm_variant_L { LLN, LUN, LLT, LUT };
 
@@ -683,10 +625,10 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
             mtrmm_lln_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
-                mgemm_(NN, NN, &ib, &my_N, &ic, &alpha,
-                       &A_(ic, 0), &lda,
-                       B_chunk, &ldb, &one_dd,
-                       &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial(NN, NN, &ib, &my_N, &ic, &alpha,
+                             &A_(ic, 0), &lda,
+                             B_chunk, &ldb, &one_dd,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             ic -= nb;
         }
@@ -704,10 +646,10 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
             const int trailing = M - (ic + ib);
             if (trailing > 0) {
                 const int j0 = ic + ib;
-                mgemm_(NN, NN, &ib, &my_N, &trailing, &alpha,
-                       &A_(ic, j0), &lda,
-                       &B_chunk[j0], &ldb, &one_dd,
-                       &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial(NN, NN, &ib, &my_N, &trailing, &alpha,
+                             &A_(ic, j0), &lda,
+                             &B_chunk[j0], &ldb, &one_dd,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
         }
     } else if (V == LLT) {
@@ -724,10 +666,10 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
             const int trailing = M - (ic + ib);
             if (trailing > 0) {
                 const int i0 = ic + ib;
-                mgemm_(TN, NN, &ib, &my_N, &trailing, &alpha,
-                       &A_(i0, ic), &lda,
-                       &B_chunk[i0], &ldb, &one_dd,
-                       &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial(TN, NN, &ib, &my_N, &trailing, &alpha,
+                             &A_(i0, ic), &lda,
+                             &B_chunk[i0], &ldb, &one_dd,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
         }
     } else { /* LUT */
@@ -743,37 +685,18 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
             mtrmm_lut_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
-                mgemm_(TN, NN, &ib, &my_N, &ic, &alpha,
-                       &A_(0, ic), &lda,
-                       B_chunk, &ldb, &one_dd,
-                       &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial(TN, NN, &ib, &my_N, &ic, &alpha,
+                             &A_(0, ic), &lda,
+                             B_chunk, &ldb, &one_dd,
+                             &B_chunk[ic], &ldb, 1, 1);
             }
             ic -= nb;
         }
     }
 }
 
-void blocked_dispatch_L(trmm_variant_L V, int M, int N, T alpha,
-                        const T *a, int lda, T *b, int ldb, int nounit)
-{
-    const int nb = trmm_nb();
-#ifdef _OPENMP
-    if (N >= MTRMM_OMP_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt  = omp_get_num_threads();
-            int js  = static_cast<int>(static_cast<long long>(N) * tid / nt);
-            int je  = static_cast<int>(static_cast<long long>(N) * (tid + 1) / nt);
-            blocked_chunk_L(V, js, je, M, nb, alpha, a, lda, b, ldb, nounit);
-        }
-        return;
-    }
-#endif
-    blocked_chunk_L(V, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
-}
-
-/* ── Blocked SIDE='R' ────────────────────────────────────────────── */
+/* ── Blocked SIDE='R' chunk worker: serial blocked-TRMM over one row slice
+ * [i_start, i_end). The mgemm trailing update routes through mgemm_serial. */
 
 enum trmm_variant_R { RLN, RUN, RLT, RUT };
 
@@ -800,10 +723,10 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
             const int trailing = N - (jc + jb);
             if (trailing > 0) {
                 const int k0 = jc + jb;
-                mgemm_(NN, NN, &my_M, &jb, &trailing, &alpha,
-                       &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
-                       &A_(k0, jc), &lda, &one_dd,
-                       &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                mgemm_serial(NN, NN, &my_M, &jb, &trailing, &alpha,
+                             &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
+                             &A_(k0, jc), &lda, &one_dd,
+                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
             }
         }
     } else if (V == RUN) {
@@ -818,10 +741,10 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
             if (jc > 0) {
-                mgemm_(NN, NN, &my_M, &jb, &jc, &alpha,
-                       B_chunk, &ldb,
-                       &A_(0, jc), &lda, &one_dd,
-                       &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                mgemm_serial(NN, NN, &my_M, &jb, &jc, &alpha,
+                             B_chunk, &ldb,
+                             &A_(0, jc), &lda, &one_dd,
+                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
             }
             jc -= nb;
         }
@@ -837,10 +760,10 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
             if (jc > 0) {
-                mgemm_(NN, TN, &my_M, &jb, &jc, &alpha,
-                       B_chunk, &ldb,
-                       &A_(jc, 0), &lda, &one_dd,
-                       &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                mgemm_serial(NN, TN, &my_M, &jb, &jc, &alpha,
+                             B_chunk, &ldb,
+                             &A_(jc, 0), &lda, &one_dd,
+                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
             }
             jc -= nb;
         }
@@ -857,123 +780,127 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
             const int trailing = N - (jc + jb);
             if (trailing > 0) {
                 const int k0 = jc + jb;
-                mgemm_(NN, TN, &my_M, &jb, &trailing, &alpha,
-                       &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
-                       &A_(jc, k0), &lda, &one_dd,
-                       &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                mgemm_serial(NN, TN, &my_M, &jb, &trailing, &alpha,
+                             &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
+                             &A_(jc, k0), &lda, &one_dd,
+                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
             }
         }
     }
 }
 
-void blocked_dispatch_R(trmm_variant_R V, int M, int N, T alpha,
-                        const T *a, int lda, T *b, int ldb, int nounit)
+/* Map (UPLO, TR) → blocked variant. */
+inline trmm_variant_L l_variant(char UPLO, char TR) {
+    if (TR == 'N') return (UPLO == 'L') ? LLN : LUN;
+    return (UPLO == 'L') ? LLT : LUT;
+}
+inline trmm_variant_R r_variant(char UPLO, char TR) {
+    if (TR == 'N') return (UPLO == 'L') ? RLN : RUN;
+    return (UPLO == 'L') ? RLT : RUT;
+}
+
+}  // namespace
+
+/* ── Exposed surface (mtrmm_kernel.h). ─────────────────────────────────── */
+
+int mtrmm_block_nb(void) { return trmm_nb(); }
+
+void mtrmm_zero_B(int M, int N, T *b, int ldb)
 {
-    const int nb = trmm_nb();
-#ifdef _OPENMP
-    if (M >= MTRMM_OMP_MIN && blas_omp_max_threads() > 1) {
-        #pragma omp parallel
-        {
-            int tid = omp_get_thread_num();
-            int nt  = omp_get_num_threads();
-            int is  = static_cast<int>(static_cast<long long>(M) * tid / nt);
-            int ie  = static_cast<int>(static_cast<long long>(M) * (tid + 1) / nt);
-            blocked_chunk_R(V, is, ie, N, nb, alpha, a, lda, b, ldb, nounit);
-        }
+    for (int j = 0; j < N; ++j)
+        for (int i = 0; i < M; ++i) B_(i, j) = zero_dd;
+}
+
+void mtrmm_L_slice(char UPLO, char TR, int use_blocked,
+                   int j_start, int j_end, int M, int nb, T alpha,
+                   const T *a, int lda, T *b, int ldb, int nounit)
+{
+    if (j_start >= j_end) return;
+    const trmm_variant_L V = l_variant(UPLO, TR);
+    if (use_blocked) {
+        blocked_chunk_L(V, j_start, j_end, M, nb, alpha, a, lda, b, ldb, nounit);
+        return;
+    }
+#ifdef MBLAS_SIMD_DD
+    /* Small-M (single-block) regime: route the unblocked path through the SIMD
+     * diag too — same kernel, over this slice's column range. */
+    if (M <= kMaxBlockM) {
+        trmm_simd_op op;
+        if (TR == 'N') op = (UPLO == 'L') ? SLLN : SLUN;
+        else           op = (UPLO == 'L') ? SLLT : SLUT;
+        mtrmm_simd_diag(op, j_start, j_end, M, alpha, a, lda, b, ldb, nounit);
         return;
     }
 #endif
-    blocked_chunk_R(V, 0, M, N, nb, alpha, a, lda, b, ldb, nounit);
+    switch (V) {
+    case LLN: mtrmm_lln_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    case LUN: mtrmm_lun_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    case LLT: mtrmm_llt_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    case LUT: mtrmm_lut_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
+    }
 }
 
-} /* anonymous namespace */
+void mtrmm_R_slice(char UPLO, char TR, int use_blocked,
+                   int row_lo, int row_hi, int N, int nb, T alpha,
+                   const T *a, int lda, T *b, int ldb, int nounit)
+{
+    if (row_lo >= row_hi) return;
+    const trmm_variant_R V = r_variant(UPLO, TR);
+    if (use_blocked) {
+        blocked_chunk_R(V, row_lo, row_hi, N, nb, alpha, a, lda, b, ldb, nounit);
+        return;
+    }
+#ifdef MBLAS_SIMD_DD
+    trmm_r_op op;
+    if (TR == 'N') op = (UPLO == 'L') ? RLN_OP : RUN_OP;
+    else           op = (UPLO == 'L') ? RLT_OP : RUT_OP;
+    mtrmm_simd_diag_R(op, row_lo, row_hi, N, alpha, a, lda, b, ldb, nounit);
+#else
+    switch (V) {
+    case RLN: mtrmm_rln_core(row_lo, row_hi, N, alpha, a, lda, b, ldb, nounit); break;
+    case RUN: mtrmm_run_core(row_lo, row_hi, N, alpha, a, lda, b, ldb, nounit); break;
+    case RLT: mtrmm_rlt_core(row_lo, row_hi, N, alpha, a, lda, b, ldb, nounit); break;
+    case RUT: mtrmm_rut_core(row_lo, row_hi, N, alpha, a, lda, b, ldb, nounit); break;
+    }
+#endif
+}
 
-extern "C" void mtrmm_(
+extern "C" void mtrmm_serial(
     const char *side, const char *uplo, const char *transa, const char *diag,
     const int *m_, const int *n_,
     const T *alpha_,
     const T *a, const int *lda_,
     T *b, const int *ldb_,
-    std::size_t side_len, std::size_t uplo_len, std::size_t transa_len, std::size_t diag_len)
+    std::size_t side_len, std::size_t uplo_len,
+    std::size_t transa_len, std::size_t diag_len)
 {
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
+    auto up = [](const char *p) {
+        return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
+    };
     const char SIDE = up(side);
     const char UPLO = up(uplo);
-    char TR         = up(transa);
+    char TR = up(transa);
     if (TR == 'C') TR = 'T';   /* real DD: conj-trans ≡ trans */
     const int nounit = (up(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
-    if (dd_iszero(alpha)) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = zero_dd;
-        return;
-    }
+    if (dd_iszero(alpha)) { mtrmm_zero_B(M, N, b, ldb); return; }
 
     const int nb = trmm_nb();
 
     if (SIDE == 'L') {
         const int use_blocked = (M >= 2 * nb);
-#ifdef MBLAS_SIMD_DD
-        /* For small M (single-block regime), route the unblocked path
-         * through the SIMD diag too — same kernel, full N column range. */
-        const int simd_unblocked = (!use_blocked) && (M <= kMaxBlockM);
-        if (simd_unblocked) {
-            trmm_simd_op op = SLLN;
-            if (TR == 'N') op = (UPLO == 'L') ? SLLN : SLUN;
-            else           op = (UPLO == 'L') ? SLLT : SLUT;
-            mtrmm_simd_diag(op, 0, N, M, alpha, a, lda, b, ldb, nounit);
-        } else
-#endif
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_L(LLN, M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrmm_lln(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_dispatch_L(LUN, M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrmm_lun(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        } else {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_L(LLT, M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrmm_llt(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_dispatch_L(LUT, M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrmm_lut(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        }
+        mtrmm_L_slice(UPLO, TR, use_blocked, 0, N, M, nb, alpha,
+                      a, lda, b, ldb, nounit);
     } else {
         const int use_blocked = (N >= 2 * nb);
-#ifdef MBLAS_SIMD_DD
-        if (!use_blocked) {
-            trmm_r_op op = RLN_OP;
-            if (TR == 'N') op = (UPLO == 'L') ? RLN_OP : RUN_OP;
-            else           op = (UPLO == 'L') ? RLT_OP : RUT_OP;
-            mtrmm_simd_diag_R(op, 0, M, N, alpha, a, lda, b, ldb, nounit);
-            return;
-        }
-#endif
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_R(RLN, M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrmm_rln(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_dispatch_R(RUN, M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrmm_run(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        } else {
-            if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_R(RLT, M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrmm_rlt(M, N, alpha, a, lda, b, ldb, nounit);
-            } else {
-                if (use_blocked) blocked_dispatch_R(RUT, M, N, alpha, a, lda, b, ldb, nounit);
-                else             mtrmm_rut(M, N, alpha, a, lda, b, ldb, nounit);
-            }
-        }
+        mtrmm_R_slice(UPLO, TR, use_blocked, 0, M, N, nb, alpha,
+                      a, lda, b, ldb, nounit);
     }
 }
 
