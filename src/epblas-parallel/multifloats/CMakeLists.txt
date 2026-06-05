@@ -9,7 +9,6 @@
 # the upstream FetchContent target `multifloats`.
 
 set(_kernels
-    mgemm.cpp
     wgemm.cpp
     mgemmtr.cpp
     wgemmtr.cpp
@@ -97,14 +96,30 @@ set(_kernels
     wrotg.cpp
 )
 
+# L3 routines split kind10/kind16-style into a public threading driver
+# (*_parallel.cpp) + an internal single-thread worker (*_serial.cpp) that
+# owns ALL the numerics — packers, micro-kernels (scalar AND the bespoke
+# AVX2 SIMD double-double kernels), block policy — shared through an
+# include-only *_kernel.h. The serial worker is what the other L3 routines
+# call for trailing updates inside their own parallel region (replacing the
+# old reliance on OpenMP's default-off nested parallelism collapsing the
+# inner team to one). Only the bare routine name (mgemm) goes into
+# _routines — the split filenames must NOT be stripped to *_parallel /
+# *_serial pseudo-routines.
+set(_split_sources
+    mgemm_parallel.cpp
+    mgemm_serial.cpp
+)
+
 set(_routines "")
 foreach(_k ${_kernels})
     string(REGEX REPLACE "\\.cpp$" "" _r "${_k}")
     list(APPEND _routines "${_r}")
 endforeach()
+list(APPEND _routines mgemm)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
-add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels})
+add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_split_sources})
 add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
 
 # C++17 for std::aligned_alloc + multifloats's header requirements.

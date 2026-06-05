@@ -1,29 +1,26 @@
 /*
- * mgemm — multifloats real GEMM overlay (float64x2, double-double).
+ * mgemm_serial.cpp — multifloats real GEMM (float64x2, double-double),
+ * single-thread core. Owns ALL the numerics shared by the serial and
+ * parallel entries: the trans decode, the block-size policy, the scalar
+ * and AVX2-SIMD packers and micro-kernels (declared in mgemm_kernel.h),
+ * plus the public `mgemm_serial` Fortran entry. No OpenMP anywhere on this
+ * call path — safe to invoke from inside another routine's parallel region.
  *
- * C++ implementation using `multifloats::float64x2` with its overloaded
- * +, -, *, += operators. The kernel body is structurally identical to
- * the kind10/kind16 C paths; only the scalar type and arithmetic surface
- * change.
+ * The math is bitwise-identical to the previous single mgemm.cpp: the
+ * parallel entry (mgemm_parallel.cpp) drives these exact leaves over a
+ * jc-partitioned team, so the two paths agree to the last bit.
  *
- * Exported with extern "C" so the symbol is `mgemm_` (gfortran name
- * mangling) and the ABI is the POD `float64x2` (sizeof == 2*double),
- * matching gfortran's `type(real64x2)` sequence layout.
- *
- * Per-element cost: ~8 fp ops for an add, ~12 for a mul (Dekker /
- * Knuth EFTs). Arithmetic-bound; OMP scales near-linearly.
+ * Per-element cost: ~8 fp ops for an add, ~12 for a mul (Dekker / Knuth
+ * EFTs). Arithmetic-bound; OMP scales near-linearly.
  */
 
-#include <cstddef>
+#include "mgemm_kernel.h"
 #include <cstdlib>
 #include <cctype>
-#include <multifloats.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
+#include <immintrin.h>
 #endif
 
 namespace mf = multifloats;
@@ -46,14 +43,24 @@ void init_blocks() {
     g_nc = env_int("MBLAS_NC", 256);
 }
 
-int trans_code(const char *p, std::size_t /*len*/) {
+const T zero_dd{0.0, 0.0};
+const T one_dd {1.0, 0.0};
+
+}  // namespace
+
+int mgemm_trans_code(const char *p, std::size_t /*len*/) {
     char c = static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
     return (c == 'C') ? 'T' : c;  /* real type: C == T */
 }
 
-void pack_A(const T * __restrict__ A, int lda,
-            int ic, int pc, int ib, int pb,
-            int ta, T * __restrict__ Ap)
+void mgemm_choose_blocks(int *MC, int *KC, int *NC) {
+    init_blocks();
+    *MC = g_mc; *KC = g_kc; *NC = g_nc;
+}
+
+void mgemm_pack_A(const T * __restrict__ A, int lda,
+                  int ic, int pc, int ib, int pb,
+                  int ta, T * __restrict__ Ap)
 {
     if (ta == 'N') {
         for (int p = 0; p < pb; ++p) {
@@ -70,9 +77,9 @@ void pack_A(const T * __restrict__ A, int lda,
     }
 }
 
-void pack_B(const T * __restrict__ B, int ldb,
-            int pc, int jc, int pb, int jb,
-            int tb, T * __restrict__ Bp)
+void mgemm_pack_B(const T * __restrict__ B, int ldb,
+                  int pc, int jc, int pb, int jb,
+                  int tb, T * __restrict__ Bp)
 {
     if (tb == 'N') {
         for (int j = 0; j < jb; ++j) {
@@ -89,9 +96,9 @@ void pack_B(const T * __restrict__ B, int ldb,
     }
 }
 
-void inner_kernel(int ib, int jb, int pb, T alpha,
-                  const T * __restrict__ Ap, const T * __restrict__ Bp,
-                  T * __restrict__ C, int ldc)
+void mgemm_inner_kernel(int ib, int jb, int pb, T alpha,
+                        const T * __restrict__ Ap, const T * __restrict__ Bp,
+                        T * __restrict__ C, int ldc)
 {
     for (int j = 0; j < jb; ++j) {
         T *cj = &C[static_cast<std::size_t>(j) * ldc];
@@ -123,9 +130,9 @@ void inner_kernel(int ib, int jb, int pb, T alpha,
 /* Panel width W = simd_dd::NR * MGEMM_SIMD_NR_PAN (4 / 8 / …) */
 constexpr int simd_pack_W() { return simd_dd::NR * MGEMM_SIMD_NR_PAN; }
 
-void pack_B_soa(const T * __restrict__ B, int ldb,
-                int pc, int jc, int pb, int jb, int tb,
-                double * __restrict__ Bp_hi, double * __restrict__ Bp_lo)
+void mgemm_pack_B_soa(const T * __restrict__ B, int ldb,
+                      int pc, int jc, int pb, int jb, int tb,
+                      double * __restrict__ Bp_hi, double * __restrict__ Bp_lo)
 {
     const int W = simd_pack_W();
     const int npanels = (jb + W - 1) / W;
@@ -162,6 +169,8 @@ void pack_B_soa(const T * __restrict__ B, int ldb,
         }
     }
 }
+
+int mgemm_simd_pack_W(void) { return simd_pack_W(); }
 
 /*
  * SIMD writeback helper: alpha-scale a DD accumulator (acc_h, acc_l)
@@ -305,11 +314,11 @@ inner_kernel_simd_t(int ib, int jb, int pb, T alpha,
     }
 }
 
-void inner_kernel_simd(int ib, int jb, int pb, T alpha,
-                       const T * __restrict__ Ap,
-                       const double * __restrict__ Bp_hi,
-                       const double * __restrict__ Bp_lo,
-                       T * __restrict__ C, int ldc)
+void mgemm_inner_kernel_simd(int ib, int jb, int pb, T alpha,
+                             const T * __restrict__ Ap,
+                             const double * __restrict__ Bp_hi,
+                             const double * __restrict__ Bp_lo,
+                             T * __restrict__ C, int ldc)
 {
     inner_kernel_simd_t<MGEMM_SIMD_MR, MGEMM_SIMD_NR_PAN>(
         ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo, C, ldc);
@@ -317,12 +326,7 @@ void inner_kernel_simd(int ib, int jb, int pb, T alpha,
 
 #endif /* MBLAS_SIMD_DD */
 
-const T zero_dd{0.0, 0.0};
-const T one_dd {1.0, 0.0};
-
-}  // namespace
-
-extern "C" void mgemm_(
+extern "C" void mgemm_serial(
     const char *transa, const char *transb,
     const int *m_, const int *n_, const int *k_,
     const T *alpha_,
@@ -335,8 +339,8 @@ extern "C" void mgemm_(
     const int M = *m_, N = *n_, K = *k_;
     const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = trans_code(transa, transa_len);
-    const int tb = trans_code(transb, transb_len);
+    const int ta = mgemm_trans_code(transa, transa_len);
+    const int tb = mgemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
@@ -350,69 +354,57 @@ extern "C" void mgemm_(
     }
     if (alpha == zero_dd || K == 0) return;
 
-    init_blocks();
-    const int MC = g_mc, KC = g_kc, NC = g_nc;
+    int MC, KC, NC;
+    mgemm_choose_blocks(&MC, &KC, &NC);
 
-#ifdef _OPENMP
-    #pragma omp parallel
-#endif
-    {
-        T *Ap = static_cast<T *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(MC) * KC * sizeof(T)));
+    T *Ap = static_cast<T *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(MC) * KC * sizeof(T)));
 #ifdef MBLAS_SIMD_DD
-        /* SoA Bp: round NC up to W = NR_LANE * NR_PAN for the trailing panel. */
-        const int W_simd = simd_pack_W();
-        const int NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
-        double *Bp_hi = static_cast<double *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-        double *Bp_lo = static_cast<double *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-        if (Ap && Bp_hi && Bp_lo) {
-#ifdef _OPENMP
-            #pragma omp for schedule(static)
-#endif
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
-                    pack_B_soa(b, ldb, pc, jc, pb, jb, tb, Bp_hi, Bp_lo);
-                    for (int ic = 0; ic < M; ic += MC) {
-                        const int ib = (M - ic < MC) ? (M - ic) : MC;
-                        pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
-                        inner_kernel_simd(ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo,
-                                          &c[static_cast<std::size_t>(jc) * ldc + ic],
-                                          ldc);
-                    }
+    const int W_simd = mgemm_simd_pack_W();
+    const int NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
+    double *Bp_hi = static_cast<double *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+    double *Bp_lo = static_cast<double *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+    if (Ap && Bp_hi && Bp_lo) {
+        for (int jc = 0; jc < N; jc += NC) {
+            const int jb = (N - jc < NC) ? (N - jc) : NC;
+            for (int pc = 0; pc < K; pc += KC) {
+                const int pb = (K - pc < KC) ? (K - pc) : KC;
+                mgemm_pack_B_soa(b, ldb, pc, jc, pb, jb, tb, Bp_hi, Bp_lo);
+                for (int ic = 0; ic < M; ic += MC) {
+                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                    mgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
+                    mgemm_inner_kernel_simd(ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo,
+                                            &c[static_cast<std::size_t>(jc) * ldc + ic],
+                                            ldc);
                 }
             }
         }
-        std::free(Ap);
-        std::free(Bp_hi);
-        std::free(Bp_lo);
-#else
-        T *Bp = static_cast<T *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC * sizeof(T)));
-        if (Ap && Bp) {
-#ifdef _OPENMP
-            #pragma omp for schedule(static)
-#endif
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
-                    pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                    for (int ic = 0; ic < M; ic += MC) {
-                        const int ib = (M - ic < MC) ? (M - ic) : MC;
-                        pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
-                        inner_kernel(ib, jb, pb, alpha, Ap, Bp,
-                                     &c[static_cast<std::size_t>(jc) * ldc + ic],
-                                     ldc);
-                    }
-                }
-            }
-        }
-        std::free(Ap);
-        std::free(Bp);
-#endif /* MBLAS_SIMD_DD */
     }
+    std::free(Ap);
+    std::free(Bp_hi);
+    std::free(Bp_lo);
+#else
+    T *Bp = static_cast<T *>(std::aligned_alloc(
+        64, static_cast<std::size_t>(KC) * NC * sizeof(T)));
+    if (Ap && Bp) {
+        for (int jc = 0; jc < N; jc += NC) {
+            const int jb = (N - jc < NC) ? (N - jc) : NC;
+            for (int pc = 0; pc < K; pc += KC) {
+                const int pb = (K - pc < KC) ? (K - pc) : KC;
+                mgemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
+                for (int ic = 0; ic < M; ic += MC) {
+                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                    mgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
+                    mgemm_inner_kernel(ib, jb, pb, alpha, Ap, Bp,
+                                       &c[static_cast<std::size_t>(jc) * ldc + ic],
+                                       ldc);
+                }
+            }
+        }
+    }
+    std::free(Ap);
+    std::free(Bp);
+#endif /* MBLAS_SIMD_DD */
 }
