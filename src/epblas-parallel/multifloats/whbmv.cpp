@@ -5,6 +5,13 @@
 #include <cstddef>
 #include <cctype>
 #include <multifloats.h>
+#ifdef _OPENMP
+#include <cstdlib>
+#include <omp.h>
+#include "../common/blas_omp.h"
+#define WHBMV_OMP_MIN 256
+#define WHBMV_MAX_CPUS 256
+#endif
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -31,6 +38,80 @@ inline T cmul_r(T const &a, R const &r) { return T{ a.re * r, a.im * r }; }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
+#ifdef _OPENMP
+/* Row-gather: y[i] (i in [lo,hi)) is an independent Hermitian-band dot. Each row
+ * reconstructs A[i][·]: the stored-triangle neighbours are used directly, the
+ * reflected neighbours conjugated (Hermitian), and the diagonal takes only the
+ * real part (matching the serial). x and y are distinct (hbmv forbids aliasing)
+ * → output rows partition with no cross-thread dependence. Reorders the per-row
+ * summation vs the serial column scatter → within DD fuzz tol; serial bit-exact. */
+static void whbmv_rowgather(bool upper, int n, int k, int lo, int hi,
+                            const T *a, std::size_t lda,
+                            const T *x, T alpha, T *y, int incy)
+{
+    const std::ptrdiff_t s1 = static_cast<std::ptrdiff_t>(lda) - 1;
+    if (upper) {
+        for (int i = lo; i < hi; ++i) {
+            const T *base = &A_(0, i);
+            T s = cmul_r(x[i], base[k].re);                  /* real diagonal */
+            const int rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
+            for (int d = 1; d <= rlen; ++d)                  /* right: upper elem direct */
+                s = cadd(s, cmul(base[k + (std::ptrdiff_t)d * s1], x[i + d]));
+            const int llen = (i < k) ? i : k;
+            for (int d = 1; d <= llen; ++d)                  /* left: conj of upper */
+                s = cadd(s, cmul(cconj(base[k - d]), x[i - d]));
+            y[(std::ptrdiff_t)i * incy] = cadd(y[(std::ptrdiff_t)i * incy], cmul(alpha, s));
+        }
+    } else {
+        for (int i = lo; i < hi; ++i) {
+            const T *base = &A_(0, i);
+            T s = cmul_r(x[i], base[0].re);                  /* real diagonal */
+            const int llen = (i < k) ? i : k;
+            for (int d = 1; d <= llen; ++d)                  /* left: lower elem direct */
+                s = cadd(s, cmul(base[-(std::ptrdiff_t)d * s1], x[i - d]));
+            const int rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
+            for (int d = 1; d <= rlen; ++d)                  /* right: conj of lower */
+                s = cadd(s, cmul(cconj(base[d]), x[i + d]));
+            y[(std::ptrdiff_t)i * incy] = cadd(y[(std::ptrdiff_t)i * incy], cmul(alpha, s));
+        }
+    }
+}
+
+/* Threaded Hermitian band matvec. Disjoint output-row ranges; x gathered to
+ * contiguous when strided. Returns true if handled. Beta already applied. */
+__attribute__((noinline)) static bool whbmv_omp(
+    bool upper, int n, int k, const T *a, std::size_t lda,
+    const T *x, int incx, T alpha, T *y, int incy)
+{
+    if (n < WHBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return false;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > WHBMV_MAX_CPUS) nthreads = WHBMV_MAX_CPUS;
+
+    if (incx < 0) x -= (std::ptrdiff_t)(n - 1) * incx;
+    if (incy < 0) y -= (std::ptrdiff_t)(n - 1) * incy;
+
+    const T *xptr = x;
+    T *xbuf = nullptr;
+    if (incx != 1) {
+        xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        if (!xbuf) return false;
+        for (int i = 0; i < n; ++i) xbuf[i] = x[(std::ptrdiff_t)i * incx];
+        xptr = xbuf;
+    }
+
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        int lo = (int)((long long)n * tid / nthreads);
+        int hi = (int)((long long)n * (tid + 1) / nthreads);
+        whbmv_rowgather(upper, n, k, lo, hi, a, lda, xptr, alpha, y, incy);
+    }
+    std::free(xbuf);
+    return true;
+}
+#endif
+
 extern "C" void whbmv_(
     const char *uplo,
     const int *n_, const int *k_,
@@ -55,6 +136,12 @@ extern "C" void whbmv_(
         else                  for (int i = 0; i < N; ++i) { y[iy] = cmul(beta, y[iy]); iy += incy; }
     }
     if (cdd_iszero(alpha)) return;
+
+#ifdef _OPENMP
+    if (N >= WHBMV_OMP_MIN && blas_omp_max_threads() > 1
+        && whbmv_omp(UPLO == 'U', N, K, a, lda, x, incx, alpha, y, incy))
+        return;
+#endif
 
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {

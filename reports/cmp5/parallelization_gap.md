@@ -79,8 +79,8 @@ regression.
 
 | routine | op | p1/mig | p4/mig | p4/p1 | notes | status |
 |---|---|---|---|---|---|---|
-| msbmv  | sym band mv     | — | — | — | — | TODO |
-| mspmv  | sym packed mv   | — | — | — | — | TODO |
+| msbmv  | sym band mv     | 0.278 | 0.118 | 0.42–0.45 | thr n≥256; row-gather (disjoint output rows, x→contig), serial bit-exact; band scales ~ideal flat | DONE |
+| mspmv  | sym packed mv   | 0.272–0.276 | 0.12–0.26 | 0.45→0.94 | thr n≥256; packed row-gather, serial bit-exact; win at every N but p4/p1 degrades at large N (BW-bound / triangular work-skew from static [lo,hi); future balanced-schedule fix) | DONE |
 | msymv  | sym mv          | — | — | — | — | TODO |
 | mtbmv  | tri band mv     | — | — | — | — | TODO |
 | mtpmv  | tri packed mv   | — | — | — | — | TODO |
@@ -91,9 +91,9 @@ regression.
 
 | routine | op | p1/mig | p4/mig | p4/p1 | notes | status |
 |---|---|---|---|---|---|---|
-| whbmv  | herm band mv    | — | — | — | — | TODO |
+| whbmv  | herm band mv    | 0.456–0.465 | 0.114 | ~0.25 | thr n≥256; row-gather, real diagonal + cconj reflected, serial bit-exact; band scales ~ideal 4× flat | DONE |
 | whemv  | herm mv         | — | — | — | — | TODO |
-| whpmv  | herm packed mv  | — | — | — | — | TODO |
+| whpmv  | herm packed mv  | 0.455–0.462 | 0.12–0.27 | 0.26→0.59 | thr n≥256; packed row-gather (real diag + cconj reflected), serial bit-exact; win at every N but p4/p1 degrades at large N (same packed-skew as mspmv) | DONE |
 | wtbmv  | tri band mv     | — | — | — | — | TODO |
 | wtpmv  | tri packed mv   | — | — | — | — | TODO |
 | wtrmv  | tri mv          | — | — | — | — | TODO |
