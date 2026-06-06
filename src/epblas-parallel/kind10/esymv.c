@@ -28,6 +28,45 @@ static inline char up(const char *p) {
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
+/* Contiguous (stride-1) two-pass column kernel shared by the serial and
+ * threaded paths: y[k] += temp1·acol[k] for k in [k_lo, k_hi), returning
+ * sum acol[k]·x[k] over the same range. Carved out noinline so the fp80 hot
+ * loop compiles in a clean x87 register context — inlined amid the routine's
+ * OMP/beta/strided scaffolding GCC spills and RELOADS acol[k] every element
+ * (4 fldt/elt vs 3); in isolation it keeps acol[k] resident, matching the
+ * migrated Fortran reference. Bit-identical to the inline two-pass form. */
+__attribute__((noinline)) static
+T esymv_axpydot(ptrdiff_t k_lo, ptrdiff_t k_hi, T temp1,
+                const T *restrict acol, const T *restrict x, T *restrict y)
+{
+    T temp2 = 0.0L;
+    for (ptrdiff_t k = k_lo; k < k_hi; ++k) {
+        const T a = acol[k];
+        y[k]  += temp1 * a;
+        temp2 += a * x[k];
+    }
+    return temp2;
+}
+
+/* Strided twin of esymv_axpydot: A walked contiguously (ak[k]), x/y by stride.
+ * Same noinline rationale — keeps ak[k] x87-resident in the general-stride
+ * fallback. ix/iy carry the running strided indices; bit-identical to the
+ * inline strided two-pass form. */
+__attribute__((noinline)) static
+T esymv_axpydot_strided(ptrdiff_t cnt, T temp1, const T *restrict ak,
+                        const T *restrict x, ptrdiff_t incx, ptrdiff_t ix,
+                        T *restrict y, ptrdiff_t incy, ptrdiff_t iy)
+{
+    T temp2 = 0.0L;
+    for (ptrdiff_t k = 0; k < cnt; ++k) {
+        const T a = ak[k];
+        y[iy] += temp1 * a;
+        temp2 += a * x[ix];
+        ix += incx; iy += incy;
+    }
+    return temp2;
+}
+
 void esymv_(
     const char *uplo,
     const int *n_,
@@ -98,25 +137,17 @@ void esymv_(
                         #pragma omp for schedule(static, 1)
                         for (ptrdiff_t j = 0; j < N; ++j) {
                             const T temp1 = alpha * x[j];
-                            T temp2 = zero;
                             const T *aj = &A_(0, j);
                             y_priv[j] += temp1 * aj[j];
-                            for (ptrdiff_t k = j + 1; k < N; ++k) {
-                                y_priv[k] += temp1 * aj[k];
-                                temp2 += aj[k] * x[k];
-                            }
+                            const T temp2 = esymv_axpydot(j + 1, N, temp1, aj, x, y_priv);
                             y_priv[j] += alpha * temp2;
                         }
                     } else {
                         #pragma omp for schedule(static, 1)
                         for (ptrdiff_t j = 0; j < N; ++j) {
                             const T temp1 = alpha * x[j];
-                            T temp2 = zero;
                             const T *aj = &A_(0, j);
-                            for (ptrdiff_t k = 0; k < j; ++k) {
-                                y_priv[k] += temp1 * aj[k];
-                                temp2 += aj[k] * x[k];
-                            }
+                            const T temp2 = esymv_axpydot(0, j, temp1, aj, x, y_priv);
                             y_priv[j] += temp1 * aj[j] + alpha * temp2;
                         }
                     }
@@ -143,13 +174,9 @@ void esymv_(
              * (stored lower triangle). Uses A_(k, i) (stride-1 in k). */
             for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[i];
-                T temp2 = zero;
                 const T *ai = &A_(0, i);
                 y[i] += temp1 * ai[i];
-                for (ptrdiff_t k = i + 1; k < N; ++k) {
-                    y[k]  += temp1 * ai[k];
-                    temp2 += ai[k] * x[k];
-                }
+                const T temp2 = esymv_axpydot(i + 1, N, temp1, ai, x, y);
                 y[i] += alpha * temp2;
             }
         } else {
@@ -157,12 +184,8 @@ void esymv_(
              * (stored upper triangle). */
             for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[i];
-                T temp2 = zero;
                 const T *ai = &A_(0, i);
-                for (ptrdiff_t k = 0; k < i; ++k) {
-                    y[k]  += temp1 * ai[k];
-                    temp2 += ai[k] * x[k];
-                }
+                const T temp2 = esymv_axpydot(0, i, temp1, ai, x, y);
                 y[i] += temp1 * ai[i] + alpha * temp2;
             }
         }
@@ -175,16 +198,10 @@ void esymv_(
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[jx];
-                T temp2 = zero;
                 y[jy] += temp1 * A_(i, i);
-                ptrdiff_t ix = jx, iy = jy;
-                const T *ak = &A_(i + 1, i);
-                for (ptrdiff_t k = i + 1; k < N; ++k) {
-                    ix += incx; iy += incy;
-                    const T akv = *ak++;
-                    y[iy] += temp1 * akv;
-                    temp2 += akv * x[ix];
-                }
+                const T temp2 = esymv_axpydot_strided(
+                    N - (i + 1), temp1, &A_(i + 1, i),
+                    x, incx, jx + incx, y, incy, jy + incy);
                 y[jy] += alpha * temp2;
                 jx += incx; jy += incy;
             }
@@ -192,15 +209,9 @@ void esymv_(
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[jx];
-                T temp2 = zero;
-                ptrdiff_t ix = kx, iy = ky;
-                const T *ak = &A_(0, i);
-                for (ptrdiff_t k = 0; k < i; ++k) {
-                    const T akv = *ak++;
-                    y[iy] += temp1 * akv;
-                    temp2 += akv * x[ix];
-                    ix += incx; iy += incy;
-                }
+                const T temp2 = esymv_axpydot_strided(
+                    i, temp1, &A_(0, i),
+                    x, incx, kx, y, incy, ky);
                 y[jy] += temp1 * A_(i, i) + alpha * temp2;
                 jx += incx; jy += incy;
             }

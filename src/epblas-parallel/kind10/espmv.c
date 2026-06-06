@@ -34,6 +34,44 @@ static inline char up(const char *p) {
     return (char)toupper((unsigned char)*p);
 }
 
+/* Contiguous (stride-1) two-pass run shared by the serial and threaded
+ * paths: y[i] += t1·ap[i] for i in [0, cnt), returning sum ap[i]·x[i].
+ * Carved out noinline so the fp80 hot loop compiles in a clean x87 register
+ * context — inlined amid the routine's OMP/beta/strided scaffolding GCC
+ * spills and RELOADS ap[i] every element (4 fldt/elt vs 3); in isolation it
+ * keeps ap[i] resident, matching the migrated Fortran reference. Callers pass
+ * pointers at the run start and carry the packed index. Bit-identical. */
+__attribute__((noinline)) static
+T espmv_axpydot(ptrdiff_t cnt, T t1,
+                const T *restrict ap, const T *restrict x, T *restrict y)
+{
+    T t2 = 0.0L;
+    for (ptrdiff_t i = 0; i < cnt; ++i) {
+        const T a = ap[i];
+        y[i] += t1 * a;
+        t2   += a * x[i];
+    }
+    return t2;
+}
+
+/* Strided twin of espmv_axpydot: ap walked contiguously, x/y by stride.
+ * Same noinline rationale, applied to the general-stride fallback. ix/iy
+ * carry the running strided indices; bit-identical to the inline form. */
+__attribute__((noinline)) static
+T espmv_axpydot_strided(ptrdiff_t cnt, T t1, const T *restrict ap,
+                        const T *restrict x, ptrdiff_t incx, ptrdiff_t ix,
+                        T *restrict y, ptrdiff_t incy, ptrdiff_t iy)
+{
+    T t2 = 0.0L;
+    for (ptrdiff_t i = 0; i < cnt; ++i) {
+        const T a = ap[i];
+        y[iy] += t1 * a;
+        t2    += a * x[ix];
+        ix += incx; iy += incy;
+    }
+    return t2;
+}
+
 #ifdef _OPENMP
 /* Sqrt-balanced contiguous column partition (OpenBLAS symv_partition, mask=3,
  * min_width=4). Per-column work grows with j for UPPER (length j+1) and shrinks
@@ -122,12 +160,8 @@ void espmv_(
                         size_t k = (size_t)m_from * (size_t)(m_from + 1) / 2;
                         for (ptrdiff_t j = m_from; j < m_to; ++j) {
                             const T t1 = x[j];
-                            T t2 = zero;
-                            for (ptrdiff_t i = 0; i < j; ++i) {
-                                slot[i] += t1 * ap[k];
-                                t2      += ap[k] * x[i];
-                                ++k;
-                            }
+                            const T t2 = espmv_axpydot(j, t1, &ap[k], x, slot);
+                            k += (size_t)j;
                             slot[j] += t1 * ap[k] + t2;   /* diagonal */
                             ++k;
                         }
@@ -135,14 +169,10 @@ void espmv_(
                         size_t k = (size_t)m_from * (size_t)(2 * n - m_from + 1) / 2;
                         for (ptrdiff_t j = m_from; j < m_to; ++j) {
                             const T t1 = x[j];
-                            T t2 = zero;
                             slot[j] += t1 * ap[k];        /* diagonal */
                             ++k;
-                            for (ptrdiff_t i = j + 1; i < n; ++i) {
-                                slot[i] += t1 * ap[k];
-                                t2      += ap[k] * x[i];
-                                ++k;
-                            }
+                            const T t2 = espmv_axpydot(n - 1 - j, t1, &ap[k], &x[j + 1], &slot[j + 1]);
+                            k += (size_t)(n - 1 - j);
                             slot[j] += t2;
                         }
                     }
@@ -174,27 +204,15 @@ void espmv_(
         if (UPLO == 'U') {
             for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[j];
-                T t2 = zero;
-                ptrdiff_t k = kk;
-                for (ptrdiff_t i = 0; i < j; ++i) {
-                    y[i] += t1 * ap[k];
-                    t2 += ap[k] * x[i];
-                    ++k;
-                }
+                const T t2 = espmv_axpydot(j, t1, &ap[kk], x, y);
                 y[j] += t1 * ap[kk + j] + alpha * t2;
                 kk += j + 1;
             }
         } else {
             for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[j];
-                T t2 = zero;
                 y[j] += t1 * ap[kk];
-                ptrdiff_t k = kk + 1;
-                for (ptrdiff_t i = j + 1; i < N; ++i) {
-                    y[i] += t1 * ap[k];
-                    t2 += ap[k] * x[i];
-                    ++k;
-                }
+                const T t2 = espmv_axpydot(N - 1 - j, t1, &ap[kk + 1], &x[j + 1], &y[j + 1]);
                 y[j] += alpha * t2;
                 kk += N - j;
             }
@@ -206,13 +224,8 @@ void espmv_(
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[jx];
-                T t2 = zero;
-                ptrdiff_t ix = kx, iy = ky;
-                for (ptrdiff_t k = kk; k < kk + j; ++k) {
-                    y[iy] += t1 * ap[k];
-                    t2 += ap[k] * x[ix];
-                    ix += incx; iy += incy;
-                }
+                const T t2 = espmv_axpydot_strided(
+                    j, t1, &ap[kk], x, incx, kx, y, incy, ky);
                 y[jy] += t1 * ap[kk + j] + alpha * t2;
                 jx += incx; jy += incy;
                 kk += j + 1;
@@ -221,14 +234,10 @@ void espmv_(
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[jx];
-                T t2 = zero;
                 y[jy] += t1 * ap[kk];
-                ptrdiff_t ix = jx, iy = jy;
-                for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
-                    ix += incx; iy += incy;
-                    y[iy] += t1 * ap[k];
-                    t2 += ap[k] * x[ix];
-                }
+                const T t2 = espmv_axpydot_strided(
+                    N - j - 1, t1, &ap[kk + 1],
+                    x, incx, jx + incx, y, incy, jy + incy);
                 y[jy] += alpha * t2;
                 jx += incx; jy += incy;
                 kk += N - j;
