@@ -178,6 +178,24 @@ void qtrmv_(
         }
     } else {
         int kx = (incx < 0) ? -(N - 1) * incx : 0;
+#ifdef _OPENMP
+        /* Thread the strided path by gathering x into a contiguous buffer,
+         * driving the shared OMP core, and scattering back — the threading
+         * lives in one place (qtrmv_omp) and the serial strided code below
+         * stays byte-for-byte unchanged. */
+        if (N >= QTRMV_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+            T *xc = (T *)malloc((size_t)N * sizeof(T));
+            if (xc) {
+                for (int i = 0; i < N; ++i) xc[i] = x[kx + i * incx];
+                if (qtrmv_omp(UPLO == 'U', TR == 'T', nounit, N, lda, a, xc)) {
+                    for (int i = 0; i < N; ++i) x[kx + i * incx] = xc[i];
+                    free(xc);
+                    return;
+                }
+                free(xc);
+            }
+        }
+#endif
         if (TR == 'N') {
             if (UPLO == 'L') {
                 for (int j = N - 1; j >= 0; --j) {
