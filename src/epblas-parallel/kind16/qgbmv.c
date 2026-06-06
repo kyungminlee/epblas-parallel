@@ -33,7 +33,10 @@ static inline char up(const char *p) {
  * handled, 0 to fall back. A(i,j)=base[j*(lda-1)] with base=a+(KU+i). */
 static int qgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
                        const T *restrict a, int lda,
-                       const T *restrict x, T *restrict y);
+                       const T *restrict x, int incx, T *restrict y, int incy);
+static int qgbmv_t_omp(int M, int N, int KL, int KU, T alpha,
+                       const T *restrict a, int lda,
+                       const T *restrict x, int incx, T *restrict y, int incy);
 #endif
 
 void qgbmv_(
@@ -72,39 +75,28 @@ void qgbmv_(
     }
     if (alpha == zero) return;
 
-    if (TR == 'N' && incx == 1 && incy == 1) {
+    if (TR == 'N') {
 #ifdef _OPENMP
+        /* NoTrans threads for contiguous AND strided x/y (the helper gathers
+         * strided x and writes strided y); bit-identical to the serial scatter
+         * via ascending-j association. */
         if (M >= QGBMV_OMP_MIN && blas_omp_max_threads() > 1
-            && qgbmv_n_omp(M, N, KL, KU, alpha, a, lda, x, y))
+            && qgbmv_n_omp(M, N, KL, KU, alpha, a, lda, x, incx, y, incy))
             return;
 #endif
-        /* sequential along j; each j writes y[max(0,j-KU)..min(M,j+KL+1)) so cols overlap */
-        for (int j = 0; j < N; ++j) {
-            const T tmp = alpha * x[j];
-            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-            const int k = KU - j;
-            for (int i = i_lo; i < i_hi; ++i) y[i] += tmp * A_(k + i, j);
-        }
-    } else if (TR != 'N' && incx == 1 && incy == 1) {
-        /* T-path: each j computes independent y[j] */
-#ifdef _OPENMP
-        const int use_omp = (N >= QGBMV_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            T s = zero;
-            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-            const int k = KU - j;
-            for (int i = i_lo; i < i_hi; ++i) s += A_(k + i, j) * x[i];
-            y[j] += alpha * s;
-        }
-    } else {
-        /* General stride — transcribe Netlib carefully. */
-        int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
-        int ky = (incy < 0) ? -(leny - 1) * incy : 0;
-        if (TR == 'N') {
+        if (incx == 1 && incy == 1) {
+            /* sequential along j; each j writes y[max(0,j-KU)..min(M,j+KL+1)) so cols overlap */
+            for (int j = 0; j < N; ++j) {
+                const T tmp = alpha * x[j];
+                const int i_lo = (j - KU > 0) ? (j - KU) : 0;
+                const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+                const int k = KU - j;
+                for (int i = i_lo; i < i_hi; ++i) y[i] += tmp * A_(k + i, j);
+            }
+        } else {
+            /* General stride — transcribe Netlib carefully. */
+            int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
+            int ky = (incy < 0) ? -(leny - 1) * incy : 0;
             int jx = kx;
             for (int j = 0; j < N; ++j) {
                 const T tmp = alpha * x[jx];
@@ -119,31 +111,59 @@ void qgbmv_(
                 jx += incx;
                 if (j >= KU) ky += incy;
             }
-        } else {
-            int jy = ky;
-            for (int j = 0; j < N; ++j) {
-                T s = zero;
-                int ix = kx;
-                const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-                const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-                const int k = KU - j;
-                for (int i = i_lo; i < i_hi; ++i) {
-                    s += A_(k + i, j) * x[ix];
-                    ix += incx;
-                }
-                y[jy] += alpha * s;
-                jy += incy;
-                if (j >= KU) kx += incx;
+        }
+    } else if (incx == 1 && incy == 1) {
+        /* T-path: each j computes independent y[j] */
+#ifdef _OPENMP
+        const int use_omp = (N >= QGBMV_OMP_MIN && blas_omp_max_threads() > 1);
+        #pragma omp parallel for if(use_omp) schedule(static)
+#endif
+        for (int j = 0; j < N; ++j) {
+            T s = zero;
+            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
+            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+            const int k = KU - j;
+            for (int i = i_lo; i < i_hi; ++i) s += A_(k + i, j) * x[i];
+            y[j] += alpha * s;
+        }
+    } else {
+        /* Strided Trans gather (C already mapped to T above). */
+#ifdef _OPENMP
+        if (N >= QGBMV_OMP_MIN && blas_omp_max_threads() > 1
+            && qgbmv_t_omp(M, N, KL, KU, alpha, a, lda, x, incx, y, incy))
+            return;
+#endif
+        int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
+        int ky = (incy < 0) ? -(leny - 1) * incy : 0;
+        int jy = ky;
+        for (int j = 0; j < N; ++j) {
+            T s = zero;
+            int ix = kx;
+            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
+            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+            const int k = KU - j;
+            for (int i = i_lo; i < i_hi; ++i) {
+                s += A_(k + i, j) * x[ix];
+                ix += incx;
             }
+            y[jy] += alpha * s;
+            jy += incy;
+            if (j >= KU) kx += incx;
         }
     }
 }
 
 #ifdef _OPENMP
+/* Threaded NoTrans band matvec. Output rows partition across threads (each y[i] an
+ * independent band dot, x and y distinct -> no race). ax[j]=alpha*x[j] is
+ * precomputed once (matching the serial scatter's temp); seeding the accumulator
+ * with y[i] then adding ax[j]*A(i,j) in ascending-j order reproduces the scatter's
+ * exact left-to-right association -> bit-identical for both contiguous and strided
+ * x/y. NoTrans reads N of x, writes M of y. */
 __attribute__((noinline)) static int qgbmv_n_omp(
     int M, int N, int KL, int KU, T alpha,
     const T *restrict a, int lda,
-    const T *restrict x, T *restrict y)
+    const T *restrict x, int incx, T *restrict y, int incy)
 {
     if (M < QGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
@@ -153,7 +173,9 @@ __attribute__((noinline)) static int qgbmv_n_omp(
     /* ax[j] = alpha*x[j] precomputed once (matches the scatter's temp exactly). */
     T *ax = (T *)malloc((size_t)N * sizeof(T));
     if (!ax) return 0;
-    for (int j = 0; j < N; ++j) ax[j] = alpha * x[j];
+    const int ix0 = (incx < 0) ? -(N - 1) * incx : 0;
+    for (int j = 0; j < N; ++j) ax[j] = alpha * x[ix0 + j * incx];
+    const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(M - 1) * incy : 0;
 
     const ptrdiff_t s1 = (ptrdiff_t)lda - 1;
     #pragma omp parallel num_threads(nthreads)
@@ -165,12 +187,59 @@ __attribute__((noinline)) static int qgbmv_n_omp(
             ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
             ptrdiff_t j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
             const T *base = a + (KU + i);
-            T s = y[i];                       /* seed: post-beta y[i] */
+            T *yi = &y[iy0 + i * incy];
+            T s = *yi;                        /* seed: post-beta y[i] */
             for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += ax[j] * base[j * s1];
-            y[i] = s;
+            *yi = s;
         }
     }
     free(ax);
+    return 1;
+}
+
+/* Threaded Trans band matvec (strided x and/or y; C is mapped to T by the caller).
+ * Output columns partition across threads (each y[j]=alpha*Σ_i A(i,j)*x[i] disjoint,
+ * x and y distinct -> no race). Strided x is gathered to contiguous so the inner dot
+ * reads x[i] directly. Trans reads M of x, writes N of y. Bit-identical to the serial
+ * strided gather (same ascending-i association). */
+__attribute__((noinline)) static int qgbmv_t_omp(
+    int M, int N, int KL, int KU, T alpha,
+    const T *restrict a, int lda,
+    const T *restrict x, int incx, T *restrict y, int incy)
+{
+    if (N < QGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > QGBMV_MAX_CPUS) nthreads = QGBMV_MAX_CPUS;
+
+    if (incx < 0) x -= (ptrdiff_t)(M - 1) * incx;
+    if (incy < 0) y -= (ptrdiff_t)(N - 1) * incy;
+
+    const T *xptr = x;
+    T *xbuf = NULL;
+    if (incx != 1) {
+        xbuf = (T *)malloc((size_t)M * sizeof(T));
+        if (!xbuf) return 0;
+        for (int i = 0; i < M; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
+        xptr = xbuf;
+    }
+
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        ptrdiff_t lo = ((ptrdiff_t)N * tid) / nthreads;
+        ptrdiff_t hi = ((ptrdiff_t)N * (tid + 1)) / nthreads;
+        for (ptrdiff_t j = lo; j < hi; ++j) {
+            ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
+            ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+            ptrdiff_t k = KU - j;
+            const T *col = &A_(k + i_lo, j);
+            T s = 0.0Q;
+            for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += *col++ * xptr[i];
+            y[j * incy] += alpha * s;
+        }
+    }
+    free(xbuf);
     return 1;
 }
 #endif /* _OPENMP */
