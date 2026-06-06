@@ -14,6 +14,10 @@
  */
 #include <cstddef>
 #include <multifloats.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -54,6 +58,89 @@ inline T horizontal_dd(__m256d h, __m256d l) {
 }
 #endif
 
+/* Σ X·Y over contiguous unit-stride ranges — the serial kernel, unchanged.
+ * Carved out so the OpenMP partial-reduction can call it per sub-range. */
+static T mdot_unit(int n, const T *x, const T *y)
+{
+#ifdef MBLAS_SIMD_DD
+    __m256d a0 = _mm256_setzero_pd();
+    __m256d a1 = _mm256_setzero_pd();
+    __m256d a2 = _mm256_setzero_pd();
+    constexpr int K = 64;
+    int counter = K;
+    const int n4 = n & ~3;
+    for (int i = 0; i < n4; i += 4) {
+        __m256d xh, xl, yh, yl;
+        load_4cell_soa(&x[i], xh, xl);
+        load_4cell_soa(&y[i], yh, yl);
+        /* DD product via simplified twoprod: drop xl*yl (~2^-106 of xh*yh) */
+        __m256d ph, pl;
+        simd_twoprod(xh, yh, ph, pl);
+        pl = _mm256_add_pd(pl,
+                _mm256_add_pd(_mm256_mul_pd(xh, yl), _mm256_mul_pd(xl, yh)));
+        /* Wide-acc absorb (a0, a1, a2) += (ph, pl) */
+        __m256d e0, e1, e2;
+        simd_twosum(a0, ph, a0, e0);
+        simd_twosum(a1, pl, a1, e1);
+        simd_twosum(a1, e0, a1, e2);
+        a2 = _mm256_add_pd(a2, _mm256_add_pd(e1, e2));
+        if (--counter == 0) {
+            /* Renormalize 3→2 doubles */
+            __m256d t, e;
+            simd_fast_twosum(a1, a2, t, e);
+            a1 = t; a2 = e;
+            simd_fast_twosum(a0, a1, a0, a1);
+            a1 = _mm256_add_pd(a1, a2);
+            simd_fast_twosum(a0, a1, a0, a1);
+            a2 = _mm256_setzero_pd();
+            counter = K;
+        }
+    }
+    __m256d t = _mm256_add_pd(a1, a2);
+    T s = horizontal_dd(a0, t);
+    for (int i = n4; i < n; ++i) s = s + x[i] * y[i];
+    return s;
+#else
+    T s0{0.0, 0.0}, s1{0.0, 0.0}, s{0.0, 0.0};
+    int i = 0;
+    for (; i + 1 < n; i += 2) {
+        s0 = s0 + x[i]     * y[i];
+        s1 = s1 + x[i + 1] * y[i + 1];
+    }
+    s = s0 + s1;
+    for (; i < n; ++i) s = s + x[i] * y[i];
+    return s;
+#endif
+}
+
+#ifdef _OPENMP
+/* Threaded partial-reduction for large unit-stride X·Y. Each thread dots its
+ * contiguous slice with the serial kernel; partials combine in tid order.
+ * Reduction order differs from serial → within fuzz tolerance (kind10 edot). */
+#define MDOT_OMP_MIN 8192
+#define MDOT_MAX_CPUS 64
+__attribute__((noinline)) static int mdot_omp(int n, const T *x, const T *y, T *out)
+{
+    if (n <= MDOT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > MDOT_MAX_CPUS) nthreads = MDOT_MAX_CPUS;
+    T partial[MDOT_MAX_CPUS];
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        int nth = omp_get_num_threads();
+        int lo = (int)((long long)n * tid / nth);
+        int hi = (int)((long long)n * (tid + 1) / nth);
+        partial[tid] = (lo < hi) ? mdot_unit(hi - lo, x + lo, y + lo) : T{0.0, 0.0};
+    }
+    T s{0.0, 0.0};
+    for (int i = 0; i < nthreads; ++i) s = s + partial[i];
+    *out = s;
+    return 1;
+}
+#endif
+
 extern "C" T mdot_(const int *n_,
                    const T *x, const int *incx_,
                    const T *y, const int *incy_)
@@ -62,63 +149,16 @@ extern "C" T mdot_(const int *n_,
     T s{0.0, 0.0};
     if (n <= 0) return s;
 
-#ifdef MBLAS_SIMD_DD
     if (incx == 1 && incy == 1) {
-        __m256d a0 = _mm256_setzero_pd();
-        __m256d a1 = _mm256_setzero_pd();
-        __m256d a2 = _mm256_setzero_pd();
-        constexpr int K = 64;
-        int counter = K;
-        const int n4 = n & ~3;
-        for (int i = 0; i < n4; i += 4) {
-            __m256d xh, xl, yh, yl;
-            load_4cell_soa(&x[i], xh, xl);
-            load_4cell_soa(&y[i], yh, yl);
-            /* DD product via simplified twoprod: drop xl*yl (~2^-106 of xh*yh) */
-            __m256d ph, pl;
-            simd_twoprod(xh, yh, ph, pl);
-            pl = _mm256_add_pd(pl,
-                    _mm256_add_pd(_mm256_mul_pd(xh, yl), _mm256_mul_pd(xl, yh)));
-            /* Wide-acc absorb (a0, a1, a2) += (ph, pl) */
-            __m256d e0, e1, e2;
-            simd_twosum(a0, ph, a0, e0);
-            simd_twosum(a1, pl, a1, e1);
-            simd_twosum(a1, e0, a1, e2);
-            a2 = _mm256_add_pd(a2, _mm256_add_pd(e1, e2));
-            if (--counter == 0) {
-                /* Renormalize 3→2 doubles */
-                __m256d t, e;
-                simd_fast_twosum(a1, a2, t, e);
-                a1 = t; a2 = e;
-                simd_fast_twosum(a0, a1, a0, a1);
-                a1 = _mm256_add_pd(a1, a2);
-                simd_fast_twosum(a0, a1, a0, a1);
-                a2 = _mm256_setzero_pd();
-                counter = K;
-            }
-        }
-        __m256d t = _mm256_add_pd(a1, a2);
-        s = horizontal_dd(a0, t);
-        for (int i = n4; i < n; ++i) s = s + x[i] * y[i];
-        return s;
-    }
+#ifdef _OPENMP
+        if (mdot_omp(n, x, y, &s)) return s;
 #endif
-    /* Strided / scalar fallback with 2-acc unroll */
-    {
-        T s0{0.0, 0.0}, s1{0.0, 0.0};
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        int i = 0;
-        if (incx == 1 && incy == 1) {
-            for (; i + 1 < n; i += 2) {
-                s0 = s0 + x[i]     * y[i];
-                s1 = s1 + x[i + 1] * y[i + 1];
-            }
-            s = s0 + s1;
-            for (; i < n; ++i) s = s + x[i] * y[i];
-        } else {
-            for (; i < n; ++i) { s = s + x[ix] * y[iy]; ix += incx; iy += incy; }
-        }
+        return mdot_unit(n, x, y);
     }
+
+    /* Strided fallback */
+    int ix = (incx < 0) ? (-n + 1) * incx : 0;
+    int iy = (incy < 0) ? (-n + 1) * incy : 0;
+    for (int i = 0; i < n; ++i) { s = s + x[ix] * y[iy]; ix += incx; iy += incy; }
     return s;
 }

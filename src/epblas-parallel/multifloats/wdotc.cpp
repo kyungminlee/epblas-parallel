@@ -2,6 +2,10 @@
  * conj(X)·Y = (xr·yr + xi·yi) + j·(xr·yi - xi·yr). */
 #include <cstddef>
 #include <multifloats.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -81,6 +85,78 @@ inline void dd_prod(__m256d xh, __m256d xl, __m256d yh, __m256d yl,
 }
 #endif
 
+/* Σ conj(X)·Y over contiguous unit-stride ranges — serial kernel, unchanged.
+ * Carved out so the OpenMP partial-reduction can call it per sub-range. */
+static T wdotc_unit(int n, const T *x, const T *y)
+{
+    T s{R{0.0, 0.0}, R{0.0, 0.0}};
+#ifdef MBLAS_SIMD_DD
+    __m256d rA0 = _mm256_setzero_pd(), rA1 = _mm256_setzero_pd(), rA2 = _mm256_setzero_pd();
+    __m256d iA0 = _mm256_setzero_pd(), iA1 = _mm256_setzero_pd(), iA2 = _mm256_setzero_pd();
+    constexpr int K = 64;
+    int counter = K;
+    const int n4 = n & ~3;
+    for (int i = 0; i < n4; i += 4) {
+        __m256d xrh, xrl, xih, xil, yrh, yrl, yih, yil;
+        load_4cell_csoa(&x[i], xrh, xrl, xih, xil);
+        load_4cell_csoa(&y[i], yrh, yrl, yih, yil);
+        /* conj(x)·y = (xr·yr + xi·yi) + j·(xr·yi - xi·yr) */
+        __m256d rh, rl, ph, pl;
+        dd_prod(xrh, xrl, yrh, yrl, rh, rl);
+        dd_prod(xih, xil, yih, yil, ph, pl);
+        absorb(rh, rl, rA0, rA1, rA2);
+        absorb(ph, pl, rA0, rA1, rA2);
+        /* im: +xr·yi - xi·yr */
+        dd_prod(xrh, xrl, yih, yil, rh, rl);
+        dd_prod(xih, xil, yrh, yrl, ph, pl);
+        absorb(rh, rl, iA0, iA1, iA2);
+        __m256d nph = _mm256_sub_pd(_mm256_setzero_pd(), ph);
+        __m256d npl = _mm256_sub_pd(_mm256_setzero_pd(), pl);
+        absorb(nph, npl, iA0, iA1, iA2);
+        if (--counter == 0) {
+            renorm3(rA0, rA1, rA2);
+            renorm3(iA0, iA1, iA2);
+            counter = K;
+        }
+    }
+    __m256d rt = _mm256_add_pd(rA1, rA2);
+    __m256d it = _mm256_add_pd(iA1, iA2);
+    s.re = horizontal_dd(rA0, rt);
+    s.im = horizontal_dd(iA0, it);
+    for (int i = n4; i < n; ++i) s = cadd(s, cmul(cconj(x[i]), y[i]));
+    return s;
+#else
+    for (int i = 0; i < n; ++i) s = cadd(s, cmul(cconj(x[i]), y[i]));
+    return s;
+#endif
+}
+
+#ifdef _OPENMP
+#define WDOTC_OMP_MIN 8192
+#define WDOTC_MAX_CPUS 64
+__attribute__((noinline)) static int wdotc_omp(int n, const T *x, const T *y, T *out)
+{
+    if (n <= WDOTC_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > WDOTC_MAX_CPUS) nthreads = WDOTC_MAX_CPUS;
+    T partial[WDOTC_MAX_CPUS];
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        int nth = omp_get_num_threads();
+        int lo = (int)((long long)n * tid / nth);
+        int hi = (int)((long long)n * (tid + 1) / nth);
+        partial[tid] = (lo < hi) ? wdotc_unit(hi - lo, x + lo, y + lo)
+                                 : T{R{0.0, 0.0}, R{0.0, 0.0}};
+    }
+    T s{R{0.0, 0.0}, R{0.0, 0.0}};
+    for (int i = 0; i < nthreads; ++i) s = cadd(s, partial[i]);
+    *out = s;
+    return 1;
+}
+#endif
+
 extern "C" T wdotc_(const int *n_,
                     const T *x, const int *incx_,
                     const T *y, const int *incy_)
@@ -89,50 +165,15 @@ extern "C" T wdotc_(const int *n_,
     T s{R{0.0, 0.0}, R{0.0, 0.0}};
     if (n <= 0) return s;
 
-#ifdef MBLAS_SIMD_DD
     if (incx == 1 && incy == 1) {
-        __m256d rA0 = _mm256_setzero_pd(), rA1 = _mm256_setzero_pd(), rA2 = _mm256_setzero_pd();
-        __m256d iA0 = _mm256_setzero_pd(), iA1 = _mm256_setzero_pd(), iA2 = _mm256_setzero_pd();
-        constexpr int K = 64;
-        int counter = K;
-        const int n4 = n & ~3;
-        for (int i = 0; i < n4; i += 4) {
-            __m256d xrh, xrl, xih, xil, yrh, yrl, yih, yil;
-            load_4cell_csoa(&x[i], xrh, xrl, xih, xil);
-            load_4cell_csoa(&y[i], yrh, yrl, yih, yil);
-            /* conj(x)·y = (xr·yr + xi·yi) + j·(xr·yi - xi·yr) */
-            __m256d rh, rl, ph, pl;
-            dd_prod(xrh, xrl, yrh, yrl, rh, rl);
-            dd_prod(xih, xil, yih, yil, ph, pl);
-            absorb(rh, rl, rA0, rA1, rA2);
-            absorb(ph, pl, rA0, rA1, rA2);
-            /* im: +xr·yi - xi·yr */
-            dd_prod(xrh, xrl, yih, yil, rh, rl);
-            dd_prod(xih, xil, yrh, yrl, ph, pl);
-            absorb(rh, rl, iA0, iA1, iA2);
-            __m256d nph = _mm256_sub_pd(_mm256_setzero_pd(), ph);
-            __m256d npl = _mm256_sub_pd(_mm256_setzero_pd(), pl);
-            absorb(nph, npl, iA0, iA1, iA2);
-            if (--counter == 0) {
-                renorm3(rA0, rA1, rA2);
-                renorm3(iA0, iA1, iA2);
-                counter = K;
-            }
-        }
-        __m256d rt = _mm256_add_pd(rA1, rA2);
-        __m256d it = _mm256_add_pd(iA1, iA2);
-        s.re = horizontal_dd(rA0, rt);
-        s.im = horizontal_dd(iA0, it);
-        for (int i = n4; i < n; ++i) s = cadd(s, cmul(cconj(x[i]), y[i]));
-        return s;
-    }
+#ifdef _OPENMP
+        if (wdotc_omp(n, x, y, &s)) return s;
 #endif
-    if (incx == 1 && incy == 1) {
-        for (int i = 0; i < n; ++i) s = cadd(s, cmul(cconj(x[i]), y[i]));
-    } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (int i = 0; i < n; ++i) { s = cadd(s, cmul(cconj(x[ix]), y[iy])); ix += incx; iy += incy; }
+        return wdotc_unit(n, x, y);
     }
+
+    int ix = (incx < 0) ? (-n + 1) * incx : 0;
+    int iy = (incy < 0) ? (-n + 1) * incy : 0;
+    for (int i = 0; i < n; ++i) { s = cadd(s, cmul(cconj(x[ix]), y[iy])); ix += incx; iy += incy; }
     return s;
 }
