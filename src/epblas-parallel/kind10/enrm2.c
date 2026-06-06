@@ -11,6 +11,12 @@
 #include <math.h>
 #include <float.h>
 #include <stddef.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#define ENRM2_OMP_MIN  10000   /* below this, run the serial path */
+#define ENRM2_MAX_CPUS 64
+#endif
 typedef long double T;
 
 static T btsml, btbig, bssml, bsbig, maxN;
@@ -34,28 +40,9 @@ static __attribute__((cold)) void blue_init(void)
 
 static inline T sq(T x) { return x * x; }
 
-T enrm2_(const int *n_, const T *x, const int *incx_)
+/* Combine the three magnitude buckets into the final norm (Anderson 2017). */
+static T enrm2_finalize(T abig, T amed, T asml)
 {
-    const ptrdiff_t n = *n_, incx = *incx_;
-    if (n <= 0) return 0.0L;
-    if (!blue_inited) blue_init();
-
-    T abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    ptrdiff_t notbig = 1;
-    ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
-    for (ptrdiff_t i = 0; i < n; ++i) {
-        T ax = fabsl(x[ix]);
-        if (ax > btbig) {
-            abig += sq(ax * bsbig);
-            notbig = 0;
-        } else if (ax < btsml) {
-            if (notbig) asml += sq(ax * bssml);
-        } else {
-            amed += sq(ax);
-        }
-        ix += incx;
-    }
-
     T scl, sumsq;
     if (abig > 0.0L) {
         if (amed > 0.0L || amed > maxN || amed != amed) {
@@ -81,4 +68,79 @@ T enrm2_(const int *n_, const T *x, const int *incx_)
         sumsq = amed;
     }
     return scl * sqrtl(sumsq);
+}
+
+#ifdef _OPENMP
+/* Bucket-accumulate a unit-stride chunk into (abig, amed, asml). The `notbig`
+ * flag is chunk-local: asml is only consumed by enrm2_finalize when the GLOBAL
+ * abig==0 (no big element anywhere → every chunk kept notbig==1), so a
+ * per-chunk notbig is exact. */
+static void enrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
+{
+    T abig = 0.0L, amed = 0.0L, asml = 0.0L;
+    ptrdiff_t notbig = 1;
+    for (ptrdiff_t i = 0; i < n; ++i) {
+        T ax = fabsl(x[i]);
+        if (ax > btbig) { abig += sq(ax * bsbig); notbig = 0; }
+        else if (ax < btsml) { if (notbig) asml += sq(ax * bssml); }
+        else amed += sq(ax);
+    }
+    *abig_ = abig; *amed_ = amed; *asml_ = asml;
+}
+
+/* Threaded reduction for large unit-stride X. Each thread buckets its own chunk;
+ * the three partial sums combine exactly as analysed above. Reduction order
+ * differs from serial (not bit-identical), but within fuzz tolerance. */
+__attribute__((noinline)) static int enrm2_omp(ptrdiff_t n, const T *x, T *out)
+{
+    if (n <= ENRM2_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > ENRM2_MAX_CPUS) nthreads = ENRM2_MAX_CPUS;
+    T pbig[ENRM2_MAX_CPUS] = {0}, pmed[ENRM2_MAX_CPUS] = {0}, psml[ENRM2_MAX_CPUS] = {0};
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        int nth = omp_get_num_threads();
+        ptrdiff_t lo = n * tid / nth;
+        ptrdiff_t hi = n * (tid + 1) / nth;
+        if (lo < hi) enrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
+    }
+    T abig = 0.0L, amed = 0.0L, asml = 0.0L;
+    for (int i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
+    *out = enrm2_finalize(abig, amed, asml);
+    return 1;
+}
+#endif
+
+T enrm2_(const int *n_, const T *x, const int *incx_)
+{
+    const ptrdiff_t n = *n_, incx = *incx_;
+    if (n <= 0) return 0.0L;
+    if (!blue_inited) blue_init();
+
+#ifdef _OPENMP
+    if (incx == 1) {
+        T r;
+        if (enrm2_omp(n, x, &r)) return r;
+    }
+#endif
+
+    T abig = 0.0L, amed = 0.0L, asml = 0.0L;
+    ptrdiff_t notbig = 1;
+    ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
+    for (ptrdiff_t i = 0; i < n; ++i) {
+        T ax = fabsl(x[ix]);
+        if (ax > btbig) {
+            abig += sq(ax * bsbig);
+            notbig = 0;
+        } else if (ax < btsml) {
+            if (notbig) asml += sq(ax * bssml);
+        } else {
+            amed += sq(ax);
+        }
+        ix += incx;
+    }
+
+    return enrm2_finalize(abig, amed, asml);
 }
