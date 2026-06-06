@@ -77,6 +77,20 @@ static void yher2_contig_L(ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, T alpha,
     }
 }
 
+/* Strided off-diagonal run: aj[i] += x[ix]·t1 + y[iy]·t2 for i in [0,cnt),
+ * x/y walked by stride. Carved noinline so the complex-MAC loop keeps t1/t2
+ * register-resident (see the strided-fallback comment below). */
+__attribute__((noinline))
+static void yher2_strided_run(ptrdiff_t cnt, T t1, T t2, T *restrict aj,
+                              const T *restrict x, ptrdiff_t incx, ptrdiff_t ix,
+                              const T *restrict y, ptrdiff_t incy, ptrdiff_t iy)
+{
+    for (ptrdiff_t i = 0; i < cnt; ++i) {
+        aj[i] += x[ix] * t1 + y[iy] * t2;
+        ix += incx; iy += incy;
+    }
+}
+
 void yher2_(
     const char *uplo,
     const int *n_,
@@ -129,7 +143,12 @@ void yher2_(
     } else {
         /* General-stride fallback — hoist the matrix column to aj[i] and
          * walk the strided vectors with running indices (Class-B fix,
-         * memory project_ptrdiff_conversion_regressors). */
+         * memory project_ptrdiff_conversion_regressors). The off-diagonal run
+         * is carved into a noinline helper for the same reason the contiguous
+         * path is (project_x87_accumulator_spill variant 3): inlined amid the
+         * strided/uplo scaffolding gcc spills the complex temporaries t1/t2,
+         * costing ~5-10% on UPPER (and LOWER); in isolation they stay on the
+         * x87 stack. Bit-identical to the inline form. */
         const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         ptrdiff_t jx = kx, jy = ky;
@@ -141,18 +160,12 @@ void yher2_(
                 const T temp2 = cconj(alpha * xj);
                 T *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    ptrdiff_t ix = jx + incx, iy = jy + incy;
-                    for (ptrdiff_t i = j + 1; i < N; ++i) {
-                        aj[i] += x[ix] * temp1 + y[iy] * temp2;
-                        ix += incx; iy += incy;
-                    }
+                    yher2_strided_run(N - j - 1, temp1, temp2, aj + j + 1,
+                                      x, incx, jx + incx, y, incy, jy + incy);
                     aj[j] = __real__ aj[j] + __real__ (xj * temp1 + yj * temp2);
                 } else {
-                    ptrdiff_t ix = kx, iy = ky;
-                    for (ptrdiff_t i = 0; i < j; ++i) {
-                        aj[i] += x[ix] * temp1 + y[iy] * temp2;
-                        ix += incx; iy += incy;
-                    }
+                    yher2_strided_run(j, temp1, temp2, aj,
+                                      x, incx, kx, y, incy, ky);
                     aj[j] = __real__ aj[j] + __real__ (xj * temp1 + yj * temp2);
                 }
             }
