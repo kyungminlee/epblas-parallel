@@ -62,6 +62,10 @@ static ptrdiff_t ygbmv_n_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t k
                        const T *restrict a, ptrdiff_t lda,
                        const T *restrict x, ptrdiff_t incx,
                        T alpha, T *restrict y, ptrdiff_t incy);
+static ptrdiff_t ygbmv_t_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
+                       const T *restrict a, ptrdiff_t lda,
+                       const T *restrict x, ptrdiff_t incx,
+                       T alpha, T *restrict y, ptrdiff_t incy, ptrdiff_t noconj);
 #endif
 
 void ygbmv_(
@@ -159,7 +163,16 @@ void ygbmv_(
         }
 #undef YGBMV_T_BODY
     } else {
-        /* Strided Trans/ConjTrans gather. */
+#ifdef _OPENMP
+        /* Thread the strided Trans/ConjTrans gather too (the contiguous Trans
+         * path above already threads). Each y[j] is a disjoint complex dot over
+         * column j, so it partitions over j with no race; strided x is gathered
+         * to contiguous. noconj selects the T (no conj) vs C (conj) inner loop. */
+        if (N >= YGBMV_OMP_MIN && blas_omp_max_threads() > 1
+            && ygbmv_t_omp(M, N, KL, KU, a, lda, x, incx, alpha, y, incy, noconj))
+            return;
+#endif
+        /* Strided Trans/ConjTrans gather (serial). */
         ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
         ptrdiff_t jy = ky;
@@ -242,6 +255,69 @@ __attribute__((noinline)) static ptrdiff_t ygbmv_n_omp(
         ptrdiff_t lo = ((ptrdiff_t)m * tid) / nthreads;
         ptrdiff_t hi = ((ptrdiff_t)m * (tid + 1)) / nthreads;
         gbmv_n_rowgather(m, n, kl, ku, lo, hi, a, lda, xptr, alpha, y, (ptrdiff_t)incy);
+    }
+
+    free(xbuf);
+    return 1;
+}
+
+/* Column-partitioned Trans/ConjTrans gather kernel: y[j] = alpha * Σ_i op(A(i,j))*x[i]
+ * for j in [lo,hi), op = identity (noconj) or conjugate. Output columns partition
+ * across threads with no cross-thread write dependence (x and y distinct). The
+ * complex accumulator s stays register-resident; noconj/conj split as two loops so
+ * the conj path isn't a per-element branch. */
+static void gbmv_t_colgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
+                             ptrdiff_t lo, ptrdiff_t hi,
+                             const T *restrict a, ptrdiff_t lda,
+                             const T *restrict x, T alpha,
+                             T *restrict y, ptrdiff_t incy, ptrdiff_t noconj)
+{
+    for (ptrdiff_t j = lo; j < hi; ++j) {
+        const ptrdiff_t i_lo = (j - ku > 0) ? (j - ku) : 0;
+        const ptrdiff_t i_hi = (j + kl + 1 < m) ? (j + kl + 1) : m;
+        const ptrdiff_t k = ku - j;
+        const T *col = &A_(k + i_lo, j);
+        T s = 0.0L + 0.0Li;
+        if (noconj) for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += *col++ * x[i];
+        else        for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += cconj(*col++) * x[i];
+        y[j * incy] += alpha * s;
+    }
+}
+
+/* Threaded Trans/ConjTrans complex general band matvec (strided x and/or y). Each
+ * thread owns a disjoint output-column range [lo,hi): it writes y[lo,hi) reading x.
+ * No cross-thread dependence (x and y distinct) -- no barrier, no scratch beyond
+ * the strided-x gather buffer. Returns 1 if handled, 0 to fall back. Trans reads
+ * M elements of x and writes N of y. */
+__attribute__((noinline)) static ptrdiff_t ygbmv_t_omp(
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict x, ptrdiff_t incx,
+    T alpha, T *restrict y, ptrdiff_t incy, ptrdiff_t noconj)
+{
+    if (n < YGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    ptrdiff_t nthreads = blas_omp_max_threads();
+    if (nthreads > YGBMV_MAX_CPUS) nthreads = YGBMV_MAX_CPUS;
+
+    if (incx < 0) x -= (ptrdiff_t)(m - 1) * incx;
+    if (incy < 0) y -= (ptrdiff_t)(n - 1) * incy;
+
+    const T *xptr = x;
+    T *xbuf = NULL;
+    if (incx != 1) {
+        xbuf = (T *)malloc((size_t)m * sizeof(T));
+        if (!xbuf) return 0;
+        for (ptrdiff_t i = 0; i < m; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
+        xptr = xbuf;
+    }
+
+    #pragma omp parallel num_threads(nthreads)
+    {
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t lo = ((ptrdiff_t)n * tid) / nthreads;
+        ptrdiff_t hi = ((ptrdiff_t)n * (tid + 1)) / nthreads;
+        gbmv_t_colgather(m, n, kl, ku, lo, hi, a, lda, xptr, alpha, y, (ptrdiff_t)incy, noconj);
     }
 
     free(xbuf);
