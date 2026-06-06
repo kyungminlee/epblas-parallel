@@ -82,9 +82,9 @@ regression.
 | msbmv  | sym band mv     | 0.278 | 0.118 | 0.42–0.45 | thr n≥256; row-gather (disjoint output rows, x→contig), serial bit-exact; band scales ~ideal flat | DONE |
 | mspmv  | sym packed mv   | 0.272–0.276 | 0.12–0.26 | 0.45→0.94 | thr n≥256; packed row-gather, serial bit-exact; win at every N but p4/p1 degrades at large N (BW-bound / triangular work-skew from static [lo,hi); future balanced-schedule fix) | DONE |
 | msymv  | sym mv          | — | — | — | — | TODO |
-| mtbmv  | tri band mv     | — | — | — | — | TODO |
-| mtpmv  | tri packed mv   | — | — | — | — | TODO |
-| mtrmv  | tri mv          | — | — | — | — | TODO |
+| mtbmv  | tri band mv     | 0.277–0.279 | 0.12–0.13 | 0.43–0.47 | thr n≥256; in-place x→contig copy, row-gather (NoTrans=row anti-diag walk, Trans=contiguous col), serial bit-exact; band scales ~ideal flat | DONE |
+| mtpmv  | tri packed mv   | 0.271–0.275 | 0.216–0.217 | ~0.79 | thr n≥256; in-place row-gather (UPLO offsets, NoTrans col-jump / Trans contiguous), serial bit-exact; real DD tri matvec BW-bound → modest ~1.27× | DONE |
+| mtrmv  | tri mv          | 0.275–0.278 | 0.214–0.215 | ~0.77 | thr n≥256; in-place dense row-gather (NoTrans strided row, Trans contiguous col), serial bit-exact; real DD BW-bound → modest ~1.3× | DONE |
 | mtrsv  | tri solve       | — | — | — | — | TODO |
 
 ### L2 — complex (w / complex64x2)
@@ -94,9 +94,9 @@ regression.
 | whbmv  | herm band mv    | 0.456–0.465 | 0.114 | ~0.25 | thr n≥256; row-gather, real diagonal + cconj reflected, serial bit-exact; band scales ~ideal 4× flat | DONE |
 | whemv  | herm mv         | — | — | — | — | TODO |
 | whpmv  | herm packed mv  | 0.455–0.462 | 0.12–0.27 | 0.26→0.59 | thr n≥256; packed row-gather (real diag + cconj reflected), serial bit-exact; win at every N but p4/p1 degrades at large N (same packed-skew as mspmv) | DONE |
-| wtbmv  | tri band mv     | — | — | — | — | TODO |
-| wtpmv  | tri packed mv   | — | — | — | — | TODO |
-| wtrmv  | tri mv          | — | — | — | — | TODO |
+| wtbmv  | tri band mv     | 0.434–0.442 | 0.116–0.119 | 0.27 | thr n≥256; in-place row-gather (NoTrans anti-diag walk, Trans contiguous col + conj on 'C'), serial bit-exact; band scales ~ideal 3.7× | DONE |
+| wtpmv  | tri packed mv   | 0.447–0.450 | 0.196–0.197 | 0.44 | thr n≥256; in-place packed row-gather (UPLO offsets, conj on 'C'), serial bit-exact; complex compute-bound → ~2.3× | DONE |
+| wtrmv  | tri mv          | 0.439–0.446 | 0.195–0.196 | 0.44 | thr n≥256; in-place dense row-gather (NoTrans strided row, Trans contiguous col + conj on 'C'), serial bit-exact; complex compute-bound → ~2.3× | DONE |
 | wtrsv  | tri solve       | — | — | — | — | TODO |
 
 ### N/A — by-design serial (no work)

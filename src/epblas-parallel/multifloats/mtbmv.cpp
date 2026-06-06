@@ -7,6 +7,13 @@
 #include <cstddef>
 #include <cctype>
 #include <multifloats.h>
+#ifdef _OPENMP
+#include <cstdlib>
+#include <omp.h>
+#include "../common/blas_omp.h"
+#define MTBMV_OMP_MIN 256
+#define MTBMV_MAX_CPUS 256
+#endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -19,6 +26,72 @@ inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
+
+#ifdef _OPENMP
+/* Row-gather: x := A*x (or A^T*x) is an in-place triangular band matvec, so each
+ * output row r is an independent dot once the original x is preserved in a copy.
+ * NoTrans reads matrix row r (anti-diagonal stride lda-1); Trans reads column r
+ * (contiguous). Diagonal scales x[r] when non-unit. xin is the contiguous copy,
+ * xout the destination. Mirrors the serial accumulation order → within DD fuzz
+ * tol; the serial path stays bit-exact. */
+static void mtbmv_rowgather(bool upper, bool trans, bool nounit,
+                            int n, int k, int lo, int hi,
+                            const T *a, std::size_t lda,
+                            const T *xin, T *xout, int incx)
+{
+    const std::ptrdiff_t s1 = static_cast<std::ptrdiff_t>(lda) - 1;
+    for (int r = lo; r < hi; ++r) {
+        const T *base = &A_(0, r);
+        const T diagc = upper ? base[k] : base[0];
+        T s = nounit ? diagc * xin[r] : xin[r];
+        if (!trans) {
+            if (upper) {
+                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+                for (int d = 1; d <= rlen; ++d) s = s + base[k + (std::ptrdiff_t)d * s1] * xin[r + d];
+            } else {
+                const int llen = (r < k) ? r : k;
+                for (int d = 1; d <= llen; ++d) s = s + base[-(std::ptrdiff_t)d * s1] * xin[r - d];
+            }
+        } else {
+            if (upper) {
+                const int llen = (r < k) ? r : k;
+                for (int d = 1; d <= llen; ++d) s = s + base[k - d] * xin[r - d];
+            } else {
+                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+                for (int d = 1; d <= rlen; ++d) s = s + base[d] * xin[r + d];
+            }
+        }
+        xout[(std::ptrdiff_t)r * incx] = s;
+    }
+}
+
+/* Threaded in-place triangular band matvec. Copy x to contiguous, partition the
+ * output rows, write back. Returns true if handled. */
+__attribute__((noinline)) static bool mtbmv_omp(
+    bool upper, bool trans, bool nounit, int n, int k,
+    const T *a, std::size_t lda, T *x, int incx)
+{
+    if (n < MTBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return false;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > MTBMV_MAX_CPUS) nthreads = MTBMV_MAX_CPUS;
+
+    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
+    T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    if (!xbuf) return false;
+    for (int i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
+
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        int lo = (int)((long long)n * tid / nthreads);
+        int hi = (int)((long long)n * (tid + 1) / nthreads);
+        mtbmv_rowgather(upper, trans, nounit, n, k, lo, hi, a, lda, xbuf, xbase, incx);
+    }
+    std::free(xbuf);
+    return true;
+}
+#endif
 
 extern "C" void mtbmv_(
     const char *uplo, const char *trans, const char *diag,
@@ -36,6 +109,12 @@ extern "C" void mtbmv_(
     const int nounit = (up(diag) != 'U');
 
     if (N == 0) return;
+
+#ifdef _OPENMP
+    if (N >= MTBMV_OMP_MIN && blas_omp_max_threads() > 1
+        && mtbmv_omp(UPLO == 'U', TR != 'N', nounit != 0, N, K, a, lda, x, incx))
+        return;
+#endif
 
     if (incx == 1) {
         if (TR == 'N') {
