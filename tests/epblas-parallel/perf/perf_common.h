@@ -124,9 +124,15 @@ static inline int perf_parse_int_list(const char *env_name,
  * BLAS calls. Same seed = same sequence; we reset before each timed
  * block. */
 static inline double perf_fill_double(size_t i, int salt) {
-    /* small rational in [-1, 1]. */
+    /* small rational in [-1, 1]. NOTE: the centring subtraction MUST be signed
+     * — `(v % 211u) - 105u` is unsigned, so every residue < 105 wraps to ~1.8e19
+     * and divides to ~8.7e16, injecting ~1e16 garbage into half the fill. Benign
+     * for single-pass kernels (matvec/axpy/dot: both legs see the same values),
+     * but it makes triangular SOLVE inputs catastrophically ill-conditioned, so
+     * the solution overflows over N steps and x87 inf-arithmetic inflates the
+     * timing ~100x. Cast to signed before centring. */
     size_t v = (i * 2654435761u) ^ (size_t)(salt * 0x9e3779b9u);
-    return (double)((v % 211u) - 105u) / 211.0;
+    return (double)((long)(v % 211u) - 105) / 211.0;
 }
 
 static inline void perf_print_header(void) {
