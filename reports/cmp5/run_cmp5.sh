@@ -125,6 +125,13 @@ for rep in $(seq 1 "$REPS"); do
     for ep_bin in "${ep_bins[@]}"; do
         name=$(basename "$ep_bin")          # ep_perf_<routine>
         routine="${name#ep_perf_}"
+        # Optional scoping: skip any routine whose name matches ROUTINE_SKIP_RE
+        # (e.g. ROUTINE_SKIP_RE='gemm|symm|syrk|syr2k|trmm|trsm|hemm|herk|her2k'
+        # for an L1/L2-only sweep that omits the slow L3 / software-quad tail).
+        if [[ -n "${ROUTINE_SKIP_RE:-}" && "$routine" =~ $ROUTINE_SKIP_RE ]]; then
+            (( rep == 1 )) && echo "[skip-re] $routine (matches ROUTINE_SKIP_RE)" >> "$LOG"
+            continue
+        fi
         par_bin="$PAR_DIR/perf_${routine}"
         if [[ ! -x "$par_bin" ]]; then
             (( rep == 1 )) && echo "[skip] no parallel-blas perf for $routine ($par_bin)" >> "$LOG"
