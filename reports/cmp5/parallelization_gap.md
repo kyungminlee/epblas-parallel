@@ -85,7 +85,7 @@ regression.
 | mtbmv  | tri band mv     | 0.277–0.279 | 0.12–0.13 | 0.43–0.47 | thr n≥256; in-place x→contig copy, row-gather (NoTrans=row anti-diag walk, Trans=contiguous col), serial bit-exact; band scales ~ideal flat | DONE |
 | mtpmv  | tri packed mv   | 0.271–0.275 | 0.216–0.217 | ~0.79 | thr n≥256; in-place row-gather (UPLO offsets, NoTrans col-jump / Trans contiguous), serial bit-exact; real DD tri matvec BW-bound → modest ~1.27× | DONE |
 | mtrmv  | tri mv          | 0.275–0.278 | 0.214–0.215 | ~0.77 | thr n≥256; in-place dense row-gather (NoTrans strided row, Trans contiguous col), serial bit-exact; real DD BW-bound → modest ~1.3× | DONE |
-| mtrsv  | tri solve       | — | — | — | — | TODO |
+| mtrsv  | tri solve       | 0.088–0.128 | 0.089→0.062 | 1.00→0.48 | thr n≥256, incx=1; blocked solve (serial bit-exact MTRSV_BLK=128 diagonal block via mtrsv_serial + threaded scalar off-diagonal GEMV over disjoint rows: NoTrans=axpy-after-solve, Trans=dot-fold-before-solve); serial untouched/bit-exact, threaded within DD fuzz tol; loop-carried ⇒ Amdahl-bound, scales with N (~1.1× @256, ~1.45× @512, ~2.1× @1024) | DONE |
 
 ### L2 — complex (w / complex64x2)
 
@@ -97,7 +97,7 @@ regression.
 | wtbmv  | tri band mv     | 0.434–0.442 | 0.116–0.119 | 0.27 | thr n≥256; in-place row-gather (NoTrans anti-diag walk, Trans contiguous col + conj on 'C'), serial bit-exact; band scales ~ideal 3.7× | DONE |
 | wtpmv  | tri packed mv   | 0.447–0.450 | 0.196–0.197 | 0.44 | thr n≥256; in-place packed row-gather (UPLO offsets, conj on 'C'), serial bit-exact; complex compute-bound → ~2.3× | DONE |
 | wtrmv  | tri mv          | 0.439–0.446 | 0.195–0.196 | 0.44 | thr n≥256; in-place dense row-gather (NoTrans strided row, Trans contiguous col + conj on 'C'), serial bit-exact; complex compute-bound → ~2.3× | DONE |
-| wtrsv  | tri solve       | — | — | — | — | TODO |
+| wtrsv  | tri solve       | 0.135–0.18 | 0.133→0.086 | 0.99→0.47 | thr n≥256, incx=1; blocked solve (serial bit-exact WTRSV_BLK=128 diagonal block via wtrsv_serial + threaded scalar off-diagonal GEMV over disjoint rows, conj on 'C'); serial untouched/bit-exact, threaded within DD fuzz tol; loop-carried ⇒ Amdahl-bound, scales with N (~1.26× @256, ~1.75× @512, ~2.1× @1024) | DONE |
 
 ### N/A — by-design serial (no work)
 

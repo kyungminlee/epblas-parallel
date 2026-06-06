@@ -11,6 +11,13 @@
 #include "mgemm_simd_kernel.h"
 #include <immintrin.h>
 #endif
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#define MTRSV_OMP_MIN 256   /* below this, run the serial SIMD path */
+#define MTRSV_BLK     128   /* diagonal-block size for the blocked solve */
+#define MTRSV_MAX_CPUS 256
+#endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -53,22 +60,12 @@ hreduce_dd(__m256d s_h, __m256d s_l)
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
-extern "C" void mtrsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *a, const int *lda_,
-    T *x, const int *incx_,
-    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+/* Bit-exact serial path (the SIMD-packed reference). Also reused as the
+ * diagonal-block solver by the threaded path below. TR is already normalized
+ * ('C' folded to 'T' by the caller). */
+static void mtrsv_serial(char UPLO, char TR, bool nounit,
+                         int N, const T *a, int lda, T *x, int incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
-    if (TR == 'C') TR = 'T';
-    const char DIAG = up(diag);
-    const bool nounit = (DIAG != 'U');
-
     if (N == 0) return;
 
     if (incx == 1) {
@@ -293,6 +290,139 @@ extern "C" void mtrsv_(
             }
         }
     }
+}
+
+#ifdef _OPENMP
+/* Blocked threaded triangular solve, incx==1 only. The loop-carried dependence
+ * is confined to small MTRSV_BLK diagonal blocks (solved serially via the
+ * bit-exact mtrsv_serial); the bulk O(N^2) off-diagonal coupling is a
+ * rectangular GEMV threaded over disjoint output rows. The serial fallback
+ * stays bit-exact; this threaded path only matches it within DD fuzz tol
+ * (the off-diagonal contribution is regrouped / scalar rather than SIMD).
+ * Returns true if it handled the call. */
+__attribute__((noinline)) static bool mtrsv_omp(
+    char UPLO, char TR, bool nounit, int N, const T *a, int lda, T *x)
+{
+    if (N < MTRSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return false;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > MTRSV_MAX_CPUS) nthreads = MTRSV_MAX_CPUS;
+    const bool lower = (UPLO == 'L');
+    const bool trans = (TR != 'N');
+
+    if (!trans) {
+        /* NoTrans: axpy form. Solve a diagonal block, then propagate its solved
+         * columns into the not-yet-solved rows (trailing for L, leading for U). */
+        if (lower) {
+            for (int j0 = 0; j0 < N; j0 += MTRSV_BLK) {
+                int j1 = j0 + MTRSV_BLK; if (j1 > N) j1 = N;
+                mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                if (j1 >= N) break;
+                #pragma omp parallel num_threads(nthreads)
+                {
+                    int tid = omp_get_thread_num();
+                    int rlo = j1 + (int)((long long)(N - j1) * tid / nthreads);
+                    int rhi = j1 + (int)((long long)(N - j1) * (tid + 1) / nthreads);
+                    for (int i = j0; i < j1; ++i) {
+                        const T xi = x[i];
+                        if (dd_iszero(xi)) continue;
+                        const T *ai = &A_(0, i);
+                        for (int k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
+                    }
+                }
+            }
+        } else {
+            for (int j1 = N; j1 > 0; j1 -= MTRSV_BLK) {
+                int j0 = j1 - MTRSV_BLK; if (j0 < 0) j0 = 0;
+                mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                if (j0 <= 0) break;
+                #pragma omp parallel num_threads(nthreads)
+                {
+                    int tid = omp_get_thread_num();
+                    int rlo = (int)((long long)j0 * tid / nthreads);
+                    int rhi = (int)((long long)j0 * (tid + 1) / nthreads);
+                    for (int i = j0; i < j1; ++i) {
+                        const T xi = x[i];
+                        if (dd_iszero(xi)) continue;
+                        const T *ai = &A_(0, i);
+                        for (int k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
+                    }
+                }
+            }
+        }
+    } else {
+        /* Trans: dot form. Fold the already-solved out-of-block tail/head into
+         * the block rows (threaded, disjoint rows), then solve the diagonal
+         * block serially (it adds the within-block coupling + divides). */
+        if (lower) {                                  /* backward, k > i */
+            for (int j1 = N; j1 > 0; j1 -= MTRSV_BLK) {
+                int j0 = j1 - MTRSV_BLK; if (j0 < 0) j0 = 0;
+                if (j1 < N) {
+                    #pragma omp parallel num_threads(nthreads)
+                    {
+                        int tid = omp_get_thread_num();
+                        int ilo = j0 + (int)((long long)(j1 - j0) * tid / nthreads);
+                        int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        for (int i = ilo; i < ihi; ++i) {
+                            const T *ai = &A_(0, i);
+                            T s = zero_dd;
+                            for (int k = j1; k < N; ++k) s = s + ai[k] * x[k];
+                            x[i] = x[i] - s;
+                        }
+                    }
+                }
+                mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+            }
+        } else {                                      /* forward, k < i */
+            for (int j0 = 0; j0 < N; j0 += MTRSV_BLK) {
+                int j1 = j0 + MTRSV_BLK; if (j1 > N) j1 = N;
+                if (j0 > 0) {
+                    #pragma omp parallel num_threads(nthreads)
+                    {
+                        int tid = omp_get_thread_num();
+                        int ilo = j0 + (int)((long long)(j1 - j0) * tid / nthreads);
+                        int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        for (int i = ilo; i < ihi; ++i) {
+                            const T *ai = &A_(0, i);
+                            T s = zero_dd;
+                            for (int k = 0; k < j0; ++k) s = s + ai[k] * x[k];
+                            x[i] = x[i] - s;
+                        }
+                    }
+                }
+                mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+            }
+        }
+    }
+    return true;
+}
+#endif
+
+extern "C" void mtrsv_(
+    const char *uplo, const char *trans, const char *diag,
+    const int *n_,
+    const T *a, const int *lda_,
+    T *x, const int *incx_,
+    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+{
+    (void)uplo_len; (void)trans_len; (void)diag_len;
+    const int N = *n_;
+    const int lda = *lda_, incx = *incx_;
+    const char UPLO = up(uplo);
+    char TR = up(trans);
+    if (TR == 'C') TR = 'T';
+    const char DIAG = up(diag);
+    const bool nounit = (DIAG != 'U');
+
+    if (N == 0) return;
+
+#ifdef _OPENMP
+    if (incx == 1 && N >= MTRSV_OMP_MIN && blas_omp_max_threads() > 1
+        && mtrsv_omp(UPLO, TR, nounit, N, a, lda, x))
+        return;
+#endif
+
+    mtrsv_serial(UPLO, TR, nounit, N, a, lda, x, incx);
 }
 
 #undef A_

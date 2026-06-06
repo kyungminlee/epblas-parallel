@@ -11,6 +11,13 @@
 #include "mgemm_simd_kernel.h"
 #include <immintrin.h>
 #endif
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#define WTRSV_OMP_MIN 256   /* below this, run the serial SIMD path */
+#define WTRSV_BLK     128   /* diagonal-block size for the blocked solve */
+#define WTRSV_MAX_CPUS 256
+#endif
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -28,6 +35,7 @@ inline bool cdd_iszero(const T &x) {
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
+inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T csub(T const &a, T const &b) { return T{ a.re - b.re, a.im - b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 inline T cdiv(T const &a, T const &b) {
@@ -82,21 +90,11 @@ hreduce_cdd(__m256d s_rh, __m256d s_rl, __m256d s_ih, __m256d s_il)
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
-extern "C" void wtrsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *a, const int *lda_,
-    T *x, const int *incx_,
-    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+/* Bit-exact serial path (the SIMD-packed reference). Also reused as the
+ * diagonal-block solver by the threaded path below. */
+static void wtrsv_serial(char UPLO, char TR, bool nounit,
+                         int N, const T *a, int lda, T *x, int incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
-    const char UPLO = up(uplo);
-    const char TR   = up(trans);
-    const char DIAG = up(diag);
-    const bool nounit = (DIAG != 'U');
-
     if (N == 0) return;
 
     if (incx == 1) {
@@ -320,6 +318,143 @@ extern "C" void wtrsv_(
             }
         }
     }
+}
+
+#ifdef _OPENMP
+/* Blocked threaded complex triangular solve, incx==1 only. Diagonal blocks
+ * (MTRSV_BLK) are solved serially via the bit-exact wtrsv_serial; the bulk
+ * off-diagonal coupling is a rectangular GEMV threaded over disjoint output
+ * rows. Serial fallback stays bit-exact; threaded path matches within DD fuzz
+ * tol. Returns true if it handled the call. */
+__attribute__((noinline)) static bool wtrsv_omp(
+    char UPLO, char TR, bool nounit, int N, const T *a, int lda, T *x)
+{
+    if (N < WTRSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return false;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > WTRSV_MAX_CPUS) nthreads = WTRSV_MAX_CPUS;
+    const bool lower = (UPLO == 'L');
+    const bool trans = (TR != 'N');
+    const bool conj_a = (TR == 'C');
+
+    if (!trans) {
+        /* NoTrans: axpy form. Solve a diagonal block, then propagate its solved
+         * columns into the not-yet-solved rows (trailing for L, leading for U). */
+        if (lower) {
+            for (int j0 = 0; j0 < N; j0 += WTRSV_BLK) {
+                int j1 = j0 + WTRSV_BLK; if (j1 > N) j1 = N;
+                wtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                if (j1 >= N) break;
+                #pragma omp parallel num_threads(nthreads)
+                {
+                    int tid = omp_get_thread_num();
+                    int rlo = j1 + (int)((long long)(N - j1) * tid / nthreads);
+                    int rhi = j1 + (int)((long long)(N - j1) * (tid + 1) / nthreads);
+                    for (int i = j0; i < j1; ++i) {
+                        const T xi = x[i];
+                        if (cdd_iszero(xi)) continue;
+                        const T *ai = &A_(0, i);
+                        for (int k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
+                    }
+                }
+            }
+        } else {
+            for (int j1 = N; j1 > 0; j1 -= WTRSV_BLK) {
+                int j0 = j1 - WTRSV_BLK; if (j0 < 0) j0 = 0;
+                wtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                if (j0 <= 0) break;
+                #pragma omp parallel num_threads(nthreads)
+                {
+                    int tid = omp_get_thread_num();
+                    int rlo = (int)((long long)j0 * tid / nthreads);
+                    int rhi = (int)((long long)j0 * (tid + 1) / nthreads);
+                    for (int i = j0; i < j1; ++i) {
+                        const T xi = x[i];
+                        if (cdd_iszero(xi)) continue;
+                        const T *ai = &A_(0, i);
+                        for (int k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
+                    }
+                }
+            }
+        }
+    } else {
+        /* Trans/ConjTrans: dot form. Fold the already-solved out-of-block
+         * tail/head into the block rows (threaded, disjoint rows), then solve
+         * the diagonal block serially (within-block coupling + divide). */
+        if (lower) {                                  /* backward, k > i */
+            for (int j1 = N; j1 > 0; j1 -= WTRSV_BLK) {
+                int j0 = j1 - WTRSV_BLK; if (j0 < 0) j0 = 0;
+                if (j1 < N) {
+                    #pragma omp parallel num_threads(nthreads)
+                    {
+                        int tid = omp_get_thread_num();
+                        int ilo = j0 + (int)((long long)(j1 - j0) * tid / nthreads);
+                        int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        for (int i = ilo; i < ihi; ++i) {
+                            const T *ai = &A_(0, i);
+                            T s = zero_cdd;
+                            for (int k = j1; k < N; ++k) {
+                                const T e = conj_a ? cconj(ai[k]) : ai[k];
+                                s = cadd(s, cmul(e, x[k]));
+                            }
+                            x[i] = csub(x[i], s);
+                        }
+                    }
+                }
+                wtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+            }
+        } else {                                      /* forward, k < i */
+            for (int j0 = 0; j0 < N; j0 += WTRSV_BLK) {
+                int j1 = j0 + WTRSV_BLK; if (j1 > N) j1 = N;
+                if (j0 > 0) {
+                    #pragma omp parallel num_threads(nthreads)
+                    {
+                        int tid = omp_get_thread_num();
+                        int ilo = j0 + (int)((long long)(j1 - j0) * tid / nthreads);
+                        int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        for (int i = ilo; i < ihi; ++i) {
+                            const T *ai = &A_(0, i);
+                            T s = zero_cdd;
+                            for (int k = 0; k < j0; ++k) {
+                                const T e = conj_a ? cconj(ai[k]) : ai[k];
+                                s = cadd(s, cmul(e, x[k]));
+                            }
+                            x[i] = csub(x[i], s);
+                        }
+                    }
+                }
+                wtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+            }
+        }
+    }
+    return true;
+}
+#endif
+
+extern "C" void wtrsv_(
+    const char *uplo, const char *trans, const char *diag,
+    const int *n_,
+    const T *a, const int *lda_,
+    T *x, const int *incx_,
+    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+{
+    (void)uplo_len; (void)trans_len; (void)diag_len;
+    const int N = *n_;
+    const int lda = *lda_, incx = *incx_;
+    const char UPLO = up(uplo);
+    const char TR   = up(trans);
+    const char DIAG = up(diag);
+    const bool nounit = (DIAG != 'U');
+
+    if (N == 0) return;
+
+#ifdef _OPENMP
+    if (incx == 1 && N >= WTRSV_OMP_MIN && blas_omp_max_threads() > 1
+        && wtrsv_omp(UPLO, TR, nounit, N, a, lda, x))
+        return;
+#endif
+
+    wtrsv_serial(UPLO, TR, nounit, N, a, lda, x, incx);
 }
 
 #undef A_
