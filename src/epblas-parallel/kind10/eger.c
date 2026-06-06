@@ -60,24 +60,44 @@ void eger_(
         }
 #undef EGER_BODY
     } else {
-        ptrdiff_t jy = (incy < 0) ? -(N - 1) * incy : 0;
-        for (ptrdiff_t j = 0; j < N; ++j) {
-            const T yj = y[jy];
-            if (yj != zero) {
-                const T t = alpha * yj;
-                T *aj = &A_(0, j);
-                if (incx == 1) {
-                    for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * x[i];
-                } else {
-                    ptrdiff_t ix = (incx < 0) ? -(M - 1) * incx : 0;
-                    for (ptrdiff_t i = 0; i < M; ++i) {
-                        aj[i] += t * x[ix];
-                        ix += incx;
-                    }
-                }
-            }
-            jy += incy;
+        /* Strided x/y. Columns of A are disjoint, so OMP-over-j is race-free
+         * and bit-exact (each column's inner loop runs in one thread, same
+         * order as serial). jy is recomputed as jy0 + j*incy — arithmetically
+         * identical to the carried `jy += incy` but parallelizable. */
+        const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+        const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
+#ifdef _OPENMP
+        const ptrdiff_t use_omp = (N >= EGER_OMP_MIN && blas_omp_max_threads() > 1
+                             && !omp_in_parallel());
+#else
+        const ptrdiff_t use_omp = 0;
+#endif
+#define EGER_STRIDED_BODY                                                    \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                  \
+            const T yj = y[jy0 + j * incy];                                  \
+            if (yj != zero) {                                                \
+                const T t = alpha * yj;                                      \
+                T *aj = &A_(0, j);                                           \
+                if (incx == 1) {                                             \
+                    for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * x[i];     \
+                } else {                                                     \
+                    ptrdiff_t ix = ix0;                                      \
+                    for (ptrdiff_t i = 0; i < M; ++i) {                      \
+                        aj[i] += t * x[ix];                                  \
+                        ix += incx;                                          \
+                    }                                                        \
+                }                                                            \
+            }                                                                \
         }
+        if (use_omp) {
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static)
+#endif
+            EGER_STRIDED_BODY
+        } else {
+            EGER_STRIDED_BODY
+        }
+#undef EGER_STRIDED_BODY
     }
 }
 

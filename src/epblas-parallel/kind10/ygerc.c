@@ -58,20 +58,38 @@ void ygerc_(
         }
 #undef YGERC_BODY
     } else {
-        ptrdiff_t jy = (incy < 0) ? -(N - 1) * incy : 0;
-        for (ptrdiff_t j = 0; j < N; ++j) {
-            const T yj = cconj(y[jy]);
-            if (yj != ZERO) {
-                const T t = alpha * yj;
-                ptrdiff_t ix = (incx < 0) ? -(M - 1) * incx : 0;
-                T *aj = &A_(0, j);
-                for (ptrdiff_t i = 0; i < M; ++i) {
-                    aj[i] += t * x[ix];
-                    ix += incx;
-                }
-            }
-            jy += incy;
+        /* Strided x/y. Columns of A are disjoint → OMP-over-j race-free and
+         * bit-exact (jy recomputed as jy0 + j*incy, same as carried add). */
+        const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+        const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
+#ifdef _OPENMP
+        const ptrdiff_t use_omp = (N >= YGERC_OMP_MIN && blas_omp_max_threads() > 1
+                             && !omp_in_parallel());
+#else
+        const ptrdiff_t use_omp = 0;
+#endif
+#define YGERC_STRIDED_BODY                                                   \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                  \
+            const T yj = cconj(y[jy0 + j * incy]);                           \
+            if (yj != ZERO) {                                                \
+                const T t = alpha * yj;                                      \
+                ptrdiff_t ix = ix0;                                          \
+                T *aj = &A_(0, j);                                           \
+                for (ptrdiff_t i = 0; i < M; ++i) {                          \
+                    aj[i] += t * x[ix];                                      \
+                    ix += incx;                                              \
+                }                                                            \
+            }                                                                \
         }
+        if (use_omp) {
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static)
+#endif
+            YGERC_STRIDED_BODY
+        } else {
+            YGERC_STRIDED_BODY
+        }
+#undef YGERC_STRIDED_BODY
     }
 }
 

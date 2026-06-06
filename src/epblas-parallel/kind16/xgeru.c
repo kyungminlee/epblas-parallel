@@ -45,19 +45,26 @@ void xgeru_(
             }
         }
     } else {
-        int jy = (incy < 0) ? -(N - 1) * incy : 0;
+        /* Strided x/y. Columns of A are disjoint → OMP-over-j race-free and
+         * bit-exact (jy recomputed as jy0 + j*incy, same as carried add). */
+        const int jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+        const int ix0 = (incx < 0) ? -(M - 1) * incx : 0;
+#ifdef _OPENMP
+        const int use_omp = (N >= XGERU_OMP_MIN && blas_omp_max_threads() > 1
+                             && !omp_in_parallel());
+        #pragma omp parallel for if(use_omp) schedule(static)
+#endif
         for (int j = 0; j < N; ++j) {
-            const T yj = y[jy];
+            const T yj = y[jy0 + j * incy];
             if (yj != zero) {
                 const T t = alpha * yj;
-                int ix = (incx < 0) ? -(M - 1) * incx : 0;
+                int ix = ix0;
                 T *aj = &A_(0, j);
                 for (int i = 0; i < M; ++i) {
                     aj[i] += t * x[ix];
                     ix += incx;
                 }
             }
-            jy += incy;
         }
     }
 }
