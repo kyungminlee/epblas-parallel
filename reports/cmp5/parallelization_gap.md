@@ -67,12 +67,20 @@ Serial bit-exact (fuzz 80/80 max-err 0); stressed OMP=4 (forced multi-block)
 80/80 max-err ~1e-18 (reduction reorder, within tol). Commits `0c78e55`
 (etpsv/ytpsv), `c1692ab` (enrm2/eynrm2).
 
-**Known measurement caveat (not a regression):** a few tpsv N=512 cells
-(etpsv LTU, ytpsv LCN/LCU/LTN/LTU) show par4/par1>1 — the documented x87
-extreme-value artifact: ill-conditioned solve inputs drive x toward overflow
-(NaN/denormal ⇒ ~100× x87 slowdown), and threaded reassociation lands on a
-worse numeric trajectory for those specific inputs. Result still correct to
-fuzz tol; the fix is a bounded-x perf driver (out of scope).
+**Former "x87 caveat" — root-caused & FIXED (commit `0f3a76a`):** the few tpsv
+N=512 cells (etpsv LTU, ytpsv LCN/LCU/LTN/LTU) that showed par4/par1>1 were a
+**perf-harness fill bug**, not an x87 limitation. `perf_fill_double` centred its
+residue with `(v % 211u) - 105u` — *unsigned* arithmetic, so every residue <105
+wrapped to ~1.8e19 and divided to ~8.7e16, making half the fill ~1e16 garbage.
+Harmless for single-pass kernels (matvec/axpy/dot: subject and migrated legs see
+identical inputs, ratios stay ~1.0 — which is why it went unnoticed) but it made
+triangular SOLVE inputs catastrophically ill-conditioned: x overflows to inf over
+N steps and x87 inf-arithmetic inflates the timing ~100×, with the threaded
+reassociation hitting inf at a different step. Fix = cast to signed before
+centring (`(double)((long)(v % 211u) - 105)`); sole change is `perf_common.h`.
+After-fix REPS=3 sweep (`cmp5_gapk10_fillfix_raw.tsv`): all tpsv cells now
+par4/par1 ∈ [0.42, 0.69], clean O(N²) scaling, p1/mig ~1.00 — etpsv LTU 512
+1.869→0.491, ytpsv L?? 512 ~1.25-1.31→~0.45.
 
 ---
 
