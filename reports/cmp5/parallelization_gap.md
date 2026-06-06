@@ -48,6 +48,34 @@ regression.
 
 ---
 
+## kind10 — reverse gap (kind10 lagging its threaded siblings) — DONE 2026-06-06
+
+While kind16/multifloats were caught up to kind10, four kind10 routines were
+found *behind* their already-threaded kind16/multifloats twins. Filled here
+(5-way cmp5 bracket since kind10 has an OpenBLAS leg; bare wall ns/call,
+ratios **smaller = faster**). Harness: `run_cmp5_gapk10.sh` + `agg_gapk10.py`;
+data `cmp5_gapk10_{before,after}_raw.tsv`.
+
+| routine | op | thr | p1/mig (serial) | p4/p1 | p4/ob4 | notes | status |
+|---|---|---|---|---|---|---|---|
+| enrm2  | nrm2        | n>10000 | parity | ~0.17–0.18 @≥16384 | ~0.21–0.23 | threaded Blue's reduction; serial byte-for-byte | DONE |
+| eynrm2 | nrm2 (cplx) | n>10000 | parity (already ~1.8× < mig) | ~0.29 @≥16384 | ~0.30 | register-resident two-reals hot loop preserved | DONE |
+| etpsv  | tri packed solve     | N≥256 | 0.90–1.09 | 0.42–0.87 | — | blocked packed solve; ptrdiff_t; UTN 2-chain split-dot kept | DONE |
+| ytpsv  | tri packed solve cplx | N≥256 | parity | ~0.63–0.68 @256 | — | blocked packed solve; noconj=='T', conj on 'C' | DONE |
+
+Serial bit-exact (fuzz 80/80 max-err 0); stressed OMP=4 (forced multi-block)
+80/80 max-err ~1e-18 (reduction reorder, within tol). Commits `0c78e55`
+(etpsv/ytpsv), `c1692ab` (enrm2/eynrm2).
+
+**Known measurement caveat (not a regression):** a few tpsv N=512 cells
+(etpsv LTU, ytpsv LCN/LCU/LTN/LTU) show par4/par1>1 — the documented x87
+extreme-value artifact: ill-conditioned solve inputs drive x toward overflow
+(NaN/denormal ⇒ ~100× x87 slowdown), and threaded reassociation lands on a
+worse numeric trajectory for those specific inputs. Result still correct to
+fuzz tol; the fix is a bounded-x perf driver (out of scope).
+
+---
+
 ## multifloats — 35 routines to fill
 
 ### L1 — real (m / float64x2)
