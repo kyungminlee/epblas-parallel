@@ -34,7 +34,13 @@ serial and need no work:
 | routine | reason |
 |---|---|
 | qcabs1, qrotg, qrotmg, xrotg | scalar generators (no loop to thread) |
-| qtbsv, qtpsv, xtbsv, xtpsv | loop-carried band/packed triangular solves |
+| qtbsv, xtbsv | loop-carried band triangular solves (narrow band ⇒ not worth threading) |
+
+**Update 2026-06-06:** `qtpsv`/`xtpsv` (packed triangular solve) are now **threaded**
+via the blocked-solve pattern (69/75 threaded). Their O(N²) packed coupling threads
+cleanly, unlike the narrow-band `qtbsv`/`xtbsv`. p4/p1 ~1.0 @128 (serial below
+QTPSV_OMP_MIN=256) → ~0.62 @256 → ~0.40 @512 (≈2.5× @512); serial bit-exact, p1/mig
+∈ [0.99, 1.04] (parity preserved). See the tpsv section under multifloats below.
 
 Verified zero-regression (`task96_kind16_interleaved.md`): `p1/mig` ∈ [0.993, 1.031],
 `p4/ep4` ≤ 1.0, `p4/p1` ~0.225–0.30. Nothing to do here unless a re-sweep surfaces a
@@ -86,6 +92,7 @@ regression.
 | mtpmv  | tri packed mv   | 0.271–0.275 | 0.216–0.217 | ~0.79 | thr n≥256; in-place row-gather (UPLO offsets, NoTrans col-jump / Trans contiguous), serial bit-exact; real DD tri matvec BW-bound → modest ~1.27× | DONE |
 | mtrmv  | tri mv          | 0.275–0.278 | 0.214–0.215 | ~0.77 | thr n≥256; in-place dense row-gather (NoTrans strided row, Trans contiguous col), serial bit-exact; real DD BW-bound → modest ~1.3× | DONE |
 | mtrsv  | tri solve       | 0.088–0.128 | 0.089→0.062 | 1.00→0.48 | thr n≥256, incx=1; blocked solve (serial bit-exact MTRSV_BLK=128 diagonal block via mtrsv_serial + threaded scalar off-diagonal GEMV over disjoint rows: NoTrans=axpy-after-solve, Trans=dot-fold-before-solve); serial untouched/bit-exact, threaded within DD fuzz tol; loop-carried ⇒ Amdahl-bound, scales with N (~1.1× @256, ~1.45× @512, ~2.1× @1024) | DONE |
+| mtpsv  | tri packed solve | 0.18–0.34 | 0.06–0.10 | 1.00→0.33 | thr n≥256, incx=1; **packed** blocked solve (MTPSV_BLK=128 diagonal block via mtpsv_serial + threaded scalar off-diagonal coupling over disjoint rows; packed col-base offsets cbL/cbU; NoTrans=axpy-after-solve, Trans=dot-fold-before-solve); serial untouched/bit-exact, threaded within DD fuzz tol; Amdahl-bound, scales with N (1.0× @128 serial, ~1.6× @256, ~2.2× @512, ~3.0× @1024) | DONE |
 
 ### L2 — complex (w / complex64x2)
 
@@ -98,13 +105,17 @@ regression.
 | wtpmv  | tri packed mv   | 0.447–0.450 | 0.196–0.197 | 0.44 | thr n≥256; in-place packed row-gather (UPLO offsets, conj on 'C'), serial bit-exact; complex compute-bound → ~2.3× | DONE |
 | wtrmv  | tri mv          | 0.439–0.446 | 0.195–0.196 | 0.44 | thr n≥256; in-place dense row-gather (NoTrans strided row, Trans contiguous col + conj on 'C'), serial bit-exact; complex compute-bound → ~2.3× | DONE |
 | wtrsv  | tri solve       | 0.135–0.18 | 0.133→0.086 | 0.99→0.47 | thr n≥256, incx=1; blocked solve (serial bit-exact WTRSV_BLK=128 diagonal block via wtrsv_serial + threaded scalar off-diagonal GEMV over disjoint rows, conj on 'C'); serial untouched/bit-exact, threaded within DD fuzz tol; loop-carried ⇒ Amdahl-bound, scales with N (~1.26× @256, ~1.75× @512, ~2.1× @1024) | DONE |
+| wtpsv  | tri packed solve | 0.25–0.41 | 0.10–0.20 | 1.00→0.30 | thr n≥256, incx=1; **packed** blocked solve (WTPSV_BLK=128 diagonal block via wtpsv_serial + threaded scalar off-diagonal coupling over disjoint rows; packed col-base offsets cbL/cbU; noconj=='T', conj on 'C' via melem); serial untouched/bit-exact, threaded within DD fuzz tol; Amdahl-bound, scales with N (1.0× @128 serial, ~1.7× @256, ~2.5× @512) | DONE |
 
 ### N/A — by-design serial (no work)
 
 | routine | reason |
 |---|---|
 | mcabs1, mrotg, mrotmg, wrotg | scalar generators |
-| mtbsv, mtpsv, wtbsv, wtpsv   | loop-carried band/packed triangular solves |
+| mtbsv, wtbsv                 | loop-carried band triangular solves (narrow band ⇒ not worth threading) |
+
+(`mtpsv`/`wtpsv` were moved OUT of this N/A list on 2026-06-06 — packed triangular
+solve threads via the blocked-solve pattern, see the L2 tables above.)
 
 ### Already threaded (32 — DONE, re-sweep to confirm parity if touched)
 
