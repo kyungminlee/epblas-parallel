@@ -49,14 +49,14 @@ regression.
 | routine | op | p1/mig | p4/mig | p4/p1 | notes | status |
 |---|---|---|---|---|---|---|
 | masum  | asum            | 0.061 | 0.015 | 0.253 | thr n>8192; serial ≤8192 untouched, bit-exact | DONE |
-| maxpy  | axpy            | — | — | — | — | TODO |
-| mcopy  | copy            | — | — | — | — | TODO |
+| maxpy  | axpy            | 0.067 | 0.017 | 0.259 | thr n>2048; disjoint SIMD slices, bit-exact | DONE |
+| mcopy  | copy            | 0.867 | 0.344 | 0.397 | thr n>8192; BW-bound memcpy split ~2.5×, bit-exact | DONE |
 | mdot   | dot             | 0.068 | 0.018 | 0.260 | thr n>8192; serial untouched; reduction within fuzz tol | DONE |
 | mnrm2  | nrm2            | — | — | — | — | TODO |
-| mrot   | rot             | — | — | — | — | TODO |
-| mrotm  | rotm            | — | — | — | — | TODO |
-| mscal  | scal            | — | — | — | — | TODO |
-| mswap  | swap            | — | — | — | — | TODO |
+| mrot   | rot             | 0.054 | 0.016 | 0.291 | thr n>2048; disjoint SIMD slices, bit-exact | DONE |
+| mrotm  | rotm            | 0.316 | 0.082 | 0.260 | thr n>1024; scalar parallel-for, bit-exact | DONE |
+| mscal  | scal            | 0.193 | 0.067 | 0.346 | thr n>2048; disjoint SIMD slices, bit-exact | DONE |
+| mswap  | swap            | 1.038 | 0.650 | 0.627 | thr n>8192; BW-bound swap ~1.6×, bit-exact | DONE |
 | mwasum | asum(|x|, cplx) | 0.007 | 0.002 | 0.266 | thr n>8192; serial untouched, bit-exact | DONE |
 | mwnrm2 | nrm2(cplx)      | — | — | — | — | TODO |
 | imamax | iamax           | 0.396 | 0.088 | 0.221 | thr n>8192; argmax-merge bit-exact (lowest-index tie) | DONE |
@@ -65,14 +65,14 @@ regression.
 
 | routine | op | p1/mig | p4/mig | p4/p1 | notes | status |
 |---|---|---|---|---|---|---|
-| waxpy  | axpy            | — | — | — | — | TODO |
-| wcopy  | copy            | — | — | — | — | TODO |
+| waxpy  | axpy            | 0.082 | 0.022 | 0.268 | thr n>2048; disjoint SIMD slices, bit-exact | DONE |
+| wcopy  | copy            | 1.081 | 0.407 | 0.377 | thr n>8192; BW-bound memcpy split ~2.7×, bit-exact | DONE |
 | wdotc  | dotc            | 0.080 | 0.021 | 0.263 | thr n>8192; serial untouched; reduction within fuzz tol | DONE |
 | wdotu  | dotu            | 0.085 | 0.023 | 0.266 | thr n>8192; serial untouched; reduction within fuzz tol | DONE |
-| wmrot  | rot (real cs)   | — | — | — | — | TODO |
-| wmscal | scal (real a)   | — | — | — | — | TODO |
-| wscal  | scal (cplx a)   | — | — | — | — | TODO |
-| wswap  | swap            | — | — | — | — | TODO |
+| wmrot  | rot (real cs)   | 0.032 | 0.009 | 0.273 | thr n>2048; disjoint SIMD slices, bit-exact | DONE |
+| wmscal | scal (real a)   | 0.042 | 0.015 | 0.355 | thr n>2048; disjoint SIMD slices, bit-exact | DONE |
+| wscal  | scal (cplx a)   | 0.080 | 0.023 | 0.288 | thr n>2048; disjoint SIMD slices, bit-exact | DONE |
+| wswap  | swap            | 0.884 | 0.681 | 0.771 | thr n>8192; BW-bound swap ~1.3×, bit-exact | DONE |
 | iwamax | iamax           | 0.048 | 0.012 | 0.257 | thr n>8192; argmax-merge bit-exact (lowest-index tie) | DONE |
 
 ### L2 — real (m / float64x2)

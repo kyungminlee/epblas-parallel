@@ -3,6 +3,10 @@
  */
 #include <cstddef>
 #include <multifloats.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
 #include <immintrin.h>
@@ -50,6 +54,52 @@ inline void store_4cell_csoa(T *p, __m256d rh, __m256d rl, __m256d ih, __m256d i
 #endif
 }  // namespace
 
+/* Y := α·X + Y over a contiguous unit-stride range — serial kernel, unchanged. */
+static void waxpy_unit(int n, T alpha, const T *x, T *y)
+{
+#ifdef MBLAS_SIMD_DD
+    const __m256d arh = _mm256_set1_pd(alpha.re.limbs[0]);
+    const __m256d arl = _mm256_set1_pd(alpha.re.limbs[1]);
+    const __m256d aih = _mm256_set1_pd(alpha.im.limbs[0]);
+    const __m256d ail = _mm256_set1_pd(alpha.im.limbs[1]);
+    const int n4 = n & ~3;
+    for (int i = 0; i < n4; i += 4) {
+        __m256d xrh, xrl, xih, xil, yrh, yrl, yih, yil;
+        load_4cell_csoa(&x[i], xrh, xrl, xih, xil);
+        load_4cell_csoa(&y[i], yrh, yrl, yih, yil);
+        __m256d prh, prl, pih, pil;
+        simd_dd::cdd_mul(arh, arl, aih, ail, xrh, xrl, xih, xil,
+                         prh, prl, pih, pil);
+        __m256d nrh, nrl, nih, nil_;
+        simd_dd::cdd_add(yrh, yrl, yih, yil, prh, prl, pih, pil,
+                         nrh, nrl, nih, nil_);
+        store_4cell_csoa(&y[i], nrh, nrl, nih, nil_);
+    }
+    for (int i = n4; i < n; ++i) y[i] = cadd(y[i], cmul(alpha, x[i]));
+#else
+    for (int i = 0; i < n; ++i) y[i] = cadd(y[i], cmul(alpha, x[i]));
+#endif
+}
+
+#ifdef _OPENMP
+#define WAXPY_OMP_MIN 2048
+__attribute__((noinline)) static int waxpy_omp(int n, T alpha, const T *x, T *y)
+{
+    if (n <= WAXPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        int nth = omp_get_num_threads();
+        int lo = (int)((long long)n * tid / nth);
+        int hi = (int)((long long)n * (tid + 1) / nth);
+        if (lo < hi) waxpy_unit(hi - lo, alpha, x + lo, y + lo);
+    }
+    return 1;
+}
+#endif
+
 extern "C" void waxpy_(const int *n_, const T *alpha_,
                        const T *x, const int *incx_,
                        T *y, const int *incy_)
@@ -59,28 +109,10 @@ extern "C" void waxpy_(const int *n_, const T *alpha_,
     if (n <= 0 || cdd_iszero(alpha)) return;
 
     if (incx == 1 && incy == 1) {
-#ifdef MBLAS_SIMD_DD
-        const __m256d arh = _mm256_set1_pd(alpha.re.limbs[0]);
-        const __m256d arl = _mm256_set1_pd(alpha.re.limbs[1]);
-        const __m256d aih = _mm256_set1_pd(alpha.im.limbs[0]);
-        const __m256d ail = _mm256_set1_pd(alpha.im.limbs[1]);
-        const int n4 = n & ~3;
-        for (int i = 0; i < n4; i += 4) {
-            __m256d xrh, xrl, xih, xil, yrh, yrl, yih, yil;
-            load_4cell_csoa(&x[i], xrh, xrl, xih, xil);
-            load_4cell_csoa(&y[i], yrh, yrl, yih, yil);
-            __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(arh, arl, aih, ail, xrh, xrl, xih, xil,
-                             prh, prl, pih, pil);
-            __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(yrh, yrl, yih, yil, prh, prl, pih, pil,
-                             nrh, nrl, nih, nil_);
-            store_4cell_csoa(&y[i], nrh, nrl, nih, nil_);
-        }
-        for (int i = n4; i < n; ++i) y[i] = cadd(y[i], cmul(alpha, x[i]));
-#else
-        for (int i = 0; i < n; ++i) y[i] = cadd(y[i], cmul(alpha, x[i]));
+#ifdef _OPENMP
+        if (waxpy_omp(n, alpha, x, y)) return;
 #endif
+        waxpy_unit(n, alpha, x, y);
     } else {
         int ix = (incx < 0) ? (-n + 1) * incx : 0;
         int iy = (incy < 0) ? (-n + 1) * incy : 0;

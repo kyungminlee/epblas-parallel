@@ -2,6 +2,11 @@
  * H · (X, Y) determined by flag in dparam[0] ∈ {-2, -1, 0, +1}.
  */
 #include <multifloats.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#define MROTM_OMP_MIN 1024
+#endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -40,6 +45,16 @@ extern "C" void mrotm_(const int *n_,
     };
 
     if (incx == 1 && incy == 1) {
+#ifdef _OPENMP
+        /* Disjoint (x[i], y[i]) updates → thread the loop directly. Scalar
+         * (no SIMD path); DD math keeps it compute-bound. */
+        if (n > MROTM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+            int nthreads = blas_omp_max_threads();
+            #pragma omp parallel for schedule(static) num_threads(nthreads)
+            for (int i = 0; i < n; ++i) step(x[i], y[i]);
+            return;
+        }
+#endif
         for (int i = 0; i < n; ++i) step(x[i], y[i]);
     } else {
         int ix = (incx < 0) ? (-n + 1) * incx : 0;
