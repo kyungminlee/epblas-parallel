@@ -69,21 +69,25 @@ static void qgemv_t_stride1_slice(
     }
 }
 
-/* General-stride serial fallback (incx≠1 or incy≠1). */
-static void qgemv_general_stride(
+/* General-stride slice (incx≠1 or incy≠1). For TR='N' [lo,hi) is the disjoint
+ * output-row slice; for TR≠'N' it is the disjoint output-index (j) slice. Each
+ * output element is written by one thread in the same per-element order as the
+ * full serial loop → race-free and bit-exact (iy0/jy0/ix recomputed). */
+static void qgemv_general_stride_slice(
     int M, int N, int TR,
     T alpha, const T *a, int lda,
-    const T *x, int incx, T *y, int incy)
+    const T *x, int incx, T *y, int incy, int lo, int hi)
 {
     const T zero = 0.0Q;
     if (TR == 'N') {
+        const int iy0 = (incy < 0) ? -(M - 1) * incy : 0;
         int jx = (incx < 0) ? -(N - 1) * incx : 0;
         for (int j = 0; j < N; ++j) {
             const T xj = x[jx];
             if (xj != zero) {
                 const T t = alpha * xj;
-                int iy = (incy < 0) ? -(M - 1) * incy : 0;
-                for (int i = 0; i < M; ++i) {
+                int iy = iy0 + lo * incy;
+                for (int i = lo; i < hi; ++i) {
                     y[iy] += t * A_(i, j);
                     iy += incy;
                 }
@@ -91,16 +95,15 @@ static void qgemv_general_stride(
             jx += incx;
         }
     } else {
-        int jy = (incy < 0) ? -(N - 1) * incy : 0;
-        for (int j = 0; j < N; ++j) {
+        const int jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+        for (int j = lo; j < hi; ++j) {
             T s = zero;
             int ix = (incx < 0) ? -(M - 1) * incx : 0;
             for (int i = 0; i < M; ++i) {
                 s += A_(i, j) * x[ix];
                 ix += incx;
             }
-            y[jy] += alpha * s;
-            jy += incy;
+            y[jy0 + j * incy] += alpha * s;
         }
     }
 }
@@ -150,7 +153,8 @@ void qgemv_serial_(
     } else if (TR != 'N' && incx == 1 && incy == 1) {
         qgemv_t_stride1_slice(M, 0, N, alpha, a, lda, x, y);
     } else {
-        qgemv_general_stride(M, N, TR, alpha, a, lda, x, incx, y, incy);
+        qgemv_general_stride_slice(M, N, TR, alpha, a, lda, x, incx, y, incy,
+                                   0, (TR == 'N') ? M : N);
     }
 }
 
@@ -217,7 +221,21 @@ void qgemv_(
         qgemv_t_stride1_slice(M, 0, N, alpha, a, lda, x, y);
 #endif
     } else {
-        qgemv_general_stride(M, N, TR, alpha, a, lda, x, incx, y, incy);
+#ifdef _OPENMP
+        const int span = (TR == 'N') ? M : N;
+        const int use_omp = (span >= QGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
+        #pragma omp parallel if(use_omp)
+        {
+            int tid = 0, nt = 1;
+            if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
+            const int lo = ((long long)span * tid) / nt;
+            const int hi = ((long long)span * (tid + 1)) / nt;
+            qgemv_general_stride_slice(M, N, TR, alpha, a, lda, x, incx, y, incy, lo, hi);
+        }
+#else
+        qgemv_general_stride_slice(M, N, TR, alpha, a, lda, x, incx, y, incy,
+                                   0, (TR == 'N') ? M : N);
+#endif
     }
 }
 

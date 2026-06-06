@@ -142,34 +142,60 @@ void ygemv_(
             }
         } else {
             /* incy != 1: strided y writes — replicate gfortran auto
-             * J-unroll-by-2 to halve y traffic on the strided path. */
-            ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;
+             * J-unroll-by-2 to halve y traffic on the strided path.
+             * Thread over disjoint output-row slices [i_lo,i_hi): each y[iy]
+             * is written by one thread in the same j-order as serial →
+             * race-free and bit-exact. jx is thread-local (recomputed). */
             const ptrdiff_t iy0 = (incy < 0) ? -(M - 1) * incy : 0;
-            ptrdiff_t j = 0;
-            for (; j + 1 < N; j += 2) {
-                const T t0 = alpha * x[jx];
-                const T t1 = alpha * x[jx + incx];
-                const T *a0 = &A_(0, j);
-                const T *a1 = &A_(0, j + 1);
-                ptrdiff_t iy = iy0;
-                for (ptrdiff_t i = 0; i < M; ++i) {
-                    y[iy] = (y[iy] + t0 * a0[i]) + t1 * a1[i];
-                    iy += incy;
+#ifdef _OPENMP
+            const ptrdiff_t use_omp = (M >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
+                                 && !omp_in_parallel());
+#else
+            const ptrdiff_t use_omp = 0;
+#endif
+#define YGEMV_N_STRIDED_BODY(i_lo, i_hi) do {                                \
+            ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;                 \
+            ptrdiff_t j = 0;                                                 \
+            for (; j + 1 < N; j += 2) {                                      \
+                const T t0 = alpha * x[jx];                                  \
+                const T t1 = alpha * x[jx + incx];                          \
+                const T *a0 = &A_(0, j);                                     \
+                const T *a1 = &A_(0, j + 1);                                 \
+                ptrdiff_t iy = iy0 + (i_lo) * incy;                          \
+                for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) {                \
+                    y[iy] = (y[iy] + t0 * a0[i]) + t1 * a1[i];               \
+                    iy += incy;                                             \
+                }                                                           \
+                jx += 2 * incx;                                             \
+            }                                                               \
+            for (; j < N; ++j) {                                            \
+                const T xj = x[jx];                                         \
+                if (xj != ZERO) {                                          \
+                    const T t = alpha * xj;                                 \
+                    ptrdiff_t iy = iy0 + (i_lo) * incy;                     \
+                    for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) {           \
+                        y[iy] += t * A_(i, j);                              \
+                        iy += incy;                                         \
+                    }                                                       \
+                }                                                           \
+                jx += incx;                                                 \
+            }                                                               \
+        } while (0)
+            if (use_omp) {
+#ifdef _OPENMP
+                #pragma omp parallel
+                {
+                    const ptrdiff_t tid = omp_get_thread_num();
+                    const ptrdiff_t nt  = omp_get_num_threads();
+                    const ptrdiff_t i_lo = ((long long)M * tid) / nt;
+                    const ptrdiff_t i_hi = ((long long)M * (tid + 1)) / nt;
+                    YGEMV_N_STRIDED_BODY(i_lo, i_hi);
                 }
-                jx += 2 * incx;
+#endif
+            } else {
+                YGEMV_N_STRIDED_BODY(0, M);
             }
-            for (; j < N; ++j) {
-                const T xj = x[jx];
-                if (xj != ZERO) {
-                    const T t = alpha * xj;
-                    ptrdiff_t iy = iy0;
-                    for (ptrdiff_t i = 0; i < M; ++i) {
-                        y[iy] += t * A_(i, j);
-                        iy += incy;
-                    }
-                }
-                jx += incx;
-            }
+#undef YGEMV_N_STRIDED_BODY
         }
     } else {
         /* TRANS='T' or 'C': y[j] += α · Σ_i A(i,j)[, conj] · x(i).
@@ -207,17 +233,35 @@ void ygemv_(
             }
 #undef YGEMV_T_BODY
         } else {
-            ptrdiff_t jy = (incy < 0) ? -(N - 1) * incy : 0;
-            for (ptrdiff_t j = 0; j < N; ++j) {
-                T s = ZERO;
-                ptrdiff_t ix = (incx < 0) ? -(M - 1) * incx : 0;
-                for (ptrdiff_t i = 0; i < M; ++i) {
-                    s += (conj_a ? cconj(A_(i, j)) : A_(i, j)) * x[ix];
-                    ix += incx;
-                }
-                y[jy] += alpha * s;
-                jy += incy;
+            /* Strided x/y. Each output y[jy(j)] is disjoint across j → OMP-over-j
+             * is race-free and bit-exact (jy recomputed as jy0 + j*incy). */
+            const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+            const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
+#ifdef _OPENMP
+            const ptrdiff_t use_omp = (N >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
+                                 && !omp_in_parallel());
+#else
+            const ptrdiff_t use_omp = 0;
+#endif
+#define YGEMV_T_STRIDED_BODY                                                  \
+            for (ptrdiff_t j = 0; j < N; ++j) {                              \
+                T s = ZERO;                                                  \
+                ptrdiff_t ix = ix0;                                          \
+                for (ptrdiff_t i = 0; i < M; ++i) {                          \
+                    s += (conj_a ? cconj(A_(i, j)) : A_(i, j)) * x[ix];      \
+                    ix += incx;                                              \
+                }                                                            \
+                y[jy0 + j * incy] += alpha * s;                              \
             }
+            if (use_omp) {
+#ifdef _OPENMP
+                #pragma omp parallel for schedule(static)
+#endif
+                YGEMV_T_STRIDED_BODY
+            } else {
+                YGEMV_T_STRIDED_BODY
+            }
+#undef YGEMV_T_STRIDED_BODY
         }
     }
 }
