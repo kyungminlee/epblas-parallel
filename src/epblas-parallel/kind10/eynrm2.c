@@ -29,7 +29,7 @@ static __attribute__((cold)) void blue_init(void)
 }
 
 static inline R sq(R x) { return x * x; }
-static inline R ldabs(R x) { return x < 0 ? -x : x; }
+static inline R ldabs(R x) { return __builtin_fabsl(x); }
 
 /* Combine the three magnitude buckets into the final norm (Anderson 2017). */
 static R eynrm2_finalize(R abig, R amed, R asml)
