@@ -152,6 +152,7 @@ MULTIFLOATS = (
     'mswap wswap mrot wmrot mdot masum mwasum wdotu wdotc '
     'mgbmv wgbmv msbmv whbmv mspmv whpmv mtbmv wtbmv '
     'mtbsv wtbsv mtpmv wtpmv mtpsv wtpsv mspr whpr '
+    'mnrm2 mwnrm2 '
     'imamax iwamax mrotg mrotm mrotmg wrotg'
 ).split()
 
