@@ -15,7 +15,12 @@
 #include "../common/blas_omp.h"
 #endif
 
-#define YHEMV_OMP_MIN 128
+/* RECALIBRATED 2026-06-07 (was 128): old break-even predates iomp5 hot-team reuse
+ * (libgomp fork/join wakeup tax). This compute-heavy complex Hermitian matvec
+ * threads from very low N. Measured par4/par1 (taskset 0-3): N=32 ~0.72-0.78,
+ * N=64 ~0.42, N=128 ~0.32; clear win at 32. omp4-vs-omp1 relerr ~1e-19 (fp80
+ * floor; the Hermitian two-sided fold reorders at ULP level, within tolerance). */
+#define YHEMV_OMP_MIN 32
 
 typedef _Complex long double T;
 static const T ZERO = 0.0L + 0.0Li;

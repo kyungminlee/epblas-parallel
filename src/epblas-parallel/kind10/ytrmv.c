@@ -13,7 +13,13 @@
 #include "../common/blas_omp.h"
 #endif
 
-#define YTRMV_OMP_MIN 128
+/* RECALIBRATED 2026-06-07 (was 128): the old break-even was set under libgomp's
+ * fork/join wakeup tax; iomp5 hot-team reuse removes it, so this compute-heavy
+ * complex triangular matvec threads from far lower N. Measured par4/par1 (N=N,
+ * K=full, taskset 0-3): N=48 ~0.61-0.73 (lowest all-shape win), N=64 ~0.46-0.58,
+ * N=128 ~0.31-0.41. At N=32 Trans/ConjTrans still lose (~1.08-1.11), so 48 is the
+ * floor. omp4-vs-omp1 relerr ~1e-19 (fp80 floor; Trans/Conj bytewise-exact). */
+#define YTRMV_OMP_MIN 48
 
 typedef _Complex long double T;
 static const T ZERO = 0.0L + 0.0Li;
