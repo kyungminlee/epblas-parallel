@@ -47,13 +47,19 @@ static inline char up(const char *p) {
  * (NoTrans in-place gather, Trans/ConjTrans dot), so threading only pays once N
  * is large enough to amortize the threaded path's malloc(n) + copy-back +
  * fork/join. Complex arithmetic is heavy enough per element that ALL three ops
- * (NoTrans/Trans/ConjTrans) share one break-even (~N=290) -- no per-op split
- * like etbmv's real case (768 NoTrans vs 1024 Trans). The fast in-place-gather
- * serial pushes the break-even up; measured against the real-codegen serial,
- * N=256 is still a marginal loss for unit-diag/Trans and N=320 is the first N
- * where every shape clearly wins (~0.85-0.89). Calibrated at K=16. */
+ * (NoTrans/Trans/ConjTrans) share one break-even -- no per-op split like
+ * etbmv's real case.
+ *
+ * RECALIBRATED 2026-06-07 (was 320): the old value was calibrated under libgomp,
+ * whose fork/join carried a wakeup tax that pushed the break-even out to ~N=290.
+ * Under iomp5 hot-team reuse that tax is gone, so threading now pays from far
+ * lower N. Measured par4/par1 (K=16, taskset 0-3): N=64 ~0.70-0.87, N=96
+ * ~0.57-0.64, N=128 ~0.49-0.55, N=256 ~0.37-0.40 across all 12 shapes; N=48 is
+ * neutral (~0.93-1.0). At the old 320, OpenBLAS threaded N=256 (ob ~7600ns) while
+ * par stayed serial (~10900ns) -> a phantom 1.43x par/ob loss; threaded par is
+ * ~4300ns, i.e. par/ob ~0.56. 64 = lowest N with a clear all-shape win. */
 #ifndef YTBMV_OMP_MIN
-#define YTBMV_OMP_MIN 320   /* first N where par4 < par1 for all ops */
+#define YTBMV_OMP_MIN 64
 #endif
 #define YTBMV_MAX_CPUS 256
 
