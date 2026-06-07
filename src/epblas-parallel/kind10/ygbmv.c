@@ -41,10 +41,16 @@
 /* Thread-entry threshold = measured break-even where par4 < par1. Shared by the
  * NoTrans gather and the Trans/ConjTrans gather. Calibrated at KL=KU=16; the heavy
  * complex band dot amortizes the barrier-free fork early, so it sits far below the
- * real egbmv's 256 (cf. the complex Hermitian yhbmv at 96). #ifndef so the
- * calibration probe can force it. */
+ * real egbmv's 256 (cf. the complex Hermitian yhbmv). #ifndef so the
+ * calibration probe can force it.
+ * RECALIBRATED 2026-06-07 (was 128): the old break-even predates iomp5 (set
+ * under libgomp's fork/join wakeup tax). With iomp5 hot-team reuse the fork is
+ * nearly free, so this complex general-band matvec (KL=KU=16 row-gather) threads
+ * from N=32. Measured par4/par1 (taskset 0-3, min-of-10): N=32 N/T/C 0.62/0.62/0.58,
+ * N=48 ~0.55, N=128 ~0.37, N=256 ~0.31. At N=28 NoTrans only ties (0.98), so 32
+ * is the floor where all three shapes win. Bit-exact across thread counts. */
 #ifndef YGBMV_OMP_MIN
-#define YGBMV_OMP_MIN 128
+#define YGBMV_OMP_MIN 32
 #endif
 #define YGBMV_MAX_CPUS 256
 

@@ -67,13 +67,19 @@ static inline char up(const char *p) {
  * (+ the strided-x malloc). yhbmv's region has LESS overhead than ytbmv's (no
  * barrier, no copy-back, no scratch) and HEAVIER per-row work than esbmv (complex
  * MAC), both pushing break-even WAY below their 320: measured break-even is
- * N~=88 (par4 < par1 from N=96, where p4/p1=0.93; N=64 still 1.34), so the heavy
  * complex band dot amortizes the barrier-free fork almost immediately. Only
  * upper/lower exist (no trans/diag) sharing the gather body, so a single
  * threshold suffices. Calibrated at K=16; #ifndef so the calibration probe can
- * force it. */
+ * force it.
+ * RECALIBRATED 2026-06-07 (was 96): the N~=88 break-even above predates iomp5
+ * (it was set under libgomp's fork/join wakeup tax — "N=64 still 1.34"). With
+ * iomp5 hot-team reuse the fork is nearly free, so threading now pays from N=32.
+ * Measured par4/par1 (taskset 0-3, min-of-10): N=32 0.64/0.64, N=48 0.55,
+ * N=128 0.37, N=256 0.32. N=28 wins too (0.73) but N=24 anomalously loses
+ * (1.16, band nearly fills the matrix) so 32 is the robust floor. Bit-exact
+ * across thread counts (disjoint-row gather; relerr 0). */
 #ifndef YHBMV_OMP_MIN
-#define YHBMV_OMP_MIN 96   /* first clean all-win (p4/p1=0.93 U&L); N=64 still a loss */
+#define YHBMV_OMP_MIN 32
 #endif
 #define YHBMV_MAX_CPUS 256
 

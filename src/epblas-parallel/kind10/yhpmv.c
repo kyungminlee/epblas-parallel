@@ -27,10 +27,15 @@ typedef _Complex long double T;
 typedef long double TR;
 static inline T cconj(T z) { return ~z; }
 
-/* Thread the contiguous path once n*n exceeds this (matches OpenBLAS zhpmv's
- * MULTI_THREAD_MINIMAL): below it the serial sweep — faster than ob's here —
- * wins outright, and ob also stays serial, so par keeps the lead. */
-#define YHPMV_OMP_MIN 16384
+/* RECALIBRATED 2026-06-07 (was 16384, i.e. N>128): the old break-even matched
+ * OpenBLAS zhpmv's MULTI_THREAD_MINIMAL, calibrated under libgomp's fork/join
+ * wakeup tax. The build now links Intel libiomp5 (hot-team reuse removes that
+ * tax), so this compute-heavy O(N^2) complex packed Hermitian matvec threads
+ * from far lower N. Measured par4/par1 (taskset 0-3, min-of-10): N=24 0.87/0.87,
+ * N=32 0.74/0.71, N=64 0.46, N=128 0.33; N=20 loses (1.13). Gate is n*n > MIN,
+ * so 575 engages at N>=24 (24^2=576 > 575, 23^2=529 <= 575). omp4-vs-omp1
+ * relerr ~1e-18 (fp80 floor; the partial-sum fold reorders within tolerance). */
+#define YHPMV_OMP_MIN 575  /* N>=24 */
 #define YHPMV_MAX_CPUS 256
 
 static inline char up(const char *p) {
