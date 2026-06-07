@@ -22,7 +22,13 @@
 #include "../common/blas_omp.h"
 #endif
 
-#define YGEMV_OMP_MIN 64
+/* RECALIBRATED 2026-06-07 (was 64): stale libgomp-era break-even; iomp5 hot-team
+ * reuse lets this dense complex fp80 matvec thread from N=32 (matching its sibling
+ * yhemv). Measured par4/par1 (taskset 0-3, min-of-10, M=N): NoTrans (M-gated)
+ * N=32 0.67, N=48 0.53; Trans/Conj (N-gated) N=32 0.66/0.48, N=48 0.37/0.35.
+ * NoTrans is the binding path (N=24 only ties; Trans/Conj already win at 24), so
+ * the shared floor is set to 32 where all three win solidly. Bit-exact (relerr 0). */
+#define YGEMV_OMP_MIN 32
 
 typedef _Complex long double T;
 
