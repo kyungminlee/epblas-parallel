@@ -24,9 +24,13 @@ static T ydotu_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdi
 }
 
 #ifdef _OPENMP
-/* Threaded partial-reduction for large unit-stride X·Y. Mirrors ydotc; manual
- * complex partial[] (no OMP reduction for `_Complex long double`). */
-#define YDOTU_OMP_MIN 10000
+/* Threaded partial-reduction for unit-stride X·Y. Mirrors ydotc; manual
+ * complex partial[] (no OMP reduction for `_Complex long double`).
+ * RECALIBRATED 2026-06-07 (was 10000): same iomp5 stale-gate fix as ydotc — the
+ * complex fp80 MAC threads from far lower n. Measured par4/par1 (taskset 0-3,
+ * min-of-12): n=400 0.83, n=600 0.64, n=1000 0.48, n=4000 0.30. 1024 adds wins
+ * in [1024,10000) where ob is serial; par still threads >=10000 to match ob. */
+#define YDOTU_OMP_MIN 1024
 #define YDOTU_MAX_CPUS 64
 __attribute__((noinline)) static ptrdiff_t ydotu_omp(ptrdiff_t n, const T *x, const T *y, T *out)
 {

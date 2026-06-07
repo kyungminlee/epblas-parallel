@@ -29,12 +29,19 @@ static T ydotc_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdi
 }
 
 #ifdef _OPENMP
-/* Threaded partial-reduction for large unit-stride conj(X)·Y. ob threads at
- * n>10000; par mirrors so it doesn't trail ob ~3.5x at n≥16384. A manual
- * complex partial[] array is required — `#pragma omp reduction(+:)` does not
- * accept `_Complex long double`. noinline isolates the region bookkeeping
- * from the serial kernel's already-saturated x87 stack. */
-#define YDOTC_OMP_MIN 10000
+/* Threaded partial-reduction for unit-stride conj(X)·Y. A manual complex
+ * partial[] array is required — `#pragma omp reduction(+:)` does not accept
+ * `_Complex long double`. noinline isolates the region bookkeeping from the
+ * serial kernel's already-saturated x87 stack.
+ * RECALIBRATED 2026-06-07 (was 10000): 10000 mirrored OpenBLAS zdotc's gate so
+ * par wouldn't trail ob ~3.5x at n>=16384. But the complex fp80 MAC is ~4x the
+ * work of a real dot, so under iomp5 (hot-team reuse) this threads from far
+ * lower n — measured par4/par1 (taskset 0-3, min-of-12): n=400 0.81, n=600
+ * 0.61, n=1000 0.50, n=4000 0.31. Lowering to 1024 only ADDS wins in
+ * [1024,10000) where ob stays serial (par4 now beats ob4 there); par still
+ * threads >=10000 to match ob. n=300 is the break-even (0.97), so 1024 keeps
+ * a safe margin past it — reduction timings are contention-sensitive. */
+#define YDOTC_OMP_MIN 1024
 #define YDOTC_MAX_CPUS 64
 __attribute__((noinline)) static ptrdiff_t ydotc_omp(ptrdiff_t n, const T *x, const T *y, T *out)
 {
