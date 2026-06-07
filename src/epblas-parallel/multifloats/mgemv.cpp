@@ -70,6 +70,88 @@ soa_store4(double *p, __m256d hi, __m256d lo)
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
+#ifdef _OPENMP
+#define MGEMV_MAX_CPUS 256
+/* Threaded strided NoTrans gemv (the contiguous path is SIMD-serial; strided has no
+ * SIMD lever, so threading is the only one). Each thread owns a disjoint band of
+ * output rows [lo,hi) and runs the serial COLUMN scatter restricted to that band:
+ * column-outer keeps the matrix read contiguous in i (cache-friendly, unlike a
+ * row-outer gather striding by lda), and accumulating y[i] += ax[j]*A(i,j) in
+ * ascending j reproduces the serial scatter's exact association -> bit-identical.
+ * ax[j]=alpha*x[j] precomputed; x,y distinct so disjoint row bands never race. */
+static bool mgemv_n_omp(int M, int N, T alpha, const T *a, int lda,
+                        const T *x, int incx, T *y, int incy)
+{
+    if (M < MGEMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return false;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > MGEMV_MAX_CPUS) nthreads = MGEMV_MAX_CPUS;
+
+    T *ax = static_cast<T *>(std::malloc(static_cast<std::size_t>(N) * sizeof(T)));
+    if (!ax) return false;
+    const int ix0 = (incx < 0) ? -(N - 1) * incx : 0;
+    for (int j = 0; j < N; ++j) ax[j] = alpha * x[ix0 + j * incx];
+    const std::ptrdiff_t iy0 = (incy < 0) ? -static_cast<std::ptrdiff_t>(M - 1) * incy : 0;
+
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        std::ptrdiff_t lo = (static_cast<std::ptrdiff_t>(M) * tid) / nthreads;
+        std::ptrdiff_t hi = (static_cast<std::ptrdiff_t>(M) * (tid + 1)) / nthreads;
+        for (int j = 0; j < N; ++j) {
+            const T t = ax[j];
+            if (dd_iszero(t)) continue;
+            const T *aj = &A_(0, j);
+            for (std::ptrdiff_t i = lo; i < hi; ++i) {
+                T *yi = &y[iy0 + i * incy];
+                *yi = *yi + t * aj[i];
+            }
+        }
+    }
+    std::free(ax);
+    return true;
+}
+
+/* Threaded strided Trans gemv. Output columns partition (each y[j]=alpha*Σ_i A(i,j)*x[i]
+ * disjoint). Strided x gathered to contiguous so the inner dot reads the column (and x)
+ * unit-stride. Bit-identical to the serial strided gather (ascending-i). */
+static bool mgemv_t_omp(int M, int N, T alpha, const T *a, int lda,
+                        const T *x, int incx, T *y, int incy)
+{
+    if (N < MGEMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return false;
+    int nthreads = blas_omp_max_threads();
+    if (nthreads > MGEMV_MAX_CPUS) nthreads = MGEMV_MAX_CPUS;
+
+    if (incx < 0) x -= static_cast<std::ptrdiff_t>(M - 1) * incx;
+    if (incy < 0) y -= static_cast<std::ptrdiff_t>(N - 1) * incy;
+
+    const T *xptr = x;
+    T *xbuf = nullptr;
+    if (incx != 1) {
+        xbuf = static_cast<T *>(std::malloc(static_cast<std::size_t>(M) * sizeof(T)));
+        if (!xbuf) return false;
+        for (int i = 0; i < M; ++i) xbuf[i] = x[static_cast<std::ptrdiff_t>(i) * incx];
+        xptr = xbuf;
+    }
+
+    #pragma omp parallel num_threads(nthreads)
+    {
+        int tid = omp_get_thread_num();
+        std::ptrdiff_t lo = (static_cast<std::ptrdiff_t>(N) * tid) / nthreads;
+        std::ptrdiff_t hi = (static_cast<std::ptrdiff_t>(N) * (tid + 1)) / nthreads;
+        for (std::ptrdiff_t j = lo; j < hi; ++j) {
+            const T *col = &A_(0, j);
+            T s = zero_dd;
+            for (int i = 0; i < M; ++i) s = s + col[i] * xptr[i];
+            y[j * incy] = y[j * incy] + alpha * s;
+        }
+    }
+    std::free(xbuf);
+    return true;
+}
+#endif /* _OPENMP */
+
 extern "C" void mgemv_(
     const char *trans,
     const int *m_, const int *n_,
@@ -244,6 +326,11 @@ extern "C" void mgemv_(
 #endif
     } else {
         if (TR == 'N') {
+#ifdef _OPENMP
+            if (M >= MGEMV_OMP_MIN && blas_omp_max_threads() > 1
+                && mgemv_n_omp(M, N, alpha, a, lda, x, incx, y, incy))
+                return;
+#endif
             int jx = (incx < 0) ? -(N - 1) * incx : 0;
             for (int j = 0; j < N; ++j) {
                 const T xj = x[jx];
@@ -258,6 +345,11 @@ extern "C" void mgemv_(
                 jx += incx;
             }
         } else {
+#ifdef _OPENMP
+            if (N >= MGEMV_OMP_MIN && blas_omp_max_threads() > 1
+                && mgemv_t_omp(M, N, alpha, a, lda, x, incx, y, incy))
+                return;
+#endif
             int jy = (incy < 0) ? -(N - 1) * incy : 0;
             for (int j = 0; j < N; ++j) {
                 T s = zero_dd;
