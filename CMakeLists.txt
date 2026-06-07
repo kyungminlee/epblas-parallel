@@ -32,6 +32,18 @@ set(EPBLAS_PARALLEL_PREFIX_kind10       e)
 set(EPBLAS_PARALLEL_PREFIX_kind16       q)
 set(EPBLAS_PARALLEL_PREFIX_multifloats  m)
 
+# Per-target eplinalg baseline helper packages. Some per-precision BLAS
+# baselines pull in precision-specific helper libs whose imported targets
+# their own Config does NOT find_dependency — siblings are the consumer's
+# responsibility (see eplinalg CONTEXT §"No sibling-deps inside eplinalg").
+# These must be find_package'd before the baseline so its imported targets
+# resolve. The multifloats baseline (mblas) links la_constants_mf +
+# la_xisnan_mf (the DD type needs its own constants/isnan); kind10/kind16
+# baselines link only eplinalg::blas, which their Config find_dependency's.
+set(EPBLAS_PARALLEL_BASELINE_DEPS_kind10       "")
+set(EPBLAS_PARALLEL_BASELINE_DEPS_kind16       "")
+set(EPBLAS_PARALLEL_BASELINE_DEPS_multifloats  la_constants_mf la_xisnan_mf)
+
 # Production discovery: a target builds iff its src dir exists. The
 # eplinalg per-target package is only checked later, before the test
 # subdirs (see EPBLAS_PARALLEL_TESTABLE_TARGETS below).
@@ -360,6 +372,11 @@ if(BUILD_TESTING)
     foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
         set(_prefix "${EPBLAS_PARALLEL_PREFIX_${_target}}")
         set(_pkg "${_prefix}blas")
+        # Pre-find any baseline helper packages so the baseline's imported
+        # targets resolve (see EPBLAS_PARALLEL_BASELINE_DEPS_* above).
+        foreach(_dep IN LISTS EPBLAS_PARALLEL_BASELINE_DEPS_${_target})
+            find_package(${_dep} QUIET)
+        endforeach()
         find_package(${_pkg} QUIET)
         if(${_pkg}_FOUND)
             message(STATUS "epblas-parallel: tests enabled for target ${_target} (${_pkg} found)")

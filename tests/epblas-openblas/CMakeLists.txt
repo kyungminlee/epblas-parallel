@@ -126,6 +126,13 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
                 ${_overlay_archive}
                 ${_migrated_archive}
                 eplinalg::blas)
+            # The multifloats `_migrated_archive` is compiled Fortran that
+            # depends on the upstream `multifloats` Fortran module runtime
+            # (dd_abs, dd_gt_dd, …) — link it like the fuzz_common library.
+            if("${_target}" STREQUAL "multifloats" AND _have_multifloats_f)
+                target_link_libraries(ep_${_name} PRIVATE
+                    $<BUILD_INTERFACE:multifloatsf>)
+            endif()
             target_compile_options(ep_${_name} PRIVATE
                 -ffunction-sections -fdata-sections)
             target_link_options(ep_${_name} PRIVATE LINKER:--gc-sections)
