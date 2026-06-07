@@ -10,7 +10,13 @@
 #include "../common/blas_omp.h"
 #endif
 
-#define YGERU_OMP_MIN 64
+/* RECALIBRATED 2026-06-07 (was 64): stale libgomp-era break-even; iomp5 hot-team
+ * reuse lets this O(M*N) complex unconjugated rank-1 update thread from N=24.
+ * Measured par4/par1 (taskset 0-3, min-of-10, M=N): N=24 0.45, N=32 0.37,
+ * N=64 0.29, N=128 0.26. It actually wins from N=16 (0.77) but 24 keeps a
+ * uniform floor with the Hermitian rank updates that lose below it.
+ * Bit-exact (relerr 0). Uniform across the y* rank-update family. */
+#define YGERU_OMP_MIN 24
 
 typedef _Complex long double T;
 static const T ZERO = 0.0L + 0.0Li;

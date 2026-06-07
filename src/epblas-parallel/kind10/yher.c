@@ -11,7 +11,13 @@
 #include "../common/blas_omp.h"
 #endif
 
-#define YHER_OMP_MIN 64
+/* RECALIBRATED 2026-06-07 (was 64): the old break-even predates iomp5 (libgomp
+ * fork/join wakeup tax). With iomp5 hot-team reuse this O(N^2) complex Hermitian
+ * rank-1 update threads from N=24. Measured par4/par1 (taskset 0-3, min-of-10):
+ * N=24 0.68/0.65, N=32 0.49/0.53, N=64 0.31, N=128 0.27. N=20 is marginal (0.90)
+ * and N=16 loses (1.18), so 24 is the robust floor. Bit-exact (relerr 0).
+ * Uniform across the y* rank-update family (yher/yher2/ygerc/ygeru/yhpr/yhpr2). */
+#define YHER_OMP_MIN 24
 
 typedef _Complex long double TC;
 typedef long double          TR;

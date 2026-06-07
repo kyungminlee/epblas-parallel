@@ -10,7 +10,12 @@
 #include "../common/blas_omp.h"
 #endif
 
-#define YHPR2_OMP_MIN 64
+/* RECALIBRATED 2026-06-07 (was 64): stale libgomp-era break-even; iomp5 hot-team
+ * reuse lets this O(N^2) complex Hermitian packed rank-2 update thread from N=24.
+ * Measured par4/par1 (taskset 0-3, min-of-10): N=24 0.58/0.55, N=32 0.50/0.48,
+ * N=64 0.33, N=128 0.28. N=20 marginal (0.71-0.77), so 24 is the robust floor.
+ * Bit-exact (relerr 0). Uniform across the y* rank-update family. */
+#define YHPR2_OMP_MIN 24
 
 typedef _Complex long double T;
 typedef long double TR;
