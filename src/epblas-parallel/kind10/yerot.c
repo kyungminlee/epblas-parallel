@@ -1,7 +1,50 @@
 #include <stddef.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
 /* yerot — kind10: complex Givens with real c, s. */
 typedef _Complex long double T;
 typedef long double R;
+
+/* Real coefficients on complex data: treat each complex element as two
+ * independent reals and run the plain real rotation over them.  The
+ * contiguous case becomes one flat 2n real loop (the epblas-openblas
+ * shape) — load-first, no _Complex multiply, accumulators stay on the
+ * x87 register stack.  Same ops in the same order — bit-identical.
+ * n is the COMPLEX count; the kernel walks 2n reals. */
+static void yerot_unit(ptrdiff_t n, R c, R s, R *px, R *py)
+{
+    const long two_n = 2L * n;
+    for (long i = 0; i < two_n; ++i) {
+        R xi = px[i], yi = py[i];
+        px[i] = c * xi + s * yi;
+        py[i] = c * yi - s * xi;
+    }
+}
+
+#ifdef _OPENMP
+/* Threaded complex Givens — same cache-bandwidth rationale as eaxpy_omp (see
+ * eaxpy.c). Compute-bound (4 mul + 2 add per real, 2n reals) and a complex
+ * element is 2x bytes, so it threads from low N: measured proto4/par1 ~1.02 at
+ * N=128, 0.76 at 192, <1.0 to 4M (~0.60), no upper bound. Break-even ~N=130;
+ * 256 keeps margin. */
+#define YEROT_OMP_MIN 256
+static int yerot_omp(ptrdiff_t n, R c, R s, R *px, R *py)
+{
+    if (n <= YEROT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    #pragma omp parallel num_threads(nthreads)
+    {
+        ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
+        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
+        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
+        if (lo < hi) yerot_unit(hi - lo, c, s, px + 2 * lo, py + 2 * lo);
+    }
+    return 1;
+}
+#endif
 
 void yerot_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
             const R *c_, const R *s_)
@@ -9,19 +52,12 @@ void yerot_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
     const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const R c = *c_, s = *s_;
     if (n <= 0) return;
-    /* Real coefficients on complex data: treat each complex element as two
-     * independent reals and run the plain real rotation over them.  The
-     * contiguous case becomes one flat 2n real loop (the epblas-openblas
-     * shape) — load-first, no _Complex multiply, accumulators stay on the
-     * x87 register stack.  Same ops in the same order — bit-identical. */
     if (incx == 1 && incy == 1) {
         R *px = (R *)x, *py = (R *)y;
-        const long two_n = 2L * n;
-        for (long i = 0; i < two_n; ++i) {
-            R xi = px[i], yi = py[i];
-            px[i] = c * xi + s * yi;
-            py[i] = c * yi - s * xi;
-        }
+#ifdef _OPENMP
+        if (yerot_omp(n, c, s, px, py)) return;
+#endif
+        yerot_unit(n, c, s, px, py);
     } else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;

@@ -1,4 +1,8 @@
 #include <stddef.h>
+#ifdef _OPENMP
+#include <omp.h>
+#include "../common/blas_omp.h"
+#endif
 /* erotm — kind10 real: apply modified Givens.
  *
  * Imag-part products written with the just-loaded operand (z) first so
@@ -17,6 +21,33 @@ static inline void step(const T flag, const T h11, const T h12, const T h21, con
     else                    { *xi = w * h11 + z;       *yi = z * h22 - w; }
 }
 
+/* Unit-stride kernel, shared by the serial entry and the per-thread OMP slices. */
+static void erotm_unit(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y)
+{
+    for (ptrdiff_t i = 0; i < n; ++i) step(flag, h11, h12, h21, h22, &x[i], &y[i]);
+}
+
+#ifdef _OPENMP
+/* Threaded modified Givens — same cache-bandwidth rationale as eaxpy_omp (see
+ * eaxpy.c). Compute-bound; measured proto4/par1 ~1.04 at N=256, 0.78 at 384,
+ * <1.0 to 4M (~0.61), no upper bound. Break-even ~N=300; 512 keeps margin. */
+#define EROTM_OMP_MIN 512
+static int erotm_omp(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y)
+{
+    if (n <= EROTM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+        return 0;
+    int nthreads = blas_omp_max_threads();
+    #pragma omp parallel num_threads(nthreads)
+    {
+        ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
+        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
+        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
+        if (lo < hi) erotm_unit(hi - lo, flag, h11, h12, h21, h22, x + lo, y + lo);
+    }
+    return 1;
+}
+#endif
+
 void erotm_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
             const T *dparam)
 {
@@ -25,7 +56,10 @@ void erotm_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
     if (n <= 0 || flag == -2.0L) return;
     const T h11 = dparam[1], h21 = dparam[2], h12 = dparam[3], h22 = dparam[4];
     if (incx == 1 && incy == 1) {
-        for (ptrdiff_t i = 0; i < n; ++i) step(flag, h11, h12, h21, h22, &x[i], &y[i]);
+#ifdef _OPENMP
+        if (erotm_omp(n, flag, h11, h12, h21, h22, x, y)) return;
+#endif
+        erotm_unit(n, flag, h11, h12, h21, h22, x, y);
     } else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
