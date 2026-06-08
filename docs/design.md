@@ -14,8 +14,14 @@
 > alone. A routine not in the overlay surfaces as a link error
 > rather than the prior silent serial fallback. Coverage state per
 > target as of this change: kind10 — full; kind16 — full;
-> multifloats — full. **§10 (perf record) below is still live** and
-> remains the canonical performance log.
+> multifloats — full. **§10 below is a historical perf snapshot, not
+> the current log.** Its GFLOP/s tables were taken on a different box
+> (4C/8T, gcc-13) in May 2026, before the switch to ns/call reporting
+> and before the bulk of the per-routine tuning — for current numbers
+> use `optimization-findings.md` and `reports/cmp5/`. What stays useful
+> in §10 is the *design rationale*: the inner- vs outer-product kernel
+> choice per precision and the record of approaches tried and abandoned
+> (register tiling, `__multf3` inlining, `fmaq`, SIMD soft-fp).
 
 Date: 2026-05-13  
 Branch: `epblas-parallel`
