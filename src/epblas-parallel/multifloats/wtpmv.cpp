@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
 #ifdef _OPENMP
 #include <cstdlib>
@@ -27,6 +28,41 @@ inline T cmul(T const &a, T const &b) {
 }
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+
+/* Bit-exact row-tiled upper-triangular packed NoTrans serial matvec (incx==1).
+ * Packed upper column j stores rows 0..j-1 contiguously at ap[j(j+1)/2], so the
+ * plain loop streams a growing x[0..j-1] run per column and thrashes the x cache
+ * (the OpenBLAS clone tiles the output rows even at one thread and wins ~15-19%).
+ * Sweep a 32-row output tile that stays cache-hot across the column passes,
+ * processing within-tile then above-tile columns in strictly ascending order so
+ * each output element's accumulation (diagonal first, then ascending column
+ * index) is byte-identical to the untiled loop. */
+inline std::size_t wtpmv_kk_upper(int j) {
+    return static_cast<std::size_t>(j) * (j + 1) / 2;
+}
+static void wtpmv_serial_N_upper(bool nounit, int n, const T *ap, T *x) {
+    const int RB = 32;
+    std::vector<T> ybuf(static_cast<std::size_t>(n));
+    T *y = ybuf.data();
+    for (int ib = 0; ib < n; ib += RB) {
+        const int ie = ib + RB < n ? ib + RB : n;
+        for (int i = ib; i < ie; ++i)
+            y[i] = nounit ? cmul(x[i], ap[wtpmv_kk_upper(i) + i]) : x[i];
+        for (int j = ib; j < ie; ++j) {                 /* within-tile, ascending j */
+            const T xj = x[j];
+            if (cdd_iszero(xj)) continue;
+            const T *col = &ap[wtpmv_kk_upper(j)];
+            for (int i = ib; i < j; ++i) y[i] = cadd(y[i], cmul(xj, col[i]));
+        }
+        for (int j = ie; j < n; ++j) {                  /* above-tile columns, ascending j */
+            const T xj = x[j];
+            if (cdd_iszero(xj)) continue;
+            const T *col = &ap[wtpmv_kk_upper(j)];
+            for (int i = ib; i < ie; ++i) y[i] = cadd(y[i], cmul(xj, col[i]));
+        }
+    }
+    for (int i = 0; i < n; ++i) x[i] = y[i];
+}
 }
 
 #ifdef _OPENMP
@@ -173,15 +209,19 @@ extern "C" void wtpmv_(
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
-                    if (!cdd_iszero(x[j])) {
-                        const T tmp = x[j];
-                        int k = kk;
-                        for (int i = 0; i < j; ++i) { x[i] = cadd(x[i], cmul(tmp, ap[k])); ++k; }
-                        if (nounit) x[j] = cmul(x[j], ap[kk + j]);
+                if (N >= 128) {
+                    wtpmv_serial_N_upper(nounit, N, ap, x);
+                } else {
+                    int kk = 0;
+                    for (int j = 0; j < N; ++j) {
+                        if (!cdd_iszero(x[j])) {
+                            const T tmp = x[j];
+                            int k = kk;
+                            for (int i = 0; i < j; ++i) { x[i] = cadd(x[i], cmul(tmp, ap[k])); ++k; }
+                            if (nounit) x[j] = cmul(x[j], ap[kk + j]);
+                        }
+                        kk += j + 1;
                     }
-                    kk += j + 1;
                 }
             } else {
                 int kk = (N * (N + 1)) / 2 - 1;
