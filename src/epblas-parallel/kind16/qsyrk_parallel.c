@@ -19,7 +19,6 @@
  */
 
 #include "qsyrk_kernel.h"
-#include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>

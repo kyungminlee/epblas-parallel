@@ -21,7 +21,6 @@
  */
 
 #include "qsyr2k_kernel.h"
-#include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>

@@ -56,7 +56,7 @@ void yher2k_(
     const char UPLO = (char)toupper((unsigned char)*uplo);
     const char TR_c = (char)toupper((unsigned char)*trans);
 
-    const TR rzero = 0.0L, rone = 1.0L;
+    const TR rone = 1.0L;
     const TC czero = 0.0L + 0.0Li;
 
     if (N == 0) return;

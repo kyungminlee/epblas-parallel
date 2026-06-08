@@ -33,7 +33,6 @@
 #include "qtrsm_kernel.h"
 #include <stddef.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>
