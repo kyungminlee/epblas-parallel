@@ -1,33 +1,31 @@
 /*
- * xsyrk_kernel.h — internal kernel surface shared by the two translation
- * units the kind16 xsyrk overlay is split across:
+ * xsyrk_kernel.h — internal shared declarations for the kind16 complex
+ * (COMPLEX(KIND=16) / __complex128) symmetric rank-k overlay, split across
+ * two translation units:
  *
- *   xsyrk_serial.c    The pure single-thread complex symmetric rank-k update
- *                     (no OpenMP). Owns the per-column compute core, the
- *                     uplo/trans decode, and the public `xsyrk_serial_`
- *                     entry. Safe to invoke from inside another routine's
- *                     own `#pragma omp parallel` region.
+ *   xsyrk_serial.c   — all the math: the per-diagonal-block worker
+ *                      (xsyrk_block: beta pre-scale + scalar diagonal add +
+ *                      xgemm_serial_ transpose trailing update), the
+ *                      beta-only column scaler, and the pure-serial
+ *                      Fortran-ABI entry `xsyrk_serial_`. No `#pragma omp`.
+ *   xsyrk_parallel.c — the public Fortran entry `xsyrk_`: threading only
+ *                      (one `omp parallel for schedule(dynamic,1)` over the
+ *                      diagonal blocks), with an `omp_in_parallel()` guard
+ *                      that delegates to `xsyrk_serial_` when called from
+ *                      inside another routine's parallel region.
  *
- *   xsyrk_parallel.c  The public Fortran entry `xsyrk_` — threading
- *                     orchestration only. Fans the independent columns of C
- *                     across an OpenMP team; falls back to running the loop
- *                     serially when invoked from inside a parallel region.
- *
- * C is N×N symmetric (NOT Hermitian — no conjugate); only the UPLO triangle
- * is referenced/written. kind16 complex is arithmetic-bound (__complex128
- * lowers to libquadmath calls), so the overlay uses the unblocked Netlib
- * reference with no packing — the shared surface is the decode plus the
- * per-column core.
- *
- * Each column j of C touches a distinct UPLO-triangle slice [i_lo,i_hi) and
- * reads only A, so columns are fully independent — per-column static
- * scheduling is bitwise-identical to the serial sweep.
+ * C is N×N symmetric (NOT Hermitian — no conjugate; see xherk). alpha and
+ * beta are complex. The work is partitioned by diagonal block (jc);
+ * triangular work is uneven so the parallel driver uses dynamic scheduling.
+ * xsyrk_block runs its trailing update through xgemm_serial_ (NOT xgemm_) so
+ * a panel worker never opens a region inside the team xsyrk_parallel.c
+ * opened. Mirrors the kind10 ysyrk overlay.
  */
 #ifndef EPBLAS_PARALLEL_KIND16_XSYRK_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_XSYRK_KERNEL_H
 
 #include <stddef.h>
-#include <quadmath.h>   /* __complex128 */
+#include <quadmath.h>
 
 typedef __complex128 xsyrk_T;
 
@@ -37,19 +35,23 @@ char xsyrk_uplo(const char *p);
 /* Decode a Fortran trans char to upper-cased 'N'/'T'. */
 char xsyrk_trans(const char *p);
 
-/* Compute columns [j0,j1) of C. The body of each j-iteration is exactly one
- * iteration of the original omp-parallel-for: the beta scaling of column j's
- * UPLO slice [i_lo,i_hi) followed by the rank-k (TR=='N') or inner-product
- * (TR=='T') accumulation. No OpenMP pragmas — pure sequential per-column
- * work; callers partition the column range if they want parallelism. */
-void xsyrk_core(
-    int j0, int j1,
-    char UPLO, char TR, int N, int K,
-    xsyrk_T alpha, xsyrk_T beta,
-    const xsyrk_T *a, int lda,
-    xsyrk_T *c, int ldc);
+/* Env-tunable block size (XSYRK_NB; otherwise 32). */
+ptrdiff_t xsyrk_nb(void);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path. */
+/* One diagonal block [jc, jc+jb): beta pre-scale of the block's columns, the
+ * scalar symmetric rank-k diagonal add, and the trailing xgemm_serial_
+ * transpose update against the rest of the panel. */
+void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K,
+                 xsyrk_T alpha, xsyrk_T beta,
+                 const xsyrk_T *a, ptrdiff_t lda, xsyrk_T *c, ptrdiff_t ldc,
+                 char UPLO, char TR);
+
+/* C := beta*C over the columns [j_start, j_end) — the alpha==0 / K==0 quick
+ * path (and the per-block pre-scale). */
+void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, xsyrk_T beta,
+                      xsyrk_T *c, ptrdiff_t ldc, char UPLO);
+
+/* Pure-serial Fortran-ABI entry (no OpenMP). Same int signature as xsyrk_. */
 void xsyrk_serial_(
     const char *uplo, const char *trans,
     const int *n_, const int *k_,

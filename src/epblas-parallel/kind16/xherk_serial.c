@@ -1,22 +1,24 @@
 /*
- * xherk_serial.c — kind16 complex (__complex128) Hermitian rank-k update,
- * serial core.
+ * xherk_serial — kind16 complex (__complex128) Hermitian rank-k,
+ * single-thread. This TU owns ALL of the xherk math; xherk_parallel.c only
+ * orchestrates the diagonal-block loop across a team.
  *
- * Owns ALL the numerics shared by the serial and parallel entries: the
- * uplo/trans decode and the per-column compute core (declared in
- * xherk_kernel.h), plus the public `xherk_serial_` Fortran entry. No
- * OpenMP anywhere on this call path — safe to invoke from inside another
- * function's `#pragma omp parallel` region.
+ * TRANS ∈ {N, C}. alpha/beta are REAL; the diagonal of C stays real.
+ * Blocked: beta pre-scale + scalar Hermitian diagonal add + xgemm trailing
+ * with conjugate transpose. The trailing update runs through xgemm_serial_
+ * (NOT xgemm_): when xherk_block runs inside the team xherk_parallel.c
+ * opened, a nested xgemm team would open a region inside a region. Mirrors
+ * the kind10 yherk overlay.
  *
- * Both xherk_serial_ and the parallel xherk_ drive numerics through
- * xherk_core, so the two paths are bitwise-identical. The Hermitian
- * real-diagonal rule (the imag part of cj[j] is zeroed) is preserved inside
- * the core, exactly matching Netlib ZHERK.
+ * The block dims threaded into the trailing GEMMs are bridged to xgemm's int
+ * Fortran ABI by xgemm_s() below.
  */
 
 #include "xherk_kernel.h"
+#include "xgemm_kernel.h"
+#include <stdlib.h>
 #include <ctype.h>
-#include <quadmath.h>
+#include <stddef.h>
 
 typedef xherk_TC TC;
 typedef xherk_TR TR;
@@ -29,60 +31,132 @@ char xherk_trans(const char *p) {
     return (char)toupper((unsigned char)*p);
 }
 
-#define A_(i, j)  a[(size_t)(j) * lda + (i)]
+static ptrdiff_t g_xherk_nb = 0;
+ptrdiff_t xherk_nb(void) {
+    if (g_xherk_nb == 0) {
+        g_xherk_nb = 32;
+        const char *s = getenv("XHERK_NB");
+        if (s && *s) { ptrdiff_t v = atoi(s); if (v > 0) g_xherk_nb = v; }
+    }
+    return g_xherk_nb;
+}
 
-void xherk_core(
-    int j0, int j1,
-    char UPLO, char TR_c, int N, int K,
-    TR alpha, TR beta,
-    const TC *a, int lda,
-    TC *c, int ldc)
+/* Bridge the ptrdiff_t block dims of the trailing update to xgemm_serial_'s
+ * int Fortran ABI (block sizes are bounded by N/K, which arrive as int). */
+static inline void xgemm_s(const char *ta, const char *tb,
+                           ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, const TC *alpha,
+                           const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                           const TC *beta, TC *c, ptrdiff_t ldc)
 {
-    const TR rzero = 0.0Q, rone = 1.0Q;
-    const TC czero = 0.0Q + 0.0Qi;
+    int mi = (int)m, ni = (int)n, ki = (int)k;
+    int ldai = (int)lda, ldbi = (int)ldb, ldci = (int)ldc;
+    xgemm_serial_(ta, tb, &mi, &ni, &ki, alpha, a, &ldai, b, &ldbi, beta, c, &ldci, 1, 1);
+}
 
-    for (int j = j0; j < j1; ++j) {
-        const int i_lo = (UPLO == 'L') ? j : 0;
-        const int i_hi = (UPLO == 'L') ? N : j + 1;
-        TC *cj = c + (size_t)j * ldc;
+static inline TC cconj(TC z) { return ~z; }
 
-        /* beta scale of the UPLO slice of column j (diag stays real). */
-        if (beta == rzero) {
-            for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-        } else if (beta != rone) {
-            for (int i = i_lo; i < i_hi; ++i) {
-                if (i == j) cj[i] = beta * crealq(cj[i]);
-                else        cj[i] = beta * cj[i];
-            }
-        } else {
-            /* beta == 1: still zero diagonal imag. */
-            cj[j] = crealq(cj[j]);
-        }
+#define A_(i, j)  a[(size_t)(j) * lda + (i)]
+#define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
-        if (TR_c == 'N') {
-            /* C := alpha · A · Aᴴ + (already-scaled) C.
-             * Column outer product: C[:,j] += alpha · conj(A[j,l]) · A[:,l]
-             * (the conj is on the j-th row because we're computing
-             *  C[i,j] = Σ A[i,l] · conj(A[j,l]).) */
-            for (int l = 0; l < K; ++l) {
+static const TC czero = 0.0Q + 0.0Qi;
+static const TR rzero = 0.0Q, rone = 1.0Q;
+
+/* Diagonal jb×jb block rank-k add, keeping diagonal entries real.
+ * No beta scaling (caller pre-scales). */
+static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TR alpha,
+                          const TC *restrict a, ptrdiff_t lda,
+                          TC *restrict c, ptrdiff_t ldc,
+                          char UPLO, char TR_c)
+{
+    if (TR_c == 'N') {
+        for (ptrdiff_t j = jc; j < jc + jb; ++j) {
+            const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
+            const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
+            TC *cj = c + (size_t)j * ldc;
+            for (ptrdiff_t l = 0; l < K; ++l) {
                 const TC ajl = A_(j, l);
                 if (ajl != czero) {
-                    const TC t = alpha * conjq(ajl);
-                    for (int i = i_lo; i < i_hi; ++i) {
-                        if (i == j) cj[i] += crealq(t * A_(i, l));
+                    const TC t = alpha * cconj(ajl);
+                    for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
+                        if (i == j) cj[i] += __real__ (t * A_(i, l));
                         else        cj[i] += t * A_(i, l);
                     }
                 }
             }
-        } else {  /* TRANS = 'C': C := alpha · Aᴴ · A + C
-                   * Inner product: C[i,j] = Σ_l conj(A[l,i]) · A[l,j]. */
+        }
+    } else {
+        for (ptrdiff_t j = jc; j < jc + jb; ++j) {
+            const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
+            const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
+            TC *cj = c + (size_t)j * ldc;
             const TC *Aj = a + (size_t)j * lda;
-            for (int i = i_lo; i < i_hi; ++i) {
+            for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
                 const TC *Ai = a + (size_t)i * lda;
                 TC s = czero;
-                for (int l = 0; l < K; ++l) s += conjq(Ai[l]) * Aj[l];
-                if (i == j) cj[i] += alpha * crealq(s);
+                for (ptrdiff_t l = 0; l < K; ++l) s += cconj(Ai[l]) * Aj[l];
+                if (i == j) cj[i] += alpha * __real__ s;
                 else        cj[i] += alpha * s;
+            }
+        }
+    }
+}
+
+void xherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, TR beta,
+                      TC *c, ptrdiff_t ldc, char UPLO)
+{
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+        TC *cj = c + (size_t)j * ldc;
+        if (beta == rzero) {
+            for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
+        } else if (beta != rone) {
+            for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
+                if (i == j) cj[i] = beta * __real__ cj[i];
+                else        cj[i] = beta * cj[i];
+            }
+        } else {
+            cj[j] = __real__ cj[j];
+        }
+    }
+}
+
+void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TR alpha, TR beta,
+                 const TC *a, ptrdiff_t lda, TC *c, ptrdiff_t ldc, char UPLO, char TR_c)
+{
+    const TC cone    = 1.0Q + 0.0Qi;
+    const TC alpha_c = alpha + 0.0Qi;
+    const char NN[1] = {'N'};
+    const char CN[1] = {'C'};
+
+    xherk_beta_scale(jc, jc + jb, N, beta, c, ldc, UPLO);
+
+    herk_diag_add(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
+
+    if (UPLO == 'L') {
+        const ptrdiff_t trailing = N - jc - jb;
+        if (trailing > 0) {
+            const ptrdiff_t j0 = jc + jb;
+            if (TR_c == 'N') {
+                xgemm_s(NN, CN, trailing, jb, K, &alpha_c,
+                        &A_(j0, 0), lda, &A_(jc, 0), lda,
+                        &cone, &C_(j0, jc), ldc);
+            } else {
+                xgemm_s(CN, NN, trailing, jb, K, &alpha_c,
+                        &A_(0, j0), lda, &A_(0, jc), lda,
+                        &cone, &C_(j0, jc), ldc);
+            }
+        }
+    } else {
+        if (jc > 0) {
+            if (TR_c == 'N') {
+                xgemm_s(NN, CN, jc, jb, K, &alpha_c,
+                        &A_(0, 0), lda, &A_(jc, 0), lda,
+                        &cone, &C_(0, jc), ldc);
+            } else {
+                xgemm_s(CN, NN, jc, jb, K, &alpha_c,
+                        &A_(0, 0), lda, &A_(0, jc), lda,
+                        &cone, &C_(0, jc), ldc);
             }
         }
     }
@@ -98,42 +172,29 @@ void xherk_serial_(
     size_t uplo_len, size_t trans_len)
 {
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldc = *ldc_;
+    const ptrdiff_t N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, ldc = *ldc_;
     const TR alpha = *alpha_, beta = *beta_;
-    const char UPLO = xherk_uplo(uplo);
-    const char TR_c = xherk_trans(trans);
+    const char UPLO = (char)toupper((unsigned char)*uplo);
+    const char TR_c = (char)toupper((unsigned char)*trans);
 
     if (N == 0) return;
 
-    const TR rzero = 0.0Q, rone = 1.0Q;
-    const TC czero = 0.0Q + 0.0Qi;
-
-    /* Quick return when only beta scaling is needed. */
     if (alpha == rzero || K == 0) {
         if (beta == rone) {
-            /* Even for beta=1, ZHERK strictly zeros the imag part of
-             * the diagonal so it stays real. */
-            for (int j = 0; j < N; ++j) c[(size_t)j * ldc + j] = crealq(c[(size_t)j * ldc + j]);
+            for (ptrdiff_t j = 0; j < N; ++j) c[(size_t)j * ldc + j] = __real__ c[(size_t)j * ldc + j];
             return;
         }
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            TC *cj = c + (size_t)j * ldc;
-            if (beta == rzero) {
-                for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-            } else {
-                for (int i = i_lo; i < i_hi; ++i) {
-                    if (i == j) cj[i] = beta * crealq(cj[i]);
-                    else        cj[i] = beta * cj[i];
-                }
-            }
-        }
+        xherk_beta_scale(0, N, N, beta, c, ldc, UPLO);
         return;
     }
 
-    xherk_core(0, N, UPLO, TR_c, N, K, alpha, beta, a, lda, c, ldc);
+    const ptrdiff_t nb = xherk_nb();
+    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
+        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
+        xherk_block(jc, jb, N, K, alpha, beta, a, lda, c, ldc, UPLO, TR_c);
+    }
 }
 
 #undef A_
+#undef C_

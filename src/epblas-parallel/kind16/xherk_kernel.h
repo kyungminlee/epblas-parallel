@@ -1,35 +1,32 @@
 /*
- * xherk_kernel.h — internal kernel surface shared by the two translation
- * units the kind16 xherk overlay is split across:
+ * xherk_kernel.h — internal shared declarations for the kind16 complex
+ * (COMPLEX(KIND=16) / __complex128) Hermitian rank-k overlay, split across
+ * two translation units:
  *
- *   xherk_serial.c    The pure single-thread Hermitian rank-k update (no
- *                     OpenMP). Owns the per-column compute core, the
- *                     uplo/trans decode, and the public `xherk_serial_`
- *                     entry. Safe to invoke from inside another routine's
- *                     own `#pragma omp parallel` region.
+ *   xherk_serial.c   — all the math: the per-diagonal-block worker
+ *                      (xherk_block: beta pre-scale keeping the diagonal
+ *                      real + scalar Hermitian diagonal add + xgemm_serial_
+ *                      conjugate-transpose trailing update), the beta-only
+ *                      column scaler, and the pure-serial Fortran-ABI entry
+ *                      `xherk_serial_`. No `#pragma omp`.
+ *   xherk_parallel.c — the public Fortran entry `xherk_`: threading only
+ *                      (one `omp parallel for schedule(dynamic,1)` over the
+ *                      diagonal blocks), with an `omp_in_parallel()` guard
+ *                      that delegates to `xherk_serial_` when called from
+ *                      inside another routine's parallel region.
  *
- *   xherk_parallel.c  The public Fortran entry `xherk_` — threading
- *                     orchestration only. Fans the independent columns of C
- *                     across an OpenMP team; falls back to running the loop
- *                     serially when invoked from inside a parallel region.
- *
- * C is N×N Hermitian; only the UPLO triangle is referenced/written and its
- * diagonal is forced real (the imag part is zeroed, matching Netlib ZHERK).
- * alpha and beta are REAL (kind=16). kind16 complex is arithmetic-bound
- * (__complex128 lowers to libquadmath calls), so the overlay uses the
- * unblocked Netlib reference with no packing — the shared surface is the
- * decode plus the per-column core.
- *
- * Each column j of C touches a distinct UPLO-triangle slice [i_lo,i_hi) and
- * reads only A, so columns are fully independent — per-column static
- * scheduling is bitwise-identical to the serial sweep. The real-diagonal
- * rule (zero the imag part of cj[j]) is applied per column inside the core.
+ * alpha and beta are REAL; the diagonal of C stays real on output. The work
+ * is partitioned by diagonal block (jc); triangular work is uneven so the
+ * parallel driver uses dynamic scheduling. xherk_block runs its trailing
+ * update through xgemm_serial_ (NOT xgemm_) so a panel worker never opens a
+ * region inside the team xherk_parallel.c opened. Mirrors the kind10 yherk
+ * overlay (__complex128 lowers to libquadmath soft-float calls).
  */
 #ifndef EPBLAS_PARALLEL_KIND16_XHERK_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_XHERK_KERNEL_H
 
 #include <stddef.h>
-#include <quadmath.h>   /* __complex128, __float128 */
+#include <quadmath.h>
 
 typedef __complex128 xherk_TC;   /* matrices A, C */
 typedef __float128   xherk_TR;   /* scalars alpha, beta */
@@ -40,20 +37,25 @@ char xherk_uplo(const char *p);
 /* Decode a Fortran trans char to upper-cased 'N'/'C'. */
 char xherk_trans(const char *p);
 
-/* Compute columns [j0,j1) of C. The body of each j-iteration is exactly one
- * iteration of the original omp-parallel-for: the beta scaling of column j's
- * UPLO slice [i_lo,i_hi) (diagonal kept real), followed by the rank-k
- * (TR=='N') or inner-product (TR=='C') accumulation with the conjugation and
- * real-diagonal rules preserved. No OpenMP pragmas — pure sequential
- * per-column work; callers partition the column range for parallelism. */
-void xherk_core(
-    int j0, int j1,
-    char UPLO, char TR, int N, int K,
-    xherk_TR alpha, xherk_TR beta,
-    const xherk_TC *a, int lda,
-    xherk_TC *c, int ldc);
+/* Env-tunable block size (XHERK_NB; otherwise 32). */
+ptrdiff_t xherk_nb(void);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path. */
+/* One diagonal block [jc, jc+jb): beta pre-scale of the block's columns
+ * (diagonal kept real), the scalar Hermitian diagonal rank-k add, and the
+ * trailing xgemm_serial_ conjugate-transpose update against the rest of the
+ * panel. */
+void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K,
+                 xherk_TR alpha, xherk_TR beta,
+                 const xherk_TC *a, ptrdiff_t lda, xherk_TC *c, ptrdiff_t ldc,
+                 char UPLO, char TR_c);
+
+/* C := beta*C over the columns [j_start, j_end) keeping the diagonal real —
+ * the alpha==0 / K==0 quick path (and the per-block pre-scale). beta==1
+ * realifies only the diagonal entry. */
+void xherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, xherk_TR beta,
+                      xherk_TC *c, ptrdiff_t ldc, char UPLO);
+
+/* Pure-serial Fortran-ABI entry (no OpenMP). Same int signature as xherk_. */
 void xherk_serial_(
     const char *uplo, const char *trans,
     const int *n_, const int *k_,
