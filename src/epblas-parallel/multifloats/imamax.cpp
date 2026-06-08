@@ -1,4 +1,5 @@
 /* imamax — multifloats real DD: 1-based argmax(|X|). */
+#include <stddef.h>
 #include <multifloats.h>
 #include <multifloats/float64x2.h>
 #ifdef _OPENMP
@@ -10,9 +11,30 @@ namespace mf = multifloats;
 using T = mf::float64x2;
 
 namespace {
+/* Inline magnitude — the public fabsdd() is an out-of-line library call, so
+ * using it per element emits a PLT call in the hot loop (~2x slower than ob's
+ * inlined abs). a < 0 ? -a : a uses only header-inline constexpr ops and yields
+ * the identical canonical magnitude for the comparison below. */
+inline T t_abs(T a) { return a < 0 ? -a : a; }
+
 inline bool dd_gt(T a, T b) {
     return a.limbs[0] > b.limbs[0]
         || (a.limbs[0] == b.limbs[0] && a.limbs[1] > b.limbs[1]);
+}
+
+/* Scan a contiguous unit-stride range [0,n); return the 0-based index of the
+ * first element with maximal |x| and store that magnitude in *bv_out.
+ * Strictly-greater update keeps the lowest index on ties. */
+__attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_out)
+{
+    ptrdiff_t best = 0;
+    T bv = t_abs(x[0]);
+    for (ptrdiff_t i = 1; i < n; ++i) {
+        T v = t_abs(x[i]);
+        if (v > bv) { bv = v; best = i; }   /* lexicographic >, matches ob clone */
+    }
+    *bv_out = bv;
+    return best;
 }
 }
 
@@ -40,12 +62,10 @@ __attribute__((noinline)) static int imamax_omp(int n, const T *x, int *out)
         int b = 0;
         T bv{0.0, 0.0};
         if (lo < hi) {
-            b = lo + 1;           /* 1-based global index */
-            bv = fabsdd(x[lo]);
-            for (int i = lo + 1; i < hi; ++i) {
-                T av = fabsdd(x[i]);
-                if (dd_gt(av, bv)) { bv = av; b = i + 1; }
-            }
+            T sv;
+            ptrdiff_t li = imamax_scan(hi - lo, x + lo, &sv);
+            b = lo + (int)li + 1;   /* 1-based global index */
+            bv = sv;
         }
         idx[tid] = b; val[tid] = bv;
     }
@@ -71,11 +91,15 @@ extern "C" int imamax_(const int *n_, const T *x, const int *incx_)
         if (imamax_omp(n, x, &r)) return r;
     }
 #endif
+    if (incx == 1) {
+        T bv;
+        return (int)imamax_scan(n, x, &bv) + 1;
+    }
     int best = 1;
-    T bestv = fabsdd(x[0]);
+    T bestv = t_abs(x[0]);
     int ix = incx;
     for (int i = 2; i <= n; ++i) {
-        T av = fabsdd(x[ix]);
+        T av = t_abs(x[ix]);
         if (dd_gt(av, bestv)) { bestv = av; best = i; }
         ix += incx;
     }
