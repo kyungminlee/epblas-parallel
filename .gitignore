@@ -21,3 +21,6 @@ reports/cmp5/run_cmp5.stdout.log
 *.log
 
 workspace
+
+# Performance-gap progress trackers — local working files, never committed
+docs/performance-gap-checklist-*.md
