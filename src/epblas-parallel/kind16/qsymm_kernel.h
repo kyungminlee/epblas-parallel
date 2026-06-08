@@ -1,23 +1,23 @@
 /*
- * qsymm_kernel.h — internal kernel surface shared by the two translation
- * units the kind16 qsymm overlay is split across:
+ * qsymm_kernel.h — internal shared surface for the kind16 real
+ * (REAL(KIND=16) / __float128) symmetric matrix-multiply overlay, split
+ * across two translation units:
  *
- *   qsymm_serial.c    The pure single-thread symmetric multiply (no OpenMP).
- *                     Owns the per-column compute core, the uplo-char decode,
- *                     and the public `qsymm_serial_` entry. Called by qsymm_
- *                     as its serial branch and usable from inside another
- *                     routine's own parallel region.
+ *   qsymm_serial.c   — the symm-aware packers + the pure single-thread
+ *                      fused driver (`qsymm_serial_`). No `#pragma omp`.
+ *   qsymm_parallel.c — the public Fortran entry `qsymm_`: same fused
+ *                      driver fanned across an OpenMP team (M-axis split,
+ *                      shared Bp), with an `omp_in_parallel()` guard that
+ *                      delegates to `qsymm_serial_` when called from inside
+ *                      another routine's parallel region.
  *
- *   qsymm_parallel.c  The public Fortran entry `qsymm_` — threading
- *                     orchestration only (omp-parallel-for over columns of C).
- *                     Delegates to the serial core per column; runs serially
- *                     when invoked from inside a parallel region.
- *
- * kind16 is arithmetic-bound (__float128 lowers to libquadmath calls), so the
- * overlay uses the unblocked reference algorithm — the shared surface is just
- * the uplo decode and the per-column compute core. Each column j of C is
- * independent, so a per-column static partition is bitwise-identical to the
- * serial sweep.
+ * Structure mirrors the qgemm overlay: qsymm owns NO GEMM math of its own.
+ * It composes the shared qgemm kernel primitives (block policy, packers,
+ * beta pre-pass, MR×NR macro-kernel — see qgemm_kernel.h) and adds only the
+ * SYMM-aware packers below, which read the symmetric operand into qgemm's
+ * packed layout while mirroring the UPLO triangle across the diagonal. The
+ * same microkernel then streams diagonal and off-diagonal tiles alike — no
+ * scalar diagonal special-case, no per-tile re-dispatch into qgemm.
  */
 #ifndef EPBLAS_PARALLEL_KIND16_QSYMM_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_QSYMM_KERNEL_H
@@ -29,22 +29,25 @@ typedef __float128 qsymm_T;
 /* Normalize a Fortran uplo/side char to its uppercase code. */
 char qsymm_uplo(const char *p);
 
-/* Compute columns [j0,j1) of C — each column is one iteration of the
- * reference omp loop: beta-scale C[:,j] then accumulate the symmetric
- * matvec for the given SIDE/UPLO. No OpenMP pragmas; each column is owned
- * by exactly one caller, so the work is race-free under a column partition. */
-void qsymm_core(
-    int j0, int j1,
-    char SIDE, char UPLO,
-    int M, int N,
-    qsymm_T alpha, qsymm_T beta,
-    const qsymm_T *a, int lda,
-    const qsymm_T *b, int ldb,
-    qsymm_T *c, int ldc);
+/* ── SYMM-aware packers (real) ───────────────────────────────────────
+ *
+ * Pack a block of the symmetric operand `a` (col-major, leading dim lda,
+ * only the UPLO triangle populated — the other triangle is never read)
+ * into the qgemm packed layout, mirroring A[row,col] == A[col,row].
+ *
+ *   qsymm_pack_a_sym → qgemm_pack_A('N') layout (SIDE='L' A-operand).
+ *   qsymm_pack_b_sym → qgemm_pack_B('N') layout (SIDE='R' B-operand).
+ *
+ * `uplo` is 'U' or 'L' (already upper-cased by the caller).
+ */
+void qsymm_pack_a_sym(const qsymm_T *a, ptrdiff_t lda,
+                      ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
+                      char uplo, qsymm_T *Ap);
+void qsymm_pack_b_sym(const qsymm_T *a, ptrdiff_t lda,
+                      ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
+                      char uplo, qsymm_T *Bp);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; safe to
- * invoke from inside another function's `#pragma omp parallel` region. Keeps
- * the exact Fortran-ABI signature of qsymm_. */
+/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as qsymm_. */
 void qsymm_serial_(
     const char *side, const char *uplo,
     const int *m_, const int *n_,
