@@ -1,152 +1,157 @@
 /*
- * xhemm_serial.c — kind16 complex (`__complex128`) Hermitian matrix multiply,
- * serial core.
+ * xhemm_serial — kind16 complex HEMM (COMPLEX(KIND=16) / __complex128),
+ * single-thread. This TU owns ALL of the xhemm math: the block plan, the
+ * B-panel packer, the per-M-slab level3 worker, and the pure-serial
+ * Fortran-ABI entry `xhemm_serial_`. xhemm_parallel.c only orchestrates
+ * threads over these same pieces.
  *
- * Owns ALL the numerics shared by the serial and parallel entries: the
- * uplo-char decode and the per-column compute core (declared in
- * xhemm_kernel.h), plus the public `xhemm_serial_` Fortran entry. No OpenMP
- * anywhere on this call path — safe to invoke from inside another function's
- * `#pragma omp parallel` region.
+ * Strategy: faithful port of the OpenBLAS GotoBLAS HEMM driver (the ob
+ * clone src/epblas-openblas/kind16/xhemm.c) over the shared packed
+ * substrate (xl3_complex.c). HERMITIAN — the HEMM packers negate the imag
+ * float on the reflected half and zero it on the diagonal. For SIDE=L the
+ * Hermitian matrix A is the ICOPY factor (HEMM ucopy/lcopy) and the regular
+ * B is the OCOPY factor (standard ncopy, conj=0); for SIDE=R the roles swap
+ * (A_eff = b, B_eff = a) and the Hermitian matrix is packed on the B side
+ * with the _oc variants (the (posX,posY) reinterpret as (col,row)).
  *
- * Off-diagonal entries reflect via the Hermitian property
- * A(k,i) = conj(A(i,k)); the diagonal of A is real — only its real part is
- * read (crealq). Both xhemm_serial_ and the parallel xhemm_ drive numerics
- * through xhemm_core, so the two paths are bitwise-identical.
+ * Fortran ABI: scalars by pointer; complex scalar = __complex128 (re, im);
+ * character args followed by hidden trailing size_t lengths; lda/ldb/ldc
+ * in complex elements. The substrate works on __float128* (interleaved
+ * re,im), reached by reinterpreting the __complex128* a/b/c.
  */
 
 #include "xhemm_kernel.h"
+#include "xl3_complex.h"
 #include <ctype.h>
-#include <quadmath.h>
+#include <stddef.h>
+#include <stdlib.h>
 
-typedef xhemm_T T;
+typedef __float128 R;
 
-char xhemm_uplo(const char *p) {
-    return (char)toupper((unsigned char)*p);
+#define MR QBLAS_YGEMM_MR
+#define NR QBLAS_YGEMM_NR
+
+static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
+
+/* ── Block plan (mirrors ob xhemm.c lines 92-107) ───────────────── */
+void xhemm_make_plan(int M, int N, int side, int uplo, xhemm_plan_t *p)
+{
+    const int K = (side == 'L') ? M : N;
+    int MC0, KC, NC;
+    qblas_ygemm_blocks(&MC0, &KC, &NC);
+
+    int MC = MC0;
+    if (K > 0 && K <= KC) {
+        const long L2_TARGET_BYTES = 256L * 1024L;
+        long target_mc = L2_TARGET_BYTES / ((long)K * (long)(2 * sizeof(R)));
+        if (target_mc > MC) {
+            if (target_mc > 4L * MC0) target_mc = 4L * MC0;
+            MC = round_up((int)target_mc, MR);
+            if (MC < MC0) MC = MC0;
+        }
+    }
+
+    p->MC = MC; p->KC = KC; p->NC = NC;
+    p->ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(R);
+    p->bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(R);
+    p->side = side; p->uplo = uplo; p->K = K;
 }
 
-static const T ZERO = 0.0Q + 0.0Qi;
-static const T ONE  = 1.0Q + 0.0Qi;
-
-#define A_(i, j)  a[(size_t)(j) * lda + (i)]
-#define B_(i, j)  b[(size_t)(j) * ldb + (i)]
-#define C_(i, j)  c[(size_t)(j) * ldc + (i)]
-
-void xhemm_core(
-    int j0, int j1,
-    char SIDE, char UPLO,
-    int M, int N,
-    T alpha, T beta,
-    const T *a, int lda,
-    const T *b, int ldb,
-    T *c, int ldc)
+/* OCOPY(B). SIDE=L: regular factor → standard NCOPY (conj=0). SIDE=R: the
+ * Hermitian matrix → HEMM _oc copy reading the reflected half at (js, ls). */
+void xhemm_pack_B(const xhemm_plan_t *p,
+                  const R *B_eff, int ldb_eff,
+                  int js, int ls, int pb, int jb,
+                  R *Bp)
 {
-    for (int j = j0; j < j1; ++j) {
-        T *cj = c + (size_t)j * ldc;
-
-        if (beta == ZERO)      for (int i = 0; i < M; ++i) cj[i]  = ZERO;
-        else if (beta != ONE)  for (int i = 0; i < M; ++i) cj[i] *= beta;
-
-        if (SIDE == 'L') {
-            if (UPLO == 'L') {
-                for (int i = 0; i < M; ++i) {
-                    T temp1 = alpha * B_(i, j);
-                    T temp2 = ZERO;
-                    for (int k = 0; k < i; ++k) {
-                        /* A(k,i) = conj(A_stored(i,k)) — Hermitian reflection. */
-                        cj[k]  += temp1 * conjq(A_(i, k));
-                        temp2  += B_(k, j) * A_(i, k);
-                    }
-                    cj[i] += temp1 * crealq(A_(i, i)) + alpha * temp2;
-                }
-            } else {  /* UPLO = 'U' */
-                for (int i = M - 1; i >= 0; --i) {
-                    T temp1 = alpha * B_(i, j);
-                    T temp2 = ZERO;
-                    for (int k = i + 1; k < M; ++k) {
-                        /* Stored A(i,k) (since i<k for upper); A(k,i) = conj. */
-                        cj[k]  += temp1 * conjq(A_(i, k));
-                        temp2  += B_(k, j) * A_(i, k);
-                    }
-                    cj[i] += temp1 * crealq(A_(i, i)) + alpha * temp2;
-                }
-            }
-        } else {  /* SIDE = 'R' */
-            /* Diagonal of A is real. */
-            {
-                const T t = alpha * crealq(A_(j, j));
-                for (int i = 0; i < M; ++i) cj[i] += t * B_(i, j);
-            }
-            if (UPLO == 'L') {
-                for (int k = 0; k < j; ++k) {
-                    /* A(k,j) = conj(A_stored(j,k)) since j>k for lower. */
-                    const T akj = conjq(A_(j, k));
-                    if (akj != ZERO) {
-                        const T t = alpha * akj;
-                        for (int i = 0; i < M; ++i) cj[i] += t * B_(i, k);
-                    }
-                }
-                for (int k = j + 1; k < N; ++k) {
-                    /* A(k,j) stored directly for k>j in lower. */
-                    const T akj = A_(k, j);
-                    if (akj != ZERO) {
-                        const T t = alpha * akj;
-                        for (int i = 0; i < M; ++i) cj[i] += t * B_(i, k);
-                    }
-                }
-            } else {  /* UPLO = 'U' */
-                for (int k = 0; k < j; ++k) {
-                    /* A(k,j) stored directly for k<j in upper. */
-                    const T akj = A_(k, j);
-                    if (akj != ZERO) {
-                        const T t = alpha * akj;
-                        for (int i = 0; i < M; ++i) cj[i] += t * B_(i, k);
-                    }
-                }
-                for (int k = j + 1; k < N; ++k) {
-                    /* A(k,j) = conj(A_stored(j,k)) since j<k for upper. */
-                    const T akj = conjq(A_(j, k));
-                    if (akj != ZERO) {
-                        const T t = alpha * akj;
-                        for (int i = 0; i < M; ++i) cj[i] += t * B_(i, k);
-                    }
-                }
-            }
-        }
+    if (p->side == 'L') {
+        qblas_ygemm_ncopy(pb, jb, 0,
+                          &B_eff[((size_t)js * ldb_eff + ls) * 2], ldb_eff, Bp);
+    } else if (p->uplo == 'U') {
+        qblas_yhemm_ucopy_oc(pb, jb, B_eff, ldb_eff, js, ls, Bp);
+    } else {
+        qblas_yhemm_lcopy_oc(pb, jb, B_eff, ldb_eff, js, ls, Bp);
     }
 }
 
+/* One (m_lo..m_hi)×(js..) slab. SIDE=L: A is the Hermitian matrix → HEMM
+ * copy. SIDE=R: A is the regular factor → standard TCOPY (conj=0). */
+void xhemm_level3_slab(int m_lo, int m_hi, const xhemm_plan_t *p,
+                       R alphar, R alphai,
+                       const R *A_eff, int lda_eff, R *Ap,
+                       const R *Bp,
+                       int js, int ls, int pb, int jb,
+                       R *C, int ldc)
+{
+    const int MC = p->MC;
+    for (int is = m_lo; is < m_hi; is += MC) {
+        int min_i = (m_hi - is < MC) ? (m_hi - is) : MC;
+
+        if (p->side == 'L') {
+            if (p->uplo == 'U')
+                qblas_yhemm_ucopy(pb, min_i, A_eff, lda_eff, is, ls, Ap);
+            else
+                qblas_yhemm_lcopy(pb, min_i, A_eff, lda_eff, is, ls, Ap);
+        } else {
+            qblas_ygemm_tcopy(pb, min_i, 0,
+                              &A_eff[((size_t)ls * lda_eff + is) * 2], lda_eff, Ap);
+        }
+
+        qblas_ygemm_kernel(min_i, jb, pb, alphar, alphai,
+                           Ap, Bp,
+                           &C[((size_t)js * ldc + is) * 2], ldc);
+    }
+}
+
+/* ── Single-thread entry (int Fortran ABI) ────────────────────── */
 void xhemm_serial_(
     const char *side, const char *uplo,
     const int *m_, const int *n_,
-    const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
-    const T *beta_,
-    T *c, const int *ldc_,
+    const xhemm_T *alpha_,
+    const xhemm_T *a, const int *lda_,
+    const xhemm_T *b, const int *ldb_,
+    const xhemm_T *beta_,
+    xhemm_T *c, const int *ldc_,
     size_t side_len, size_t uplo_len)
 {
     (void)side_len; (void)uplo_len;
     const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = xhemm_uplo(side);
-    const char UPLO = xhemm_uplo(uplo);
+    const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
+    const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
+    const int sd = (char)toupper((unsigned char)*side);
+    const int up = (char)toupper((unsigned char)*uplo);
+    const int ldc = *ldc_;
 
-    if (M == 0 || N == 0) return;
+    if (M <= 0 || N <= 0) return;
 
-    if (alpha == ZERO) {
-        if (beta == ONE) return;
-        for (int j = 0; j < N; ++j) {
-            T *cj = c + (size_t)j * ldc;
-            if (beta == ZERO) for (int i = 0; i < M; ++i) cj[i] = ZERO;
-            else              for (int i = 0; i < M; ++i) cj[i] *= beta;
+    R *C = (R *)c;
+    qblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i, C, (ptrdiff_t)ldc);
+    if (alphar == 0.0Q && alphai == 0.0Q) return;
+
+    const R *A_eff = (const R *)((sd == 'L') ? a : b);
+    const R *B_eff = (const R *)((sd == 'L') ? b : a);
+    const int lda_eff = (sd == 'L') ? *lda_ : *ldb_;
+    const int ldb_eff = (sd == 'L') ? *ldb_ : *lda_;
+
+    xhemm_plan_t p;
+    xhemm_make_plan(M, N, sd, up, &p);
+    if (p.K == 0) return;
+
+    R *Ap = aligned_alloc(64, (p.ap_bytes + 63) & ~(size_t)63);
+    if (!Ap) return;
+    R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
+    if (!Bp) { free(Ap); return; }
+
+    for (int js = 0; js < N; js += p.NC) {
+        int jb = (N - js < p.NC) ? (N - js) : p.NC;
+        for (int ls = 0; ls < p.K; ls += p.KC) {
+            int pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
+            xhemm_pack_B(&p, B_eff, ldb_eff, js, ls, pb, jb, Bp);
+            xhemm_level3_slab(0, M, &p, alphar, alphai,
+                              A_eff, lda_eff, Ap, Bp, js, ls, pb, jb, C, ldc);
         }
-        return;
     }
 
-    xhemm_core(0, N, SIDE, UPLO, M, N, alpha, beta, a, lda, b, ldb, c, ldc);
+    free(Bp);
+    free(Ap);
 }
-
-#undef A_
-#undef B_
-#undef C_

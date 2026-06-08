@@ -1,77 +1,157 @@
 /*
- * xhemm_ — kind16 complex (`__complex128`) Hermitian matrix multiply, public
- * Fortran entry. THREADING ORCHESTRATION ONLY: all the math lives in
- * xhemm_serial.c (the per-column compute core and uplo decode), shared
- * through xhemm_kernel.h.
+ * xhemm_ — kind16 complex HEMM (COMPLEX(KIND=16) / __complex128), the
+ * public Fortran entry and threading-orchestration half of the xhemm
+ * overlay (see xhemm_kernel.h; all the math lives in xhemm_serial.c).
  *
- *   C := alpha · A · B + beta · C          (SIDE='L', A is M×M Hermitian)
- *   C := alpha · B · A + beta · C          (SIDE='R', A is N×N Hermitian)
+ *   C := alpha * A * B + beta * C    (SIDE=L, A Hermitian M×M)
+ *   C := alpha * B * A + beta * C    (SIDE=R, A Hermitian N×N)
  *
- * For UPLO='L' the lower triangle is stored. Off-diagonal entries reflect via
- * the Hermitian property A(k,i) = conj(A(i,k)); the diagonal of A is real —
- * only its real part is read.
+ * Parallel shape (the OpenBLAS level3.c SMP shape): one `omp parallel`
+ * block-partitions the M axis across the team (rounded to MR). Each thread
+ * keeps a private Ap pack buffer; the Bp panel is shared and packed once
+ * per (js, ls) under `omp single`, bracketed by an explicit barrier and the
+ * single's implicit end barrier. The beta pre-pass runs once up front.
  *
- * Unblocked Netlib reference (matches Netlib ZHEMM column ordering) with
- * omp-parallel-for over columns of C. Each column j is independent, so a
- * per-column static partition is bitwise-identical to the serial sweep. Falls
- * back to running serially when invoked from inside another parallel region.
- *
- * Fortran ABI: name lowercased + trailing underscore; scalars by pointer;
- * character args followed by hidden trailing size_t lengths; COMPLEX(KIND=16)
- * ↔ __complex128.
+ * Nesting guard: when xhemm_ is called from inside another routine's
+ * parallel region it delegates to xhemm_serial_ and opens no region.
  */
 
 #include "xhemm_kernel.h"
-#include <quadmath.h>
+#include "xl3_complex.h"
+#include <ctype.h>
+#include <stddef.h>
+#include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 
-#define XHEMM_OMP_MIN 32
+typedef __float128 R;
 
-typedef xhemm_T T;
+#define MR QBLAS_YGEMM_MR
 
-static const T ZERO = 0.0Q + 0.0Qi;
-static const T ONE  = 1.0Q + 0.0Qi;
+static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
 
 void xhemm_(
     const char *side, const char *uplo,
     const int *m_, const int *n_,
-    const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
-    const T *beta_,
-    T *c, const int *ldc_,
+    const xhemm_T *alpha_,
+    const xhemm_T *a, const int *lda_,
+    const xhemm_T *b, const int *ldb_,
+    const xhemm_T *beta_,
+    xhemm_T *c, const int *ldc_,
     size_t side_len, size_t uplo_len)
 {
+#ifdef _OPENMP
+    if (omp_in_parallel()) {
+        xhemm_serial_(side, uplo, m_, n_, alpha_, a, lda_, b, ldb_,
+                      beta_, c, ldc_, side_len, uplo_len);
+        return;
+    }
+#endif
     (void)side_len; (void)uplo_len;
     const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = xhemm_uplo(side);
-    const char UPLO = xhemm_uplo(uplo);
+    const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
+    const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
+    const int sd = (char)toupper((unsigned char)*side);
+    const int up = (char)toupper((unsigned char)*uplo);
+    const int ldc = *ldc_;
 
-    if (M == 0 || N == 0) return;
+    if (M <= 0 || N <= 0) return;
 
-    if (alpha == ZERO) {
-        if (beta == ONE) return;
+    R *C = (R *)c;
+    qblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i, C, (ptrdiff_t)ldc);
+    if (alphar == 0.0Q && alphai == 0.0Q) return;
+
+    const R *A_eff = (const R *)((sd == 'L') ? a : b);
+    const R *B_eff = (const R *)((sd == 'L') ? b : a);
+    const int lda_eff = (sd == 'L') ? *lda_ : *ldb_;
+    const int ldb_eff = (sd == 'L') ? *ldb_ : *lda_;
+
+    xhemm_plan_t p;
+    xhemm_make_plan(M, N, sd, up, &p);
+    if (p.K == 0) return;
+
 #ifdef _OPENMP
-        const int use_omp = (N >= XHEMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-        #pragma omp parallel for if(use_omp) schedule(static)
+    int nthreads = blas_omp_max_threads();
+    if (nthreads < 1) nthreads = 1;
+#else
+    int nthreads = 1;
 #endif
-        for (int j = 0; j < N; ++j) {
-            T *cj = c + (size_t)j * ldc;
-            if (beta == ZERO) for (int i = 0; i < M; ++i) cj[i] = ZERO;
-            else              for (int i = 0; i < M; ++i) cj[i] *= beta;
+
+    long mnk = (long)M * (long)N * (long)p.K;
+    if (mnk < 64L * 64L * 64L) nthreads = 1;
+
+    if (nthreads == 1) {
+        R *Ap = aligned_alloc(64, (p.ap_bytes + 63) & ~(size_t)63);
+        if (!Ap) return;
+        R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
+        if (!Bp) { free(Ap); return; }
+        for (int js = 0; js < N; js += p.NC) {
+            int jb = (N - js < p.NC) ? (N - js) : p.NC;
+            for (int ls = 0; ls < p.K; ls += p.KC) {
+                int pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
+                xhemm_pack_B(&p, B_eff, ldb_eff, js, ls, pb, jb, Bp);
+                xhemm_level3_slab(0, M, &p, alphar, alphai,
+                                  A_eff, lda_eff, Ap, Bp, js, ls, pb, jb, C, ldc);
+            }
         }
+        free(Bp);
+        free(Ap);
+        return;
+    }
+
+    R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
+    if (!Bp) return;
+    R **Ap_arr = calloc((size_t)nthreads, sizeof(R *));
+    if (!Ap_arr) { free(Bp); return; }
+    int alloc_ok = 1;
+    for (int t = 0; t < nthreads; ++t) {
+        Ap_arr[t] = aligned_alloc(64, (p.ap_bytes + 63) & ~(size_t)63);
+        if (!Ap_arr[t]) { alloc_ok = 0; break; }
+    }
+    if (!alloc_ok) {
+        for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
+        free(Ap_arr); free(Bp);
         return;
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= XHEMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-    #pragma omp parallel for if(use_omp) schedule(static)
+    #pragma omp parallel num_threads(nthreads)
 #endif
-    for (int j = 0; j < N; ++j)
-        xhemm_core(j, j + 1, SIDE, UPLO, M, N, alpha, beta, a, lda, b, ldb, c, ldc);
+    {
+#ifdef _OPENMP
+        int tid = omp_get_thread_num();
+        int nth = omp_get_num_threads();
+#else
+        int tid = 0, nth = 1;
+#endif
+        R *Ap = Ap_arr[tid];
+
+        int m_chunk = round_up((M + nth - 1) / nth, MR);
+        int m_lo = tid * m_chunk;
+        int m_hi = m_lo + m_chunk;
+        if (m_hi > M) m_hi = M;
+
+        for (int js = 0; js < N; js += p.NC) {
+            int jb = (N - js < p.NC) ? (N - js) : p.NC;
+            for (int ls = 0; ls < p.K; ls += p.KC) {
+                int pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
+#ifdef _OPENMP
+                #pragma omp barrier
+                #pragma omp single
+#endif
+                {
+                    xhemm_pack_B(&p, B_eff, ldb_eff, js, ls, pb, jb, Bp);
+                }
+                if (m_lo < m_hi)
+                    xhemm_level3_slab(m_lo, m_hi, &p, alphar, alphai,
+                                      A_eff, lda_eff, Ap, Bp, js, ls, pb, jb, C, ldc);
+            }
+        }
+    }
+
+    for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
+    free(Ap_arr);
+    free(Bp);
 }
