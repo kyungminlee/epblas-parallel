@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <omp.h>
 #include "../common/blas_omp.h"
-#define WTPMV_OMP_MIN 256
+#define WTPMV_OMP_MIN 128
 #define WTPMV_MAX_CPUS 256
 #endif
 
@@ -30,59 +30,99 @@ inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }
 }
 
 #ifdef _OPENMP
-/* Row-gather: x := A*x / A^T*x / A^H*x, in-place triangular packed. Each output
- * row r is an independent dot once original x is copied off. For UPLO='U' column
- * j starts at kk_j=j(j+1)/2 (diag at +j); for 'L' at kk_j=j*N-j(j-1)/2 (diag at
- * +0). NoTrans walks a column-jumping run (elements direct); Trans/ConjTrans
- * walks one contiguous run inside column r (conjugated when conj). Diagonal
- * scales x[r] when non-unit. xin is the contiguous copy, xout the destination.
- * Mirrors the serial accumulation order → within DD fuzz tol; serial bit-exact. */
-static void wtpmv_rowgather(bool upper, bool trans, bool conj, bool nounit,
-                            int n, int lo, int hi,
-                            const T *ap, const T *xin, T *xout, int incx)
+namespace {
+const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+/* Base index of packed column j. Upper: kk=j(j+1)/2, diag at kk+j, off-diag rows
+ * 0..j-1 at kk+0..j-1. Lower: kk=j*N-j(j-1)/2, diag at kk+0, rows j+1..N-1 at
+ * kk+1..N-1-j. So &ap[kk] is column j contiguous — identical to the dense
+ * (wtrmv) per-column kernel, just with packed offsets. */
+inline std::size_t kk_upper(std::ptrdiff_t j) {
+    return static_cast<std::size_t>(j) * (j + 1) / 2;
+}
+inline std::size_t kk_lower(std::ptrdiff_t j, std::ptrdiff_t n) {
+    return static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2;
+}
+}
+
+/* Threaded contiguous-x core, mirroring wtrmv_omp_contig with packed column
+ * offsets. The earlier row-gather threaded poorly: NoTrans walked a column-
+ * JUMPING run — cache-hostile — and the contiguous-block row partition load-
+ * imbalanced the triangular work. This keeps packed-column access contiguous and
+ * uses schedule(static,1) cyclic balancing:
+ *   - Trans/ConjTrans: each x[j] is an independent contiguous-column dot
+ *     (conjugated when conj; disjoint writes).
+ *   - NoTrans: per-thread accumulator + column AXPY, reduced at the end.
+ * DD addition reorders vs serial → within fuzz tol; serial stays bit-exact. */
+static bool wtpmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
+                             std::ptrdiff_t n, const T *ap, T *x, int nt)
 {
-    for (int r = lo; r < hi; ++r) {
-        if (upper) {
-            const std::size_t kk_r = static_cast<std::size_t>(r) * (r + 1) / 2;
-            T diagc = ap[kk_r + r]; if (conj) diagc = cconj(diagc);
-            T s = nounit ? cmul(diagc, xin[r]) : xin[r];
-            if (!trans) {                                    /* right: col-jump direct */
-                std::size_t kk_c = kk_r + (r + 1);
-                for (int c = r + 1; c < n; ++c) {
-                    s = cadd(s, cmul(ap[kk_c + r], xin[c]));
-                    kk_c += static_cast<std::size_t>(c + 1);
+    if (trans) {
+        T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        if (!y_buf) return false;
+        #pragma omp parallel num_threads(nt)
+        {
+            #pragma omp for schedule(static, 1)
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T *aj = upper ? &ap[kk_upper(j)] : &ap[kk_lower(j, n)];
+                T diagc = upper ? aj[j] : aj[0]; if (conj) diagc = cconj(diagc);
+                T s = nounit ? cmul(diagc, x[j]) : x[j];
+                if (upper) {
+                    for (std::ptrdiff_t c = 0; c < j; ++c) {
+                        T e = aj[c]; if (conj) e = cconj(e);
+                        s = cadd(s, cmul(e, x[c]));
+                    }
+                } else {
+                    for (std::ptrdiff_t c = j + 1; c < n; ++c) {
+                        T e = aj[c - j]; if (conj) e = cconj(e);
+                        s = cadd(s, cmul(e, x[c]));
+                    }
                 }
-            } else {                                         /* left: contiguous in col r */
-                for (int c = 0; c < r; ++c) {
-                    T e = ap[kk_r + c]; if (conj) e = cconj(e);
-                    s = cadd(s, cmul(e, xin[c]));
-                }
+                y_buf[j] = s;
             }
-            xout[(std::ptrdiff_t)r * incx] = s;
-        } else {
-            const std::size_t kk_r =
-                static_cast<std::size_t>(r) * n - static_cast<std::size_t>(r) * (r - 1) / 2;
-            T diagc = ap[kk_r]; if (conj) diagc = cconj(diagc);
-            T s = nounit ? cmul(diagc, xin[r]) : xin[r];
-            if (!trans) {                                    /* left: col-jump direct */
-                std::size_t kk_c = 0;
-                for (int c = 0; c < r; ++c) {
-                    s = cadd(s, cmul(ap[kk_c + (r - c)], xin[c]));
-                    kk_c += static_cast<std::size_t>(n - c);
-                }
-            } else {                                         /* right: contiguous in col r */
-                for (int c = r + 1; c < n; ++c) {
-                    T e = ap[kk_r + (c - r)]; if (conj) e = cconj(e);
-                    s = cadd(s, cmul(e, xin[c]));
-                }
-            }
-            xout[(std::ptrdiff_t)r * incx] = s;
+            #pragma omp for schedule(static)
+            for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = y_buf[i];
         }
+        std::free(y_buf);
+        return true;
+    } else {
+        const T one_cdd{ R{1.0, 0.0}, R{0.0, 0.0} };
+        T *y_priv_all = static_cast<T *>(
+            std::calloc((std::size_t)nt * (std::size_t)n, sizeof(T)));
+        if (!y_priv_all) return false;
+        #pragma omp parallel num_threads(nt)
+        {
+            const std::ptrdiff_t tid = omp_get_thread_num();
+            T *y_priv = &y_priv_all[(std::size_t)tid * n];  /* calloc-zeroed */
+            #pragma omp for schedule(static, 1)
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T xj = x[j];
+                if (upper) {
+                    const T *aj = &ap[kk_upper(j)];
+                    for (std::ptrdiff_t i = 0; i < j; ++i)
+                        y_priv[i] = cadd(y_priv[i], cmul(xj, aj[i]));
+                    y_priv[j] = cadd(y_priv[j], cmul(xj, nounit ? aj[j] : one_cdd));
+                } else {
+                    const T *aj = &ap[kk_lower(j, n)];
+                    y_priv[j] = cadd(y_priv[j], cmul(xj, nounit ? aj[0] : one_cdd));
+                    for (std::ptrdiff_t i = j + 1; i < n; ++i)
+                        y_priv[i] = cadd(y_priv[i], cmul(xj, aj[i - j]));
+                }
+            }
+            #pragma omp for schedule(static)
+            for (std::ptrdiff_t i = 0; i < n; ++i) {
+                T s = zero_cdd;
+                for (std::ptrdiff_t t = 0; t < nt; ++t)
+                    s = cadd(s, y_priv_all[(std::size_t)t * n + i]);
+                x[i] = s;
+            }
+        }
+        std::free(y_priv_all);
+        return true;
     }
 }
 
-/* Threaded in-place complex triangular packed matvec. Copy x to contiguous,
- * partition the output rows, write back. Returns true if handled. */
+/* Threaded in-place complex triangular packed matvec. incx==1 drives the
+ * contiguous core directly; strided gathers/scatters around it. */
 __attribute__((noinline)) static bool wtpmv_omp(
     bool upper, bool trans, bool conj, bool nounit, int n,
     const T *ap, T *x, int incx)
@@ -92,20 +132,18 @@ __attribute__((noinline)) static bool wtpmv_omp(
     int nthreads = blas_omp_max_threads();
     if (nthreads > WTPMV_MAX_CPUS) nthreads = WTPMV_MAX_CPUS;
 
+    if (incx == 1)
+        return wtpmv_omp_contig(upper, trans, conj, nounit, n, ap, x, nthreads);
+
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
     T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (!xbuf) return false;
     for (int i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
-
-    #pragma omp parallel num_threads(nthreads)
-    {
-        int tid = omp_get_thread_num();
-        int lo = (int)((long long)n * tid / nthreads);
-        int hi = (int)((long long)n * (tid + 1) / nthreads);
-        wtpmv_rowgather(upper, trans, conj, nounit, n, lo, hi, ap, xbuf, xbase, incx);
-    }
+    bool ok = wtpmv_omp_contig(upper, trans, conj, nounit, n, ap, xbuf, nthreads);
+    if (ok)
+        for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xbuf[i];
     std::free(xbuf);
-    return true;
+    return ok;
 }
 #endif
 

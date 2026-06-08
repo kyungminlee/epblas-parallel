@@ -11,7 +11,7 @@
 #include <cstdlib>
 #include <omp.h>
 #include "../common/blas_omp.h"
-#define MTPMV_OMP_MIN 256
+#define MTPMV_OMP_MIN 128
 #define MTPMV_MAX_CPUS 256
 #endif
 
@@ -26,51 +26,96 @@ inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.
 }
 
 #ifdef _OPENMP
-/* Row-gather: x := A*x (or A^T*x) in-place triangular packed matvec. Each output
- * row r is an independent dot once the original x is copied off. For UPLO='U'
- * column j starts at kk_j=j(j+1)/2 (diag at +j); for 'L' at kk_j=j*N-j(j-1)/2
- * (diag at +0). NoTrans walks a column-jumping run (offset += O(1)/step); Trans
- * walks one contiguous run inside column r. xin is the contiguous copy, xout the
- * destination. Mirrors the serial accumulation order → within DD fuzz tol; the
- * serial path stays bit-exact. */
-static void mtpmv_rowgather(bool upper, bool trans, bool nounit,
-                            int n, int lo, int hi,
-                            const T *ap, const T *xin, T *xout, int incx)
+namespace {
+const T zero_dd{0.0, 0.0};
+/* Base index of packed column j (its first stored element). Upper: kk=j(j+1)/2,
+ * diag at kk+j, off-diag rows 0..j-1 at kk+0..j-1. Lower: kk=j*N-j(j-1)/2, diag
+ * at kk+0, rows j+1..N-1 at kk+1..N-1-j. So &ap[kk] is column j contiguous —
+ * identical access to the dense (mtrmv) per-column kernel, just with packed
+ * offsets, so the threading matches mtrmv's contiguous-column scheme. */
+inline std::size_t kk_upper(std::ptrdiff_t j) {
+    return static_cast<std::size_t>(j) * (j + 1) / 2;
+}
+inline std::size_t kk_lower(std::ptrdiff_t j, std::ptrdiff_t n) {
+    return static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2;
+}
+}
+
+/* Threaded contiguous-x core, mirroring mtrmv_omp_contig but with packed column
+ * offsets. The earlier row-gather threaded poorly: NoTrans walked a column-
+ * JUMPING run (offset += c+1 per step) — cache-hostile — and the contiguous-
+ * block row partition load-imbalanced the triangular work. This keeps packed-
+ * column access contiguous and uses schedule(static,1) cyclic balancing:
+ *   - Trans: each x[j] is an independent contiguous-column dot (disjoint writes).
+ *   - NoTrans: per-thread accumulator + column AXPY, reduced at the end.
+ * DD addition reorders vs serial → within fuzz tol; serial stays bit-exact.
+ * Returns true on success, false if a scratch alloc failed. */
+static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
+                             std::ptrdiff_t n, const T *ap, T *x, int nt)
 {
-    for (int r = lo; r < hi; ++r) {
-        if (upper) {
-            const std::size_t kk_r = static_cast<std::size_t>(r) * (r + 1) / 2;
-            T s = nounit ? ap[kk_r + r] * xin[r] : xin[r];
-            if (!trans) {                                    /* right: col-jump */
-                std::size_t kk_c = kk_r + (r + 1);
-                for (int c = r + 1; c < n; ++c) {
-                    s = s + ap[kk_c + r] * xin[c];
-                    kk_c += static_cast<std::size_t>(c + 1);
+    if (trans) {
+        T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        if (!y_buf) return false;
+        #pragma omp parallel num_threads(nt)
+        {
+            #pragma omp for schedule(static, 1)
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T *aj = upper ? &ap[kk_upper(j)] : &ap[kk_lower(j, n)];
+                T s = zero_dd;
+                if (upper) {
+                    T temp = nounit ? (aj[j] * x[j]) : x[j];
+                    for (std::ptrdiff_t c = 0; c < j; ++c) s = s + aj[c] * x[c];
+                    y_buf[j] = temp + s;
+                } else {
+                    T temp = nounit ? (aj[0] * x[j]) : x[j];
+                    for (std::ptrdiff_t c = j + 1; c < n; ++c) s = s + aj[c - j] * x[c];
+                    y_buf[j] = temp + s;
                 }
-            } else {                                         /* left: contiguous in col r */
-                for (int c = 0; c < r; ++c) s = s + ap[kk_r + c] * xin[c];
             }
-            xout[(std::ptrdiff_t)r * incx] = s;
-        } else {
-            const std::size_t kk_r =
-                static_cast<std::size_t>(r) * n - static_cast<std::size_t>(r) * (r - 1) / 2;
-            T s = nounit ? ap[kk_r] * xin[r] : xin[r];
-            if (!trans) {                                    /* left: col-jump */
-                std::size_t kk_c = 0;
-                for (int c = 0; c < r; ++c) {
-                    s = s + ap[kk_c + (r - c)] * xin[c];
-                    kk_c += static_cast<std::size_t>(n - c);
-                }
-            } else {                                         /* right: contiguous in col r */
-                for (int c = r + 1; c < n; ++c) s = s + ap[kk_r + (c - r)] * xin[c];
-            }
-            xout[(std::ptrdiff_t)r * incx] = s;
+            #pragma omp for schedule(static)
+            for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = y_buf[i];
         }
+        std::free(y_buf);
+        return true;
+    } else {
+        const T one_dd{1.0, 0.0};
+        T *y_priv_all = static_cast<T *>(
+            std::calloc((std::size_t)nt * (std::size_t)n, sizeof(T)));
+        if (!y_priv_all) return false;
+        #pragma omp parallel num_threads(nt)
+        {
+            const std::ptrdiff_t tid = omp_get_thread_num();
+            T *y_priv = &y_priv_all[(std::size_t)tid * n];  /* calloc-zeroed */
+            #pragma omp for schedule(static, 1)
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T xj = x[j];
+                if (upper) {
+                    const T *aj = &ap[kk_upper(j)];
+                    for (std::ptrdiff_t i = 0; i < j; ++i)
+                        y_priv[i] = y_priv[i] + xj * aj[i];
+                    y_priv[j] = y_priv[j] + xj * (nounit ? aj[j] : one_dd);
+                } else {
+                    const T *aj = &ap[kk_lower(j, n)];
+                    y_priv[j] = y_priv[j] + xj * (nounit ? aj[0] : one_dd);
+                    for (std::ptrdiff_t i = j + 1; i < n; ++i)
+                        y_priv[i] = y_priv[i] + xj * aj[i - j];
+                }
+            }
+            #pragma omp for schedule(static)
+            for (std::ptrdiff_t i = 0; i < n; ++i) {
+                T s = zero_dd;
+                for (std::ptrdiff_t t = 0; t < nt; ++t)
+                    s = s + y_priv_all[(std::size_t)t * n + i];
+                x[i] = s;
+            }
+        }
+        std::free(y_priv_all);
+        return true;
     }
 }
 
-/* Threaded in-place triangular packed matvec. Copy x to contiguous, partition
- * the output rows, write back. Returns true if handled. */
+/* Threaded in-place triangular packed matvec. incx==1 drives the contiguous
+ * core directly; strided gathers/scatters around it. Returns true if handled. */
 __attribute__((noinline)) static bool mtpmv_omp(
     bool upper, bool trans, bool nounit, int n,
     const T *ap, T *x, int incx)
@@ -80,20 +125,18 @@ __attribute__((noinline)) static bool mtpmv_omp(
     int nthreads = blas_omp_max_threads();
     if (nthreads > MTPMV_MAX_CPUS) nthreads = MTPMV_MAX_CPUS;
 
+    if (incx == 1)
+        return mtpmv_omp_contig(upper, trans, nounit, n, ap, x, nthreads);
+
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
     T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (!xbuf) return false;
     for (int i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
-
-    #pragma omp parallel num_threads(nthreads)
-    {
-        int tid = omp_get_thread_num();
-        int lo = (int)((long long)n * tid / nthreads);
-        int hi = (int)((long long)n * (tid + 1) / nthreads);
-        mtpmv_rowgather(upper, trans, nounit, n, lo, hi, ap, xbuf, xbase, incx);
-    }
+    bool ok = mtpmv_omp_contig(upper, trans, nounit, n, ap, xbuf, nthreads);
+    if (ok)
+        for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xbuf[i];
     std::free(xbuf);
-    return true;
+    return ok;
 }
 #endif
 
