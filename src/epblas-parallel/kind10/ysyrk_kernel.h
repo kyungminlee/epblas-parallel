@@ -19,7 +19,7 @@
  * worker to a dynamic-scheduled team (triangular work is uneven, so
  * dynamic balances better than static). ysyrk_block runs its trailing
  * update through ygemm_serial — opening a nested ygemm team would trip the
- * libgomp barrier wedge (see memory project-etrsm-omp4-wedge).
+ * libgomp barrier wedge.
  */
 #ifndef EPBLAS_PARALLEL_KIND10_YSYRK_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_YSYRK_KERNEL_H

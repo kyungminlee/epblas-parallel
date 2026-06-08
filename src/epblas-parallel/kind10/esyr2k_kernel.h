@@ -15,7 +15,7 @@
  *                      slice of the output, UPLO-clipped per N-band). Delegates
  *                      to esyr2k_serial when called from inside another
  *                      routine's parallel region (the libgomp barrier-wedge
- *                      guard, memory project-etrsm-omp4-wedge).
+ *                      guard).
  *
  * SYR2K is a faithful port of OpenBLAS DSYR2K:
  *   C := alpha·(A·B^T + B·A^T) + beta·C   (trans='N', A,B are N×K)

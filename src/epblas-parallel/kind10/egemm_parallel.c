@@ -11,7 +11,7 @@
  *     etrmm, egemmtr, esyrk, esymm, esyr2k — runs egemm trailing updates
  *     inside its own `omp parallel`): open NO nested region. Run the
  *     single-thread kernel in the calling thread. This is the cure for
- *     the libgomp barrier wedge (see memory project-etrsm-omp4-wedge):
+ *     the libgomp barrier wedge:
  *     the old code opened a nested team-of-1 GOMP_parallel per trailing
  *     block, and that create/destroy churn under libgomp's default
  *     barrier spin window tripped a lost-wakeup race that livelocked

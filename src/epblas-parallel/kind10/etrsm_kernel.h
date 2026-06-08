@@ -32,7 +32,7 @@
  * egemm_beta_prepass, egemm_round_up, egemm_trans_code.
  *
  * Nested calls must run serial: opening a nested OpenMP region trips the
- * libgomp barrier wedge (see memory project-etrsm-omp4-wedge). The entry
+ * libgomp barrier wedge. The entry
  * guard in etrsm_parallel.c is the single nesting gate.
  */
 #ifndef EPBLAS_PARALLEL_KIND10_ETRSM_KERNEL_H

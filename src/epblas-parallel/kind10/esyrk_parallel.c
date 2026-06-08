@@ -19,7 +19,7 @@
  * Nesting guard: when esyrk_ is called from inside another routine's parallel
  * region, delegate to esyrk_serial and open no team of our own — calling only
  * the *serial* kernel primitives means no nested team either way, the libgomp
- * barrier-wedge cure (memory project-etrsm-omp4-wedge).
+ * barrier-wedge cure.
  */
 
 #include "esyrk_kernel.h"

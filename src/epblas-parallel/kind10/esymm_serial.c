@@ -16,7 +16,7 @@
  * are the serial egemm primitives from egemm_kernel.h — calling them
  * (not egemm_) keeps esymm free of any nested OpenMP team, so it is safe
  * to run inside another routine's parallel region (the libgomp barrier
- * wedge guard, memory project-etrsm-omp4-wedge).
+ * wedge guard).
  */
 
 #include "esymm_kernel.h"

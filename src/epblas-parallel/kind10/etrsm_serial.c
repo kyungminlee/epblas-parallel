@@ -17,7 +17,7 @@
  * directly — see etrsm_kernel.h for why the rest is NOT shared with egemm.
  *
  * Contains no `#pragma omp`. The libgomp barrier-wedge nesting guard
- * lives in etrsm_parallel.c (memory project-etrsm-omp4-wedge).
+ * lives in etrsm_parallel.c.
  */
 
 #include <stddef.h>

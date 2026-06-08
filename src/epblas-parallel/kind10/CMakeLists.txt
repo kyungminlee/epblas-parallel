@@ -87,7 +87,7 @@ set(_kernels
 # L3 routines that call it from inside their own parallel region (egemm/
 # ygemm trailing updates), and (b) the fully-serial path its own driver
 # delegates to under the omp_in_parallel() nesting guard — opening a nested
-# team would trip the libgomp barrier wedge (memory project-etrsm-omp4-wedge).
+# team would trip the libgomp barrier wedge.
 # Only the bare routine names (egemm, ygemm, etrsm, …) are Fortran-callable
 # overlays — the _serial workers are internal — so these sources are added
 # to the build but NOT name-derived into the routine list; the routine names
@@ -160,7 +160,7 @@ target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
     # and lands a few hot loops off a 16-byte boundary (ieamax mod16 0->8,
     # eynrm2 loop-body fetch). -falign-loops=16 pins them back, restoring
     # parity; it is neutral on the routines that were already aligned and worse
-    # at 32 (over-align). See memory project_ptrdiff_conversion_regressors.
+    # at 32 (over-align).
     -falign-loops=16
     # Use Fortran-style complex arithmetic (skip NaN/Inf checks).
     # Without this, gcc emits __mulxc3/__divxc3 library calls for

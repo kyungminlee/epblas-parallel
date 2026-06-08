@@ -14,8 +14,7 @@
  *                     packed under `omp single`, each thread an M-row slice
  *                     of the output, UPLO-clipped per N-band). Delegates to
  *                     esyrk_serial when called from inside another routine's
- *                     parallel region (the libgomp barrier-wedge guard,
- *                     memory project-etrsm-omp4-wedge).
+ *                     parallel region (the libgomp barrier-wedge guard).
  *
  * SYRK is a faithful port of OpenBLAS DSYRK: C := alpha·A·A^T + beta·C (or
  * A^T·A). Only the UPLO triangle of C is touched. It reuses the SHARED

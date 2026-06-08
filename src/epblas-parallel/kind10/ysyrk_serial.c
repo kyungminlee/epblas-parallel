@@ -7,7 +7,7 @@
  * scalar diagonal + ygemm trailing. The trailing update runs through
  * ygemm_serial (NOT ygemm_): when ysyrk_block runs inside the team
  * ysyrk_parallel.c opened, a nested ygemm team would trip the libgomp
- * barrier wedge (memory project-etrsm-omp4-wedge).
+ * barrier wedge.
  */
 
 #include "ysyrk_kernel.h"

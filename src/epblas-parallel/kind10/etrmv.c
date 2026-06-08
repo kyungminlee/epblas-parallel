@@ -293,8 +293,7 @@ void etrmv_(
                  * dominates this light real scatter — the residual int->
                  * ptrdiff_t regression on the un-unrolled single-column
                  * form (the running-index hoist made it WORSE; halving x
-                 * traffic is the real lever). Sub-class C / Rule 21.
-                 * memory project_ptrdiff_conversion_regressors. */
+                 * traffic is the real lever). Sub-class C / Rule 21. */
                 ptrdiff_t j = N - 1;
                 for (; j - 1 >= 0; j -= 2) {
                     const T t0 = x[kx + j * incx];

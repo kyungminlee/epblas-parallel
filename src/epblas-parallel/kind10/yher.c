@@ -85,8 +85,7 @@ void yher_(
 #undef YHER_BODY
     } else {
         /* General-stride fallback — hoist the matrix column to aj[i] and
-         * walk the strided vector with a running index (Class-B fix,
-         * memory project_ptrdiff_conversion_regressors). */
+         * walk the strided vector with a running index (Class-B fix). */
         const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         ptrdiff_t jx = kx;
         for (ptrdiff_t j = 0; j < N; ++j) {

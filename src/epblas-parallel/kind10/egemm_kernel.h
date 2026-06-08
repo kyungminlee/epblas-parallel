@@ -13,9 +13,9 @@
  *   egemm_parallel.c  The public Fortran entry `egemm_` — threading
  *                     orchestration only. Delegates to egemm_serial when
  *                     called from inside a parallel region (the nested
- *                     case that used to trip the libgomp barrier wedge,
- *                     see memory project-etrsm-omp4-wedge); otherwise
- *                     fans these same kernel pieces across an OpenMP team.
+ *                     case that used to trip the libgomp barrier wedge);
+ *                     otherwise fans these same kernel pieces across an
+ *                     OpenMP team.
  *
  * Everything here is internal to the overlay. `egemm_serial` keeps the
  * exact Fortran-ABI signature of egemm_ so callers already inside a

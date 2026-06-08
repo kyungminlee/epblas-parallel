@@ -14,7 +14,7 @@
  *                      guard that delegates to `ygemm_serial` when called
  *                      from inside another routine's parallel region
  *                      (opening a nested team there trips the libgomp
- *                      barrier wedge — see memory project-etrsm-omp4-wedge).
+ *                      barrier wedge).
  *
  * The cores are range-parameterized over the column (j) axis of C —
  * [j_start, j_end). The serial entry calls them over the full range; the

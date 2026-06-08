@@ -242,8 +242,7 @@ void etrsv_serial_(
         }
     } else {
         /* General-stride fallback — hoist matrix column to ai[k] and
-         * walk the strided vector with a running index (Class-B fix,
-         * memory project_ptrdiff_conversion_regressors). */
+         * walk the strided vector with a running index (Class-B fix). */
         const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'L') {

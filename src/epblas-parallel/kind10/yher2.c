@@ -147,8 +147,7 @@ void yher2_(
         }
     } else {
         /* General-stride fallback — hoist the matrix column to aj[i] and
-         * walk the strided vectors with running indices (Class-B fix,
-         * memory project_ptrdiff_conversion_regressors). The off-diagonal run
+         * walk the strided vectors with running indices (Class-B fix). The off-diagonal run
          * is carved into a noinline helper for the same reason the contiguous
          * path is (project_x87_accumulator_spill variant 3): inlined amid the
          * strided/uplo scaffolding gcc spills the complex temporaries t1/t2,

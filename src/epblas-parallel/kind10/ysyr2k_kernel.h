@@ -18,8 +18,7 @@
  * by diagonal block (jc): the serial entry walks the blocks in a plain loop;
  * the parallel driver hands the same per-block worker to a dynamic-scheduled
  * team. ysyr2k_block runs its trailing updates through ygemm_serial —
- * opening a nested ygemm team would trip the libgomp barrier wedge (see
- * memory project-etrsm-omp4-wedge).
+ * opening a nested ygemm team would trip the libgomp barrier wedge.
  */
 #ifndef EPBLAS_PARALLEL_KIND10_YSYR2K_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_YSYR2K_KERNEL_H

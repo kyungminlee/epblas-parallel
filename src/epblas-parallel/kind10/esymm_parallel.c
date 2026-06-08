@@ -14,7 +14,7 @@
  * Nesting guard: when esymm_ is called from inside another routine's parallel
  * region, delegate to esymm_serial and open no team of our own — calling only
  * the *serial* egemm kernel primitives (never egemm_) means no nested team
- * either way, the libgomp barrier-wedge cure (memory project-etrsm-omp4-wedge).
+ * either way, the libgomp barrier-wedge cure.
  */
 
 #include "esymm_kernel.h"

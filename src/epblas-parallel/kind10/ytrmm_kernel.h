@@ -19,7 +19,7 @@
  * 'C' variants share one core each, selected by a runtime conj_flag.
  *
  * Nested calls must run serial: opening a nested OpenMP region here trips
- * the libgomp barrier wedge (see memory project-etrsm-omp4-wedge).
+ * the libgomp barrier wedge.
  */
 #ifndef EPBLAS_PARALLEL_KIND10_YTRMM_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_YTRMM_KERNEL_H

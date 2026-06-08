@@ -6,7 +6,7 @@
  * Blocked "read A_IK once, use it twice" recipe (see ysymm_kernel.h). The
  * trailing updates run through ygemm_serial (NOT ygemm_): when a panel
  * worker runs inside the team ysymm_parallel.c opened, a nested ygemm team
- * would trip the libgomp barrier wedge (memory project-etrsm-omp4-wedge).
+ * would trip the libgomp barrier wedge.
  */
 
 #include "ysymm_kernel.h"

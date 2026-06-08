@@ -11,7 +11,7 @@
  * Nesting guard: when ysyrk_ is itself called from inside another
  * routine's parallel region, it delegates to ysyrk_serial and opens no
  * region of its own — opening a nested team here trips the libgomp barrier
- * wedge (memory project-etrsm-omp4-wedge).
+ * wedge.
  */
 
 #include <stddef.h>

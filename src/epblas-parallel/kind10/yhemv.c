@@ -153,8 +153,7 @@ void yhemv_(
         }
     } else {
         /* General-stride fallback — hoist the matrix column to ai[k] and
-         * walk the strided vectors with running indices (Class-B fix,
-         * memory project_ptrdiff_conversion_regressors). */
+         * walk the strided vectors with running indices (Class-B fix). */
         const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         if (UPLO == 'L') {

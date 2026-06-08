@@ -25,7 +25,7 @@
  * (egemm_choose_blocks / egemm_round_up). Calling only these *serial*
  * primitives (never the threaded entries) keeps esyrk free of any nested
  * OpenMP team, so it is safe inside another routine's parallel region (the
- * libgomp barrier-wedge guard, memory project-etrsm-omp4-wedge).
+ * libgomp barrier-wedge guard).
  */
 
 #include "esyrk_kernel.h"

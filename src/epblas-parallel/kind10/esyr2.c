@@ -77,8 +77,7 @@ void esyr2_(
 #undef ESYR2_BODY
     } else {
         /* General-stride fallback — hoist the matrix column to aj[i] and
-         * walk the strided vectors with running indices (Class-B fix,
-         * memory project_ptrdiff_conversion_regressors). */
+         * walk the strided vectors with running indices (Class-B fix). */
         const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         ptrdiff_t jx = kx, jy = ky;

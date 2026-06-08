@@ -8,7 +8,7 @@
  * two ygemm trailing calls per block. The trailing updates run through
  * ygemm_serial (NOT ygemm_): when ysyr2k_block runs inside the team
  * ysyr2k_parallel.c opened, a nested ygemm team would trip the libgomp
- * barrier wedge (memory project-etrsm-omp4-wedge).
+ * barrier wedge.
  */
 
 #include "ysyr2k_kernel.h"

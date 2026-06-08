@@ -20,7 +20,7 @@
  * each, selected by a runtime conj_flag.
  *
  * Nested calls must run serial: opening a nested OpenMP region here trips
- * the libgomp barrier wedge (see memory project-etrsm-omp4-wedge). The
+ * the libgomp barrier wedge. The
  * entry guard is the single nesting gate; the cores never touch OpenMP.
  */
 #ifndef EPBLAS_PARALLEL_KIND10_YTRSM_KERNEL_H

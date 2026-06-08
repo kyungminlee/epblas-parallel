@@ -19,7 +19,7 @@
  *                      `omp_in_parallel()` guard that delegates to
  *                      `etrmm_serial` when called from inside another
  *                      routine's parallel region (libgomp barrier-wedge
- *                      guard, memory project-etrsm-omp4-wedge).
+ *                      guard).
  *
  * TRMM as alpha-prescale + overwrite nest: alpha pre-scales B in place
  * (egemm_beta_prepass), then the L3 nest runs with kernel-alpha = 1.0L,

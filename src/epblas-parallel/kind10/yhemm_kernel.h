@@ -19,7 +19,7 @@
  * Same blocked structure as ysymm, but Hermitian: the reflection gemm uses
  * 'C' and the scalar diagonal block keeps the diagonal real. The trailing
  * updates run through ygemm_serial — opening a nested ygemm team would trip
- * the libgomp barrier wedge (see memory project-etrsm-omp4-wedge).
+ * the libgomp barrier wedge.
  */
 #ifndef EPBLAS_PARALLEL_KIND10_YHEMM_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_YHEMM_KERNEL_H
