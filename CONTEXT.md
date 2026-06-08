@@ -154,7 +154,7 @@ epblas-parallel/
 ├── tests/
 │   ├── epblas-parallel/
 │   └── epblas-openblas/
-├── doc/
+├── docs/
 ├── scripts/
 └── reports/
 ```

@@ -6,7 +6,7 @@
 > - `tests/blas_parallel/{consistency,bench,perf}/` → `tests/epblas-parallel/{consistency,bench,perf}/`
 > - `/tmp/stage-{e,q,m}/blas/src/` → `blas/src/` in the sibling `eplinalg` repo (migrated Fortran reference)
 > - `/tmp/stage-{e,q,m}/parallel_blas/` → `src/epblas-parallel/...` here
-> - `doc/parallel-blas-optimization-findings-20260515.md` and any "Rule N / Addendum N" citations → `doc/optimization-findings.md` here.
+> - `doc/parallel-blas-optimization-findings-20260515.md` and any "Rule N / Addendum N" citations → `docs/optimization-findings.md` here.
 
 Triggered by the loop-direction survey work — when we extended
 `fuzz_trsv/trmv` to randomize incx and re-ran, the existing fuzz

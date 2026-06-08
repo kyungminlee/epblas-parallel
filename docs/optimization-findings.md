@@ -1900,7 +1900,7 @@ otherwise-parity row matters more than three routines stuck at 0.95×.
     N=512 and similar for `xtrsv`, `mtrsv`. kind10 `*trsv`/`*trmv`
     converted; kind16 + multifloats deliberately kept forward.
     Full per-site survey and measurement table: see
-    `doc/archive/loop-direction-survey-20260518.md`.
+    `docs/archive/loop-direction-survey-20260518.md`.
 
 ## Addendum 19: ytrsv U-T K-unroll asymmetry — conj path resists the trick (2026-05-18)
 

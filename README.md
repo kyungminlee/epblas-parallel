@@ -13,7 +13,7 @@ as **separate CMake packages**:
   overlay. C/C++/OpenMP kernels for every routine, all three targets
   (`kind10`, `kind16`, `multifloats`). Ships the per-precision composite
   `epblas-parallel::{e,q,m}blas` as a drop-in replacement for
-  `eplinalg::{e,q,m}blas`. See `doc/design.md`.
+  `eplinalg::{e,q,m}blas`. See `docs/design.md`.
 - **`epblas-openblas`** — experimental reference library. OpenBLAS D/Z
   port to extended precision, kind10 only. Used purely as an A/B
   comparison subject against `epblas-parallel` and the migrated baseline.
@@ -179,8 +179,8 @@ cmake/
 ├── FortranCompiler.cmake     ← copy of eplinalg's helper (sync by hand)
 ├── epblas-parallelConfig.cmake.in
 └── epblas-openblasConfig.cmake.in
-docs/adr/                 ← architectural decision records
-doc/                      ← design and optimization-findings docs
+docs/                     ← design, optimization-findings
+└── adr/                  ← architectural decision records
 src/
 ├── epblas-parallel/<target>/
 └── epblas-openblas/<target>/  ← kind10 only
