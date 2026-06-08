@@ -19,7 +19,6 @@ using T = mf::float64x2;
 
 namespace {
 #define MGER_OMP_MIN 64
-const T zero_dd{0.0, 0.0};
 inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD

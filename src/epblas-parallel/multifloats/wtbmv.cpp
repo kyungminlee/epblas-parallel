@@ -19,7 +19,6 @@ namespace {
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
-const R rzero{0.0, 0.0};
 inline bool dd_iszero(const R &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
 inline T cmul(T const &a, T const &b) {

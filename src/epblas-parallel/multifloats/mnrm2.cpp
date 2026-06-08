@@ -16,14 +16,6 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
-namespace {
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_gt(T a, T b) {
-    return a.limbs[0] > b.limbs[0]
-        || (a.limbs[0] == b.limbs[0] && a.limbs[1] > b.limbs[1]);
-}
-}
-
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
 

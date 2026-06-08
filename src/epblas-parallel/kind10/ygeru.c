@@ -4,7 +4,6 @@
  */
 
 #include <stddef.h>
-#include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"

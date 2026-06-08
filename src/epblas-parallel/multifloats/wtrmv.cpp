@@ -21,7 +21,6 @@ namespace {
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
-const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 inline bool cdd_iszero(const T &x) {
     return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
         && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;

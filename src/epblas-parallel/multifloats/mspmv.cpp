@@ -23,7 +23,6 @@ inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
 const T zero_dd{0.0, 0.0};
-const T one_dd{1.0, 0.0};
 inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 }

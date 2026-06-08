@@ -13,7 +13,6 @@ using T = mf::complex64x2;
 
 namespace {
 inline bool dd_eq0(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_eq0(T const &z) { return dd_eq0(z.re) && dd_eq0(z.im); }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };

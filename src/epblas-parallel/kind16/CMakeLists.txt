@@ -83,9 +83,11 @@ set(_kernels
 # (qtrsm/xtrsm trailing GEMM updates call qgemm_serial_/xgemm_serial_), and
 # (b) the fully-serial path its own driver delegates to under the
 # omp_in_parallel() nesting guard. The real-quad routines pack inline in
-# their *_serial.c; the complex-quad routines (xgemm/xsymm/xhemm/xherk/xsyrk
-# …) share the packed substrate xl3_complex.c (a faithful par-side copy of
-# the epblas-openblas common substrate, mirroring kind10's etri_kernel.c).
+# their *_serial.c; the complex-quad routines xgemm/xsymm/xhemm share the
+# packed substrate xl3_complex.c (a faithful par-side copy of the
+# epblas-openblas common substrate, mirroring kind10's etri_kernel.c).
+# xherk/xsyrk do not use the substrate directly — they route their trailing
+# rank-k update through xgemm_serial_.
 # Only the bare routine names (qgemm, xgemm, …) are Fortran-callable
 # overlays, so these sources are added to the build but NOT name-derived;
 # the names are appended by hand below (mirrors kind10).

@@ -33,7 +33,6 @@ inline char up(const char *p) {
 }
 
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
-const T one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
 
 inline bool cdd_iszero(const T &x) {
     return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0

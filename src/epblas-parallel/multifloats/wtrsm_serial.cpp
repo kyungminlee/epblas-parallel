@@ -67,7 +67,6 @@ inline bool cdd_isone(const T &x) {
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T csub(T const &a, T const &b) { return T{ a.re - b.re, a.im - b.im }; }
 inline T cconj(T const &a) { return T{ a.re, -a.im }; }
 inline T cdiv(T const &a, T const &b) {

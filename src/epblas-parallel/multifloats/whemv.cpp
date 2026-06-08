@@ -29,7 +29,6 @@ inline char up(const char *p) {
 }
 const R rzero{0.0, 0.0};
 const T zero_cdd{ rzero, rzero };
-const T one_cdd { R{1.0, 0.0}, rzero };
 
 inline bool dd_iszero(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
