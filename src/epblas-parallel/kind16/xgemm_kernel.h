@@ -1,56 +1,72 @@
 /*
- * xgemm_kernel.h — internal kernel surface shared by the two translation
- * units the kind16 complex xgemm overlay is split across:
+ * xgemm_kernel.h — internal shared declarations for the kind16 complex
+ * GEMM overlay (COMPLEX(KIND=16) / __complex128), split across two
+ * translation units:
  *
- *   xgemm_serial.c    The pure single-thread complex GEMM (no OpenMP). Owns
- *                     the per-tile compute kernel, the trans-char decode, and
- *                     the public `xgemm_serial_` entry. Called directly by
- *                     the L3 routines that run xgemm trailing updates inside
- *                     their OWN parallel region, and by xgemm_ as its
- *                     serial branch.
+ *   xgemm_serial.c   — all the math: the block plan, the per-M-slab level3
+ *                      worker (ICOPY(A) + microkernel), the B-panel packer,
+ *                      and the pure-serial Fortran-ABI entry `xgemm_serial_`.
+ *                      No `#pragma omp`. Called directly by the complex L3
+ *                      routines (xtrsm, xtrmm, xsyrk, … ) that run xgemm
+ *                      trailing updates inside their OWN parallel region.
+ *   xgemm_parallel.c — the public Fortran entry `xgemm_`: threading
+ *                      orchestration only (M-axis partition with per-thread
+ *                      Ap and shared Bp), with an `omp_in_parallel()` guard
+ *                      that delegates to `xgemm_serial_` when called from
+ *                      inside another routine's parallel region.
  *
- *   xgemm_parallel.c  The public Fortran entry `xgemm_` — threading
- *                     orchestration only (2D tile grid, env-tunable tile
- *                     side). Delegates to the serial kernel when called from
- *                     inside a parallel region; otherwise fans the tile grid
- *                     across an OpenMP team.
+ * Both drivers run the OpenBLAS GotoBLAS blocking nest over the shared
+ * packed substrate (xl3_complex.c): qblas_ygemm_beta / _blocks / _ncopy /
+ * _tcopy / _kernel. __complex128 has no SIMD path — every multiply lowers to
+ * a libquadmath soft-float call — but the 2×2 register microkernel forms
+ * four independent accumulator chains that overlap that call latency, which
+ * the plain reference rank-1 loop cannot. This is a faithful port of the ob
+ * clone src/epblas-openblas/kind16/xgemm.c.
  *
- * kind16 complex is arithmetic-bound (__complex128 lowers to libquadmath
- * calls), so the overlay uses the unblocked reference algorithm with no
- * packing — the shared surface is just the trans decode and the per-tile
- * compute kernel. TRANSA / TRANSB independently in {N, T, C}; conjugation
- * under 'C' is applied at element access time.
+ * `xgemm_serial_` keeps the exact int Fortran-ABI signature of xgemm_ so
+ * callers already inside a parallel region (e.g. xtrsm) swap the symbol name
+ * only. The a/b/c/alpha/beta pointers are __complex128 (interleaved re,im);
+ * the substrate is reached by reinterpreting them as __float128*.
  */
 #ifndef EPBLAS_PARALLEL_KIND16_XGEMM_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_XGEMM_KERNEL_H
 
 #include <stddef.h>
-#include <quadmath.h>   /* __complex128 */
+#include <quadmath.h>
 
 typedef __complex128 xgemm_T;
 
-/* Normalize a Fortran trans char to its uppercase code ('N'/'T'/'C'). */
+/* Normalize a Fortran trans char to its uppercase code ('N'/'T'/'C'/'R'). */
 int xgemm_trans_code(const char *p, size_t len);
 
-/* Compute one tile of C[i0:i1, j0:j1]:
- *
- *   C[i,j] = beta * C[i,j] + alpha * op(A) * op(B) [k summed]
- *
- * No OpenMP pragmas — pure sequential per-tile work. Each (i,j) is owned by
- * exactly one tile, so the beta pass is race-free under a tile partition.
- * Conjugation under 'C' is applied at element access time. */
-void xgemm_tile_compute(
-    int i0, int i1, int j0, int j1, int K,
-    int trans_a, int conj_a, int trans_b, int conj_b,
-    xgemm_T alpha, xgemm_T beta,
-    const xgemm_T *a, int lda,
-    const xgemm_T *b, int ldb,
-    xgemm_T *c, int ldc);
+/* Blocking plan for one xgemm call. MC may be grown adaptively for small K.
+ * The conj/trans flags are decoded once from the (ta, tb) codes. */
+typedef struct {
+    int MC, KC, NC;
+    size_t ap_bytes, bp_bytes;
+    int conj_a, trans_a;
+    int conj_b, trans_b;
+} xgemm_plan_t;
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; safe to
- * invoke from inside another function's `#pragma omp parallel` region. Keeps
- * the exact Fortran-ABI signature of xgemm_ so callers already inside a
- * parallel region can swap the symbol name only. */
+/* Fill *p from the problem dims and the (ta, tb) trans codes. */
+void xgemm_make_plan(int M, int N, int K, int ta, int tb, xgemm_plan_t *p);
+
+/* OCOPY(B): pack the (pb × jb) panel at (ls, js) into Bp. */
+void xgemm_pack_B(const xgemm_plan_t *p,
+                  const __float128 *b, int ldb,
+                  int js, int ls, int pb, int jb,
+                  __float128 *Bp);
+
+/* One (m_lo..m_hi) × (js..js+jb) slab: ICOPY(A) per M-block + microkernel
+ * against an already-packed Bp. */
+void xgemm_level3_slab(int m_lo, int m_hi, const xgemm_plan_t *p,
+                       __float128 alphar, __float128 alphai,
+                       const __float128 *A, int lda, __float128 *Ap,
+                       const __float128 *Bp,
+                       int js, int ls, int pb, int jb,
+                       __float128 *C, int ldc);
+
+/* Pure-serial Fortran-ABI entry (no OpenMP). Same int signature as xgemm_. */
 void xgemm_serial_(
     const char *transa, const char *transb,
     const int *m_, const int *n_, const int *k_,

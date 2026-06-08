@@ -82,14 +82,15 @@ set(_kernels
 # reused by L3 routines that call it from inside their own parallel region
 # (qtrsm/xtrsm trailing GEMM updates call qgemm_serial_/xgemm_serial_), and
 # (b) the fully-serial path its own driver delegates to under the
-# omp_in_parallel() nesting guard. kind16 is arithmetic-bound (every
-# __float128 op lowers to a libquadmath call), so unlike kind10 there is NO
-# packing/blocking — hence no *_pack.c / *_kernel.c, only the *_parallel.c /
-# *_serial.c pair plus an include-only *_kernel.h. Only the bare routine
-# names (qgemm, xgemm, …) are Fortran-callable overlays, so these sources
-# are added to the build but NOT name-derived; the names are appended by
-# hand below (mirrors kind10).
+# omp_in_parallel() nesting guard. The real-quad routines pack inline in
+# their *_serial.c; the complex-quad routines (xgemm/xsymm/xhemm/xherk/xsyrk
+# …) share the packed substrate xl3_complex.c (a faithful par-side copy of
+# the epblas-openblas common substrate, mirroring kind10's etri_kernel.c).
+# Only the bare routine names (qgemm, xgemm, …) are Fortran-callable
+# overlays, so these sources are added to the build but NOT name-derived;
+# the names are appended by hand below (mirrors kind10).
 set(_split_sources
+    xl3_complex.c
     qgemm_parallel.c
     qgemm_serial.c
     xgemm_parallel.c

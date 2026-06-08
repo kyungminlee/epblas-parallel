@@ -1,138 +1,163 @@
 /*
- * xgemm_ — kind16 complex (COMPLEX(KIND=16) / __complex128) GEMM, public
- * Fortran entry. THREADING ORCHESTRATION ONLY: all the math lives in
- * xgemm_serial.c (the per-tile compute kernel and trans decode), shared
- * through xgemm_kernel.h.
+ * xgemm_ — kind16 complex GEMM (COMPLEX(KIND=16) / __complex128), the
+ * public Fortran entry and threading-orchestration half of the xgemm
+ * overlay (see xgemm_kernel.h for the split rationale; all the math lives
+ * in xgemm_serial.c).
  *
  *   C := alpha * op(A) * op(B) + beta * C
  *
- * 2D tile decomposition: the (M, N) output is partitioned into MB × NB
- * tiles; threads consume tiles via `collapse(2)`. K stays serial inside
- * each tile. Tile side defaults to ≈ sqrt(M*N / (4*nthreads)) clamped to
- * [16, 128]; env overrides XGEMM_MB / XGEMM_NB pin specific sides.
+ * Parallel shape: one `omp parallel` block-partitions the M axis across the
+ * team (rounded to MR). Each thread keeps a private Ap pack buffer; the Bp
+ * panel is shared and packed once per (js, ls) under `omp single`, bracketed
+ * by an explicit barrier (no thread still reading the previous Bp) and the
+ * single's implicit end barrier (new Bp visible before any kernel run). This
+ * is the OpenBLAS level3.c SMP shape with a single-level OpenMP team in place
+ * of the blas_queue runtime. The beta pre-pass runs once up front.
  *
- * As a defensive guard against accidental nested parallelism, falls back to
- * the serial kernel if invoked from inside another parallel region.
- *
- * Fortran ABI: name lowercased + trailing underscore; scalars by pointer;
- * character args followed by hidden trailing size_t lengths; COMPLEX(KIND=16)
- * ↔ __complex128.
+ * Nesting guard: when xgemm_ is itself called from inside another routine's
+ * parallel region (the complex L3 family — xtrsm, xtrmm, xsyrk, … runs
+ * xgemm trailing updates inside its own `omp parallel`), it delegates to
+ * xgemm_serial_ and opens no region of its own.
  */
 
 #include "xgemm_kernel.h"
+#include "xl3_complex.h"
+#include <stddef.h>
 #include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 
-typedef xgemm_T T;
+typedef __float128 R;
 
-/* Cached env overrides. 0 = uninitialized; >0 = override; <0 = use heuristic. */
-static int xgemm_mb_cached = 0;
-static int xgemm_nb_cached = 0;
+#define MR QBLAS_YGEMM_MR
 
-static int xgemm_read_dim_env(const char *name) {
-    const char *s = getenv(name);
-    if (!s || !*s) return -1;
-    int v = atoi(s);
-    return (v > 0) ? v : -1;
-}
-
-static int xgemm_mb_override(void) {
-    int v = __atomic_load_n(&xgemm_mb_cached, __ATOMIC_RELAXED);
-    if (__builtin_expect(v == 0, 0)) {
-        v = xgemm_read_dim_env("XGEMM_MB");
-        if (v == 0) v = -1;
-        __atomic_store_n(&xgemm_mb_cached, v, __ATOMIC_RELAXED);
-    }
-    return v;
-}
-
-static int xgemm_nb_override(void) {
-    int v = __atomic_load_n(&xgemm_nb_cached, __ATOMIC_RELAXED);
-    if (__builtin_expect(v == 0, 0)) {
-        v = xgemm_read_dim_env("XGEMM_NB");
-        if (v == 0) v = -1;
-        __atomic_store_n(&xgemm_nb_cached, v, __ATOMIC_RELAXED);
-    }
-    return v;
-}
-
-/* Pick a square tile side ≈ sqrt(M*N / (4*nthreads)) clamped to
- * power-of-two sides in [16, 128]. */
-static int xgemm_tile_side(int M, int N, int nthreads) {
-    if (nthreads < 1) nthreads = 1;
-    const size_t area = (size_t)M * (size_t)N;
-    const size_t target_tiles = (size_t)nthreads * 4u;
-    const size_t per_tile = target_tiles ? (area / target_tiles) : area;
-    int s = 16;
-    while (s < 128 && (size_t)(s * 2) * (size_t)(s * 2) <= per_tile) s *= 2;
-    return s;
-}
+static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
 
 void xgemm_(
     const char *transa, const char *transb,
     const int *m_, const int *n_, const int *k_,
-    const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
-    const T *beta_,
-    T *c, const int *ldc_,
+    const xgemm_T *alpha_,
+    const xgemm_T *a, const int *lda_,
+    const xgemm_T *b, const int *ldb_,
+    const xgemm_T *beta_,
+    xgemm_T *c, const int *ldc_,
     size_t transa_len, size_t transb_len)
 {
+#ifdef _OPENMP
+    /* Called from inside another routine's parallel region: run fully
+     * serial, opening no team of our own. xgemm_serial_ shares the int
+     * Fortran ABI, so forward the pointers unchanged. */
+    if (omp_in_parallel()) {
+        xgemm_serial_(transa, transb, m_, n_, k_, alpha_, a, lda_,
+                      b, ldb_, beta_, c, ldc_, transa_len, transb_len);
+        return;
+    }
+#endif
+
     const int M = *m_, N = *n_, K = *k_;
     const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const T alpha = *alpha_, beta = *beta_;
+    const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
+    const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
     const int ta = xgemm_trans_code(transa, transa_len);
     const int tb = xgemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
-    const int conj_a = (ta == 'C');
-    const int conj_b = (tb == 'C');
-    const int trans_a = (ta != 'N');
-    const int trans_b = (tb != 'N');
+    const R *A = (const R *)a;
+    const R *B = (const R *)b;
+    R *C = (R *)c;
+
+    qblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i, C, (ptrdiff_t)ldc);
+    if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
+
+    xgemm_plan_t p;
+    xgemm_make_plan(M, N, K, ta, tb, &p);
 
 #ifdef _OPENMP
-    const int nthreads_max = blas_omp_max_threads();
-    const int in_parallel  = omp_in_parallel();
+    int nthreads = blas_omp_max_threads();
+    if (nthreads < 1) nthreads = 1;
 #else
-    const int nthreads_max = 1;
-    const int in_parallel  = 0;
+    int nthreads = 1;
 #endif
 
-    int MB, NB;
-    {
-        int mb_env = xgemm_mb_override();
-        int nb_env = xgemm_nb_override();
-        if (mb_env > 0 && nb_env > 0) {
-            MB = mb_env; NB = nb_env;
-        } else {
-            int side = xgemm_tile_side(M, N, nthreads_max);
-            MB = (mb_env > 0) ? mb_env : side;
-            NB = (nb_env > 0) ? nb_env : side;
+    /* Don't fan out for tiny problems — overhead exceeds work. */
+    long mnk = (long)M * (long)N * (long)K;
+    if (mnk < 64L * 64L * 64L) nthreads = 1;
+
+    if (nthreads == 1) {
+        R *Ap = aligned_alloc(64, (p.ap_bytes + 63) & ~(size_t)63);
+        if (!Ap) return;
+        R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
+        if (!Bp) { free(Ap); return; }
+        for (int js = 0; js < N; js += p.NC) {
+            int jb = (N - js < p.NC) ? (N - js) : p.NC;
+            for (int ls = 0; ls < K; ls += p.KC) {
+                int pb = (K - ls < p.KC) ? (K - ls) : p.KC;
+                xgemm_pack_B(&p, B, ldb, js, ls, pb, jb, Bp);
+                xgemm_level3_slab(0, M, &p, alphar, alphai,
+                                  A, lda, Ap, Bp, js, ls, pb, jb, C, ldc);
+            }
         }
+        free(Bp);
+        free(Ap);
+        return;
     }
-    if (MB > M) MB = M;
-    if (NB > N) NB = N;
-    const int nt_m = (M + MB - 1) / MB;
-    const int nt_n = (N + NB - 1) / NB;
-    const int total_tiles = nt_m * nt_n;
+
+    /* Allocate per-thread Ap and the shared Bp BEFORE the parallel region so
+     * every thread in the team hits every `omp barrier` / `omp single`. */
+    R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
+    if (!Bp) return;
+    R **Ap_arr = calloc((size_t)nthreads, sizeof(R *));
+    if (!Ap_arr) { free(Bp); return; }
+    int alloc_ok = 1;
+    for (int t = 0; t < nthreads; ++t) {
+        Ap_arr[t] = aligned_alloc(64, (p.ap_bytes + 63) & ~(size_t)63);
+        if (!Ap_arr[t]) { alloc_ok = 0; break; }
+    }
+    if (!alloc_ok) {
+        for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
+        free(Ap_arr); free(Bp);
+        return;
+    }
 
 #ifdef _OPENMP
-    const int use_omp = (total_tiles >= 2 && nthreads_max > 1 && !in_parallel);
-    #pragma omp parallel for collapse(2) if(use_omp) schedule(static)
+    #pragma omp parallel num_threads(nthreads)
 #endif
-    for (int jt = 0; jt < nt_n; ++jt) {
-        for (int it = 0; it < nt_m; ++it) {
-            const int j0 = jt * NB;
-            const int j1 = (j0 + NB < N) ? (j0 + NB) : N;
-            const int i0 = it * MB;
-            const int i1 = (i0 + MB < M) ? (i0 + MB) : M;
-            xgemm_tile_compute(i0, i1, j0, j1, K,
-                               trans_a, conj_a, trans_b, conj_b,
-                               alpha, beta, a, lda, b, ldb, c, ldc);
+    {
+#ifdef _OPENMP
+        int tid = omp_get_thread_num();
+        int nth = omp_get_num_threads();
+#else
+        int tid = 0, nth = 1;
+#endif
+        R *Ap = Ap_arr[tid];
+
+        int m_chunk = round_up((M + nth - 1) / nth, MR);
+        int m_lo = tid * m_chunk;
+        int m_hi = m_lo + m_chunk;
+        if (m_hi > M) m_hi = M;
+
+        for (int js = 0; js < N; js += p.NC) {
+            int jb = (N - js < p.NC) ? (N - js) : p.NC;
+            for (int ls = 0; ls < K; ls += p.KC) {
+                int pb = (K - ls < p.KC) ? (K - ls) : p.KC;
+#ifdef _OPENMP
+                #pragma omp barrier
+                #pragma omp single
+#endif
+                {
+                    xgemm_pack_B(&p, B, ldb, js, ls, pb, jb, Bp);
+                }
+                if (m_lo < m_hi)
+                    xgemm_level3_slab(m_lo, m_hi, &p, alphar, alphai,
+                                      A, lda, Ap, Bp, js, ls, pb, jb, C, ldc);
+            }
         }
     }
+
+    for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
+    free(Ap_arr);
+    free(Bp);
 }
