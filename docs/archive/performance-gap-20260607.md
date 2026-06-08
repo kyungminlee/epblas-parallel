@@ -1,5 +1,20 @@
 # epblas-parallel performance gap report — all types (2026-06-07)
 
+> **Resolved — archived 2026-06-08.** Every gap this report ranks as
+> "genuine remaining" has since been closed; the overlay now meets the
+> `par ≤ ob` bar in every cell it covers. Kept as a record of the frontier
+> as it stood on 2026-06-07. Closing commits:
+> - **Gap 1 — multifloats OMP=4 triangular matvec** (`mtrmv`/`mtpmv`/`wtrmv`/`wtpmv`):
+>   `87007ba` (contiguous-column OMP threading), `947d17c` + `1356abc`
+>   (row-tiled NoTrans serial paths).
+> - **Gap 2 — multifloats serial argmax** (`imamax`/`iwamax`): `487d414`
+>   (inline abs + lexicographic compare).
+> - **Gap 3 — kind16 L3 GEMM-family** (`qgemm`/`qsymm`/`xgemm`/`xhemm`/`xsymm`/`xherk`/`xsyrk`):
+>   `455e66f`, `29f93af`, `d815c0f`, `fc0829b`, `5d66fb8` (re-port onto the
+>   kind10 blocked fused-packer substrate).
+>
+> The full analysis below is unchanged from the original snapshot.
+
 Snapshot of the remaining performance gaps in the `epblas-parallel` overlay,
 across all six element families, after the multifloats double-double OpenBLAS
 hand-port landed (commit `0321ebe`) and the first complete 5-way `cmp5` sweep
