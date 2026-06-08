@@ -10,6 +10,66 @@ The unifying theme: **structural choices that paid off for one (precision, compl
 
 ---
 
+## Contents
+
+Append-only optimization journal — newest entries at the bottom. Each section is a dated, self-contained finding; jump via the links below.
+
+- [TL;DR results table](#tldr-results-table)
+- [Findings by precision](#findings-by-precision)
+- [Optimizations that did NOT work](#optimizations-that-did-not-work)
+- [Reporting convention (how perf numbers are presented)](#reporting-convention-how-perf-numbers-are-presented)
+- [Diagnostic methodology that worked](#diagnostic-methodology-that-worked)
+- [Hardware-specific gotchas on this machine](#hardware-specific-gotchas-on-this-machine)
+- [Open items / things worth trying later](#open-items--things-worth-trying-later)
+- [Addendum: kind10 L3 (symm/hemm/syrk/herk) round — 2026-05-15](#addendum-kind10-l3-symmhemmsyrkherk-round--2026-05-15)
+- [TL;DR results (OMP=1, 40 iters, P-core)](#tldr-results-omp1-40-iters-p-core)
+- [What worked](#what-worked)
+- [What didn't work](#what-didnt-work)
+- [Findings worth recording](#findings-worth-recording)
+- [Additions to "diagnostic methodology"](#additions-to-diagnostic-methodology)
+- [K-axis 2-unroll: works on real dot products, breaks on complex ones](#k-axis-2-unroll-works-on-real-dot-products-breaks-on-complex-ones)
+- [Addendum 2: ytrmm nb 64 → 32 + etrmm at codegen ceiling — 2026-05-15](#addendum-2-ytrmm-nb-64--32--etrmm-at-codegen-ceiling--2026-05-15)
+- [Addendum 3: `omp_get_max_threads()` per-call overhead — 2026-05-16](#addendum-3-omp_get_max_threads-per-call-overhead--2026-05-16)
+- [Addendum 4: libm function calls in the inner expression — 2026-05-16](#addendum-4-libm-function-calls-in-the-inner-expression--2026-05-16)
+- [Addendum 5: algorithmic gap — Blue's single-pass nrm2 — 2026-05-16](#addendum-5-algorithmic-gap--blues-single-pass-nrm2--2026-05-16)
+- [Addendum 6: noise vs. genuine sub-parity (larger-N re-bench, 2026-05-16)](#addendum-6-noise-vs-genuine-sub-parity-larger-n-re-bench-2026-05-16)
+- [Addendum 7: gfortran's shared-index pointer-walk codegen (2026-05-16)](#addendum-7-gfortrans-shared-index-pointer-walk-codegen-2026-05-16)
+- [Addendum 8: pointer-walk loop pattern for L2 packed kernels (2026-05-16)](#addendum-8-pointer-walk-loop-pattern-for-l2-packed-kernels-2026-05-16)
+- [Addendum 9: shared-index applies to 2-pointer rotations (2026-05-16)](#addendum-9-shared-index-applies-to-2-pointer-rotations-2026-05-16)
+- [Addendum 10: the shared-index gap is OMP-specific, not general (2026-05-16)](#addendum-10-the-shared-index-gap-is-omp-specific-not-general-2026-05-16)
+- [Addendum 11: verifying espr is the same OMP blocker (2026-05-16)](#addendum-11-verifying-espr-is-the-same-omp-blocker-2026-05-16)
+- [Addendum 12: why OMP outlining blocks shared-index, and the cleaner fix (2026-05-16)](#addendum-12-why-omp-outlining-blocks-shared-index-and-the-cleaner-fix-2026-05-16)
+- [Addendum 13: what actually blocks gcc's shared-index inside OMP (2026-05-16)](#addendum-13-what-actually-blocks-gccs-shared-index-inside-omp-2026-05-16)
+- [Addendum 14: the Fortran bench's "residual gap" is a measurement artifact (2026-05-16)](#addendum-14-the-fortran-benchs-residual-gap-is-a-measurement-artifact-2026-05-16)
+- [Addendum 15: full-overlay C-harness sweep (2026-05-17)](#addendum-15-full-overlay-c-harness-sweep-2026-05-17)
+- [Addendum 16: `#pragma omp parallel for if(use_omp)` always outlines (2026-05-17)](#addendum-16-pragma-omp-parallel-for-ifuse_omp-always-outlines-2026-05-17)
+- [Addendum 17: closing every sub-parity routine — there is no x87 floor (2026-05-17)](#addendum-17-closing-every-sub-parity-routine--there-is-no-x87-floor-2026-05-17)
+- [Addendum 18: etrsv LTN — inner walk must mirror outer descent (2026-05-18)](#addendum-18-etrsv-ltn--inner-walk-must-mirror-outer-descent-2026-05-18)
+- [Addendum 19: ytrsv U-T K-unroll asymmetry — conj path resists the trick (2026-05-18)](#addendum-19-ytrsv-u-t-k-unroll-asymmetry--conj-path-resists-the-trick-2026-05-18)
+- [Addendum 20: gfortran J-unrolls strided fallbacks too (2026-05-18)](#addendum-20-gfortran-j-unrolls-strided-fallbacks-too-2026-05-18)
+- [Addendum 21: etrsv TRANS='T' — same single-acc dep chain as ytrsv U-T (2026-05-18)](#addendum-21-etrsv-transt--same-single-acc-dep-chain-as-ytrsv-u-t-2026-05-18)
+- [Addendum 22: s*mv strided fallback — a ~10% gap I can't close (2026-05-19)](#addendum-22-smv-strided-fallback--a-10-gap-i-cant-close-2026-05-19)
+- [Addendum 23: complex K-unroll-by-4 spills x87 stack — keep at 2 (2026-05-19)](#addendum-23-complex-k-unroll-by-4-spills-x87-stack--keep-at-2-2026-05-19)
+- [Addendum 24: K-unroll-by-2 regresses banded inners — short loops don't amortize (2026-05-19)](#addendum-24-k-unroll-by-2-regresses-banded-inners--short-loops-dont-amortize-2026-05-19)
+- [Addendum 25: small-N benches are bimodal — need ≥20000 iters (2026-05-19)](#addendum-25-small-n-benches-are-bimodal--need-20000-iters-2026-05-19)
+- [Addendum 26: inner-OMP on ytrsv loses everywhere except UNN/N=512 (2026-05-20)](#addendum-26-inner-omp-on-ytrsv-loses-everywhere-except-unnn512-2026-05-20)
+- [Addendum 27: kind16 xgemm 2D tile parallelism (2026-05-20)](#addendum-27-kind16-xgemm-2d-tile-parallelism-2026-05-20)
+- [Addendum 28: kind16 xtrsm — xtrsv-loop fast path + Amdahl-capped dispatch (2026-05-20)](#addendum-28-kind16-xtrsm--xtrsv-loop-fast-path--amdahl-capped-dispatch-2026-05-20)
+- [Addendum 29: single-parallel-region for blocked xtrs* + blas_omp cache anti-pattern (2026-05-20)](#addendum-29-single-parallel-region-for-blocked-xtrs--blas_omp-cache-anti-pattern-2026-05-20)
+- [Addendum 30: full-overlay re-sweep — systematic catalog (2026-05-20)](#addendum-30-full-overlay-re-sweep--systematic-catalog-2026-05-20)
+- [Addendum 31: applying Rule 43 — etrmv LNN J-unroll-by-2 (2026-05-20)](#addendum-31-applying-rule-43--etrmv-lnn-j-unroll-by-2-2026-05-20)
+- [Addendum 32: TRSM SIDE='R' — row-partition OMP closes the only L3 OMP gap (2026-05-21)](#addendum-32-trsm-sider--row-partition-omp-closes-the-only-l3-omp-gap-2026-05-21)
+- [Addendum 33: Add-30 catalog re-verification — Rule 30 catches the rest (2026-05-21)](#addendum-33-add-30-catalog-re-verification--rule-30-catches-the-rest-2026-05-21)
+- [Addendum 34: egemm — single-region + omp single Bp + omp for ic restores scaling (2026-05-21)](#addendum-34-egemm--single-region--omp-single-bp--omp-for-ic-restores-scaling-2026-05-21)
+- [Addendum 35: ygemv N-branch — J-unroll the OMP path (2026-05-21)](#addendum-35-ygemv-n-branch--j-unroll-the-omp-path-2026-05-21)
+- [Addendum 36: esymv / yhemv — per-thread y_priv + reduction unlocks SYMV/HEMV scaling (2026-05-21)](#addendum-36-esymv--yhemv--per-thread-y_priv--reduction-unlocks-symvhemv-scaling-2026-05-21)
+- [Addendum 37: etrmv / ytrmv — out-of-place buffer dissolves the in-place dependency (2026-05-21)](#addendum-37-etrmv--ytrmv--out-of-place-buffer-dissolves-the-in-place-dependency-2026-05-21)
+- [Addendum 38: comprehensive OMP=1 vs OMP=4 sweep — May 2026 status (2026-05-21)](#addendum-38-comprehensive-omp1-vs-omp4-sweep--may-2026-status-2026-05-21)
+- [Addendum 39: esyrk — full OpenBLAS DSYRK cooperative-kernel port (2026-05-21)](#addendum-39-esyrk--full-openblas-dsyrk-cooperative-kernel-port-2026-05-21)
+- [Addendum 40: egemmtr — same packed-inline + tile-classify treatment (2026-05-21)](#addendum-40-egemmtr--same-packed-inline--tile-classify-treatment-2026-05-21)
+
+---
+
 ## TL;DR results table
 
 GFLOPs at OMP=1, median speedup over migrated, range across 9 transpose combos × sizes 64/128/256(/512):
