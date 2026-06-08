@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
 #ifdef _OPENMP
 #include <cstdlib>
@@ -33,6 +34,38 @@ inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
+
+/* Bit-exact row-tiled lower-triangular NoTrans serial matvec (incx==1).
+ * The plain column-AXPY loop streams a full n-row column per j and thrashes the
+ * x cache; the OpenBLAS clone tiles the output rows even at one thread and wins
+ * ~8%. This recovers that by sweeping a 32-row output tile that stays cache-hot,
+ * while preserving the plain loop's accumulation order for each output element
+ * (diagonal first, then strictly descending column index) so the result is
+ * byte-identical to the untiled path. */
+static void wtrmv_serial_N_lower(bool nounit, int n,
+                                 const T *a, std::size_t lda, T *x) {
+    const int RB = 32;
+    std::vector<T> ybuf(static_cast<std::size_t>(n));
+    T *y = ybuf.data();
+    for (int ib = 0; ib < n; ib += RB) {
+        const int ie = ib + RB < n ? ib + RB : n;
+        for (int i = ib; i < ie; ++i)
+            y[i] = nounit ? cmul(x[i], A_(i, i)) : x[i];
+        for (int j = ie - 1; j >= ib; --j) {            /* within-tile, descending j */
+            const T xj = x[j];
+            if (cdd_iszero(xj)) continue;
+            const T *col = &A_(0, j);
+            for (int i = j + 1; i < ie; ++i) y[i] = cadd(y[i], cmul(xj, col[i]));
+        }
+        for (int j = ib - 1; j >= 0; --j) {             /* below-tile columns, descending j */
+            const T xj = x[j];
+            if (cdd_iszero(xj)) continue;
+            const T *col = &A_(0, j);
+            for (int i = ib; i < ie; ++i) y[i] = cadd(y[i], cmul(xj, col[i]));
+        }
+    }
+    for (int i = 0; i < n; ++i) x[i] = y[i];
+}
 
 #ifdef _OPENMP
 /* sqrt-balanced contiguous row-block partition (OpenBLAS trmv_thread.c). Each
@@ -259,13 +292,17 @@ extern "C" void wtrmv_(
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (int j = N - 1; j >= 0; --j) {
-                    const T temp = x[j];
-                    if (!cdd_iszero(temp)) {
-                        const T *aj = &A_(0, j);
-                        for (int i = j + 1; i < N; ++i) x[i] = cadd(x[i], cmul(temp, aj[i]));
+                if (N >= 128) {
+                    wtrmv_serial_N_lower(nounit, N, a, lda, x);
+                } else {
+                    for (int j = N - 1; j >= 0; --j) {
+                        const T temp = x[j];
+                        if (!cdd_iszero(temp)) {
+                            const T *aj = &A_(0, j);
+                            for (int i = j + 1; i < N; ++i) x[i] = cadd(x[i], cmul(temp, aj[i]));
+                        }
+                        if (nounit) x[j] = cmul(x[j], A_(j, j));
                     }
-                    if (nounit) x[j] = cmul(x[j], A_(j, j));
                 }
             } else {
                 for (int j = 0; j < N; ++j) {
