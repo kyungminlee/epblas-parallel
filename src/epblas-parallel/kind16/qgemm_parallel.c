@@ -1,17 +1,19 @@
 /*
  * qgemm_ — kind16 (REAL(KIND=16) / __float128) GEMM, public Fortran entry.
  * THREADING ORCHESTRATION ONLY: all the math lives in qgemm_serial.c (the
- * per-tile compute kernel and trans decode), shared through qgemm_kernel.h.
+ * packers, MR×NR micro-kernel, beta pre-pass, block policy), shared through
+ * qgemm_kernel.h.
  *
  *   C := alpha * op(A) * op(B) + beta * C
  *
- * 2D tile decomposition: the (M, N) output is partitioned into MB × NB
- * tiles; threads consume tiles via `collapse(2)`. K stays serial inside
- * each tile. Tile side defaults to ≈ sqrt(M*N / (4*nthreads)) clamped to
- * [16, 128]; env overrides QGEMM_MB / QGEMM_NB pin specific sides.
- *
- * As a defensive guard against accidental nested parallelism, falls back to
- * the serial kernel if invoked from inside another parallel region.
+ * Two regimes (mirrors the kind10 egemm overlay):
+ *   - Called from inside another OpenMP team (the L3 family — qtrsm runs
+ *     qgemm trailing updates inside its own `omp parallel`): open NO nested
+ *     region. Run the single-thread kernel in the calling thread.
+ *   - Called at top level: fan the M-axis across an OpenMP team. Bp is
+ *     packed once per (jc, pc) under `omp single` (implicit barrier) and
+ *     shared; each thread keeps a private Ap and takes an `omp for` slice
+ *     of the ic loop.
  *
  * Fortran ABI: name lowercased + trailing underscore; scalars by pointer;
  * character args followed by hidden trailing size_t lengths; REAL(KIND=16)
@@ -22,53 +24,14 @@
 #include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
+#include <stddef.h>
 #include "../common/blas_omp.h"
 #endif
 
 typedef qgemm_T T;
 
-/* Cached env overrides. 0 = uninitialized; >0 = override; <0 = use heuristic. */
-static int qgemm_mb_cached = 0;
-static int qgemm_nb_cached = 0;
-
-static int qgemm_read_dim_env(const char *name) {
-    const char *s = getenv(name);
-    if (!s || !*s) return -1;
-    int v = atoi(s);
-    return (v > 0) ? v : -1;
-}
-
-static int qgemm_mb_override(void) {
-    int v = __atomic_load_n(&qgemm_mb_cached, __ATOMIC_RELAXED);
-    if (__builtin_expect(v == 0, 0)) {
-        v = qgemm_read_dim_env("QGEMM_MB");
-        if (v == 0) v = -1;
-        __atomic_store_n(&qgemm_mb_cached, v, __ATOMIC_RELAXED);
-    }
-    return v;
-}
-
-static int qgemm_nb_override(void) {
-    int v = __atomic_load_n(&qgemm_nb_cached, __ATOMIC_RELAXED);
-    if (__builtin_expect(v == 0, 0)) {
-        v = qgemm_read_dim_env("QGEMM_NB");
-        if (v == 0) v = -1;
-        __atomic_store_n(&qgemm_nb_cached, v, __ATOMIC_RELAXED);
-    }
-    return v;
-}
-
-/* Pick a square tile side ≈ sqrt(M*N / (4*nthreads)) clamped to
- * power-of-two sides in [16, 128]. */
-static int qgemm_tile_side(int M, int N, int nthreads) {
-    if (nthreads < 1) nthreads = 1;
-    const size_t area = (size_t)M * (size_t)N;
-    const size_t target_tiles = (size_t)nthreads * 4u;
-    const size_t per_tile = target_tiles ? (area / target_tiles) : area;
-    int s = 16;
-    while (s < 128 && (size_t)(s * 2) * (size_t)(s * 2) <= per_tile) s *= 2;
-    return s;
-}
+#define MR QGEMM_MR
+#define NR QGEMM_NR
 
 void qgemm_(
     const char *transa, const char *transb,
@@ -80,56 +43,91 @@ void qgemm_(
     T *c, const int *ldc_,
     size_t transa_len, size_t transb_len)
 {
-    const int M = *m_, N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+#ifdef _OPENMP
+    /* Already inside a team → run serially in this thread, no nested region.
+     * qgemm_serial_ shares the int Fortran ABI, so forward the pointers. */
+    if (omp_in_parallel()) {
+        qgemm_serial_(transa, transb, m_, n_, k_, alpha_, a, lda_,
+                      b, ldb_, beta_, c, ldc_, transa_len, transb_len);
+        return;
+    }
+#endif
+
+    const ptrdiff_t M = *m_, N = *n_, K = *k_;
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = qgemm_trans_code(transa, transa_len);
-    const int tb = qgemm_trans_code(transb, transb_len);
+    const ptrdiff_t ta = qgemm_trans_code(transa, transa_len);
+    const ptrdiff_t tb = qgemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
-    const int trans_a = (ta != 'N');
-    const int trans_b = (tb != 'N');
+    qgemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
+    if (alpha == 0.0Q || K == 0) return;
 
+    /* Fast path: TA='T' (≡'C'), TB='N'. Stride-1 dot, no packing — but only
+     * for skinny problems (see qgemm_tn_use_fast). For non-trivial K the
+     * blocked packed path below is faster per FLOP and threads over M. */
+    if (ta == 'T' && tb == 'N' && qgemm_tn_use_fast(M, N, K)) {
 #ifdef _OPENMP
-    const int nthreads_max = blas_omp_max_threads();
-    const int in_parallel  = omp_in_parallel();
-#else
-    const int nthreads_max = 1;
-    const int in_parallel  = 0;
+        #pragma omp parallel for schedule(static)
+#endif
+        for (ptrdiff_t j2 = 0; j2 < N; ++j2)
+            qgemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
+        return;
+    }
+
+    ptrdiff_t MC, KC, NC;
+    qgemm_choose_blocks(K, &MC, &KC, &NC);
+#ifdef _OPENMP
+    /* The ic loop is partitioned across the team via `omp for`, so the number
+     * of ic-blocks (ceil(M/MC)) must be >= the team size or threads sit idle.
+     * Cap MC so M splits into at least `nthr` blocks (only shrinks MC; stays
+     * a multiple of MR). The cap is local to this threaded entry. */
+    const ptrdiff_t nthr = blas_omp_max_threads();
+    if (nthr > 1) {
+        ptrdiff_t cap = qgemm_round_up((M + nthr - 1) / nthr, MR);
+        if (cap < MR) cap = MR;
+        if (MC > cap) MC = cap;
+    }
 #endif
 
-    int MB, NB;
+    /* Single outer `omp parallel`, shared Bp packed once per (jc, pc) via
+     * `omp single` (implicit barrier), then `omp for` over the ic loop. */
+    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(T);
+    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    if (!Bp) return;
+#ifdef _OPENMP
+    #pragma omp parallel
+#endif
     {
-        int mb_env = qgemm_mb_override();
-        int nb_env = qgemm_nb_override();
-        if (mb_env > 0 && nb_env > 0) {
-            MB = mb_env; NB = nb_env;
-        } else {
-            int side = qgemm_tile_side(M, N, nthreads_max);
-            MB = (mb_env > 0) ? mb_env : side;
-            NB = (nb_env > 0) ? nb_env : side;
-        }
-    }
-    if (MB > M) MB = M;
-    if (NB > N) NB = N;
-    const int nt_m = (M + MB - 1) / MB;
-    const int nt_n = (N + NB - 1) / NB;
-    const int total_tiles = nt_m * nt_n;
-
+        T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        if (Ap) {
+            for (ptrdiff_t jc = 0; jc < N; jc += NC) {
+                const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+                for (ptrdiff_t pc = 0; pc < K; pc += KC) {
+                    const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
 #ifdef _OPENMP
-    const int use_omp = (total_tiles >= 2 && nthreads_max > 1 && !in_parallel);
-    #pragma omp parallel for collapse(2) if(use_omp) schedule(static)
+                    #pragma omp single
 #endif
-    for (int jt = 0; jt < nt_n; ++jt) {
-        for (int it = 0; it < nt_m; ++it) {
-            const int j0 = jt * NB;
-            const int j1 = (j0 + NB < N) ? (j0 + NB) : N;
-            const int i0 = it * MB;
-            const int i1 = (i0 + MB < M) ? (i0 + MB) : M;
-            qgemm_tile_compute(i0, i1, j0, j1, K,
-                               trans_a, trans_b,
-                               alpha, beta, a, lda, b, ldb, c, ldc);
+                    qgemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
+                    /* implicit barrier at end of `single` makes Bp safe to
+                     * read in the for below. */
+#ifdef _OPENMP
+                    #pragma omp for schedule(static)
+#endif
+                    for (ptrdiff_t ic = 0; ic < M; ic += MC) {
+                        const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                        qgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
+                        qgemm_macro_kernel(ib, jb, pb, alpha, Ap, Bp,
+                                           &c[(size_t)jc * ldc + ic], ldc);
+                    }
+                    /* implicit barrier at end of `for` keeps Bp stable for
+                     * the next (jc, pc) iteration. */
+                }
+            }
         }
+        free(Ap);
     }
+    free(Bp);
 }
