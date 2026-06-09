@@ -17,15 +17,7 @@
 
 typedef ysyrk_T T;
 
-static ptrdiff_t g_ysyrk_nb = 0;
-ptrdiff_t ysyrk_nb(void) {
-    if (g_ysyrk_nb == 0) {
-        g_ysyrk_nb = 32;
-        const char *s = getenv("YSYRK_NB");
-        if (s && *s) { ptrdiff_t v = atoi(s); if (v > 0) g_ysyrk_nb = v; }
-    }
-    return g_ysyrk_nb;
-}
+ptrdiff_t ysyrk_nb(void) { return 32; }
 
 extern void ygemm_serial(
     const char *transa, const char *transb,

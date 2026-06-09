@@ -16,17 +16,8 @@
 
 typedef ysymm_T T;
 
-static ptrdiff_t g_ysymm_nb_override = -1;
-ptrdiff_t ysymm_nb(void) {
-    if (g_ysymm_nb_override < 0) {
-        g_ysymm_nb_override = 0;
-        const char *s = getenv("YSYMM_NB");
-        if (s && *s) { ptrdiff_t v = atoi(s); if (v > 0) g_ysymm_nb_override = v; }
-    }
-    /* The original symm_nb_pick clamps to [32, 32], so nb is always 32
-     * unless explicitly overridden. */
-    return (g_ysymm_nb_override > 0) ? g_ysymm_nb_override : 32;
-}
+/* nb is fixed at 32 (the original symm_nb_pick clamps to [32, 32]). */
+ptrdiff_t ysymm_nb(void) { return 32; }
 
 extern void ygemm_serial(
     const char *transa, const char *transb,

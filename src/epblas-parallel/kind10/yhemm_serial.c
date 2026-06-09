@@ -17,17 +17,8 @@
 
 typedef yhemm_T T;
 
-static ptrdiff_t g_yhemm_nb_override = -1;
-ptrdiff_t yhemm_nb(void) {
-    if (g_yhemm_nb_override < 0) {
-        g_yhemm_nb_override = 0;
-        const char *s = getenv("YHEMM_NB");
-        if (s && *s) { ptrdiff_t v = atoi(s); if (v > 0) g_yhemm_nb_override = v; }
-    }
-    /* The original hemm_nb_pick clamps to [32, 32], so nb is always 32
-     * unless explicitly overridden. */
-    return (g_yhemm_nb_override > 0) ? g_yhemm_nb_override : 32;
-}
+/* nb is fixed at 32 (the original hemm_nb_pick clamps to [32, 32]). */
+ptrdiff_t yhemm_nb(void) { return 32; }
 
 extern void ygemm_serial(
     const char *transa, const char *transb,

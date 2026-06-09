@@ -24,22 +24,8 @@ typedef egemmtr_T T;
 #define EGEMMTR_KC_DEFAULT 256
 #define EGEMMTR_NC_DEFAULT 512
 
-static ptrdiff_t g_mc = 0, g_kc = 0, g_nc = 0;
-
-static ptrdiff_t env_int(const char *name, ptrdiff_t dflt) {
-    const char *s = getenv(name);
-    if (!s || !*s) return dflt;
-    ptrdiff_t v = atoi(s);
-    return v > 0 ? v : dflt;
-}
-
 void egemmtr_block_sizes(ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC) {
-    if (g_mc == 0) {
-        g_mc = env_int("EGEMMTR_MC", EGEMMTR_MC_DEFAULT);
-        g_kc = env_int("EGEMMTR_KC", EGEMMTR_KC_DEFAULT);
-        g_nc = env_int("EGEMMTR_NC", EGEMMTR_NC_DEFAULT);
-    }
-    *MC = g_mc; *KC = g_kc; *NC = g_nc;
+    *MC = EGEMMTR_MC_DEFAULT; *KC = EGEMMTR_KC_DEFAULT; *NC = EGEMMTR_NC_DEFAULT;
 }
 
 ptrdiff_t egemmtr_trans_code(const char *p) {

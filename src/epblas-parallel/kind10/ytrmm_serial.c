@@ -24,15 +24,9 @@
 
 typedef ytrmm_T T;
 
-static ptrdiff_t env_int(const char *name, ptrdiff_t dflt) {
-    const char *s = getenv(name);
-    if (!s || !*s) return dflt;
-    ptrdiff_t v = atoi(s);
-    return v > 0 ? v : dflt;
-}
 static ptrdiff_t g_nb_trmm = 0;
 ptrdiff_t ytrmm_nb(void) {
-    if (g_nb_trmm == 0) g_nb_trmm = env_int("YTRMM_NB", 32);
+    if (g_nb_trmm == 0) g_nb_trmm = 32;
     return g_nb_trmm;
 }
 

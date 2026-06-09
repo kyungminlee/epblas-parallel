@@ -19,15 +19,7 @@
 typedef yherk_TC TC;
 typedef yherk_TR TR;
 
-static ptrdiff_t g_yherk_nb = 0;
-ptrdiff_t yherk_nb(void) {
-    if (g_yherk_nb == 0) {
-        g_yherk_nb = 32;
-        const char *s = getenv("YHERK_NB");
-        if (s && *s) { ptrdiff_t v = atoi(s); if (v > 0) g_yherk_nb = v; }
-    }
-    return g_yherk_nb;
-}
+ptrdiff_t yherk_nb(void) { return 32; }
 
 extern void ygemm_serial(
     const char *transa, const char *transb,

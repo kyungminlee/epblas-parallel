@@ -24,10 +24,10 @@
  *   Inner kernel reads MR consecutive A elements and NR consecutive B
  *   elements per p — both stride-1 in the packed layout.
  *
- * Block sizes (env-overridable):
- *   EBLAS_MC=64   panel rows
- *   EBLAS_KC=256  panel depth
- *   EBLAS_NC=512  column band per thread
+ * Block sizes (fixed compile-time constants):
+ *   MC=64   panel rows (grown adaptively at small K toward the L2 budget)
+ *   KC=256  panel depth
+ *   NC=512  column band per thread
  * Register-tile dims MR=2, NR=2 are compile-time constants (EGEMM_MR/NR).
  *
  * Fortran ABI (egemm_serial mirrors egemm_ exactly):
@@ -49,30 +49,20 @@ typedef egemm_T T;
 
 /* ── Block sizes ──────────────────────────────────────────────── */
 
-static ptrdiff_t env_int(const char *name, ptrdiff_t dflt) {
-    const char *s = getenv(name);
-    if (!s || !*s) return dflt;
-    ptrdiff_t v = atoi(s);
-    return v > 0 ? v : dflt;
-}
-
 static ptrdiff_t g_mc = 0, g_kc = 0, g_nc = 0;
 static long g_l2_bytes = 0;        /* adaptive-MC cache target (see below) */
 static void init_blocks(void) {
     if (g_mc) return;
-    g_kc = env_int("EBLAS_KC", 256);
-    g_nc = env_int("EBLAS_NC", 512);
+    g_kc = 256;
+    g_nc = 512;
     /* Adaptive-MC cache budget: a packed Ap block (MC*KC) should sit in L2.
      * Detect this core's L2 at runtime rather than hardcoding one machine's
      * size — a wrong target bloats Ap past L2 (e.g. a 768K target on a 256K
-     * L2 core blew Ap to 768K at K=256, ~1% slower). Override with EBLAS_L2_KB. */
-    ptrdiff_t l2_kb = env_int("EBLAS_L2_KB", 0);
-    if (l2_kb <= 0) {
-        long sz = sysconf(_SC_LEVEL2_CACHE_SIZE);
-        l2_kb = (sz > 0) ? (ptrdiff_t)(sz / 1024) : 256;
-    }
+     * L2 core blew Ap to 768K at K=256, ~1% slower). */
+    long sz = sysconf(_SC_LEVEL2_CACHE_SIZE);
+    ptrdiff_t l2_kb = (sz > 0) ? (ptrdiff_t)(sz / 1024) : 256;
     g_l2_bytes = (long)l2_kb * 1024L;
-    g_mc = env_int("EBLAS_MC", 64);  /* set last: g_mc!=0 is the init flag */
+    g_mc = 64;  /* set last: g_mc!=0 is the init flag */
 }
 
 ptrdiff_t egemm_trans_code(const char *p, size_t len) {

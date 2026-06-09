@@ -45,13 +45,7 @@ static inline char up(const char *p) {
 #define ETRSV_BLOCKED_NB_DEFAULT 64
 
 static ptrdiff_t etrsv_blocked_nb(void) {
-    static ptrdiff_t cached = 0;
-    if (cached == 0) {
-        const char *s = getenv("ETRSV_NB");
-        ptrdiff_t v = (s && *s) ? atoi(s) : 0;
-        cached = (v > 0) ? v : ETRSV_BLOCKED_NB_DEFAULT;
-    }
-    return cached;
+    return ETRSV_BLOCKED_NB_DEFAULT;
 }
 
 void etrsv_blocked_(

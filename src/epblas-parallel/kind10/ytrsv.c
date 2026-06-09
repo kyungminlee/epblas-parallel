@@ -47,13 +47,7 @@ static inline char up(const char *p) {
 #define YTRSV_BLOCKED_NB_DEFAULT 64
 
 static ptrdiff_t ytrsv_blocked_nb(void) {
-    static ptrdiff_t cached = 0;
-    if (cached == 0) {
-        const char *s = getenv("YTRSV_NB");
-        ptrdiff_t v = (s && *s) ? atoi(s) : 0;
-        cached = (v > 0) ? v : YTRSV_BLOCKED_NB_DEFAULT;
-    }
-    return cached;
+    return YTRSV_BLOCKED_NB_DEFAULT;
 }
 
 void ytrsv_blocked_(
