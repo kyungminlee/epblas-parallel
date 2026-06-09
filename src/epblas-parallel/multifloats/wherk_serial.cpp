@@ -27,13 +27,6 @@ using T = mf::complex64x2;
 
 namespace {
 
-int env_int(const char *name, int dflt) {
-    const char *s = std::getenv(name);
-    if (!s || !*s) return dflt;
-    int v = std::atoi(s);
-    return v > 0 ? v : dflt;
-}
-
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
@@ -330,7 +323,7 @@ inline void diag_dispatch(int jc, int jb, int K, R alpha,
 
 int wherk_block_nb(void) {
     static int nb = 0;
-    if (nb == 0) nb = env_int("WHERK_NB", 64);
+    if (nb == 0) nb = 64;
     return nb;
 }
 

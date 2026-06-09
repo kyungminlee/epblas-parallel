@@ -41,13 +41,6 @@ inline T cmul(T const &a, T const &b) {
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 
-int env_int(const char *name, int dflt) {
-    const char *s = std::getenv(name);
-    if (!s || !*s) return dflt;
-    int v = std::atoi(s);
-    return v > 0 ? v : dflt;
-}
-
 int g_nb = 0;
 
 #define A_(i, j)  a[(std::size_t)(j) * lda + (i)]
@@ -105,7 +98,7 @@ inline void diag_add(int jc, int jb, int K, T alpha,
 } /* anonymous */
 
 int wgemmtr_block_nb(void) {
-    if (g_nb == 0) g_nb = env_int("WGEMMTR_NB", 64);
+    if (g_nb == 0) g_nb = 64;
     return g_nb;
 }
 

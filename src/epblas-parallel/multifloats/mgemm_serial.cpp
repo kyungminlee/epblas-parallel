@@ -28,19 +28,12 @@ using T = mf::float64x2;
 
 namespace {
 
-int env_int(const char *name, int dflt) {
-    const char *s = std::getenv(name);
-    if (!s || !*s) return dflt;
-    int v = std::atoi(s);
-    return v > 0 ? v : dflt;
-}
-
 int g_mc = 0, g_kc = 0, g_nc = 0;
 void init_blocks() {
     if (g_mc) return;
-    g_mc = env_int("MBLAS_MC",  64);
-    g_kc = env_int("MBLAS_KC", 128);
-    g_nc = env_int("MBLAS_NC", 256);
+    g_mc =  64;
+    g_kc = 128;
+    g_nc = 256;
 }
 
 const T zero_dd{0.0, 0.0};

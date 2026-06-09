@@ -35,13 +35,6 @@ const T one_dd {1.0, 0.0};
 inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
-int env_int(const char *name, int dflt) {
-    const char *s = std::getenv(name);
-    if (!s || !*s) return dflt;
-    int v = std::atoi(s);
-    return v > 0 ? v : dflt;
-}
-
 int g_nb = 0;
 
 #define A_(i, j)  a[(std::size_t)(j) * lda + (i)]
@@ -98,7 +91,7 @@ inline void diag_add(int jc, int jb, int K, T alpha,
 } /* anonymous */
 
 int mgemmtr_block_nb(void) {
-    if (g_nb == 0) g_nb = env_int("MGEMMTR_NB", 64);
+    if (g_nb == 0) g_nb = 64;
     return g_nb;
 }
 

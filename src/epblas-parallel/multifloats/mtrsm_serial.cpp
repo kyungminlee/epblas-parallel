@@ -34,16 +34,9 @@ using T = mf::float64x2;
 
 namespace {
 
-int env_int(const char *name, int dflt) {
-    const char *s = std::getenv(name);
-    if (!s || !*s) return dflt;
-    int v = std::atoi(s);
-    return v > 0 ? v : dflt;
-}
-
 int g_nb_trsm = 0;
 int trsm_nb(void) {
-    if (g_nb_trsm == 0) g_nb_trsm = env_int("MTRSM_NB", 64);
+    if (g_nb_trsm == 0) g_nb_trsm = 64;
     return g_nb_trsm;
 }
 
