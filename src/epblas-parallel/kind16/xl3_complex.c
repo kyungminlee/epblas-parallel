@@ -374,23 +374,9 @@ void qblas_ygemm_beta(ptrdiff_t m, ptrdiff_t n,
 }
 
 
-/* ── Env-var block-size lookup (lazy, idempotent) ───────────────── */
-static int g_mc = 0, g_kc = 0, g_nc = 0;
-
-static int env_int(const char *name, int dflt) {
-    const char *s = getenv(name);
-    if (!s || !*s) return dflt;
-    int v = atoi(s);
-    return v > 0 ? v : dflt;
-}
-
+/* ── Block-size constants ───────────────────────────────────────── */
 void qblas_ygemm_blocks(int *mc, int *kc, int *nc) {
-    if (!g_mc) {
-        g_mc = env_int("QBLAS_MC", QBLAS_YGEMM_GEMM_P);
-        g_kc = env_int("QBLAS_KC", QBLAS_YGEMM_GEMM_Q);
-        g_nc = env_int("QBLAS_NC", QBLAS_YGEMM_GEMM_R);
-    }
-    *mc = g_mc; *kc = g_kc; *nc = g_nc;
+    *mc = QBLAS_YGEMM_GEMM_P; *kc = QBLAS_YGEMM_GEMM_Q; *nc = QBLAS_YGEMM_GEMM_R;
 }
 
 

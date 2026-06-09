@@ -49,29 +49,19 @@ typedef qgemm_T T;
 
 /* ── Block sizes ──────────────────────────────────────────────── */
 
-static ptrdiff_t env_int(const char *name, ptrdiff_t dflt) {
-    const char *s = getenv(name);
-    if (!s || !*s) return dflt;
-    ptrdiff_t v = atoi(s);
-    return v > 0 ? v : dflt;
-}
-
 static ptrdiff_t g_mc = 0, g_kc = 0, g_nc = 0;
 static long g_l2_bytes = 0;        /* adaptive-MC cache target (see below) */
 static void init_blocks(void) {
     if (g_mc) return;
-    g_kc = env_int("QBLAS_KC", 256);
-    g_nc = env_int("QBLAS_NC", 512);
+    g_kc = 256;
+    g_nc = 512;
     /* Adaptive-MC cache budget: a packed Ap block (MC*KC) should sit in L2.
      * Detect this core's L2 at runtime rather than hardcoding one machine's
-     * size. Override with QBLAS_L2_KB. */
-    ptrdiff_t l2_kb = env_int("QBLAS_L2_KB", 0);
-    if (l2_kb <= 0) {
-        long sz = sysconf(_SC_LEVEL2_CACHE_SIZE);
-        l2_kb = (sz > 0) ? (ptrdiff_t)(sz / 1024) : 256;
-    }
+     * size. */
+    long sz = sysconf(_SC_LEVEL2_CACHE_SIZE);
+    ptrdiff_t l2_kb = (sz > 0) ? (ptrdiff_t)(sz / 1024) : 256;
     g_l2_bytes = (long)l2_kb * 1024L;
-    g_mc = env_int("QBLAS_MC", 64);  /* set last: g_mc!=0 is the init flag */
+    g_mc = 64;  /* set last: g_mc!=0 is the init flag */
 }
 
 ptrdiff_t qgemm_trans_code(const char *p, size_t len) {

@@ -39,7 +39,7 @@ extern "C" {
 #define QBLAS_YGEMM_MR 2
 #define QBLAS_YGEMM_NR 2
 
-/* ── Cache-block defaults (overridable via getenv at routine entry) ─
+/* ── Cache-block sizes (fixed compile-time constants) ───────────────
  *
  * Sized so MC*KC of complex `__float128` (32 B each on x86-64) fits
  * inside ~256 KB of L2:  64 * 256 * 32 B = 512 KB nominal (we run a

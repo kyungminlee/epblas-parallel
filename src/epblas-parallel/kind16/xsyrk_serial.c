@@ -29,15 +29,7 @@ char xsyrk_trans(const char *p) {
     return (char)toupper((unsigned char)*p);
 }
 
-static ptrdiff_t g_xsyrk_nb = 0;
-ptrdiff_t xsyrk_nb(void) {
-    if (g_xsyrk_nb == 0) {
-        g_xsyrk_nb = 32;
-        const char *s = getenv("XSYRK_NB");
-        if (s && *s) { ptrdiff_t v = atoi(s); if (v > 0) g_xsyrk_nb = v; }
-    }
-    return g_xsyrk_nb;
-}
+ptrdiff_t xsyrk_nb(void) { return 32; }
 
 /* Bridge the ptrdiff_t block dims of the trailing update to xgemm_serial_'s
  * int Fortran ABI (block sizes are bounded by N/K, which arrive as int). */

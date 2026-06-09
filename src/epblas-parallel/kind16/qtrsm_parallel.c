@@ -62,20 +62,8 @@ extern void qtrsv_(
  *   scaling = min(nthreads, M / nb)
  * Crossover where fast path stops winning vs col-parallel is at
  * nrhs ≈ scaling — hence MAX = scaling - 1 (last nrhs where fast path
- * is still preferred). QTRSM_QTRSV_LOOP_MAX env overrides the heuristic. */
+ * is still preferred). */
 static int qtrsm_qtrsv_loop_max(int M) {
-    static int env_set = 0;
-    static int env_val = -1;
-    if (!__atomic_load_n(&env_set, __ATOMIC_RELAXED)) {
-        const char *s = getenv("QTRSM_QTRSV_LOOP_MAX");
-        if (s && *s) {
-            int v = atoi(s);
-            if (v >= 0) env_val = v;
-        }
-        __atomic_store_n(&env_set, 1, __ATOMIC_RELAXED);
-    }
-    if (env_val >= 0) return env_val;
-
 #ifdef _OPENMP
     const int max_nt     = blas_omp_max_threads() - 1;
 #else
@@ -242,13 +230,7 @@ extern void qgemm_serial_(
 #define QTRSM_BLOCKED_NB_DEFAULT 64
 
 static int qtrsm_blocked_nb(void) {
-    static int cached = 0;
-    if (cached == 0) {
-        const char *s = getenv("QTRSM_NB");
-        int v = (s && *s) ? atoi(s) : 0;
-        cached = (v > 0) ? v : QTRSM_BLOCKED_NB_DEFAULT;
-    }
-    return cached;
+    return QTRSM_BLOCKED_NB_DEFAULT;
 }
 
 void qtrsm_blocked_(

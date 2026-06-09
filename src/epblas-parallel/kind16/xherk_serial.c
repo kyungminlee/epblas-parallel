@@ -31,15 +31,7 @@ char xherk_trans(const char *p) {
     return (char)toupper((unsigned char)*p);
 }
 
-static ptrdiff_t g_xherk_nb = 0;
-ptrdiff_t xherk_nb(void) {
-    if (g_xherk_nb == 0) {
-        g_xherk_nb = 32;
-        const char *s = getenv("XHERK_NB");
-        if (s && *s) { ptrdiff_t v = atoi(s); if (v > 0) g_xherk_nb = v; }
-    }
-    return g_xherk_nb;
-}
+ptrdiff_t xherk_nb(void) { return 32; }
 
 /* Bridge the ptrdiff_t block dims of the trailing update to xgemm_serial_'s
  * int Fortran ABI (block sizes are bounded by N/K, which arrive as int). */

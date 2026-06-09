@@ -51,13 +51,7 @@ static inline char up(const char *p) {
 #define XTRSV_BLOCKED_NB_DEFAULT 64
 
 static int xtrsv_blocked_nb(void) {
-    static int cached = 0;
-    if (cached == 0) {
-        const char *s = getenv("XTRSV_NB");
-        int v = (s && *s) ? atoi(s) : 0;
-        cached = (v > 0) ? v : XTRSV_BLOCKED_NB_DEFAULT;
-    }
-    return cached;
+    return XTRSV_BLOCKED_NB_DEFAULT;
 }
 
 void xtrsv_blocked_(

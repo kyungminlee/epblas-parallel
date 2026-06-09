@@ -38,20 +38,8 @@ extern void xtrsv_(
 
 /* Maximum nrhs at which the xtrsv-loop fast path beats column-parallel
  * xtrsm. In the serial entry no team is available, so the heuristic floors
- * at 1 (env override still honoured). */
+ * at 1. */
 static int xtrsm_xtrsv_loop_max(int M) {
-    static int env_set = 0;
-    static int env_val = -1;
-    if (!__atomic_load_n(&env_set, __ATOMIC_RELAXED)) {
-        const char *s = getenv("XTRSM_XTRSV_LOOP_MAX");
-        if (s && *s) {
-            int v = atoi(s);
-            if (v >= 0) env_val = v;
-        }
-        __atomic_store_n(&env_set, 1, __ATOMIC_RELAXED);
-    }
-    if (env_val >= 0) return env_val;
-
     const int max_nt     = 1 - 1;
     const int max_amdahl = M / XTRSM_XTRSV_LOOP_NB_HINT;
     int v = (max_nt < max_amdahl) ? max_nt : max_amdahl;

@@ -43,13 +43,7 @@ static inline char up(const char *p) {
 #define QTRSV_BLOCKED_NB_DEFAULT 64
 
 static int qtrsv_blocked_nb(void) {
-    static int cached = 0;
-    if (cached == 0) {
-        const char *s = getenv("QTRSV_NB");
-        int v = (s && *s) ? atoi(s) : 0;
-        cached = (v > 0) ? v : QTRSV_BLOCKED_NB_DEFAULT;
-    }
-    return cached;
+    return QTRSV_BLOCKED_NB_DEFAULT;
 }
 
 void qtrsv_blocked_(
