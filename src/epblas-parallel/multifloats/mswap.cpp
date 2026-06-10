@@ -1,5 +1,10 @@
 /*
  * mswap — multifloats real DD: swap X ↔ Y.
+ *
+ * 4-way unrolled kernel (matches ob swap_kernel): DD has no SIMD, so the only
+ * lever on this bandwidth/loop-overhead-bound op is amortizing the loop control
+ * with independent temps. Threaded path splits into contiguous chunks, each
+ * running the same unrolled kernel.
  */
 #include <cstddef>
 #include <multifloats.h>
@@ -12,26 +17,52 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+static void mswap_kernel(std::ptrdiff_t n, T *x, std::ptrdiff_t incx,
+                                            T *y, std::ptrdiff_t incy)
+{
+    if (incx == 1 && incy == 1) {
+        std::ptrdiff_t i, n1 = n & -4;
+        for (i = 0; i < n1; i += 4) {
+            T t0 = x[i+0], t1 = x[i+1], t2 = x[i+2], t3 = x[i+3];
+            x[i+0] = y[i+0]; x[i+1] = y[i+1];
+            x[i+2] = y[i+2]; x[i+3] = y[i+3];
+            y[i+0] = t0; y[i+1] = t1; y[i+2] = t2; y[i+3] = t3;
+        }
+        for (; i < n; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
+        return;
+    }
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
+        T t = x[i*incx]; x[i*incx] = y[i*incy]; y[i*incy] = t;
+    }
+}
+
 extern "C" void mswap_(const int *n_,
                        T *x, const int *incx_,
                        T *y, const int *incy_)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return;
-    if (incx == 1 && incy == 1) {
+    if (incx < 0) x -= (n - 1) * incx;
+    if (incy < 0) y -= (n - 1) * incy;
+
 #ifdef _OPENMP
-        /* Memory-bandwidth bound (2 reads + 2 writes); disjoint slices. */
-        if (n > MSWAP_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
-            int nthreads = blas_omp_max_threads();
-            #pragma omp parallel for schedule(static) num_threads(nthreads)
-            for (int i = 0; i < n; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
-            return;
+    /* Memory-bandwidth bound (2 reads + 2 writes); disjoint contiguous slices. */
+    if (n > MSWAP_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+        int nthreads = blas_omp_max_threads();
+        #pragma omp parallel num_threads(nthreads)
+        {
+            int tid = omp_get_thread_num();
+            int nth = omp_get_num_threads();
+            std::ptrdiff_t chunk = (n + nth - 1) / nth;
+            std::ptrdiff_t start = (std::ptrdiff_t)tid * chunk;
+            std::ptrdiff_t end   = start + chunk;
+            if (end > n) end = n;
+            if (start < end)
+                mswap_kernel(end - start, x + start * incx, incx,
+                                          y + start * incy, incy);
         }
-#endif
-        for (int i = 0; i < n; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
-    } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (int i = 0; i < n; ++i) { T t = x[ix]; x[ix] = y[iy]; y[iy] = t; ix += incx; iy += incy; }
+        return;
     }
+#endif
+    mswap_kernel(n, x, incx, y, incy);
 }

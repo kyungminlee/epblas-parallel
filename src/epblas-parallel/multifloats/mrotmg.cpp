@@ -13,8 +13,13 @@ namespace {
 inline bool dd_lt0(T x) { return x.limbs[0] < 0.0; }
 inline bool dd_eq0(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_gt0(T x) { return x.limbs[0] > 0.0 || (x.limbs[0] == 0.0 && x.limbs[1] > 0.0); }
+/* Inline magnitude — the public fabsdd() is an out-of-line library call (the
+ * scalar generator emitted 27 PLT calls to it → ~1.27x vs ob's inlined abs).
+ * a < 0 ? -a : a uses only header-inline ops and yields the identical canonical
+ * magnitude (same idiom as imamax t_abs; verified bit-exact). */
+inline T dd_abs(T a) { return a < 0 ? -a : a; }
 inline bool dd_abs_gt(T a, T b) {
-    T aa = fabsdd(a), bb = fabsdd(b);
+    T aa = dd_abs(a), bb = dd_abs(b);
     return aa.limbs[0] > bb.limbs[0]
         || (aa.limbs[0] == bb.limbs[0] && aa.limbs[1] > bb.limbs[1]);
 }
@@ -80,14 +85,14 @@ extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
             }
         }
         if (!dd_eq0(d2)) {
-            while (dd_abs_gt(rgamsq, fabsdd(d2)) || !dd_abs_gt(gamsq, fabsdd(d2))) {
+            while (dd_abs_gt(rgamsq, dd_abs(d2)) || !dd_abs_gt(gamsq, dd_abs(d2))) {
                 if (dd_eq0(flag)) { h11 = one; h22 = one; flag = T{-1.0, 0.0}; }
                 else              { h21 = T{-1.0, 0.0}; h12 = one; flag = T{-1.0, 0.0}; }
-                if (dd_abs_gt(rgamsq, fabsdd(d2))) { d2 = d2 * gam * gam;
+                if (dd_abs_gt(rgamsq, dd_abs(d2))) { d2 = d2 * gam * gam;
                     h21 = h21 / gam; h22 = h22 / gam; }
                 else                                { d2 = d2 / (gam * gam);
                     h21 = h21 * gam; h22 = h22 * gam; }
-                if (dd_abs_gt(rgamsq, fabsdd(d2)) || !dd_abs_gt(gamsq, fabsdd(d2))) continue; else break;
+                if (dd_abs_gt(rgamsq, dd_abs(d2)) || !dd_abs_gt(gamsq, dd_abs(d2))) continue; else break;
             }
         }
     }
