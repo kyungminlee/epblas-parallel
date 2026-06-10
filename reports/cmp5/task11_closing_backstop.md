@@ -26,7 +26,7 @@ Raw: `cmp5_task11_backstop_raw.tsv`. Wall time ns/call; **par/ob smaller = faste
 | mswap  | 9  | 0 | closed |
 | mrotmg | 1  | 0 | closed |
 | mrotm  | 9  | 0 | closed (-/256 1.059@min-5 → 0.989@min-9, sub-threshold noise) |
-| **whemv** | 54 | 24 | **OPEN** — L-strided serial DD-EFT floor |
+| **whemv** | 54 | 2  | **CLOSED** (5f60504) — L-strided 1.087→1.015, noinline carve |
 | **wher**  | 18 | 3  | **OPEN** — U-strided serial codegen floor |
 | **mgemv** | 90 | 8  | **OPEN** — small-N strided NoTrans OMP floor |
 

@@ -46,7 +46,20 @@ U/x-1     512    0.901     |    0.937  (still beats ob)
 LOWER strided improved ~14%→~9% (par1 ~1.68M→1.59M at N=256). UPPER and
 unit-stride unchanged-or-better; serial-correct paths untouched.
 
-## Residual — LOWER strided ~1.088 (codegen-layout floor, STILL OPEN)
+## Residual — LOWER strided ~1.088 — RESOLVED (commit 5f60504)
+
+**Update (2026-06-10):** the "codegen-layout floor" diagnosis below was WRONG.
+Disassembly of the built object showed both strided inner loops spilled to
+out-of-line `call cmul` + float64x2 `operator+` under register pressure inside
+the 4500-insn `whemv_` body (72 calls, 33 vzeroupper), and LOWER landed the
+worse basic-block layout. Carving the strided inner sweep into one `noinline`
+helper (`whemv_strided_inner`, shared by both uplos) compiles it once in a clean
+context with the complex-DD ops inlined. gap5 min-of-9: L-strided `par4/ob4`
+avg **1.087 [1.072–1.105] → 1.015 [0.996–1.032]**, worst 1.105 → 1.032; bit-exact
+(fuzz OMP1+4 relerr 0). Same fix pattern as wtbmv (`c32ca4c`). The pre-fix
+analysis is retained below for the record.
+
+## (pre-fix) Residual — LOWER strided ~1.088
 
 After the hoist the LOWER and UPPER strided inner loops have **identical
 source**, yet par's LOWER stays ~9% slower than its UPPER (and ob is opposite).
