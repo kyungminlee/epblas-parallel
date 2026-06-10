@@ -75,9 +75,16 @@ soa_store4(double *p, __m256d hi, __m256d lo)
  * SIMD lever, so threading is the only one). Each thread owns a disjoint band of
  * output rows [lo,hi) and runs the serial COLUMN scatter restricted to that band:
  * column-outer keeps the matrix read contiguous in i (cache-friendly, unlike a
- * row-outer gather striding by lda), and accumulating y[i] += ax[j]*A(i,j) in
+ * row-outer gather striding by lda), and accumulating y[i] += alpha*x[j]*A(i,j) in
  * ascending j reproduces the serial scatter's exact association -> bit-identical.
- * ax[j]=alpha*x[j] precomputed; x,y distinct so disjoint row bands never race. */
+ *
+ * Mirrors ob gemv_n_strided exactly: t=alpha*x[jx] is computed inline inside the
+ * thread (redundant across threads but fully overlapped), and the y index advances
+ * by an incremental iy += incy. The earlier form precomputed ax[]=alpha*x via a
+ * malloc + a SERIAL prologue ahead of the parallel region; that fixed serial cost
+ * does not shrink with threads, so it capped strided scaling at ~2.8x (vs ob ~3.35x)
+ * and left par4/ob4 ~1.05-1.15 at N<=512. x,y distinct so disjoint row bands never
+ * race; skip on dd_iszero(x[jx]) matches the serial strided path. */
 static bool mgemv_n_omp(int M, int N, T alpha, const T *a, int lda,
                         const T *x, int incx, T *y, int incy)
 {
@@ -86,10 +93,7 @@ static bool mgemv_n_omp(int M, int N, T alpha, const T *a, int lda,
     int nthreads = blas_omp_max_threads();
     if (nthreads > MGEMV_MAX_CPUS) nthreads = MGEMV_MAX_CPUS;
 
-    T *ax = static_cast<T *>(std::malloc(static_cast<std::size_t>(N) * sizeof(T)));
-    if (!ax) return false;
-    const int ix0 = (incx < 0) ? -(N - 1) * incx : 0;
-    for (int j = 0; j < N; ++j) ax[j] = alpha * x[ix0 + j * incx];
+    const std::ptrdiff_t ix0 = (incx < 0) ? -static_cast<std::ptrdiff_t>(N - 1) * incx : 0;
     const std::ptrdiff_t iy0 = (incy < 0) ? -static_cast<std::ptrdiff_t>(M - 1) * incy : 0;
 
     #pragma omp parallel num_threads(nthreads)
@@ -97,17 +101,21 @@ static bool mgemv_n_omp(int M, int N, T alpha, const T *a, int lda,
         int tid = omp_get_thread_num();
         std::ptrdiff_t lo = (static_cast<std::ptrdiff_t>(M) * tid) / nthreads;
         std::ptrdiff_t hi = (static_cast<std::ptrdiff_t>(M) * (tid + 1)) / nthreads;
+        std::ptrdiff_t jx = ix0;
         for (int j = 0; j < N; ++j) {
-            const T t = ax[j];
-            if (dd_iszero(t)) continue;
-            const T *aj = &A_(0, j);
-            for (std::ptrdiff_t i = lo; i < hi; ++i) {
-                T *yi = &y[iy0 + i * incy];
-                *yi = *yi + t * aj[i];
+            const T xj = x[jx];
+            if (!dd_iszero(xj)) {
+                const T t = alpha * xj;
+                const T *aj = &A_(0, j);
+                std::ptrdiff_t iy = iy0 + lo * incy;
+                for (std::ptrdiff_t i = lo; i < hi; ++i) {
+                    y[iy] = y[iy] + t * aj[i];
+                    iy += incy;
+                }
             }
+            jx += incx;
         }
     }
-    std::free(ax);
     return true;
 }
 
