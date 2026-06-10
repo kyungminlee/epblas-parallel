@@ -68,12 +68,19 @@ void egemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, egemm_T alpha,
  * stride-1 dot with a SINGLE fp80 accumulator, so the ~3-cyc x87 `fadd`
  * latency serializes the reduction (~5.1 cyc/MAC). The blocked packed path
  * keeps four independent MR×NR accumulator chains that hide that latency
- * (~2.9 cyc/MAC) AND threads over the M axis — so it is faster per FLOP for
- * any non-trivial K. fast_col only wins where packing isn't amortized:
- * short K (the single chain hasn't yet lost to the blocked ILP) or a tiny
- * output. Everything else falls through to the blocked path. */
+ * (~2.9 cyc/MAC) — so it is faster per FLOP whenever its packing + buffer
+ * alloc can be amortized. fast_col only wins where it can't: a SKINNY output
+ * (min(M,N) tiny, so the packed element count ≈ the MAC count and packing
+ * never pays off) or a TINY total FLOP (a 32³-ish cube the alloc dwarfs).
+ *
+ * The earlier `K <= 64` proxy was wrong: it mis-routed the moderate 64×64×64
+ * cube — neither skinny nor tiny — to fast_col, where its serialized fadd
+ * lost ~25% to the always-blocked ob reference (par1 243k vs ob1 191k ns).
+ * Gating on min(M,N) and total work routes that cube to the blocked path.
+ * Everything genuinely skinny/tiny still takes fast_col. */
 static inline ptrdiff_t egemm_tn_use_fast(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K) {
-    return K <= 64 || (long)M * (long)N <= 64L * 64L;
+    const ptrdiff_t mn = (M < N) ? M : N;   /* skinny (min) dimension */
+    return mn <= 8 || (long)M * (long)N * (long)K <= 32L * 32L * 32L;
 }
 
 /* Pure single-thread GEMM. Same signature as egemm_ — no OpenMP. */
