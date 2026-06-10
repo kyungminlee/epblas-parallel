@@ -8,8 +8,8 @@ Ways: par1 par4 ob1 ob4 mig (mig = migrated serial reference, from par archive).
 
 Measured after the rewrite that ports the etbmv/ytbmv row-gather to the symmetric
 band case (serial register-resident gather + disjoint-row threaded gather; no
-barrier/scratch since x,y distinct; thresholded at ESBMV_OMP_MIN=320). Supersedes
-the stale GF/s cmp5.tsv rows.
+barrier/scratch since x,y distinct; thresholded at ESBMV_OMP_MIN, now 256 — see the
+recalibration section below). Supersedes the stale GF/s cmp5.tsv rows.
 
 ```
 key     N |      par1      par4       ob1       ob4       mig |   p1/o1   p4/o4   p4/p1  p1/mig
@@ -70,14 +70,43 @@ N≈44000), and on fp80 (x87, no SIMD) the L3-resident read is far cheaper than 
 per-element y RMW it eliminates. So the simple gather wins across the range and the
 B=2 row-block escalation (which would recover the single-load) is NOT needed here.
 
-## Threshold (ESBMV_OMP_MIN=320)
+## Threshold — 320 → 256 (recalibrated 2026-06-10 under iomp5)
 
-Forced-threshold in-archive calibration (par4 vs real-codegen par1): break-even is
-~N=256 (p4/p1≈1.00), first clean all-win at N=320 (~0.82–0.88). Lower than etbmv's
-768 because esbmv does the full 2K+1 band per row (vs etbmv's triangular K+1), so
-threading amortizes the fork sooner. Only upper/lower exist (no trans/diag) sharing
-the gather body, so a single threshold suffices. In the gap [256,320) par stays
-serial and still wins p4/o4: at N=256 par serial 10114 < ob 4-thread 12925.
+The original calibration (above table, `OMP_WAIT_POLICY=passive`, libgomp) set
+ESBMV_OMP_MIN=320: break-even ~N=256 (p4/p1≈1.00), first clean all-win at 320. The
+gap [256,320) was justified because **back then** par serial (10114) beat ob's
+4-thread path (12925) at N=256 — ob threaded into a *loss* there, so staying serial
+won p4/o4.
+
+That premise no longer holds under iomp5. ob's threaded path got much faster (its
+fork/join tax fell with hot-team reuse): at N=256, ob4 is now ~5.2µs vs par serial
+~7.9µs — **ob threaded now beats our serial gather**, so leaving par serial at 256
+loses: par4/ob4 ≈ 1.3–1.5 on every N=256 key. Meanwhile par itself now threads
+profitably at 256 (par4/par1 ≈ 0.38, ~2.6×), so the real break-even has dropped
+well below 256.
+
+Fix = ESBMV_OMP_MIN 320 → 256 (same stale-threshold pattern as the y* family audit,
+[[project_ystar_omp_threshold_audit]]). N=128 stays serial, where the register-
+resident gather still beats ob (threaded or not): par4/ob4 ≈ 0.69–0.82. Only a
+threshold constant changed — serial path byte-for-byte identical, bit-exact (fuzz
+max-err 0).
+
+### N=256 before/after (par4/ob4, smaller = faster), min-of-5 iomp5 re-sweep
+
+| key | before (thr 320) | after (thr 256) |
+|---|---|---|
+| U          | 1.47 | 0.58 |
+| L          | 1.45 | 0.56 |
+| U/x2       | 1.34 | 0.62 |
+| L/x-1      | 1.31 | 0.64 |
+| L/y-1      | 1.52 | 0.59 |
+| U/y2       | 1.51 | 0.58 |
+
+All 18 N=256 keys went 1.3–1.5 → 0.56–0.65. N=512/1024 unchanged (par4/ob4 ≈
+0.27–0.35). The aggregator still prints 14 "FAIL" at N=128 — those are
+`par4 > 1.03·par1` noise flags (par4 ≈ par1 because par is serial at 128); the real
+par4/ob4 is < 1.0 in every cell. Raw: `esbmv_before_raw.tsv` (thr 320, iomp5),
+`esbmv_after_raw.tsv` (thr 256).
 
 ## Correctness
 max_rel_err ~1e-19 (register accumulator is ~K·ulp more accurate than the scatter,

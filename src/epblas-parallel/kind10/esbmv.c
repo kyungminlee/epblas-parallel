@@ -52,17 +52,22 @@ static inline char up(const char *p) {
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 
-/* Thread-entry threshold = the measured break-even where par4 < par1 (forking
- * actually beats our own serial gather). The register-resident serial gather is
- * fast, so threading only pays once N amortizes the parallel region's fork/join
- * (+ the strided-x malloc). Below this the serial gather wins -- and beats ob's
- * threaded path too -- so we never fork into a loss. esbmv does the full 2K+1
- * band per row (vs etbmv's triangular K+1), so its break-even is lower than
- * etbmv's. Only upper/lower exist (no trans/diag) and share the gather body, so
- * a single threshold suffices. Calibrated at K=16; #ifndef so the calibration
- * probe can force it. */
+/* Thread-entry threshold = the measured break-even where forking beats our own
+ * serial gather. The register-resident serial gather is fast, so threading only
+ * pays once N amortizes the parallel region's fork/join (+ the strided-x malloc).
+ * esbmv does the full 2K+1 band per row (vs etbmv's triangular K+1), so its
+ * break-even is lower than etbmv's. Only upper/lower exist (no trans/diag) and
+ * share the gather body, so a single threshold suffices. Calibrated at K=16;
+ * #ifndef so the calibration probe can force it.
+ *
+ * Recalibrated 2026-06-10 under iomp5 (hot-team reuse → cheap fork): the old 320
+ * was a stale libgomp-era value that kept N=256 serial, but ob threads at 256 and
+ * its threaded path beat our serial gather there (par4/ob4 ~1.3-1.5). Under iomp5
+ * N=256 threads to par4/par1 ~0.38 (~2.6×) → par4/ob4 ~0.57. Drop to 256 so the
+ * N=256 band cells win; N=128 stays serial and the serial gather still beats ob's
+ * (threaded or not) at 128. (Same stale-threshold pattern as the y* audit.) */
 #ifndef ESBMV_OMP_MIN
-#define ESBMV_OMP_MIN 320   /* break-even ~N=256 (p4/p1=1.0); 320 = first clean all-win */
+#define ESBMV_OMP_MIN 256
 #endif
 #define ESBMV_MAX_CPUS 256
 
