@@ -26,13 +26,13 @@ Raw: `cmp5_task11_backstop_raw.tsv`. Wall time ns/call; **par/ob smaller = faste
 | mswap  | 9  | 0 | closed |
 | mrotmg | 1  | 0 | closed |
 | mrotm  | 9  | 0 | closed (-/256 1.059@min-5 → 0.989@min-9, sub-threshold noise) |
-| **whemv** | 54 | 24 | **won't-fix** — L-strided serial DD-EFT floor |
-| **wher**  | 18 | 3  | **won't-fix** — U-strided serial codegen floor |
-| **mgemv** | 90 | 8  | **won't-fix** — small-N strided NoTrans OMP floor |
+| **whemv** | 54 | 24 | **OPEN** — L-strided serial DD-EFT floor |
+| **wher**  | 18 | 3  | **OPEN** — U-strided serial codegen floor |
+| **mgemv** | 90 | 8  | **OPEN** — small-N strided NoTrans OMP floor |
 
-16 of 19 routines fully closed. The three with residuals are all evidence-backed
-won't-fix floors on **rare strided input shapes**, and par beats the migrated
-gfortran reference handily in every one:
+16 of 19 routines fully closed. The three with residuals are STILL-OPEN floors
+on **rare strided input shapes** that need a fresh angle, and par beats the
+migrated gfortran reference handily in every one:
 
 - **whemv** — 24 cells, all `L/*` strided, `par4/ob4` ~1.08. `par1/ob1 ≈ par4/ob4`
   (≈1.08) → this is **serial**, not a threading gap (threading scales identically,

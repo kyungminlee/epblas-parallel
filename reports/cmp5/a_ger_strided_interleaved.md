@@ -67,4 +67,5 @@ fuzz 80/80 each, OMP 1+4, max-err ~1e-32 (DD round-off floor, 0 tol-fails).
   threading gap: `par1/ob1 ≈ 1.033` on the same cells (par's serial complex-DD
   conjugated gerc trails ob serial ~3%), and both legs thread identically
   (~3.75×). Consistent with the wher strided-UPPER / yher serial residuals.
-  Under the 1.05 bar; left as-is.
+  Under the 1.05 bar, but STILL OPEN — wants a fresh angle on the serial
+  complex-DD gerc codegen.

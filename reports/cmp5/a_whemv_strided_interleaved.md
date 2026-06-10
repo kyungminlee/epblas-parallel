@@ -46,7 +46,7 @@ U/x-1     512    0.901     |    0.937  (still beats ob)
 LOWER strided improved ~14%→~9% (par1 ~1.68M→1.59M at N=256). UPPER and
 unit-stride unchanged-or-better; serial-correct paths untouched.
 
-## Residual — LOWER strided ~1.088 (codegen-layout floor, won't-fix)
+## Residual — LOWER strided ~1.088 (codegen-layout floor, STILL OPEN)
 
 After the hoist the LOWER and UPPER strided inner loops have **identical
 source**, yet par's LOWER stays ~9% slower than its UPPER (and ob is opposite).
@@ -61,5 +61,6 @@ LOWER onto UPPER's shape (loop-first, combined diagonal fold) made it *worse*
 This sits in the documented serial-residual family (wher strided-UPPER ~1.05,
 yher LOWER ~1.035, esbmv serial): par's codegen is leaner yet the migrated/ob
 reference schedules the identical loop a few % better on one triangle. par
-**beats the migrated reference ~2×** on these cells (p4/m ~0.53). Under no
-threading lever (ob doesn't thread it either); left as-is.
+**beats the migrated reference ~2×** on these cells (p4/m ~0.53). No threading
+lever applies (ob doesn't thread it either) — this is STILL OPEN and wants a
+fresh angle on the serial codegen, not acceptance.

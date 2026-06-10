@@ -78,7 +78,8 @@ body even at OMP=1 — converted to the source-level `if(use_omp){#pragma…BODY
 threshold moved to the shared 128. Serial stays at parity with ob (`p1/o1` ≈ 1.00
 for T and C); large-N threading is healthy (`p4/o4` 0.49–0.85). T runs ~5% behind
 the migrated reference serially (`p1/mig` ~1.05) — the known unattributed complex-
-sweep codegen gap, left as-is; the bar is parity with ob, which holds.
+sweep codegen gap, STILL OPEN (wants a fresh angle); the bar is parity with ob,
+which holds.
 
 ## Threshold (YGBMV_OMP_MIN=128, shared N/T/C)
 

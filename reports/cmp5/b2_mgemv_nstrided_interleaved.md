@@ -40,7 +40,7 @@ N/y2         256   1.044                 1.045
 Worst N≤512 strided-NoTrans cell: **1.154 → 1.11** (and the N=256 column, which
 held the worst cells, dropped to ~0.99–1.04).
 
-## Residual (disassembly-backed won't-fix)
+## Residual (disassembly-backed, STILL OPEN)
 
 Min-of-9, 8 of 40 strided-NoTrans cells remain at `par4/ob4` 1.05–1.11, all at
 **N=128–512**, closing to ~1.00 by N≥1024:
@@ -65,4 +65,5 @@ These are a **small-N OMP runtime floor, not a code defect**:
 Sibling of the documented `whemv`-L / `wher`-U strided residuals
 ([[project_multifloats_cmp5_frontier]]): faithful structure mirror of the ob
 reference, par wins serial, only a sub-2% small-N threading delta remains on a
-rare input shape. Won't-fix.
+rare input shape. STILL OPEN — needs a fresh angle on the small-N team-dispatch
+floor.

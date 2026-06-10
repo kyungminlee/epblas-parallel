@@ -139,8 +139,9 @@ void yhpr2_(
              * instructions are byte-identical to int once the surrounding body
              * shifted. Both a noinline carve-out and an increment-ordering
              * rewrite were tried and either failed to move the alignment or
-             * made it marginally worse — left as the plain converted form.
-             * project_ptrdiff_conversion_regressors (placement won't-fix). */
+             * made it marginally worse, so this is the plain converted form for
+             * now — the ~4% LOWER-strided residual is STILL OPEN and wants a
+             * fresh angle. project_ptrdiff_conversion_regressors (placement). */
             for (ptrdiff_t j = 0; j < N; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const T t1 = alpha * cconj(y[jy]);

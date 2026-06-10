@@ -42,7 +42,8 @@ was a column SCATTER with an `if(x[j]!=0)` guard; now an in-place band-dot gathe
 (upper ascending / lower descending, no buffer). `par1/ob1` NoTrans: **1.01–1.02 →
 0.62–0.65** (par serial now ~37% faster than ob AND the migrated ref). Trans/
 ConjTrans serial was already a register dot — left unchanged; its `par1/ob1 ≈
-1.02–1.05` is the pre-existing complex-upper codegen gap (not a spill), left as-is.
+1.02–1.05` is the pre-existing complex-upper codegen gap (not a spill), STILL
+OPEN and wanting a fresh angle.
 
 **Win 2 — row-partitioned threaded gather.** Replaced the private-slot fold (which
 floored `p4/p1`) with disjoint output rows → shared scratch → one barrier →
