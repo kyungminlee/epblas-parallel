@@ -277,6 +277,15 @@ extern "C" void mgemv_(
             x_hi[i] = 0.0;  x_lo[i] = 0.0;
         }
         const __m256d zerov = _mm256_setzero_pd();
+        /* Columns are independent dots over the shared read-only x SoA scratch;
+         * thread over j (each y[j] disjoint, per-j SIMD reduction order unchanged
+         * -> consistency unaffected). The SIMD T-path was otherwise serial, so
+         * ob's threaded Trans overtook it; this restores ~3.7x scaling. */
+#ifdef _OPENMP
+        const int use_omp_t = (N >= MGEMV_OMP_MIN && blas_omp_max_threads() > 1
+                               && !omp_in_parallel());
+        #pragma omp parallel for if(use_omp_t) schedule(static)
+#endif
         for (int j = 0; j < N; ++j) {
             const double *aj = reinterpret_cast<const double *>(&A_(0, j));
             __m256d s_h = zerov, s_l = zerov;
