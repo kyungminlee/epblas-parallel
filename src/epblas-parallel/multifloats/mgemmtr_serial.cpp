@@ -35,8 +35,6 @@ const T one_dd {1.0, 0.0};
 inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
-int g_nb = 0;
-
 #define A_(i, j)  a[(std::size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(std::size_t)(j) * ldb + (i)]
 #define C_(i, j)  c[(std::size_t)(j) * ldc + (i)]
@@ -90,9 +88,22 @@ inline void diag_add(int jc, int jb, int K, T alpha,
 
 } /* anonymous */
 
+/* Column block size. Small by design: the jb×jb diagonal triangle of each
+ * block is handled by the SCALAR diag_add (no SIMD), while the off-diagonal
+ * rectangle routes through the AVX2 mgemm_serial kernel. The scalar fraction
+ * is ≈ nb/N, so a small nb minimises slow scalar work and pushes the bulk
+ * through SIMD. 8 is the knee: smallest multiple of the kernel's NR=4 that
+ * still fills two SIMD column-tiles per block, and it is best-or-tied across
+ * N∈[64,512] for every (uplo,transa,transb). (Larger nb — e.g. the 64 a
+ * dense GEMM would use — is pessimal here precisely because the diagonal is
+ * scalar, not SIMD.) Env-overridable via MGEMMTR_NB for tuning. */
 int mgemmtr_block_nb(void) {
-    if (g_nb == 0) g_nb = 64;
-    return g_nb;
+    static const int nb = [] {
+        const char *e = std::getenv("MGEMMTR_NB");
+        int v = e ? std::atoi(e) : 0;
+        return (v > 0) ? v : 8;
+    }();
+    return nb;
 }
 
 void mgemmtr_beta_core(int j0, int j1, int N, bool upper,
