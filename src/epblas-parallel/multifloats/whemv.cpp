@@ -41,6 +41,30 @@ inline T cmul(T const &a, T const &b) {
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 
+/* Strided Hermitian inner sweep over k in [lo,hi): the temp1-axpy y[iy]+=temp1*A[k,i]
+ * plus temp2 += conj(A[k,i])*x[ix], advancing the strided x/y by incx/incy. Carved
+ * into a noinline helper so it compiles ONCE in a clean register context: inlined
+ * into the large whemv_ body GCC spilled the loop to out-of-line cmul/cadd calls and
+ * gave the LOWER copy a worse basic-block layout than UPPER (~9% slower). As one
+ * shared helper both uplos get the same tight loop with cmul/cadd/cconj inlined.
+ * y[iy] is written once per k and temp2 accumulates in ascending k — the exact
+ * operation order of the prior inline bodies, so bit-identical. ai, x, y never alias
+ * (distinct BLAS operands) → __restrict lets temp2 stay register-resident. */
+__attribute__((noinline)) static T
+whemv_strided_inner(T temp1, const T *__restrict ai, int lo, int hi,
+                    const T *__restrict x, T *__restrict y,
+                    int ix0, int iy0, int incx, int incy) {
+    T temp2 = zero_cdd;
+    int ix = ix0, iy = iy0;
+    for (int k = lo; k < hi; ++k) {
+        const T aik = ai[k];
+        y[iy] = cadd(y[iy], cmul(temp1, aik));
+        temp2 = cadd(temp2, cmul(cconj(aik), x[ix]));
+        ix += incx; iy += incy;
+    }
+    return temp2;
+}
+
 #ifdef MBLAS_SIMD_DD
 static inline __attribute__((always_inline)) void
 soa_load4_cdd(const double *p,
@@ -363,31 +387,20 @@ extern "C" void whemv_(
             for (int i = 0; i < N; ++i) {
                 const int ii = ky + i * incy;
                 const T temp1 = cmul(alpha, x[kx + i * incx]);
-                T temp2 = zero_cdd;
                 const T *ai = &A_(0, i);
                 const T aii_re{ ai[i].re, rzero };
                 y[ii] = cadd(y[ii], cmul(temp1, aii_re));
-                int ix = kx + (i + 1) * incx, iy = ky + (i + 1) * incy;
-                for (int k = i + 1; k < N; ++k) {
-                    const T aik = ai[k];
-                    y[iy] = cadd(y[iy], cmul(temp1, aik));
-                    temp2 = cadd(temp2, cmul(cconj(aik), x[ix]));
-                    ix += incx; iy += incy;
-                }
+                const T temp2 = whemv_strided_inner(
+                    temp1, ai, i + 1, N, x, y,
+                    kx + (i + 1) * incx, ky + (i + 1) * incy, incx, incy);
                 y[ii] = cadd(y[ii], cmul(alpha, temp2));
             }
         } else {
             for (int i = 0; i < N; ++i) {
                 const T temp1 = cmul(alpha, x[kx + i * incx]);
-                T temp2 = zero_cdd;
                 const T *ai = &A_(0, i);
-                int ix = kx, iy = ky;
-                for (int k = 0; k < i; ++k) {
-                    const T aik = ai[k];
-                    y[iy] = cadd(y[iy], cmul(temp1, aik));
-                    temp2 = cadd(temp2, cmul(cconj(aik), x[ix]));
-                    ix += incx; iy += incy;
-                }
+                const T temp2 = whemv_strided_inner(
+                    temp1, ai, 0, i, x, y, kx, ky, incx, incy);
                 const T aii_re{ ai[i].re, rzero };
                 const int ii = ky + i * incy;
                 y[ii] = cadd(y[ii], cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
