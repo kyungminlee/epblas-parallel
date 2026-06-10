@@ -7,6 +7,7 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -71,14 +72,30 @@ void eger_(
 #else
         const ptrdiff_t use_omp = 0;
 #endif
+        /* Threaded + strided x: copy x once to a unit-stride buffer so every
+         * thread streams x[] at stride 1 (mirrors ob ger_thread.c). Bit-exact —
+         * same values copied in order, same per-column accumulation. Serial keeps
+         * the strided load (its inner loop isn't on a shared/contended path, and a
+         * malloc per call there would only add overhead). */
+        const T *xp = x;
+        T *x_buf = NULL;
+        if (use_omp && incx != 1) {
+            x_buf = malloc((size_t)M * sizeof(T));
+            if (x_buf) {
+                ptrdiff_t ix = ix0;
+                for (ptrdiff_t i = 0; i < M; ++i) { x_buf[i] = x[ix]; ix += incx; }
+                xp = x_buf;
+            }
+        }
+        const int x_unit = (incx == 1) || (x_buf != NULL);
 #define EGER_STRIDED_BODY                                                    \
         for (ptrdiff_t j = 0; j < N; ++j) {                                  \
             const T yj = y[jy0 + j * incy];                                  \
             if (yj != zero) {                                                \
                 const T t = alpha * yj;                                      \
                 T *aj = &A_(0, j);                                           \
-                if (incx == 1) {                                             \
-                    for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * x[i];     \
+                if (x_unit) {                                                \
+                    for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * xp[i];    \
                 } else {                                                     \
                     ptrdiff_t ix = ix0;                                      \
                     for (ptrdiff_t i = 0; i < M; ++i) {                      \
@@ -97,6 +114,7 @@ void eger_(
             EGER_STRIDED_BODY
         }
 #undef EGER_STRIDED_BODY
+        free(x_buf);
     }
 }
 
