@@ -355,28 +355,42 @@ extern "C" void whemv_(
     } else {
         int kx = (incx < 0) ? -(N - 1) * incx : 0;
         int ky = (incy < 0) ? -(N - 1) * incy : 0;
+        /* Hoist the column base ai=&A_(0,i) (A is unit-stride in the row index k,
+         * so A_(k,i)=ai[k]), load each ai[k] once for both the temp1-axpy and the
+         * conj-dot, and walk the strided x/y by incremental ix/iy (no k*inc
+         * multiply per element). Bit-identical to the macro form. */
         if (UPLO == 'L') {
             for (int i = 0; i < N; ++i) {
+                const int ii = ky + i * incy;
                 const T temp1 = cmul(alpha, x[kx + i * incx]);
                 T temp2 = zero_cdd;
-                const T aii_re{ A_(i, i).re, rzero };
-                y[ky + i * incy] = cadd(y[ky + i * incy], cmul(temp1, aii_re));
+                const T *ai = &A_(0, i);
+                const T aii_re{ ai[i].re, rzero };
+                y[ii] = cadd(y[ii], cmul(temp1, aii_re));
+                int ix = kx + (i + 1) * incx, iy = ky + (i + 1) * incy;
                 for (int k = i + 1; k < N; ++k) {
-                    y[ky + k * incy] = cadd(y[ky + k * incy], cmul(temp1, A_(k, i)));
-                    temp2 = cadd(temp2, cmul(cconj(A_(k, i)), x[kx + k * incx]));
+                    const T aik = ai[k];
+                    y[iy] = cadd(y[iy], cmul(temp1, aik));
+                    temp2 = cadd(temp2, cmul(cconj(aik), x[ix]));
+                    ix += incx; iy += incy;
                 }
-                y[ky + i * incy] = cadd(y[ky + i * incy], cmul(alpha, temp2));
+                y[ii] = cadd(y[ii], cmul(alpha, temp2));
             }
         } else {
             for (int i = 0; i < N; ++i) {
                 const T temp1 = cmul(alpha, x[kx + i * incx]);
                 T temp2 = zero_cdd;
+                const T *ai = &A_(0, i);
+                int ix = kx, iy = ky;
                 for (int k = 0; k < i; ++k) {
-                    y[ky + k * incy] = cadd(y[ky + k * incy], cmul(temp1, A_(k, i)));
-                    temp2 = cadd(temp2, cmul(cconj(A_(k, i)), x[kx + k * incx]));
+                    const T aik = ai[k];
+                    y[iy] = cadd(y[iy], cmul(temp1, aik));
+                    temp2 = cadd(temp2, cmul(cconj(aik), x[ix]));
+                    ix += incx; iy += incy;
                 }
-                const T aii_re{ A_(i, i).re, rzero };
-                y[ky + i * incy] = cadd(y[ky + i * incy], cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
+                const T aii_re{ ai[i].re, rzero };
+                const int ii = ky + i * incy;
+                y[ii] = cadd(y[ii], cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
             }
         }
     }

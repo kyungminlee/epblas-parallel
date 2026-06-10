@@ -1,0 +1,65 @@
+# A — multifloats whemv strided-x serial codegen (LOWER triangle)
+
+Date: 2026-06-10. 5-way cmp5 interleaved min-of-5 (`run_gap5.sh`, REPS=5).
+Wall time ns/call; **par/ob ratio smaller = faster**.
+Raw: `cmp5_a_whemv_before_raw.tsv`, `cmp5_a_whemv_after_raw.tsv`.
+
+## Problem (not a threading gap)
+
+whemv's strided path (`incx≠1` or `incy≠1`) is serial in **both** par and ob —
+neither threads it (only the unit-stride SIMD path threads). So `par4≈par1`,
+`ob4≈ob1`, and `par4/ob4 ≈ par1/ob1`. Profile was asymmetric by triangle:
+
+```
+            BEFORE (strided, N=256)
+key        par1      ob1     par4/ob4
+U/x-1   1451040  1554104    0.913   ← par already beats ob
+L/x-1   1678736  1494725    1.139   ← par ~14% slower than ob
+```
+
+par **wins** the UPPER strided triangle and **loses** the LOWER one; ob has the
+*opposite* asymmetry (ob's LOWER is faster than its UPPER). Unit-stride L/U
+cells are healthy (par crushes ob, threads at N≥256).
+
+## Fix — strided index hoist (bit-exact)
+
+The strided inner loops recomputed `A_(k,i)` (= `a[i*lda+k]`) and the
+`kx+k*incx` / `ky+k*incy` index-multiplies every element, and loaded A twice
+(once for the temp1-axpy, once for the conj-dot). Hoisted the column base
+`ai=&A_(0,i)` (A is unit-stride in the row index k → `A_(k,i)=ai[k]`), loaded
+each `ai[k]` **once** into a local reused for both the axpy and `cconj(aik)`,
+and replaced the per-element index-multiply with incremental `ix+=incx`,
+`iy+=incy`. Applied symmetrically to both triangles. Bit-identical arithmetic
+and order (fuzz 80/80, OMP 1+4, max-err 3.0e-32 = DD floor).
+
+## Result
+
+```
+            BEFORE              AFTER
+key        N    par4/ob4   |   par4/ob4
+L/x-1     256    1.139     |    1.089
+L/x-1     512    1.100     |    1.088
+L/x2      512    1.158     |    ~1.09
+U/x-1     512    0.901     |    0.937  (still beats ob)
+```
+
+LOWER strided improved ~14%→~9% (par1 ~1.68M→1.59M at N=256). UPPER and
+unit-stride unchanged-or-better; serial-correct paths untouched.
+
+## Residual — LOWER strided ~1.088 (codegen-layout floor, won't-fix)
+
+After the hoist the LOWER and UPPER strided inner loops have **identical
+source**, yet par's LOWER stays ~9% slower than its UPPER (and ob is opposite).
+Disassembly shows the bodies are the double-double error-free-transform
+sequences (two_sum / two_prod) GCC compiles with data-dependent branches
+(`vucomisd` + `setnp` + `cmovne` / `je`). GCC orders the two loops' basic
+blocks differently, and one layout predicts/prefetches better — a codegen-layout
+/ branch floor, not a source-level spill. Confirmed: structurally mirroring
+LOWER onto UPPER's shape (loop-first, combined diagonal fold) made it *worse*
+(1.088→1.102) and broke bit-exactness, so it was reverted.
+
+This sits in the documented serial-residual family (wher strided-UPPER ~1.05,
+yher LOWER ~1.035, esbmv serial): par's codegen is leaner yet the migrated/ob
+reference schedules the identical loop a few % better on one triangle. par
+**beats the migrated reference ~2×** on these cells (p4/m ~0.53). Under no
+threading lever (ob doesn't thread it either); left as-is.
