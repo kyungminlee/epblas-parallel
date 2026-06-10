@@ -49,7 +49,11 @@ extern "C" void wher_(
     if (incx == 1) {
 #ifdef _OPENMP
         const int use_omp = (N >= WHER_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
+        /* static,1: cyclic interleave balances the triangular column skew.
+         * Full complex storage → columns are lda apart (no false sharing) and
+         * the complex DD work per element is heavy, so chunk-1 is ideal;
+         * mirrors the yher twin. */
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
         for (int j = 0; j < N; ++j) {
             const T xj = x[j];
@@ -69,21 +73,30 @@ extern "C" void wher_(
             }
         }
     } else {
+        /* Strided x: hoist the column base aj=&A_(0,j) (output A is unit-stride
+         * in i) and walk x by an incremental ix+=incx — avoids the per-element
+         * j*lda+i and kx+i*incx index multiplies the A_()/x[kx+i*incx] form
+         * emits. Bit-identical; mirrors the ob zher strided path. */
         int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        int jx = kx;
         for (int j = 0; j < N; ++j) {
-            const T xj = x[kx + j * incx];
+            const T xj = x[jx];
             if (!cdd_iszero(xj)) {
                 const T t = rcmul(alpha, cconj(xj));
+                T *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i) A_(i, j) = cadd(A_(i, j), cmul(t, x[kx + i * incx]));
-                    T prod = cmul(t, x[kx + j * incx]);
-                    A_(j, j) = T{ A_(j, j).re + prod.re, rzero };
+                    int ix = jx;
+                    for (int i = j + 1; i < N; ++i) { ix += incx; aj[i] = cadd(aj[i], cmul(t, x[ix])); }
+                    T prod = cmul(t, x[jx]);
+                    aj[j] = T{ aj[j].re + prod.re, rzero };
                 } else {
-                    for (int i = 0; i < j; ++i) A_(i, j) = cadd(A_(i, j), cmul(t, x[kx + i * incx]));
-                    T prod = cmul(t, x[kx + j * incx]);
-                    A_(j, j) = T{ A_(j, j).re + prod.re, rzero };
+                    int ix = kx;
+                    for (int i = 0; i < j; ++i) { aj[i] = cadd(aj[i], cmul(t, x[ix])); ix += incx; }
+                    T prod = cmul(t, x[jx]);
+                    aj[j] = T{ aj[j].re + prod.re, rzero };
                 }
             }
+            jx += incx;
         }
     }
 }

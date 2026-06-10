@@ -43,7 +43,13 @@ extern "C" void mspr_(
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const int use_omp = (N >= MSPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            /* static,8: column j writes j+1 (U) / N-j (L) packed elems — a
+             * triangular skew that plain static dumps the heavy end onto one
+             * thread. Packed columns are contiguous in ap, so cyclic static,1
+             * would false-share cache lines on this light real rank-1 write.
+             * Chunk-8 balances the skew while keeping each thread's run local
+             * (mirrors the espr twin). */
+            #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (int j = 0; j < N; ++j) {
                 if (!dd_iszero(x[j])) {
@@ -55,7 +61,13 @@ extern "C" void mspr_(
         } else {
 #ifdef _OPENMP
             const int use_omp = (N >= MSPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            /* static,8: column j writes j+1 (U) / N-j (L) packed elems — a
+             * triangular skew that plain static dumps the heavy end onto one
+             * thread. Packed columns are contiguous in ap, so cyclic static,1
+             * would false-share cache lines on this light real rank-1 write.
+             * Chunk-8 balances the skew while keeping each thread's run local
+             * (mirrors the espr twin). */
+            #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (int j = 0; j < N; ++j) {
                 if (!dd_iszero(x[j])) {

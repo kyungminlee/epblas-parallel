@@ -40,7 +40,11 @@ extern "C" void msyr_(
     if (incx == 1) {
 #ifdef _OPENMP
         const int use_omp = (N >= MSYR_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
+        /* static,1: cyclic interleave balances the triangular column skew
+         * (column j writes j+1 / N-j elems). Full storage → columns are lda
+         * apart so chunk-1 never false-shares (unlike packed mspr); mirrors
+         * the esyr twin. */
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
         for (int j = 0; j < N; ++j) {
             const T xj = x[j];

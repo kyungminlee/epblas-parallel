@@ -52,7 +52,12 @@ extern "C" void whpr_(
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            /* static,1: cyclic interleave balances the triangular packed-column
+             * skew. Packed columns are contiguous (boundary elems can share a
+             * line), but the complex DD rank-1 work per element is heavy enough
+             * to dominate any false sharing — so chunk-1, matching the yhpr
+             * twin (real packed mspr stays static,8 because its write is light). */
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
                 const int kk = (j * (j + 1)) / 2;
@@ -68,7 +73,12 @@ extern "C" void whpr_(
         } else {
 #ifdef _OPENMP
             const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            /* static,1: cyclic interleave balances the triangular packed-column
+             * skew. Packed columns are contiguous (boundary elems can share a
+             * line), but the complex DD rank-1 work per element is heavy enough
+             * to dominate any false sharing — so chunk-1, matching the yhpr
+             * twin (real packed mspr stays static,8 because its write is light). */
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
                 const int kk = j * N - (j * (j - 1)) / 2;
