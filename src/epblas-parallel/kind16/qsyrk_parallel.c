@@ -66,9 +66,17 @@ void qsyrk_(
         return;
     }
 
+    /* schedule(static, 1): column j's UPLO slice is the triangular [i_lo,i_hi)
+     * — work per column is ∝ (N-j) (L) or (j+1) (U). Plain contiguous static
+     * dumps the heavy end of the triangle on one thread, capping omp4 at ~2.3×
+     * (vs ob's ~4× blocked 2D partition). Cyclic static,1 interleaves heavy and
+     * light columns across the team so each thread carries a balanced share —
+     * lifts NoTrans scaling and closes the par4/ob4 NoTrans breaches. The serial
+     * per-column kernel (qsyrk_core, netlib unblocked) is unchanged; only the
+     * parallel orchestration differs. Bitwise-identical to the serial sweep. */
 #ifdef _OPENMP
     const int use_omp = (N >= QSYRK_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-    #pragma omp parallel for if(use_omp) schedule(static)
+    #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
     for (int j = 0; j < N; ++j)
         qsyrk_core(j, j + 1, UPLO, TR, N, K, alpha, beta, a, lda, c, ldc);
