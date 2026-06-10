@@ -26,6 +26,32 @@ inline T cmul(T const &a, T const &b) {
 }
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+
+/* Band inner-loop kernels, carved out as noinline so each compiles once in
+ * isolation: the DD complex MAC then stays register-resident with the
+ * error-free-transform float64x2 ops inlined inside a single tight body,
+ * instead of GCC emitting a per-element out-of-line cmul call (with its
+ * 32-byte sret spill and an AVX->SSE vzeroupper) amid the big wtbmv_ scaffold.
+ *
+ * caxpy_run updates len independent outputs x[t] += tmp*a[t]; since each x[t]
+ * is touched exactly once the traversal order is irrelevant, so both UPLOs use
+ * the same ascending kernel and stay bit-exact. The Trans dot accumulates into
+ * a single acc, so its rounding depends on order: cdot_fwd walks ascending
+ * (lower), cdot_rev walks descending from the base (upper), each matching the
+ * original loop direction exactly. */
+__attribute__((noinline)) static void caxpy_run(T *x, const T *a, T tmp, int len) {
+    for (int t = 0; t < len; ++t) x[t] = cadd(x[t], cmul(tmp, a[t]));
+}
+__attribute__((noinline)) static T cdot_fwd(const T *a, const T *x, int len, bool conj, T acc) {
+    if (!conj) for (int t = 0; t < len; ++t) acc = cadd(acc, cmul(a[t], x[t]));
+    else       for (int t = 0; t < len; ++t) acc = cadd(acc, cmul(cconj(a[t]), x[t]));
+    return acc;
+}
+__attribute__((noinline)) static T cdot_rev(const T *a, const T *x, int len, bool conj, T acc) {
+    if (!conj) for (int t = 0; t < len; ++t) acc = cadd(acc, cmul(a[-t], x[-t]));
+    else       for (int t = 0; t < len; ++t) acc = cadd(acc, cmul(cconj(a[-t]), x[-t]));
+    return acc;
+}
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -137,7 +163,7 @@ extern "C" void wtbmv_(
                         const T tmp = x[j];
                         const int L = K - j;
                         const int i_lo = (j - K > 0) ? (j - K) : 0;
-                        for (int i = i_lo; i < j; ++i) x[i] = cadd(x[i], cmul(tmp, A_(L + i, j)));
+                        if (j > i_lo) caxpy_run(&x[i_lo], &A_(L + i_lo, j), tmp, j - i_lo);
                         if (nounit) x[j] = cmul(x[j], A_(K, j));
                     }
                 }
@@ -146,7 +172,7 @@ extern "C" void wtbmv_(
                     if (!cdd_iszero(x[j])) {
                         const T tmp = x[j];
                         const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (int i = i_hi - 1; i > j; --i) x[i] = cadd(x[i], cmul(tmp, A_(i - j, j)));
+                        if (i_hi - 1 > j) caxpy_run(&x[j + 1], &A_(1, j), tmp, i_hi - j - 1);
                         if (nounit) x[j] = cmul(x[j], A_(0, j));
                     }
                 }
@@ -158,8 +184,7 @@ extern "C" void wtbmv_(
                     const int L = K - j;
                     if (nounit) tmp = cmul(tmp, (noconj ? A_(K, j) : cconj(A_(K, j))));
                     const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    if (noconj) for (int i = j - 1; i >= i_lo; --i) tmp = cadd(tmp, cmul(A_(L + i, j), x[i]));
-                    else        for (int i = j - 1; i >= i_lo; --i) tmp = cadd(tmp, cmul(cconj(A_(L + i, j)), x[i]));
+                    if (j > i_lo) tmp = cdot_rev(&A_(L + j - 1, j), &x[j - 1], j - i_lo, !noconj, tmp);
                     x[j] = tmp;
                 }
             } else {
@@ -167,8 +192,7 @@ extern "C" void wtbmv_(
                     T tmp = x[j];
                     if (nounit) tmp = cmul(tmp, (noconj ? A_(0, j) : cconj(A_(0, j))));
                     const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    if (noconj) for (int i = j + 1; i < i_hi; ++i) tmp = cadd(tmp, cmul(A_(i - j, j), x[i]));
-                    else        for (int i = j + 1; i < i_hi; ++i) tmp = cadd(tmp, cmul(cconj(A_(i - j, j)), x[i]));
+                    if (i_hi > j + 1) tmp = cdot_fwd(&A_(1, j), &x[j + 1], i_hi - j - 1, !noconj, tmp);
                     x[j] = tmp;
                 }
             }
