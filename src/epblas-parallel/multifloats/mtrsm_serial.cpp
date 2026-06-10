@@ -847,6 +847,21 @@ void mtrsm_L_slice(char UPLO, char TR, int use_blocked,
         blocked_chunk(V, j_start, j_end, M, nb, alpha, a, lda, b, ldb, nounit);
         return;
     }
+#ifdef MBLAS_SIMD_DD
+    /* Single-block (M < 2·nb) path: route through the SIMD diagonal kernel
+     * rather than the scalar cores. The transpose cores (LLT/LUT) are
+     * single-accumulator dot loops — latency-bound for double-double — so the
+     * scalar path lost the small-M Left/Transpose cells (~1.5-1.6× vs ob); the
+     * 4-column-lane SIMD substitution recovers them. M ≤ kMaxBlockM holds here
+     * because use_blocked is false ⇒ M < 2·nb (= 128) ≤ kMaxBlockM (256).
+     * Same kernel the blocked path already drives, so serial and parallel stay
+     * bitwise-identical. */
+    if (M <= kMaxBlockM) {
+        static const trsm_simd_op op_of[4] = { SLLN, SLUN, SLLT, SLUT };
+        mtrsm_simd_diag(op_of[V], j_start, j_end, M, alpha, a, lda, b, ldb, nounit);
+        return;
+    }
+#endif
     switch (V) {
     case LLN: mtrsm_lln_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
     case LUN: mtrsm_lun_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
