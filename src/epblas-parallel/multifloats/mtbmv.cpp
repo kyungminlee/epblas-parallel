@@ -28,45 +28,78 @@ inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
 #ifdef _OPENMP
-/* Row-gather: x := A*x (or A^T*x) is an in-place triangular band matvec, so each
- * output row r is an independent dot once the original x is preserved in a copy.
- * NoTrans reads matrix row r (anti-diagonal stride lda-1); Trans reads column r
- * (contiguous). Diagonal scales x[r] when non-unit. xin is the contiguous copy,
- * xout the destination. Mirrors the serial accumulation order → within DD fuzz
- * tol; the serial path stays bit-exact. */
-static void mtbmv_rowgather(bool upper, bool trans, bool nounit,
-                            int n, int k, int lo, int hi,
-                            const T *a, std::size_t lda,
-                            const T *xin, T *xout, int incx)
+/* Row-gather for the Trans triangle: x := A^T*x is an in-place band matvec, so
+ * each output row r is an independent dot once the original x is preserved in a
+ * copy. Trans reads matrix column r CONTIGUOUSLY (base[k-d] upper / base[d]
+ * lower), so this already scales well; the NoTrans triangle, whose row read is
+ * anti-diagonal, uses the column-scatter below instead. Diagonal scales x[r]
+ * when non-unit. Mirrors the serial accumulation order (bit-exact). */
+static void mtbmv_rowgather_t(bool upper, bool nounit,
+                              int n, int k, int lo, int hi,
+                              const T *a, std::size_t lda,
+                              const T *xin, T *y)
 {
-    const std::ptrdiff_t s1 = static_cast<std::ptrdiff_t>(lda) - 1;
     for (int r = lo; r < hi; ++r) {
         const T *base = &A_(0, r);
         const T diagc = upper ? base[k] : base[0];
         T s = nounit ? diagc * xin[r] : xin[r];
-        if (!trans) {
-            if (upper) {
-                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
-                for (int d = 1; d <= rlen; ++d) s = s + base[k + (std::ptrdiff_t)d * s1] * xin[r + d];
-            } else {
-                const int llen = (r < k) ? r : k;
-                for (int d = 1; d <= llen; ++d) s = s + base[-(std::ptrdiff_t)d * s1] * xin[r - d];
-            }
+        if (upper) {
+            const int llen = (r < k) ? r : k;
+            for (int d = 1; d <= llen; ++d) s = s + base[k - d] * xin[r - d];
         } else {
-            if (upper) {
-                const int llen = (r < k) ? r : k;
-                for (int d = 1; d <= llen; ++d) s = s + base[k - d] * xin[r - d];
-            } else {
-                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
-                for (int d = 1; d <= rlen; ++d) s = s + base[d] * xin[r + d];
-            }
+            const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+            for (int d = 1; d <= rlen; ++d) s = s + base[d] * xin[r + d];
         }
-        xout[(std::ptrdiff_t)r * incx] = s;
+        y[r] = s;
     }
 }
 
-/* Threaded in-place triangular band matvec. Copy x to contiguous, partition the
- * output rows, write back. Returns true if handled. */
+/* Column-scatter for the NoTrans triangle: each thread owns output rows [lo,hi)
+ * and walks the columns touching them, reading every column's band segment
+ * CONTIGUOUSLY (stride 1 in the row index, vs the row-gather's anti-diagonal
+ * lda-1 stride) and scattering only into its owned rows. Writes are disjoint
+ * across threads -> no race, no O(nthreads*n) fold. Iterating columns ascending
+ * (upper) / descending (lower) seeds each owned row at its diagonal column
+ * first, then accumulates off-diagonals in column order -> identical per-row
+ * association as the serial scatter (bit-exact). y[lo,hi) need not be pre-zeroed:
+ * every owned row is assigned at its diagonal column before any += reaches it. */
+static void mtbmv_colscatter(bool upper, bool nounit, int n, int k,
+                             int lo, int hi, const T *a, std::size_t lda,
+                             const T *xin, T *y)
+{
+    if (upper) {
+        const int jmax = (hi + k < n) ? (hi + k) : n;
+        for (int j = lo; j < jmax; ++j) {
+            const T tmp = xin[j];
+            const int L = k - j;                         /* A(i,j) = A_(L+i, j) */
+            const int i_lo = (j - k > lo) ? (j - k) : lo;
+            const int i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
+            const T *col = &A_(L + i_lo, j);             /* contiguous in i */
+            for (int i = i_lo; i < i_hi; ++i) y[i] = y[i] + tmp * (*col++);
+            if (j >= lo && j < hi)                       /* diagonal seed */
+                y[j] = nounit ? tmp * A_(k, j) : tmp;
+        }
+    } else {
+        const int jmin = (lo - k > 0) ? (lo - k) : 0;
+        for (int j = hi - 1; j >= jmin; --j) {
+            const T tmp = xin[j];
+            const int i_lo = (j + 1 > lo) ? (j + 1) : lo;
+            const int i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
+            const T *col = &A_(i_lo - j, j);             /* A(i,j)=A_(i-j,j), contiguous */
+            for (int i = i_lo; i < i_hi; ++i) y[i] = y[i] + tmp * (*col++);
+            if (j >= lo && j < hi)                       /* diagonal seed */
+                y[j] = nounit ? tmp * A_(0, j) : tmp;
+        }
+    }
+}
+
+/* Threaded in-place triangular band matvec. Each thread owns a disjoint output-
+ * row range [lo,hi): it gathers y[lo,hi) reading x (never written here), a
+ * barrier, then copies its own range back to x. NoTrans uses the contiguous
+ * column-scatter above; Trans uses the row-gather (which reads its column
+ * contiguously already). Unit-stride reads x directly — no serial input copy
+ * (the old full x->xbuf memcpy was an O(n) Amdahl tax); only a strided x is
+ * gathered to contiguous up front. Returns true if handled. */
 __attribute__((noinline)) static bool mtbmv_omp(
     bool upper, bool trans, bool nounit, int n, int k,
     const T *a, std::size_t lda, T *x, int incx)
@@ -76,19 +109,31 @@ __attribute__((noinline)) static bool mtbmv_omp(
     int nthreads = blas_omp_max_threads();
     if (nthreads > MTBMV_MAX_CPUS) nthreads = MTBMV_MAX_CPUS;
 
-    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
-    T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
-    if (!xbuf) return false;
-    for (int i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
+    if (incx < 0) x -= (std::ptrdiff_t)(n - 1) * incx;   /* x at logical 0 */
+
+    const T *xptr = x;
+    T *xbuf = NULL;
+    if (incx != 1) {
+        xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        if (!xbuf) return false;
+        for (int i = 0; i < n; ++i) xbuf[i] = x[(std::ptrdiff_t)i * incx];
+        xptr = xbuf;
+    }
+    T *y = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    if (!y) { std::free(xbuf); return false; }
 
     #pragma omp parallel num_threads(nthreads)
     {
         int tid = omp_get_thread_num();
         int lo = (int)((long long)n * tid / nthreads);
         int hi = (int)((long long)n * (tid + 1) / nthreads);
-        mtbmv_rowgather(upper, trans, nounit, n, k, lo, hi, a, lda, xbuf, xbase, incx);
+        if (!trans) mtbmv_colscatter(upper, nounit, n, k, lo, hi, a, lda, xptr, y);
+        else        mtbmv_rowgather_t(upper, nounit, n, k, lo, hi, a, lda, xptr, y);
+        #pragma omp barrier              /* all reads of x done before any write-back */
+        if (incx == 1) for (int i = lo; i < hi; ++i) x[i] = y[i];
+        else           for (int i = lo; i < hi; ++i) x[(std::ptrdiff_t)i * incx] = y[i];
     }
-    std::free(xbuf);
+    std::free(y); std::free(xbuf);
     return true;
 }
 #endif

@@ -31,12 +31,16 @@ inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
 #ifdef _OPENMP
-/* Threaded NoTrans DD band matvec. Output rows partition across threads (each y[i]
- * an independent band dot, x and y distinct -> no race). ax[j]=alpha*x[j] is
- * precomputed once (matching the serial scatter's temp); seeding the accumulator
- * with y[i] then adding ax[j]*A(i,j) in ascending-j order reproduces the scatter's
- * exact left-to-right association -> bit-identical for both contiguous and strided
- * x/y. NoTrans reads N of x, writes M of y. Returns true if handled. */
+/* Threaded NoTrans DD band matvec via restricted column-scatter. Each thread
+ * owns a disjoint output-row range [lo,hi) and walks the columns touching it,
+ * reading each column's band segment CONTIGUOUSLY (A_(KU-j+i, j) is stride-1 in
+ * the row index — the same layout the serial scatter reads — vs the row-gather's
+ * anti-diagonal lda-1 stride) and scattering only into its owned rows. Disjoint
+ * writes -> no race, no fold. y already holds post-beta values, so each owned
+ * y[i] accumulates alpha*x[j]*A(i,j) in ascending j -> identical association as
+ * the serial/netlib scatter (bit-exact). alpha*x[j] is recomputed per column
+ * (read-only x), which removes the shared ax buffer and its barrier. NoTrans
+ * reads N of x, writes M of y. Returns true if handled. */
 static bool mgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
                         const T *a, int lda,
                         const T *x, int incx, T *y, int incy)
@@ -46,29 +50,28 @@ static bool mgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
     int nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
 
-    T *ax = static_cast<T *>(std::malloc(static_cast<std::size_t>(N) * sizeof(T)));
-    if (!ax) return false;
     const int ix0 = (incx < 0) ? -(N - 1) * incx : 0;
-    for (int j = 0; j < N; ++j) ax[j] = alpha * x[ix0 + j * incx];
     const std::ptrdiff_t iy0 = (incy < 0) ? -static_cast<std::ptrdiff_t>(M - 1) * incy : 0;
 
-    const std::ptrdiff_t s1 = static_cast<std::ptrdiff_t>(lda) - 1;
     #pragma omp parallel num_threads(nthreads)
     {
         int tid = omp_get_thread_num();
         std::ptrdiff_t lo = (static_cast<std::ptrdiff_t>(M) * tid) / nthreads;
         std::ptrdiff_t hi = (static_cast<std::ptrdiff_t>(M) * (tid + 1)) / nthreads;
-        for (std::ptrdiff_t i = lo; i < hi; ++i) {
-            std::ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
-            std::ptrdiff_t j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
-            const T *base = a + (KU + i);
-            T *yi = &y[iy0 + i * incy];
-            T s = *yi;                        /* seed: post-beta y[i] */
-            for (std::ptrdiff_t j = j_lo; j < j_hi; ++j) s = s + ax[j] * base[j * s1];
-            *yi = s;
+        /* columns whose band [j-KU, j+KL] intersects owned rows [lo,hi) */
+        std::ptrdiff_t jlo = (lo - KL > 0) ? (lo - KL) : 0;
+        std::ptrdiff_t jhi = (hi - 1 + KU + 1 < N) ? (hi + KU) : N;
+        for (std::ptrdiff_t j = jlo; j < jhi; ++j) {
+            const T tmp = alpha * x[ix0 + j * incx];
+            std::ptrdiff_t i_lo = (j - KU > lo) ? (j - KU) : lo;
+            std::ptrdiff_t i_hi = (j + KL + 1 < hi) ? (j + KL + 1) : hi;
+            const T *col = &A_(KU - j + i_lo, j);   /* contiguous in i */
+            for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
+                T *yi = &y[iy0 + i * incy];
+                *yi = *yi + tmp * (*col++);
+            }
         }
     }
-    std::free(ax);
     return true;
 }
 
