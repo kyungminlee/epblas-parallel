@@ -109,20 +109,36 @@ extern "C" void mger_(
         }
 #endif
     } else {
-        int jy = (incy < 0) ? -(N - 1) * incy : 0;
+        const int jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+        const int ix0 = (incx < 0) ? -(M - 1) * incx : 0;
+#ifdef _OPENMP
+        const int use_omp = (N >= MGER_OMP_MIN && blas_omp_max_threads() > 1);
+#else
+        const int use_omp = 0;
+#endif
+        /* Threaded + strided x: copy x once to a unit-stride buffer so the
+         * column loop reads it contiguously; mirrors ob ger_thread.c. Columns
+         * of A are disjoint → OMP-over-j is race-free and bit-exact. */
+        const T *xp = x;
+        T *x_buf = NULL;
+        if (use_omp && incx != 1) {
+            x_buf = static_cast<T *>(std::malloc(static_cast<size_t>(M) * sizeof(T)));
+            if (x_buf) { int ix = ix0; for (int i = 0; i < M; ++i) { x_buf[i] = x[ix]; ix += incx; } xp = x_buf; }
+        }
+        const int x_unit = (incx == 1) || (x_buf != NULL);
+#ifdef _OPENMP
+        #pragma omp parallel for if(use_omp) schedule(static)
+#endif
         for (int j = 0; j < N; ++j) {
-            const T yj = y[jy];
+            const T yj = y[jy0 + j * incy];
             if (!dd_iszero(yj)) {
                 const T t = alpha * yj;
-                int ix = (incx < 0) ? -(M - 1) * incx : 0;
                 T *aj = &A_(0, j);
-                for (int i = 0; i < M; ++i) {
-                    aj[i] = aj[i] + t * x[ix];
-                    ix += incx;
-                }
+                if (x_unit) { for (int i = 0; i < M; ++i) aj[i] = aj[i] + t * xp[i]; }
+                else { int ix = ix0; for (int i = 0; i < M; ++i) { aj[i] = aj[i] + t * x[ix]; ix += incx; } }
             }
-            jy += incy;
         }
+        std::free(x_buf);
     }
 }
 
