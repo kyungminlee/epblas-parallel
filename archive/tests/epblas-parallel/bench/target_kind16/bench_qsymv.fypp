@@ -1,2 +1,0 @@
-#:set routine = 'qsymv'
-#:include 'bench_symv_real_body.fypp'

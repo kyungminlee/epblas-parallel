@@ -1,2 +1,0 @@
-#:set routine = 'esymm'
-#:include 'bench_symm_real_body.fypp'

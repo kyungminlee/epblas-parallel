@@ -1,2 +1,0 @@
-#:set routine = 'xqscal'
-#:include 'bench_scal_mixed_body.fypp'

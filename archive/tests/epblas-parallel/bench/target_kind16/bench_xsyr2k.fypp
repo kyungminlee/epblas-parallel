@@ -1,2 +1,0 @@
-#:set routine = 'xsyr2k'
-#:include 'bench_syr2k_complex_body.fypp'

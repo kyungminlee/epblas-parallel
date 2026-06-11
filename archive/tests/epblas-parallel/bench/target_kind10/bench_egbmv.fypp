@@ -1,2 +1,0 @@
-#:set routine = 'egbmv'
-#:include 'bench_gbmv_real_body.fypp'

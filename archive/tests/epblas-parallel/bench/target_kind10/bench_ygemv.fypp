@@ -1,2 +1,0 @@
-#:set routine = 'ygemv'
-#:include 'bench_gemv_complex_body.fypp'

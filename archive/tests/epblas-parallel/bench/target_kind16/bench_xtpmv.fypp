@@ -1,2 +1,0 @@
-#:set routine = 'xtpmv'
-#:include 'bench_tpmv_complex_body.fypp'

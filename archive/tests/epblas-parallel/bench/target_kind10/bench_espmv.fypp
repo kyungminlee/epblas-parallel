@@ -1,2 +1,0 @@
-#:set routine = 'espmv'
-#:include 'bench_spmv_body.fypp'

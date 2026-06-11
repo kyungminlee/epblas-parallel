@@ -1,2 +1,0 @@
-#:set routine = 'easum'
-#:include 'bench_norm_real_body.fypp'

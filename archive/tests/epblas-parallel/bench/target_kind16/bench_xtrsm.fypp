@@ -1,2 +1,0 @@
-#:set routine = 'xtrsm'
-#:include 'bench_trsm_complex_body.fypp'

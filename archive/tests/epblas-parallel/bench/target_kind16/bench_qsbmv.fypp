@@ -1,2 +1,0 @@
-#:set routine = 'qsbmv'
-#:include 'bench_sbmv_body.fypp'

@@ -1,2 +1,0 @@
-#:set routine = 'qtrmm'
-#:include 'bench_trmm_real_body.fypp'

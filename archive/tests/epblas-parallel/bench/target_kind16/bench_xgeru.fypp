@@ -1,2 +1,0 @@
-#:set routine = 'xgeru'
-#:include 'bench_ger_complex_body.fypp'

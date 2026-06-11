@@ -1,2 +1,0 @@
-#:set routine = 'qaxpy'
-#:include 'bench_axpy_real_body.fypp'

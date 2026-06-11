@@ -1,2 +1,0 @@
-#:set routine = 'xscal'
-#:include 'bench_scal_complex_body.fypp'

@@ -1,2 +1,0 @@
-#:set routine = 'yaxpy'
-#:include 'bench_axpy_complex_body.fypp'

@@ -1,2 +1,0 @@
-#:set routine = 'xsymm'
-#:include 'bench_symm_complex_body.fypp'

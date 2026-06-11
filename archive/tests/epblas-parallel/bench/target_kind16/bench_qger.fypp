@@ -1,2 +1,0 @@
-#:set routine = 'qger'
-#:include 'bench_ger_real_body.fypp'

@@ -1,2 +1,0 @@
-#:set routine = 'qtbmv'
-#:include 'bench_tbmv_real_body.fypp'

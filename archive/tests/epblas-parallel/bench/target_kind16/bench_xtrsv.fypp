@@ -1,2 +1,0 @@
-#:set routine = 'xtrsv'
-#:include 'bench_trsv_complex_body.fypp'

@@ -1,2 +1,0 @@
-#:set routine = 'qrotm'
-#:include 'bench_rotm_real_body.fypp'

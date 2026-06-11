@@ -1,3 +1,0 @@
-#:set routine = 'ecopy'
-#:set flop_per_n = 2
-#:include 'bench_copyswap_real_body.fypp'

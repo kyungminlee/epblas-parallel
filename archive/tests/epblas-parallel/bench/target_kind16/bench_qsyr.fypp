@@ -1,2 +1,0 @@
-#:set routine = 'qsyr'
-#:include 'bench_syr_real_body.fypp'

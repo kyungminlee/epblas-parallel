@@ -1,2 +1,0 @@
-#:set routine = 'xrotg'
-#:include 'bench_rotg_complex_body.fypp'

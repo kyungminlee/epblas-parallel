@@ -1,2 +1,0 @@
-#:set routine = 'qrotg'
-#:include 'bench_rotg_real_body.fypp'

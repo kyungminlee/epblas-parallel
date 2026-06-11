@@ -1,2 +1,0 @@
-#:set routine = 'enrm2'
-#:include 'bench_norm_real_body.fypp'

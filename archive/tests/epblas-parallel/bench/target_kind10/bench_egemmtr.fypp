@@ -1,2 +1,0 @@
-#:set routine = 'egemmtr'
-#:include 'bench_gemmtr_real_body.fypp'

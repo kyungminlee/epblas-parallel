@@ -1,2 +1,0 @@
-#:set routine = 'xtrmm'
-#:include 'bench_trmm_complex_body.fypp'

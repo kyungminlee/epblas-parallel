@@ -1,2 +1,0 @@
-#:set routine = 'qspmv'
-#:include 'bench_spmv_body.fypp'

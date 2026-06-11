@@ -1,2 +1,0 @@
-#:set routine = 'escal'
-#:include 'bench_scal_real_body.fypp'

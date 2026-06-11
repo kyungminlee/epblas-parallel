@@ -1,2 +1,0 @@
-#:set routine = 'qtbsv'
-#:include 'bench_tbsv_real_body.fypp'

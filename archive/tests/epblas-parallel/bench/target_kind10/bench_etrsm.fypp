@@ -1,2 +1,0 @@
-#:set routine = 'etrsm'
-#:include 'bench_trsm_real_body.fypp'

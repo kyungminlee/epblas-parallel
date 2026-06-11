@@ -1,2 +1,0 @@
-#:set routine = 'xdotc'
-#:include 'bench_dot_complex_body.fypp'

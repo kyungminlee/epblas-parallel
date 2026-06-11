@@ -1,2 +1,0 @@
-#:set routine = 'yherk'
-#:include 'bench_herk_body.fypp'

@@ -1,2 +1,0 @@
-#:set routine = 'yher2k'
-#:include 'bench_her2k_body.fypp'

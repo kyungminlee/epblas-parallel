@@ -1,2 +1,0 @@
-#:set routine = 'ytrmv'
-#:include 'bench_trmv_complex_body.fypp'

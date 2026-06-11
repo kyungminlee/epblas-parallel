@@ -1,2 +1,0 @@
-#:set routine = 'yerot'
-#:include 'bench_rot_mixed_body.fypp'

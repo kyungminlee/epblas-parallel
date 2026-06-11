@@ -1,2 +1,0 @@
-#:set routine = 'xtbsv'
-#:include 'bench_tbsv_complex_body.fypp'

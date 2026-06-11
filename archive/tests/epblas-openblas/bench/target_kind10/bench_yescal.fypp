@@ -1,2 +1,0 @@
-#:set routine = 'yescal'
-#:include 'bench_scal_mixed_body.fypp'

@@ -1,2 +1,0 @@
-#:set routine = 'xher'
-#:include 'bench_her_body.fypp'

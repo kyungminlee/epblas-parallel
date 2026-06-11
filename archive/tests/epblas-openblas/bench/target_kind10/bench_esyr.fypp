@@ -1,2 +1,0 @@
-#:set routine = 'esyr'
-#:include 'bench_syr_real_body.fypp'

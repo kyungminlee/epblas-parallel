@@ -1,2 +1,0 @@
-#:set routine = 'edot'
-#:include 'bench_dot_real_body.fypp'

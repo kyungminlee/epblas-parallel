@@ -1,2 +1,0 @@
-#:set routine = 'qgbmv'
-#:include 'bench_gbmv_real_body.fypp'

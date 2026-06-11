@@ -1,2 +1,0 @@
-#:set routine = 'iqamax'
-#:include 'bench_iamax_real_body.fypp'

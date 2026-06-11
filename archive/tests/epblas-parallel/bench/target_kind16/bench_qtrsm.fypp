@@ -1,2 +1,0 @@
-#:set routine = 'qtrsm'
-#:include 'bench_trsm_real_body.fypp'

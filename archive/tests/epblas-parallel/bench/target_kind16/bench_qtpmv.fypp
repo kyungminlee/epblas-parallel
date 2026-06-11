@@ -1,2 +1,0 @@
-#:set routine = 'qtpmv'
-#:include 'bench_tpmv_real_body.fypp'

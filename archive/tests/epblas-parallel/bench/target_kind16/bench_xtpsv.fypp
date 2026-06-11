@@ -1,2 +1,0 @@
-#:set routine = 'xtpsv'
-#:include 'bench_tpsv_complex_body.fypp'

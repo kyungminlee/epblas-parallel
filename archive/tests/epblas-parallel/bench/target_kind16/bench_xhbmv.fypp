@@ -1,2 +1,0 @@
-#:set routine = 'xhbmv'
-#:include 'bench_hbmv_body.fypp'
