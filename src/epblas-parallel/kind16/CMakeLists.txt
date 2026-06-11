@@ -92,6 +92,7 @@ set(_kernels
 # overlays, so these sources are added to the build but NOT name-derived;
 # the names are appended by hand below (mirrors kind10).
 set(_split_sources
+    qtri_kernel.c
     xl3_complex.c
     qgemm_parallel.c
     qgemm_serial.c

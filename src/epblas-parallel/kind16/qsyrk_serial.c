@@ -1,78 +1,239 @@
 /*
- * qsyrk_serial.c — kind16 (REAL(KIND=16) / __float128) symmetric rank-k
- * update, serial core.
+ * qsyrk_serial — kind16 real (__float128) symmetric rank-k update,
+ * single-thread. Owns the SYRK-specific math (triangular β pre-pass +
+ * diagonal-aware writeback kernel) and the fused serial driver.
  *
- * Owns ALL the numerics shared by the serial and parallel entries: the
- * uplo/trans decode and the per-column compute core (declared in
- * qsyrk_kernel.h), plus the public `qsyrk_serial_` Fortran entry. No
- * OpenMP anywhere on this call path — safe to invoke from inside another
- * function's `#pragma omp parallel` region.
+ *   C := alpha · A · A^T + beta · C    (trans='N', A is N×K)
+ *   C := alpha · A^T · A + beta · C    (trans='T', A is K×N)
  *
- * Both qsyrk_serial_ and the parallel qsyrk_ drive numerics through
- * qsyrk_core, so the two paths are bitwise-identical.
+ * Only the UPLO triangle of C is read or written.
+ *
+ * Structure (faithful __float128 port of kind10 esyrk / OpenBLAS DSYRK —
+ * interface/syrk.c dispatch, driver/level3/level3_syrk.c blocking nest,
+ * driver/level3/syrk_kernel.c diagonal kernel): one packed GEMM whose output
+ * is clipped to the UPLO triangle. Both Ap and Bp source from the same input A
+ * (A doubles as B); the diagonal kernel splits each MC×NC block around the
+ * global diagonal, GEMMing the strict-triangle remainders and merging only the
+ * UPLO triangle of each diagonal NR×NR sub-block.
+ *
+ * Built on the SHARED ob-convention substrate (qtri_gemm_kernel / qtri_ncopy
+ * / qtri_tcopy, qtri_kernel.h) because the diagonal kernel indexes the packed
+ * buffers at arbitrary (possibly odd) offsets, which is only valid under
+ * OpenBLAS's contiguous-odd-tail packing (par's qgemm zero-pads odd tails at
+ * stride MR and would mis-read those bytes). The layout-agnostic block policy
+ * is shared with qgemm (qgemm_choose_blocks / qgemm_round_up). Calling only
+ * these *serial* primitives (never the threaded entries) keeps qsyrk free of
+ * any nested OpenMP team, so it is safe inside another routine's parallel
+ * region.
  */
 
 #include "qsyrk_kernel.h"
+#include "qtri_kernel.h"
+#include "qgemm_kernel.h"
+#include <stddef.h>
+#include <stdlib.h>
 #include <ctype.h>
-#include <quadmath.h>
 
 typedef qsyrk_T T;
 
-char qsyrk_uplo(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
+#define MR QSYRK_MR
+#define NR QSYRK_NR
 
-int qsyrk_trans_code(const char *p, size_t len) {
-    (void)len;
-    char c = (char)toupper((unsigned char)*p);
-    return (c == 'C') ? 'T' : c;
-}
-
-#define A_(i, j)  a[(size_t)(j) * lda + (i)]
-#define C_(i, j)  c[(size_t)(j) * ldc + (i)]
-
-void qsyrk_core(
-    int j0, int j1,
-    char UPLO, int TR, int N, int K,
-    T alpha, T beta,
-    const T *a, int lda,
-    T *c, int ldc)
-{
-    const T zero = 0.0Q, one = 1.0Q;
-
-    for (int j = j0; j < j1; ++j) {
-        const int i_lo = (UPLO == 'L') ? j : 0;
-        const int i_hi = (UPLO == 'L') ? N : j + 1;
-        T *cj = c + (size_t)j * ldc;
-
-        /* beta scale of the UPLO slice of column j. */
-        if (beta == zero)      for (int i = i_lo; i < i_hi; ++i) cj[i]  = zero;
-        else if (beta != one)  for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-
-        if (TR == 'N') {
-            /* Rank-k via column outer products: C[:,j] += alpha · A[j,l] · A[:,l]. */
-            for (int l = 0; l < K; ++l) {
-                const T ajl = A_(j, l);
-                if (ajl != zero) {
-                    const T t = alpha * ajl;
-                    for (int i = i_lo; i < i_hi; ++i) cj[i] += t * A_(i, l);
-                }
-            }
-        } else {  /* TR == 'T' */
-            /* Inner-product form on Aᵀ A: C(i,j) += alpha · Σ_l A(l,i) · A(l,j). */
-            const T *Aj = a + (size_t)j * lda;
-            for (int i = i_lo; i < i_hi; ++i) {
-                const T *Ai = a + (size_t)i * lda;
-                T s = zero;
-                for (int l = 0; l < K; ++l) s += Ai[l] * Aj[l];
-                cj[i] += alpha * s;
-            }
+/* ── Triangular β pre-pass ─────────────────────────────────────────────
+ * Port of OpenBLAS driver/level3/syrk_k.c's `syrk_beta`. Scales only the
+ * UPLO triangle of C; the off-UPLO triangle is left untouched. */
+void qsyrk_beta_u(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+    if (beta == 1.0Q) return;
+    if (beta == 0.0Q) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            T *cj = c + j * ldc;
+            for (ptrdiff_t i = 0; i <= j; ++i) cj[i] = 0.0Q;
+        }
+    } else {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            T *cj = c + j * ldc;
+            for (ptrdiff_t i = 0; i <= j; ++i) cj[i] *= beta;
         }
     }
 }
 
+void qsyrk_beta_l(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+    if (beta == 1.0Q) return;
+    if (beta == 0.0Q) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            T *cj = c + j * ldc;
+            for (ptrdiff_t i = j; i < n; ++i) cj[i] = 0.0Q;
+        }
+    } else {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            T *cj = c + j * ldc;
+            for (ptrdiff_t i = j; i < n; ++i) cj[i] *= beta;
+        }
+    }
+}
+
+/* ── Diagonal-aware writeback kernel ───────────────────────────────────
+ * Faithful port of OpenBLAS driver/level3/syrk_kernel.c, with the GEMM
+ * micro-kernel → the shared qtri_gemm_kernel. The strict-triangle rectangular
+ * remainders are full GEMMs into C; each diagonal NR×NR sub-block is GEMMed
+ * into a zeroed subbuffer (qtri_gemm_kernel accumulates), then only its UPLO
+ * triangle is merged into C. Subbuffer sized NR*(NR+1) to match OpenBLAS's
+ * safety pad. */
+void qsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
+                    const T *a, const T *b,
+                    T *c, ptrdiff_t ldc, ptrdiff_t offset)
+{
+    T subbuf[NR * (NR + 1)];
+
+    if (m + offset < 0) {
+        qtri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
+        return;
+    }
+    if (n < offset) {
+        return;
+    }
+    if (offset > 0) {
+        b += offset * k;
+        c += offset * ldc;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        qtri_gemm_kernel(m, n - m - offset, k, alpha,
+                         a, b + (m + offset) * k,
+                         c + (m + offset) * ldc, ldc);
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        qtri_gemm_kernel(-offset, n, k, alpha, a, b, c, ldc);
+        a -= offset * k;
+        c -= offset;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+
+    /* Diagonal walk in NR-step blocks. offset == 0, m == n here. */
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        /* Strict-upper portion: rows 0..loop-1 × cols loop..loop+nn-1. */
+        if (loop > 0) {
+            qtri_gemm_kernel(loop, nn, k, alpha,
+                             a, b + loop * k, c + loop * ldc, ldc);
+        }
+
+        /* Diagonal block via subbuffer. */
+        for (ptrdiff_t z = 0; z < nn * nn; ++z) subbuf[z] = 0.0Q;
+        qtri_gemm_kernel(nn, nn, k, alpha,
+                         a + loop * k, b + loop * k, subbuf, nn);
+
+        T *cc = c + loop + loop * ldc;
+        const T *ss = subbuf;
+        for (ptrdiff_t j = 0; j < nn; ++j) {
+            for (ptrdiff_t i = 0; i <= j; ++i) cc[i] += ss[i];
+            ss += nn;
+            cc += ldc;
+        }
+    }
+}
+
+void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
+                    const T *a, const T *b,
+                    T *c, ptrdiff_t ldc, ptrdiff_t offset)
+{
+    T subbuf[NR * (NR + 1)];
+
+    if (m + offset < 0) {
+        return;
+    }
+    if (n < offset) {
+        qtri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
+        return;
+    }
+    if (offset > 0) {
+        qtri_gemm_kernel(m, offset, k, alpha, a, b, c, ldc);
+        b += offset * k;
+        c += offset * ldc;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        a -= offset * k;
+        c -= offset;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+    if (m > n - offset) {
+        qtri_gemm_kernel(m - n + offset, n, k, alpha,
+                         a + (n - offset) * k, b,
+                         c + (n - offset), ldc);
+        m = n + offset;
+        if (m <= 0) return;
+    }
+
+    /* Diagonal walk in NR-step blocks. offset == 0, m == n here. */
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t mm = loop;
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        /* Diagonal block via subbuffer. */
+        for (ptrdiff_t z = 0; z < nn * nn; ++z) subbuf[z] = 0.0Q;
+        qtri_gemm_kernel(nn, nn, k, alpha,
+                         a + loop * k, b + loop * k, subbuf, nn);
+
+        T *cc = c + loop + loop * ldc;
+        const T *ss = subbuf;
+        for (ptrdiff_t j = 0; j < nn; ++j) {
+            for (ptrdiff_t i = j; i < nn; ++i) cc[i] += ss[i];
+            ss += nn;
+            cc += ldc;
+        }
+
+        /* Strict-lower portion: rows loop+nn..m-1 × cols loop..loop+nn-1. */
+        if (m > mm + nn) {
+            qtri_gemm_kernel(m - mm - nn, nn, k, alpha,
+                             a + (mm + nn) * k, b + loop * k,
+                             c + (mm + nn) + loop * ldc, ldc);
+        }
+    }
+}
+
+/* ── Transpose inner-product (trans='T') ───────────────────────────────
+ * C := alpha·A^T·A + C over the UPLO triangle of output column j. A is K×N so
+ * both dot operands are unit-stride over the K axis. β is already applied.
+ * Unlike the NoTrans outer product (which RMW-streams C K times per column),
+ * each C(i,j) is accumulated in a register and written once — packing has
+ * nothing to save here, so the clean unpacked loop matches the reference. */
+void qsyrk_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
+                     T alpha, const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc)
+{
+    const ptrdiff_t i_lo = (uplo == 'L') ? j : 0;
+    const ptrdiff_t i_hi = (uplo == 'L') ? N : j + 1;
+    const T *Aj = a + j * lda;
+    T *cj = c + j * ldc;
+    for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
+        const T *Ai = a + i * lda;
+        T s = 0.0Q;
+        for (ptrdiff_t l = 0; l < K; ++l) s += Ai[l] * Aj[l];
+        cj[i] += alpha * s;
+    }
+}
+
+/* ── Single-thread driver ──────────────────────────────────────────────
+ * Faithful port of OpenBLAS level3_syrk.c with a single thread spanning the
+ * whole output (rows ∈ [0, N]). The js-band UPLO clip bounds the active row
+ * range so the kernel only ever writes the requested triangle. */
 void qsyrk_serial_(
-    const char *uplo, const char *trans,
+    const char *uplo_p, const char *trans_p,
     const int *n_, const int *k_,
     const T *alpha_,
     const T *a, const int *lda_,
@@ -81,31 +242,68 @@ void qsyrk_serial_(
     size_t uplo_len, size_t trans_len)
 {
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldc = *ldc_;
+    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = qsyrk_uplo(uplo);
-    const int TR = qsyrk_trans_code(trans, trans_len);
+    const ptrdiff_t lda = *lda_, ldc = *ldc_;
+    const int uplo  = (char)toupper((unsigned char)*uplo_p);
+    const int trans = (char)toupper((unsigned char)*trans_p);
 
-    if (N == 0) return;
+    if (N <= 0) return;
 
-    const T zero = 0.0Q, one = 1.0Q;
+    if (uplo == 'U') qsyrk_beta_u(N, beta, c, ldc);
+    else             qsyrk_beta_l(N, beta, c, ldc);
 
-    /* alpha == 0 or K == 0 quick return — just scale the UPLO triangle of C. */
-    if (alpha == zero || K == 0) {
-        if (beta == one) return;
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            if (beta == zero) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero;
-            else              for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-        }
+    if (K == 0 || alpha == 0.0Q) return;
+
+    /* Transpose: netlib-style unpacked inner-product (no packing overhead). */
+    if (trans != 'N') {
+        for (ptrdiff_t j = 0; j < N; ++j)
+            qsyrk_trans_col(j, uplo, N, K, alpha, a, lda, c, ldc);
         return;
     }
 
-    qsyrk_core(0, N, UPLO, TR, N, K, alpha, beta, a, lda, c, ldc);
-}
+    ptrdiff_t MC, KC, NC;
+    qgemm_choose_blocks(K, &MC, &KC, &NC);
 
-#undef A_
-#undef C_
+    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(T);
+    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    if (Ap && Bp) {
+        for (ptrdiff_t js = 0; js < N; js += NC) {
+            const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+
+            /* UPLO clip of the [0, N] row range for this js-band:
+             *   UPPER: only rows up to js+jb contribute.
+             *   LOWER: only rows from js onwards. */
+            ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
+            ptrdiff_t m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
+
+            for (ptrdiff_t ls = 0; ls < K; ls += KC) {
+                const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+
+                /* Pack Bp = the same A in OCOPY shape (A doubles as B). NoTrans
+                 * only — the Transpose path is handled above, unpacked. */
+                qtri_tcopy(pb, jb, &a[(size_t)ls * lda + js], lda, Bp);
+
+                for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
+                    const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+
+                    qtri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap);
+
+                    if (uplo == 'U')
+                        qsyrk_kernel_u(min_i, jb, pb, alpha, Ap, Bp,
+                                       &c[(size_t)js * ldc + is], ldc,
+                                       (ptrdiff_t)(is - js));
+                    else
+                        qsyrk_kernel_l(min_i, jb, pb, alpha, Ap, Bp,
+                                       &c[(size_t)js * ldc + is], ldc,
+                                       (ptrdiff_t)(is - js));
+                }
+            }
+        }
+    }
+    free(Ap);
+    free(Bp);
+}

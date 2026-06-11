@@ -1,21 +1,39 @@
 /*
- * qsyr2k_kernel.h — internal kernel surface shared by the two translation
- * units the kind16 qsyr2k overlay is split across:
+ * qsyr2k_kernel.h — internal surface shared by the two translation units the
+ * kind16 (REAL(KIND=16) / __float128) qsyr2k overlay is split across:
  *
- *   qsyr2k_serial.c    The pure single-thread symmetric rank-2k (no OpenMP).
- *                      Owns the uplo decode and the per-column compute core,
- *                      plus the public `qsyr2k_serial_` entry. Safe to call
- *                      from inside another routine's parallel region.
+ *   qsyr2k_serial.c    The pure single-thread rank-2k update (no OpenMP). Owns
+ *                      the SYR2K-specific diagonal-aware writeback kernel and
+ *                      the fused serial driver, plus the public Fortran-ABI
+ *                      serial entry `qsyr2k_serial_`. Called directly by
+ *                      qsyr2k_ as its serial branch / OOM fallback / nesting
+ *                      delegate.
  *
- *   qsyr2k_parallel.c  The public Fortran entry `qsyr2k_` — threading
- *                      orchestration only (one omp-parallel-for over the
- *                      columns of C). Each column is independent, so the
- *                      static per-column partition is race-free and
- *                      bitwise-identical to the serial path.
+ *   qsyr2k_parallel.c  The public Fortran entry `qsyr2k_` — threading only.
+ *                      Fans the same pieces across an OpenMP team (the two
+ *                      shared B-packs under `omp single`, each thread an M-row
+ *                      slice of the output, UPLO-clipped per N-band). Delegates
+ *                      to qsyr2k_serial_ when called from inside another
+ *                      routine's parallel region.
  *
- * kind16 is arithmetic-bound (__float128 lowers to libquadmath calls), so the
- * overlay uses the unblocked Netlib DSYR2K shape with no packing — the shared
- * surface is just the uplo decode and the per-column compute core.
+ * SYR2K is a faithful __float128 port of OpenBLAS DSYR2K:
+ *   C := alpha·(A·B^T + B·A^T) + beta·C   (trans='N', A,B are N×K)
+ *   C := alpha·(A^T·B + B^T·A) + beta·C   (trans='T', A,B are K×N)
+ * Only the UPLO triangle of C is touched. Each (is,js) tile does TWO kernel
+ * passes: pass 1 with (Ap=A-pack, Bp=B-pack) and flag=1 (the diagonal NR×NR
+ * block is GEMMed to a subbuffer and merged symmetrically, covering both the
+ * A·B^T and B·A^T contributions on the diagonal); pass 2 with (Ap=B-pack,
+ * Bp=A-pack) and flag=0 (only the strict-triangle strips, accumulating B·A^T
+ * off the diagonal).
+ *
+ * Like qsyrk, this is built on the SHARED ob-convention L3 substrate
+ * (qtri_gemm_kernel / qtri_ncopy / qtri_tcopy from qtri_kernel.h) — NOT par's
+ * qgemm primitives — because the diagonal kernel indexes the packed buffers at
+ * arbitrary (possibly odd) row/column offsets, valid only under OpenBLAS's
+ * contiguous-odd-tail packing. The triangular β pre-pass is the SYRK helper
+ * (qsyrk_beta_{u,l} from qsyrk_kernel.h), reused verbatim as ob does. The
+ * layout-agnostic block-size policy is shared with qgemm (qgemm_choose_blocks
+ * / qgemm_round_up).
  */
 #ifndef EPBLAS_PARALLEL_KIND16_QSYR2K_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_QSYR2K_KERNEL_H
@@ -24,36 +42,46 @@
 
 typedef __float128 qsyr2k_T;
 
-/* Uppercase a Fortran uplo/trans char (de-static'd original `up`). */
-char qsyr2k_uplo(const char *p);
+#define QSYR2K_MR 2
+#define QSYR2K_NR 2
 
-/* Compute columns [j0,j1) of C — full per-column rank-2k work: the beta
- * scaling of the UPLO triangle slice followed by both rank-update terms
- * (TRANS branch handled inside, exactly as the original omp loop body).
- * Each column is independent, so any [j0,j1) sub-range is race-free.
- *
- * UPLO is the decoded uplo char ('L'/'U'); TR is the decoded trans char
- * ('N' or 'T', with 'C' already folded to 'T'). Caller guarantees
- * alpha != 0 && K > 0. */
-void qsyr2k_core(
-    int j0, int j1, int N, int K,
-    char UPLO, char TR,
-    qsyr2k_T alpha, qsyr2k_T beta,
-    const qsyr2k_T *a, int lda,
-    const qsyr2k_T *b, int ldb,
-    qsyr2k_T *c, int ldc);
+/* Diagonal-aware writeback kernel for one packed (m,n,k) block whose top-left
+ * corner sits at global diagonal offset `offset` (row_base - col_base). The
+ * strict-triangle rectangular remainders are full GEMMs (qtri_gemm_kernel).
+ * When flag != 0 the diagonal NR×NR block is GEMMed into a zeroed subbuffer and
+ * its UPLO triangle merged symmetrically (subbuf + subbuf^T) into C — this is
+ * pass 1, which folds both A·B^T and B·A^T on the diagonal. flag == 0 (pass 2)
+ * skips the diagonal block; the off-diagonal B·A^T strips land in C directly. */
+void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_T alpha,
+                     const qsyr2k_T *a, const qsyr2k_T *b,
+                     qsyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag);
+void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_T alpha,
+                     const qsyr2k_T *a, const qsyr2k_T *b,
+                     qsyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag);
 
-/* Pure-serial Fortran entry. No OpenMP on this call path; keeps the exact
- * Fortran-ABI signature of qsyr2k_ so callers already inside a parallel
- * region can swap the symbol name only. */
+/* Transpose path (trans='T'): accumulate the UPLO triangle of output column j
+ * of C := alpha·(A^T·B + B^T·A) + C via the netlib-style stride-1 register
+ * inner product. A,B are K×N so all dot operands stream contiguously over the K
+ * axis; like qsyrk this writes each C(i,j) once, so packing buys nothing and the
+ * clean dot loop ties/beats the reference. β is assumed already applied to C (by
+ * qsyrk_beta_{u,l}). Per-column so the parallel entry can `omp for` over j
+ * (cyclic) for balanced triangular load with no shared packs or barrier. */
+void qsyr2k_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
+                      qsyr2k_T alpha, const qsyr2k_T *a, ptrdiff_t lda,
+                      const qsyr2k_T *b, ptrdiff_t ldb,
+                      qsyr2k_T *c, ptrdiff_t ldc);
+
+/* Pure-serial Fortran entry (no OpenMP). Same signature as qsyr2k_; the
+ * single-thread packed driver. Safe to call from inside another routine's
+ * parallel region. */
 void qsyr2k_serial_(
     const char *uplo, const char *trans,
     const int *n_, const int *k_,
     const qsyr2k_T *alpha_,
-    const qsyr2k_T *restrict a, const int *lda_,
-    const qsyr2k_T *restrict b, const int *ldb_,
+    const qsyr2k_T *a, const int *lda_,
+    const qsyr2k_T *b, const int *ldb_,
     const qsyr2k_T *beta_,
-    qsyr2k_T *restrict c, const int *ldc_,
+    qsyr2k_T *c, const int *ldc_,
     size_t uplo_len, size_t trans_len);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QSYR2K_KERNEL_H */

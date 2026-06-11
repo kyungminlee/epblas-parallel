@@ -1,25 +1,37 @@
 /*
- * qsyrk_kernel.h — internal kernel surface shared by the two translation
- * units the kind16 qsyrk overlay is split across:
+ * qsyrk_kernel.h — internal surface shared by the two translation units the
+ * kind16 (REAL(KIND=16) / __float128) qsyrk overlay is split across:
  *
- *   qsyrk_serial.c    The pure single-thread symmetric rank-k update (no
- *                     OpenMP). Owns the per-column compute core, the
- *                     uplo/trans decode, and the public `qsyrk_serial_`
- *                     entry. Safe to invoke from inside another routine's
- *                     own `#pragma omp parallel` region.
+ *   qsyrk_serial.c    The pure single-thread rank-k update (no OpenMP). Owns
+ *                     the SYRK-specific math — the triangular β pre-pass and
+ *                     the diagonal-aware writeback kernel — plus the public
+ *                     Fortran-ABI serial entry `qsyrk_serial_`. Called directly
+ *                     by qsyrk_ as its serial branch / OOM fallback / nesting
+ *                     delegate.
  *
- *   qsyrk_parallel.c  The public Fortran entry `qsyrk_` — threading
- *                     orchestration only. Fans the independent columns of C
- *                     across an OpenMP team; falls back to running the loop
- *                     serially when invoked from inside a parallel region.
+ *   qsyrk_parallel.c  The public Fortran entry `qsyrk_` — threading only.
+ *                     Fans the same pieces across an OpenMP team (shared Bp
+ *                     packed under `omp single`, each thread an M-row slice
+ *                     of the output, UPLO-clipped per N-band). Delegates to
+ *                     qsyrk_serial_ when called from inside another routine's
+ *                     parallel region.
  *
- * kind16 is arithmetic-bound (__float128 lowers to libquadmath calls), so
- * the overlay uses the unblocked Netlib reference (DSYRK shape) with no
- * packing — the shared surface is the decode plus the per-column core.
+ * SYRK is a faithful __float128 port of OpenBLAS DSYRK: C := alpha·A·A^T +
+ * beta·C (or A^T·A). Only the UPLO triangle of C is touched. It reuses the
+ * SHARED ob-convention L3 substrate (qtri_gemm_kernel / qtri_ncopy /
+ * qtri_tcopy from qtri_kernel.h) — NOT par's qgemm primitives. SYRK's diagonal
+ * kernel splits each MC×NC block around the global diagonal and GEMMs the
+ * strict-triangle remainders at arbitrary (possibly odd) row/column offsets
+ * into the packed buffers; that sub-block indexing only lands on valid strip
+ * boundaries under OpenBLAS's contiguous-odd-tail packing, which the qtri
+ * substrate provides and par's zero-padded qgemm layout does not. The
+ * layout-agnostic block-size policy is still shared with qgemm
+ * (qgemm_choose_blocks / qgemm_round_up).
  *
- * Each column j of C touches a distinct UPLO-triangle slice [i_lo,i_hi) and
- * reads only A, so columns are fully independent — per-column static
- * scheduling is bitwise-identical to the serial sweep.
+ * Why packed rather than the old unblocked register-tile: at small N (≈64) the
+ * unblocked rank-k trailed ob's packed kernel ~3-4% on the NoTrans serial
+ * corner; packing the operands matches ob's data-movement structure and closes
+ * it (the libquadmath arithmetic floor is identical either way).
  */
 #ifndef EPBLAS_PARALLEL_KIND16_QSYRK_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_QSYRK_KERNEL_H
@@ -28,25 +40,40 @@
 
 typedef __float128 qsyrk_T;
 
-/* Decode a Fortran uplo char to upper-cased 'U'/'L'. */
-char qsyrk_uplo(const char *p);
+#define QSYRK_MR 2
+#define QSYRK_NR 2
 
-/* Decode a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-int qsyrk_trans_code(const char *p, size_t len);
+/* Triangular β pre-pass: C := β·C over the UPLO triangle of C only (the
+ * off-UPLO triangle is left untouched — the SYRK fuzz sentinel checks this). */
+void qsyrk_beta_u(ptrdiff_t n, qsyrk_T beta, qsyrk_T *c, ptrdiff_t ldc);
+void qsyrk_beta_l(ptrdiff_t n, qsyrk_T beta, qsyrk_T *c, ptrdiff_t ldc);
 
-/* Compute columns [j0,j1) of C. The body of each j-iteration is exactly one
- * iteration of the original omp-parallel-for: the beta scaling of column j's
- * UPLO slice [i_lo,i_hi) followed by the rank-k (TR=='N') or inner-product
- * (TR=='T') accumulation. No OpenMP pragmas — pure sequential per-column
- * work; callers partition the column range if they want parallelism. */
-void qsyrk_core(
-    int j0, int j1,
-    char UPLO, int TR, int N, int K,
-    qsyrk_T alpha, qsyrk_T beta,
-    const qsyrk_T *a, int lda,
-    qsyrk_T *c, int ldc);
+/* Diagonal-aware writeback kernel for one packed (m,n,k) block whose top-left
+ * corner sits at global diagonal offset (row_base - col_base). Off-diagonal
+ * strict-triangle remainders are full GEMMs (qtri_gemm_kernel); the diagonal
+ * NR×NR blocks go through a subbuffer so only the UPLO triangle merges into C. */
+void qsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyrk_T alpha,
+                    const qsyrk_T *a, const qsyrk_T *b,
+                    qsyrk_T *c, ptrdiff_t ldc, ptrdiff_t offset);
+void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyrk_T alpha,
+                    const qsyrk_T *a, const qsyrk_T *b,
+                    qsyrk_T *c, ptrdiff_t ldc, ptrdiff_t offset);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path. */
+/* Transpose path (trans='T'): accumulate the UPLO triangle of output column j
+ * of C := alpha·A^T·A + C via the netlib-style stride-1 register inner product.
+ * A is K×N so both dot operands stream contiguously over the K axis; unlike the
+ * NoTrans outer product (which RMW-streams each C column K times), this writes
+ * each C(i,j) once, so there is nothing for packing to amortise and the clean
+ * dot loop ties/beats the reference. β is assumed already applied to C (by
+ * qsyrk_beta_{u,l}). Per-column so the parallel entry can `omp for` over j
+ * (cyclic) for balanced triangular load with no shared pack or barrier. */
+void qsyrk_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
+                     qsyrk_T alpha, const qsyrk_T *a, ptrdiff_t lda,
+                     qsyrk_T *c, ptrdiff_t ldc);
+
+/* Pure-serial Fortran entry (no OpenMP). Same signature as qsyrk_; the
+ * single-thread packed driver. Safe to call from inside another routine's
+ * parallel region. */
 void qsyrk_serial_(
     const char *uplo, const char *trans,
     const int *n_, const int *k_,

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
-PERF_DIR = REPO / "tests" / "epblas-parallel" / "perf"
+PERF_DIR = REPO / "bench" / "drivers"
 
 # ---------------------------------------------------------------------------
 # Per-target type info
@@ -135,7 +135,7 @@ KIND10 = (
 ).split()
 KIND16 = (
     'qgemm xgemm qgemmtr xgemmtr qtrsm xtrsm qtrmm xtrmm '
-    'qsyrk xsyrk xherk qsymm xsymm xhemm qgemv xgemv '
+    'qsyrk xsyrk xherk qsyr2k qsymm xsymm xhemm qgemv xgemv '
     'qger xgeru xgerc qsymv xhemv qtrsv xtrsv qtrmv xtrmv '
     'qsyr xher qscal qaxpy qcopy qswap qrot qdot qasum '
     'xscal xqscal xaxpy xcopy xswap xqrot xdotu xdotc '
