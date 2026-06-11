@@ -361,6 +361,12 @@ option(BUILD_TESTING "Build the overlay test suite (needs fypp + eplinalg)" ON)
 if(BUILD_TESTING)
     enable_testing()
 
+    # Pull the prebuilt eplinalg migrated baseline (eblas/qblas/mblas) for each
+    # built precision into the build tree and add it to CMAKE_PREFIX_PATH, so
+    # the find_package() probes below resolve without a hand-staged install.
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchEplinalgBaseline.cmake)
+    epblas_fetch_eplinalg_baseline()
+
     # Tests + benches A/B against the migrated baseline, so each
     # built target needs its eplinalg per-target package. Targets
     # without one configure cleanly but contribute no tests.
