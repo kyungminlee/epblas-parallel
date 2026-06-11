@@ -18,6 +18,7 @@
  */
 
 #include <stddef.h>
+#include <math.h>
 
 #include "qtri_kernel.h"
 
@@ -258,4 +259,50 @@ void qtri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, T alpha,
         for (ptrdiff_t i = 0; i < bm; ++i) cj[i] = 0;
     }
     qtri_gemm_kernel(bm, bn, bk, alpha, Ap, Bp, C, ldc);
+}
+
+/* ── Area-balanced triangular row partition ────────────────────────────
+ * The cumulative triangular work above row r is, for the two uplos:
+ *   'U':  W(r) = Σ_{i<r}(N-i) = r·N - r(r-1)/2      (row i has N-i cols)
+ *   'L':  W(r) = Σ_{i<r}(i+1) = r(r+1)/2            (row i has i+1 cols)
+ * both with total T = N(N+1)/2. Thread t's lower boundary is the r solving
+ * W(r) = (t/nth)·T, i.e. the positive root of a quadratic. Rounding each
+ * boundary independently to MR keeps the sequence monotone (W is increasing),
+ * so the per-thread ranges still tile [0,N) exactly. */
+static ptrdiff_t tri_boundary(int uplo, ptrdiff_t N, ptrdiff_t nth,
+                              ptrdiff_t t, ptrdiff_t mr)
+{
+    if (t <= 0)   return 0;
+    if (t >= nth) return N;
+
+    const double total  = (double)N * (double)(N + 1) * 0.5;
+    const double target = total * (double)t / (double)nth;
+
+    double r;
+    if (uplo == 'U') {
+        /* r² - (2N+1)r + 2·target = 0, take the smaller root (r ≤ N). */
+        const double b = 2.0 * (double)N + 1.0;
+        double disc = b * b - 8.0 * target;
+        if (disc < 0.0) disc = 0.0;
+        r = (b - sqrt(disc)) * 0.5;
+    } else {
+        /* r² + r - 2·target = 0. */
+        r = (-1.0 + sqrt(1.0 + 8.0 * target)) * 0.5;
+    }
+
+    ptrdiff_t rr = (ptrdiff_t)(r + 0.5);
+    rr -= rr % mr;                 /* floor to MR for panel alignment */
+    if (rr < 0) rr = 0;
+    if (rr > N) rr = N;
+    return rr;
+}
+
+void qtri_row_bounds(int uplo, ptrdiff_t N, ptrdiff_t nth, ptrdiff_t tid,
+                     ptrdiff_t mr, ptrdiff_t *m_lo, ptrdiff_t *m_hi)
+{
+    ptrdiff_t lo = tri_boundary(uplo, N, nth, tid, mr);
+    ptrdiff_t hi = tri_boundary(uplo, N, nth, tid + 1, mr);
+    if (hi < lo) hi = lo;
+    *m_lo = lo;
+    *m_hi = hi;
 }

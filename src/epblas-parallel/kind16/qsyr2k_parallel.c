@@ -11,13 +11,15 @@
  * Threading: one outer `omp parallel`. The two right operands (Bp_A = A in
  * B-shape, Bp_B = B in B-shape) are packed once per (js, ls) band under
  * `omp single` and shared; each thread owns a CONTIGUOUS slice of the M axis
- * (the N output rows, m_chunk = ceil(N/nth) rounded to MR) and runs the
- * MC-blocked is loop within it, packing its own Ap_A/Ap_B and doing the two
- * kernel passes. The per-band UPLO clip (m_lo_eff / m_hi_eff) trims each
- * thread's row range, but every thread still executes every js/ls iteration so
- * the `omp single`/`omp barrier` pair stays collective. Partitioning the M
- * axis into per-thread chunks (not by MC-block count) keeps threads busy on
- * small/thin shapes.
+ * (the N output rows), sized by triangular AREA (qtri_row_bounds) so every
+ * thread carries equal work — an equal-row split caps the speedup at ~16/7
+ * because the thread owning the fat end of the triangle hogs 7/16 of the work.
+ * It then runs the MC-blocked is loop within its range, packing its own
+ * Ap_A/Ap_B and doing the two kernel passes. The per-band UPLO clip (m_lo_eff
+ * / m_hi_eff) trims each thread's row range, but every thread still executes
+ * every js/ls iteration so the `omp single`/`omp barrier` pair stays
+ * collective. Partitioning the M axis into per-thread chunks (not by MC-block
+ * count) keeps threads busy on small/thin shapes.
  *
  * Nesting guard: when qsyr2k_ is called from inside another routine's parallel
  * region, delegate to qsyr2k_serial_ and open no team of our own — calling only
@@ -130,11 +132,12 @@ void qsyr2k_(
             T *Ap_A = Ap_A_arr[tid];
             T *Ap_B = Ap_B_arr[tid];
 
-            /* M-axis (= N output rows) partition into per-thread chunks. */
-            const ptrdiff_t m_chunk = qgemm_round_up((N + nth - 1) / nth, MR);
-            const ptrdiff_t m_lo = tid * m_chunk;
-            ptrdiff_t m_hi = m_lo + m_chunk;
-            if (m_hi > N) m_hi = N;
+            /* M-axis (= N output rows) partition into per-thread chunks, sized
+             * by triangular AREA so each thread carries equal work (an equal-
+             * row split caps the speedup at ~16/7 — the fat-end thread hogs
+             * 7/16 of a triangular output). */
+            ptrdiff_t m_lo, m_hi;
+            qtri_row_bounds(uplo, N, nth, tid, MR, &m_lo, &m_hi);
 
             for (ptrdiff_t js = 0; js < N; js += NC) {
                 const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;

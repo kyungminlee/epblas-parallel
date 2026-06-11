@@ -40,4 +40,16 @@ void qtri_ncopy(ptrdiff_t m, ptrdiff_t n, const qtri_T *a, ptrdiff_t lda,
 void qtri_tcopy(ptrdiff_t m, ptrdiff_t n, const qtri_T *a, ptrdiff_t lda,
                 qtri_T *b);
 
+/* Area-balanced M-row partition for a triangular (SYRK/SYR2K) output.
+ * Returns thread `tid`'s contiguous row range [*m_lo, *m_hi) of [0, N) such
+ * that the TRIANGULAR work — row i carries (N-i) active columns for uplo 'U',
+ * (i+1) for 'L' — is split evenly across `nth` threads. A naive equal-row-count
+ * split caps the rank-k NoTrans speedup at ~16/7 ≈ 2.29× on 4 threads because
+ * the thread owning the fat end of the triangle carries 7/16 of the work; this
+ * weights band widths by area instead (narrow at the fat end, wide at the thin
+ * end). Boundaries are floored to MR so each thread's packed panels stay
+ * MR-aligned; the result tiles [0, N) with no gaps or overlaps. */
+void qtri_row_bounds(int uplo, ptrdiff_t N, ptrdiff_t nth, ptrdiff_t tid,
+                     ptrdiff_t mr, ptrdiff_t *m_lo, ptrdiff_t *m_hi);
+
 #endif /* EPBLAS_PARALLEL_KIND16_QTRI_KERNEL_H */
