@@ -100,11 +100,11 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     # (The legacy Fortran bench harness was removed here — see
     # archive/tests/epblas-openblas/bench and archive/README.md.)
 
-    # C perf harnesses — reused from tests/epblas-parallel/perf/target_<T>/,
-    # built only for routines that are in the epblas-openblas overlay set
-    # so the link succeeds without dragging in unported symbols.
+    # C perf harnesses — reused from bench/drivers/target_<T>/, built only for
+    # routines that are in the epblas-openblas overlay set so the link succeeds
+    # without dragging in unported symbols.
     set(_perf_target_dir
-        ${CMAKE_CURRENT_SOURCE_DIR}/../epblas-parallel/perf/target_${_target})
+        ${PROJECT_SOURCE_DIR}/bench/drivers/target_${_target})
     if(IS_DIRECTORY ${_perf_target_dir} AND _overlay_routines)
         foreach(_r ${_overlay_routines})
             set(_perf_src ${_perf_target_dir}/perf_${_r}.c)

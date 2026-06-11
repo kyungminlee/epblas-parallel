@@ -3,11 +3,13 @@
 # Per target in EPBLAS_PARALLEL_TESTABLE_TARGETS we generate:
 #   common/target_<name>/fuzz_util.fypp        → fuzz_util.f90 (per-target shim)
 #   consistency/target_<name>/fuzz_*.fypp      → fuzz drivers (overlay vs migrated)
-#   perf/target_<name>/perf_*.c|.cpp           → C/C++ perf harnesses
+#
+# The C/C++ perf harnesses live in bench/drivers/target_<name>/perf_*.c|.cpp
+# (shared with the epblas-openblas suite); see _perf_target_dir below.
 #
 # The legacy Fortran bench harness (bench/target_<name>/bench_*.fypp) has been
-# archived under archive/tests/ — the C perf harness (perf/) is the supported
-# timing path and reports bare wall time (ns/call). See archive/README.md.
+# archived under archive/tests/ — the C perf harness is the supported timing
+# path and reports bare wall time (ns/call). See archive/README.md.
 #
 # Each test binary links the composite `epblas-parallel::<prefix>blas`
 # (WHOLE_ARCHIVE-wrapped overlay) AND the renamed `_migrated` archive
@@ -51,7 +53,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     set(_consist_target_dir
         ${CMAKE_CURRENT_SOURCE_DIR}/consistency/target_${_target})
     set(_perf_target_dir
-        ${CMAKE_CURRENT_SOURCE_DIR}/perf/target_${_target})
+        ${PROJECT_SOURCE_DIR}/bench/drivers/target_${_target})
 
     # Per-target fuzz_util library.
     add_fypp_source(_fuzz_util_src
