@@ -20,7 +20,7 @@ __pycache__/
 bench/cmp5/run_cmp5.stdout.log
 *.log
 
-workspace
+workspace*
 
 # Performance-gap progress trackers — local working files, never committed
 docs/performance-gap-checklist-*.md
