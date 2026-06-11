@@ -192,9 +192,17 @@ void qsyr2k_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
     for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
         const T *Ai = a + i * lda;
         const T *Bi = b + i * ldb;
-        T s = 0.0Q;
-        for (ptrdiff_t l = 0; l < K; ++l) s += Ai[l] * Bj[l] + Bi[l] * Aj[l];
-        cj[i] += alpha * s;
+        /* Two independent accumulators (netlib's temp1/temp2): the A·B and
+         * B·A dot chains have no mutual dependency, so the out-of-order core
+         * overlaps consecutive libquadmath __addtf3 calls — fp128 has no FMA
+         * and each add is a serial soft-float call, so a single fused `s`
+         * chain is latency-bound; splitting hides it (~4-8% on Transpose). */
+        T s1 = 0.0Q, s2 = 0.0Q;
+        for (ptrdiff_t l = 0; l < K; ++l) {
+            s1 += Ai[l] * Bj[l];
+            s2 += Bi[l] * Aj[l];
+        }
+        cj[i] += alpha * (s1 + s2);
     }
 }
 

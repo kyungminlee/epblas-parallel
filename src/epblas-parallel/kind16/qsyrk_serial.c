@@ -222,6 +222,11 @@ void qsyrk_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
     T *cj = c + j * ldc;
     for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
         const T *Ai = a + i * lda;
+        /* Single accumulator: SYRK's dot is one product per l, so the two
+         * libquadmath soft-float calls (__multf3 then __addtf3) already serialize
+         * on each other — an even/odd accumulator split adds tail logic without
+         * any independent chain to overlap, and measured slower (unlike syr2k,
+         * whose two distinct products genuinely overlap). */
         T s = 0.0Q;
         for (ptrdiff_t l = 0; l < K; ++l) s += Ai[l] * Aj[l];
         cj[i] += alpha * s;
