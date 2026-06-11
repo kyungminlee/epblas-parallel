@@ -26,7 +26,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(FortranCompiler)
 
 # Baked-in (target, prefix) table. Adding a fourth target is a
-# coordinated change touching both repos; see CONTEXT.md §"Discovery".
+# coordinated change touching both repos.
 set(EPBLAS_PARALLEL_KNOWN_TARGETS kind10 kind16 multifloats)
 set(EPBLAS_PARALLEL_PREFIX_kind10       e)
 set(EPBLAS_PARALLEL_PREFIX_kind16       q)

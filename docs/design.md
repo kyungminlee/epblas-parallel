@@ -5,8 +5,8 @@
 > longer exists in this repo: a `PARALLEL_BLAS` cmake option, an
 > in-tree migrator stage, and a single-package composite gated by
 > that option. The architecture that actually shipped is the
-> two-package split documented in `../CONTEXT.md` and
-> `../docs/adr/0001-public-cmake-api-after-split.md` — read those
+> two-package split documented in
+> `../docs/adr/0001-public-cmake-api-after-split.md` — read that
 > for current truth. As of CLEANUP-20260528 the composite
 > `epblas-parallel::<prefix>blas` no longer links the serial
 > baseline behind the overlay either: the overlay targets 100%

@@ -18,8 +18,8 @@ as **separate CMake packages**:
   port to extended precision, kind10 only. Used purely as an A/B
   comparison subject against `epblas-parallel` and the migrated baseline.
 
-For the umbrella terminology, the migrator/overlay split, and the
-public-API decisions, see `CONTEXT.md` and `docs/adr/0001-public-cmake-api-after-split.md`.
+For the migrator/overlay split and the public-API decisions, see
+`docs/design.md` and `docs/adr/0001-public-cmake-api-after-split.md`.
 
 ## Prerequisites
 
@@ -167,16 +167,17 @@ Installs both packages:
 - The per-target overlay archives, the composite INTERFACE targets,
   and the openblas reference archives under `lib/`.
 
-No version constraint on `eplinalg` — see `CONTEXT.md` §"Repo identity".
+No version constraint on `eplinalg` — see
+`docs/adr/0001-public-cmake-api-after-split.md`.
 
 ## Layout
 
 ```
 CMakeLists.txt
 CMakePresets.json
-CONTEXT.md                ← glossary + design decisions
 cmake/
-├── FortranCompiler.cmake     ← copy of eplinalg's helper (sync by hand)
+├── FortranCompiler.cmake        ← copy of eplinalg's helper (sync by hand)
+├── FetchEplinalgBaseline.cmake  ← fetches the migrated baseline release binaries
 ├── epblas-parallelConfig.cmake.in
 └── epblas-openblasConfig.cmake.in
 docs/                     ← design, optimization-findings
@@ -185,8 +186,10 @@ src/
 ├── epblas-parallel/<target>/
 └── epblas-openblas/<target>/  ← kind10 only
 tests/
-├── epblas-parallel/        ← consistency + bench + perf
-└── epblas-openblas/        ← consistency + bench + perf, reuses bodies from epblas-parallel
+├── epblas-parallel/        ← consistency + fuzz
+└── epblas-openblas/        ← consistency + fuzz, reuses bodies from epblas-parallel
+bench/
+├── drivers/target_<target>/  ← C/C++ perf drivers (shared by both suites)
+└── cmp5/                    ← 5-way comparison harness + verdict reports
 scripts/                  ← perf-sweep + report-generation utilities
-reports/cmp5/             ← perf comparison artifacts
 ```
