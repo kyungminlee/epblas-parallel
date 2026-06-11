@@ -13,13 +13,10 @@ as **separate CMake packages**:
   overlay. C/C++/OpenMP kernels for every routine, all three targets
   (`kind10`, `kind16`, `multifloats`). Ships the per-precision composite
   `epblas-parallel::{e,q,m}blas` as a drop-in replacement for
-  `eplinalg::{e,q,m}blas`. See `docs/design.md`.
+  `eplinalg::{e,q,m}blas`.
 - **`epblas-openblas`** — experimental reference library. OpenBLAS D/Z
   port to extended precision, kind10 only. Used purely as an A/B
   comparison subject against `epblas-parallel` and the migrated baseline.
-
-For the migrator/overlay split and the public-API decisions, see
-`docs/design.md` and `docs/adr/0001-public-cmake-api-after-split.md`.
 
 ## Prerequisites
 
@@ -167,8 +164,8 @@ Installs both packages:
 - The per-target overlay archives, the composite INTERFACE targets,
   and the openblas reference archives under `lib/`.
 
-No version constraint on `eplinalg` — see
-`docs/adr/0001-public-cmake-api-after-split.md`.
+No version constraint on `eplinalg` — version coupling would re-introduce
+the lifecycle entanglement the split exists to remove.
 
 ## Layout
 
@@ -180,8 +177,6 @@ cmake/
 ├── FetchEplinalgBaseline.cmake  ← fetches the migrated baseline release binaries
 ├── epblas-parallelConfig.cmake.in
 └── epblas-openblasConfig.cmake.in
-docs/                     ← design, optimization-findings
-└── adr/                  ← architectural decision records
 src/
 ├── epblas-parallel/<target>/
 └── epblas-openblas/<target>/  ← kind10 only
