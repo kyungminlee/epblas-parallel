@@ -81,19 +81,16 @@ add_subdirectory(epblas-parallel)
 add_subdirectory(epblas-openblas)
 
 # ── End-to-end perf sweeps (label `sweep`, ~30 min–hours) ─────────
-# Registered as ctest tests so the `sweep` and `e2e` workflow presets
-# can pull them in. Default `ctest` invocations should exclude
-# `-L sweep` (or use `--preset fuzz`) — they're long-running.
-add_test(NAME cmp5_sweep
-    COMMAND bash ${PROJECT_SOURCE_DIR}/bench/cmp5/run_cmp5.sh)
-set_tests_properties(cmp5_sweep PROPERTIES
-    ENVIRONMENT "STAGE_E=${PROJECT_BINARY_DIR}"
-    LABELS "sweep"
-    TIMEOUT 7200)
-
-add_test(NAME perf_sweep
-    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/run_perf_sweep.sh
-            ${PROJECT_BINARY_DIR})
-set_tests_properties(perf_sweep PROPERTIES
-    LABELS "sweep"
-    TIMEOUT 7200)
+# In-process namespaced dual-link harness: par/ob/mig linked into one
+# binary, timed interleaved per rep (bench/dual/run_dual.sh). Registered
+# as ctest tests so the `sweep` and `e2e` workflow presets can pull them
+# in. Default `ctest` invocations should exclude `-L sweep` (or use
+# `--preset fuzz`) — they're long-running.
+foreach(fam e q m)
+  add_test(NAME dual_sweep_${fam}
+      COMMAND bash ${PROJECT_SOURCE_DIR}/bench/dual/run_dual.sh ${fam})
+  set_tests_properties(dual_sweep_${fam} PROPERTIES
+      ENVIRONMENT "BUILD=${PROJECT_BINARY_DIR}"
+      LABELS "sweep"
+      TIMEOUT 14400)
+endforeach()

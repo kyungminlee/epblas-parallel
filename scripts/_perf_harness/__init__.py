@@ -1,8 +1,7 @@
-"""Internal package for scripts/gen_perf_harnesses.py.
+"""Internal package for the dual-link perf harness (scripts/gen_dual_harnesses.py).
 
-Re-exports the small surface the entry-point script consumes.
+Re-exports the shared catalog/shape surface the generator consumes.
 """
-from .core import CATALOG, GEN_SENTINEL, PERF_DIR, TYPES, routine_shape
-from .dispatch import emit_routine
+from .core import CATALOG, routine_shape
 
-__all__ = ["CATALOG", "GEN_SENTINEL", "PERF_DIR", "TYPES", "emit_routine", "routine_shape"]
+__all__ = ["CATALOG", "routine_shape"]

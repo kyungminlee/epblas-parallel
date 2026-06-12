@@ -80,7 +80,7 @@ and pick the workflow preset matching the cadence you want.
 | `fuzz`     | All fuzz / consistency drivers (the correctness gate) | ~15 s                     |
 | `bench`    | Fortran `bench_*` drivers (OMP=1, OMP=4)             | minutes                   |
 | `perf`     | C `perf_*` harnesses (jobs=1, 1800 s/test cap)       | tens of minutes per slice |
-| `sweep`    | `cmp5_sweep` + `perf_sweep` shell drivers            | hours                     |
+| `sweep`    | `dual_sweep_{e,q,m}` in-process dual-link drivers    | hours                     |
 | `e2e`      | Everything above                                     | overnight                 |
 
 Everyday loop:
@@ -99,10 +99,12 @@ ctest --preset perf -N    # dry-run: list what would be run
 ```
 
 `perf` and `sweep` are gated as their own presets so the everyday
-`fuzz` run stays cheap. The `sweep` preset bundles
-`reports/cmp5/run_cmp5.sh` (the cmp5 4-variant sweep — epopenblas vs
-parallel-blas at OMP=1 and OMP=4) and `scripts/run_perf_sweep.sh`
-(parallel-overlay perf sweep). Outputs land under `reports/`.
+`fuzz` run stays cheap. The `sweep` preset runs the in-process
+namespaced dual-link harness `bench/dual/run_dual.sh` once per precision
+family (`e`/`q`/`m`): par, ob, and mig are linked into one binary and
+timed interleaved per rep at OMP=1 and OMP=4 (see
+`bench/dual/BENCH_PROTOCOL.md`). Raw data lands in the gitignored
+`workspace/files/gap5/nsbench/`.
 
 Build-only (skip the workflow chaining):
 
