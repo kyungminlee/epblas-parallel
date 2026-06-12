@@ -177,7 +177,13 @@ def render(name: str, fam: Family, is_c: bool, ret: str, sig: str, spec: Spec) -
     """Assemble a full dual-link driver source for one routine."""
     elem = 'CT' if is_c else 'RT'
     cc = 'g++' if fam.ext == 'cpp' else 'gcc'
-    externs = '\n'.join(_extern(p, name, ret, sig) for p in ('par_', 'ob_', 'mig_'))
+    # The par/ob/mig BLAS entry points are unmangled `extern "C"` symbols in
+    # every family (including the C++ multifloats archives); guard so the
+    # prototypes keep C linkage when the driver itself is compiled as C++.
+    protos = '\n'.join(_extern(p, name, ret, sig) for p in ('par_', 'ob_', 'mig_'))
+    externs = ('#ifdef __cplusplus\nextern "C" {\n#endif\n'
+               f'{protos}\n'
+               '#ifdef __cplusplus\n}\n#endif')
     header = _HEADER.format(name=name, cc=cc, src=f'dual_{name}.{fam.ext}',
                             link=fam.link, preamble=fam.preamble, elem=elem,
                             externs=externs)

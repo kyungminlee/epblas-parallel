@@ -40,15 +40,50 @@ case "$FAM" in
 esac
 
 shopt -s nullglob
-refblas=( "$BUILD/_deps/eplinalg-$REF/lib/lib${LIB}"*-gfortran-*.a "$BUILD/_deps/eplinalg-$REF/lib/libblas-gfortran-"*.a )
-[[ ${#refblas[@]} -ge 1 ]] || { echo "refblas archive not found under build/_deps/eplinalg-$REF/lib" >&2; exit 1; }
-REFA="${refblas[0]}"
+# lsame_/xerbla_ (referenced as bare externals by the mig leg's netlib objects)
+# live in libblas-gfortran, NOT the per-precision lib${LIB}blas reference.
+refblas=( "$BUILD/_deps/eplinalg-$REF/lib/libblas-gfortran-"*.a )
+[[ ${#refblas[@]} -ge 1 ]] || { echo "refblas (libblas-gfortran) not found under build/_deps/eplinalg-$REF/lib" >&2; exit 1; }
+REFAS=( "${refblas[0]}" )
+# The multifloats mig leg is gfortran netlib that USES the Fortran `multifloats`
+# module (double-double ops __multifloats_MOD_dd_*), which in turn calls the
+# C++ companions (fmoddd/matmuldd_*). Both live ONLY in the `_mf` subproject's
+# archives — built with gcc-15 + fat-LTO (LTO 15.1), so they cannot be linked
+# into our gcc-16 driver (lto1 rejects the bytecode-version mismatch). We can't
+# use build/_mf/{fsrc/libmultifloatsf.a,src/libmultifloats-gcc-15.a} directly.
+# Instead we recompile that runtime NON-LTO from the same generated sources
+# (build_mf_runtime, below) into a private archive and link THAT.
+if [[ "$FAM" == m ]]; then
+  MFRT="$NSDIR/lib_mfrt_nolto.a"
+  REFAS+=( "$MFRT" )
+fi
+
+# Recompile the multifloats dd-module + C++ companions NON-LTO so the gcc-16
+# driver can link the gfortran-15-pinned `_mf` runtime. Compilers default to the
+# -15 toolchain that produced the reference (keeps the mig leg byte-faithful);
+# override via MF_FC / MF_CXX.
+build_mf_runtime() {
+  local fc="${MF_FC:-gfortran-15}" cxx="${MF_CXX:-g++-15}"
+  local fsrc="$BUILD/_mf/fsrc/generated/multifloats-quad.f90"
+  local csrc="$BUILD/_deps/multifloats_fetch-src/src"
+  [[ -f "$fsrc" ]] || { echo "multifloats module source not found: $fsrc" >&2; exit 1; }
+  [[ -f "$csrc/multifloats_math.cc" ]] || { echo "multifloats companion source not found under $csrc" >&2; exit 1; }
+  local tmp="$NSDIR/_mfrt"; mkdir -p "$tmp"
+  "$fc"  -O3 -fno-lto -fPIC -J"$tmp" -c "$fsrc"                   -o "$tmp/mfquad.o"
+  "$cxx" -O3 -fno-lto -fPIC -I"$csrc/../include" -I"$csrc" -c "$csrc/multifloats_math.cc" -o "$tmp/mfmath.o"
+  "$cxx" -O3 -fno-lto -fPIC -I"$csrc/../include" -I"$csrc" -c "$csrc/multifloats_io.cc"   -o "$tmp/mfio.o"
+  rm -f "$MFRT"; ar rcs "$MFRT" "$tmp/mfquad.o" "$tmp/mfmath.o" "$tmp/mfio.o"
+}
 
 if [[ "${SKIP_BUILD:-0}" != 1 ]]; then
   echo "### [1/6] build par/ob/mig archives (anti-stale) ###"
   cmake --build "$BUILD" --target "${LIB}_parallel" "${LIB}_openblas" "${LIB}_migrated_build"
   echo "### [2/6] namespace archives ###"
   OUT="$NSDIR" BUILD="$BUILD" "$HERE/nsbuild.sh" "$FAM"
+  if [[ "$FAM" == m ]]; then
+    echo "### [2b/6] recompile multifloats runtime non-LTO ###"
+    build_mf_runtime
+  fi
 fi
 PAR="$NSDIR/lib_par_ns.a"; OB="$NSDIR/lib_ob_ns.a"; MIG="$NSDIR/lib_mig_ns.a"
 for a in "$PAR" "$OB" "$MIG"; do [[ -f "$a" ]] || { echo "missing $a (run without SKIP_BUILD)" >&2; exit 1; }; done
@@ -72,7 +107,7 @@ for r in $ROUTINES; do
   [[ -f "$src" ]] || { echo "  skip $r (no driver $src)"; continue; }
   bin="$DRV/dual_$r"
   echo "### [4/6] compile $r ###"
-  "$CC" "${CFLAGS[@]}" "$src" "$PAR" "$OB" "$MIG" "$REFA" $LINK -o "$bin"
+  "$CC" "${CFLAGS[@]}" "$src" "$PAR" "$OB" "$MIG" "${REFAS[@]}" $LINK -o "$bin"
   echo "### [5/6] run $r  (reps=$REPS, omp1 core $CORE1 / omp4 cores $CORE4) ###"
   OMP_NUM_THREADS=1 taskset -c "$CORE1" "$bin" "$REPS" > "$OUT/$r.omp1.txt"
   OMP_NUM_THREADS=4 taskset -c "$CORE4" "$bin" "$REPS" > "$OUT/$r.omp4.txt"
