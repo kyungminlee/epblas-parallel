@@ -1,136 +1,148 @@
 /*
- * xher2k_serial.c — kind16 complex (__complex128) Hermitian rank-2k, serial
- * core.
+ * xher2k_serial.c — kind16 complex (__complex128) Hermitian rank-2k update,
+ * single-thread. The fused serial packed-GEMM driver plus the internal serial
+ * entry `xher2k_serial`, called by xher2k_ as its OOM fallback / nesting
+ * delegate.
  *
- * Owns ALL the numerics shared by the serial and parallel entries: the uplo
- * decode and the per-column compute core (declared in xher2k_kernel.h), plus
- * the public `xher2k_serial_` Fortran entry. No OpenMP anywhere on this call
- * path — safe to invoke from inside another function's `#pragma omp parallel`
- * region.
+ *   C := alpha·A·Bᴴ + conj(alpha)·B·Aᴴ + beta·C   (trans='N', A,B are N×K)
+ *   C := alpha·Aᴴ·B + conj(alpha)·Bᴴ·A + beta·C   (trans='C', A,B are K×N)
  *
- * Both xher2k_serial_ and the parallel xher2k_ drive numerics through
- * xher2k_core, so the two paths are bitwise-identical. alpha is COMPLEX,
- * beta is REAL, and the Hermitian diagonal is kept real at every touch.
+ * alpha is COMPLEX, beta is REAL, C is HERMITIAN — only the UPLO triangle is
+ * touched and the diagonal stays real on output.
+ *
+ * Faithful port of OpenBLAS ZHER2K: one packed GEMM nest whose output is
+ * clipped to the UPLO triangle, run TWICE per (is,js) tile. Pass 1
+ * (Ap=A, Bp=B, alpha, flag=1) folds A·Bᴴ plus both diagonal halves via the
+ * Hermitian subbuffer merge; pass 2 (Ap=B, Bp=A, conj(alpha) via −alphai,
+ * flag=0) adds the off-diagonal B·Aᴴ strips. Conjugation is absorbed at pack
+ * time: TRANS='N' conjugates the Bp side, TRANS='C' conjugates the Ap side
+ * (matching upstream's GEMM_KERNEL_R / _L selection). The triangular β
+ * pre-pass (qblas_yherk_beta_{u,l}, real beta, unconditionally clears diag
+ * imag) and the diagonal-aware kernel (qblas_yher2k_kernel_{u,l}) both live in
+ * the shared complex L3 substrate (xl3_complex.h).
+ *
+ * Arrays are interleaved (re,im) __float128; ld-args, k, n and offset are in COMPLEX
+ * elements, so every pointer step is ×2. Calling only the *serial* substrate
+ * primitives keeps this path free of any nested OpenMP team, so it is safe
+ * inside another routine's parallel region.
  */
 
 #include "xher2k_kernel.h"
+#include "xl3_complex.h"
+#include <stddef.h>
+#include <stdlib.h>
 #include <ctype.h>
-#include <quadmath.h>
 
-typedef xher2k_TC TC;
-typedef xher2k_TR TR;
+typedef __float128 T;
 
-char xher2k_uplo(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
+#define MR QBLAS_YGEMM_MR
+#define NR QBLAS_YGEMM_NR
 
-#define A_(i, j)  a[(size_t)(j) * lda + (i)]
-#define B_(i, j)  b[(size_t)(j) * ldb + (i)]
+static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
-void xher2k_core(
-    int j0, int j1, int N, int K,
-    char UPLO, char TR_c,
-    TC alpha, TC alpha_conj, TR beta,
-    const TC *a, int lda,
-    const TC *b, int ldb,
-    TC *c, int ldc)
-{
-    const TR rzero = 0.0Q, rone = 1.0Q;
-    const TC czero = 0.0Q + 0.0Qi;
-
-    for (int j = j0; j < j1; ++j) {
-        const int i_lo = (UPLO == 'L') ? j : 0;
-        const int i_hi = (UPLO == 'L') ? N : j + 1;
-        TC *cj = c + (size_t)j * ldc;
-
-        if (beta == rzero) {
-            for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-        } else if (beta != rone) {
-            for (int i = i_lo; i < i_hi; ++i) {
-                if (i == j) cj[i] = beta * crealq(cj[i]);
-                else        cj[i] = beta * cj[i];
-            }
-        } else {
-            cj[j] = crealq(cj[j]);
-        }
-
-        if (TR_c == 'N') {
-            /* C(I,J) += α A(I,l) conj(B(J,l)) + conj(α) B(I,l) conj(A(J,l)) */
-            for (int l = 0; l < K; ++l) {
-                const TC t1 = alpha      * conjq(B_(j, l));
-                const TC t2 = alpha_conj * conjq(A_(j, l));
-                for (int i = i_lo; i < i_hi; ++i) {
-                    if (i == j) cj[i] += crealq(A_(i, l) * t1 + B_(i, l) * t2);
-                    else        cj[i] += A_(i, l) * t1 + B_(i, l) * t2;
-                }
-            }
-        } else {
-            /* C(I,J) += α conj(A(l,I))·B(l,J) + conj(α) conj(B(l,I))·A(l,J) */
-            const TC *Aj = a + (size_t)j * lda;
-            const TC *Bj = b + (size_t)j * ldb;
-            for (int i = i_lo; i < i_hi; ++i) {
-                const TC *Ai = a + (size_t)i * lda;
-                const TC *Bi = b + (size_t)i * ldb;
-                TC s1 = czero, s2 = czero;
-                for (int l = 0; l < K; ++l) {
-                    s1 += conjq(Ai[l]) * Bj[l];
-                    s2 += conjq(Bi[l]) * Aj[l];
-                }
-                if (i == j) cj[i] += crealq(alpha * s1 + alpha_conj * s2);
-                else        cj[i] += alpha * s1 + alpha_conj * s2;
-            }
-        }
-    }
-}
-
-void xher2k_serial_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
-    const TC *alpha_,
-    const TC *restrict a, const int *lda_,
-    const TC *restrict b, const int *ldb_,
-    const TR *beta_,
-    TC *restrict c, const int *ldc_,
+void xher2k_serial(
+    const char *uplo_p, const char *trans_p,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    const T *alpha_,
+    const T *a, const ptrdiff_t *lda_,
+    const T *b, const ptrdiff_t *ldb_,
+    const T *beta_,
+    T *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len)
 {
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const TC alpha = *alpha_;
-    const TR beta  = *beta_;
-    const char UPLO = xher2k_uplo(uplo);
-    const char TR_c = xher2k_uplo(trans);
+    const ptrdiff_t N = *n_, K = *k_;
+    const T alphar = alpha_[0], alphai = alpha_[1];
+    const T beta_r = beta_[0];
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const int uplo  = (char)toupper((unsigned char)*uplo_p);
+    const int trans = (char)toupper((unsigned char)*trans_p);
 
-    if (N == 0) return;
+    if (N <= 0) return;
 
-    const TR rzero = 0.0Q, rone = 1.0Q;
-    const TC czero = 0.0Q + 0.0Qi;
-    const TC alpha_conj = conjq(alpha);
+    if (uplo == 'U') qblas_yherk_beta_u(N, beta_r, c, ldc);
+    else             qblas_yherk_beta_l(N, beta_r, c, ldc);
 
-    if (alpha == czero || K == 0) {
-        if (beta == rone) {
-            for (int j = 0; j < N; ++j) c[(size_t)j * ldc + j] = crealq(c[(size_t)j * ldc + j]);
-            return;
+    if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
+
+    int MC0, KC0, NC0;
+    qblas_ygemm_blocks(&MC0, &KC0, &NC0);
+    ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
+
+    /* Grow MC toward an L2-sized panel when K is small (complex doubles the
+     * per-element footprint), capped at 4×MC0 and rounded to MR. */
+    if (K <= KC) {
+        const long L2_TARGET_BYTES = 256L * 1024L;
+        long target_mc = L2_TARGET_BYTES / ((long)K * 2L * (long)sizeof(T));
+        if (target_mc > MC) {
+            if (target_mc > 4L * MC0) target_mc = 4L * MC0;
+            MC = round_up((ptrdiff_t)target_mc, MR);
+            if (MC < MC0) MC = MC0;
         }
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            TC *cj = c + (size_t)j * ldc;
-            if (beta == rzero) {
-                for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-            } else {
-                for (int i = i_lo; i < i_hi; ++i) {
-                    if (i == j) cj[i] = beta * crealq(cj[i]);
-                    else        cj[i] = beta * cj[i];
+    }
+
+    /* Conjugation absorbed at pack time (upstream GEMM_KERNEL_R/_L choice):
+     *   TRANS='N' → conjugate Bp;  TRANS='C' → conjugate Ap. */
+    const int conj_a_pack = (trans == 'C') ? 1 : 0;
+    const int conj_b_pack = (trans == 'N') ? 1 : 0;
+
+    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(T);
+    T *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    T *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    if (Ap_A && Ap_B && Bp_A && Bp_B) {
+        for (ptrdiff_t js = 0; js < N; js += NC) {
+            const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+
+            /* UPLO clip of the [0, N] row range for this js-band. */
+            ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
+            ptrdiff_t m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
+
+            for (ptrdiff_t ls = 0; ls < K; ls += KC) {
+                const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+
+                if (trans == 'N') {
+                    qblas_ygemm_tcopy(pb, jb, conj_b_pack, &a[((size_t)ls * lda + js) * 2], lda, Bp_A);
+                    qblas_ygemm_tcopy(pb, jb, conj_b_pack, &b[((size_t)ls * ldb + js) * 2], ldb, Bp_B);
+                } else {
+                    qblas_ygemm_ncopy(pb, jb, conj_b_pack, &a[((size_t)js * lda + ls) * 2], lda, Bp_A);
+                    qblas_ygemm_ncopy(pb, jb, conj_b_pack, &b[((size_t)js * ldb + ls) * 2], ldb, Bp_B);
+                }
+
+                for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
+                    const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+
+                    if (trans == 'N') {
+                        qblas_ygemm_tcopy(pb, min_i, conj_a_pack, &a[((size_t)ls * lda + is) * 2], lda, Ap_A);
+                        qblas_ygemm_tcopy(pb, min_i, conj_a_pack, &b[((size_t)ls * ldb + is) * 2], ldb, Ap_B);
+                    } else {
+                        qblas_ygemm_ncopy(pb, min_i, conj_a_pack, &a[((size_t)is * lda + ls) * 2], lda, Ap_A);
+                        qblas_ygemm_ncopy(pb, min_i, conj_a_pack, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
+                    }
+
+                    T *cij = &c[((size_t)js * ldc + is) * 2];
+                    const ptrdiff_t off = is - js;
+
+                    /* Pass 1: alpha·A·Bᴴ + Hermitian diagonal merge. */
+                    if (uplo == 'U')
+                        qblas_yher2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
+                    else
+                        qblas_yher2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
+
+                    /* Pass 2: conj(alpha)·B·Aᴴ into the off-diagonal strips. */
+                    if (uplo == 'U')
+                        qblas_yher2k_kernel_u(min_i, jb, pb, alphar, -alphai, Ap_B, Bp_A, cij, ldc, off, 0);
+                    else
+                        qblas_yher2k_kernel_l(min_i, jb, pb, alphar, -alphai, Ap_B, Bp_A, cij, ldc, off, 0);
                 }
             }
         }
-        return;
     }
-
-    xher2k_core(0, N, N, K, UPLO, TR_c, alpha, alpha_conj, beta,
-                a, lda, b, ldb, c, ldc);
+    free(Ap_A);
+    free(Ap_B);
+    free(Bp_A);
+    free(Bp_B);
 }
-
-#undef A_
-#undef B_

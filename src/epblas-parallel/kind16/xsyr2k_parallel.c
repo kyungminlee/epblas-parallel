@@ -1,78 +1,199 @@
 /*
- * xsyr2k_ — kind16 complex (__complex128) symmetric rank-2k, public Fortran
- * entry. THREADING ORCHESTRATION ONLY: all the math lives in xsyr2k_serial.c
- * (the per-column compute core and uplo decode), shared through
- * xsyr2k_kernel.h.
+ * xsyr2k_ — kind16 complex (__complex128) symmetric rank-2k update: the public
+ * Fortran entry and threading-orchestration half of the xsyr2k overlay (all
+ * the math lives in xsyr2k_serial.c + the shared xl3_complex.c substrate).
+ * Faithful port of OpenBLAS ZSYR2K interface/syr2k.c → level3_syr2k.c threading.
  *
- *   C := alpha · (A · Bᵀ + B · Aᵀ) + beta · C         (TRANS='N')
- *   C := alpha · (Aᵀ · B + Bᵀ · A) + beta · C         (TRANS='T')
+ *   C := alpha·(A·Bᵀ + B·Aᵀ) + beta·C   (trans='N', A,B are N×K)
+ *   C := alpha·(Aᵀ·B + Bᵀ·A) + beta·C   (trans='T', A,B are K×N)
  *
- * C is N×N complex symmetric (NOT Hermitian); TRANS='C' is folded to 'T'.
- * One omp-parallel-for over the columns of C — each column is independent, so
- * static per-column scheduling is race-free and bitwise-identical to the
- * serial path. Falls back to serial when invoked from inside another parallel
- * region (the `!omp_in_parallel()` term in use_omp makes the same
- * `if(use_omp)` loop run serially).
+ * Threading: one outer `omp parallel`. The two right operands (Bp_A = A in
+ * B-shape, Bp_B = B in B-shape) are packed once per (js, ls) band under
+ * `omp single` and shared; each thread owns a CONTIGUOUS slice of the M axis
+ * (the N output rows, m_chunk = ceil(N/nth) rounded to MR) and runs the
+ * MC-blocked is loop within it, packing its own Ap_A/Ap_B and doing the two
+ * kernel passes. The per-band UPLO clip trims each thread's row range, but
+ * every thread still executes every js/ls iteration so the `single`/`barrier`
+ * pair stays collective.
  *
- * Fortran ABI: name lowercased + trailing underscore; scalars by pointer;
- * character args followed by hidden trailing size_t lengths.
+ * Nesting guard: when xsyr2k_ is called from inside another routine's parallel
+ * region, delegate to xsyr2k_serial and open no team of our own.
+ *
+ * Arrays are interleaved (re,im) __float128; ld-args, k, n and offset are in COMPLEX
+ * elements, so every pointer step is ×2.
  */
 
 #include "xsyr2k_kernel.h"
-#include <quadmath.h>
+#include "xl3_complex.h"
+#include <stddef.h>
+#include <stdlib.h>
+#include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
-#define XSYR2K_OMP_MIN 32
+typedef __float128 T;
 
-typedef xsyr2k_T T;
+#define MR QBLAS_YGEMM_MR
+#define NR QBLAS_YGEMM_NR
+
+static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 void xsyr2k_(
-    const char *uplo, const char *trans,
+    const char *uplo_p, const char *trans_p,
     const int *n_, const int *k_,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict b, const int *ldb_,
+    const T *a, const int *lda_,
+    const T *b, const int *ldb_,
     const T *beta_,
-    T *restrict c, const int *ldc_,
+    T *c, const int *ldc_,
     size_t uplo_len, size_t trans_len)
 {
-    (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = xsyr2k_uplo(uplo);
-    char TR = xsyr2k_uplo(trans);
-    if (TR == 'C') TR = 'T';
-
-    if (N == 0) return;
-
-    const T zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
-
-    if (alpha == zero || K == 0) {
-        if (beta == one) return;
 #ifdef _OPENMP
-        const int use_omp = (N >= XSYR2K_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            const int i_lo = (UPLO == 'L') ? j : 0;
-            const int i_hi = (UPLO == 'L') ? N : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            if (beta == zero) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero;
-            else              for (int i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-        }
+    /* Inside another team → run serial, open no region of our own. */
+    if (omp_in_parallel()) {
+        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
+        xsyr2k_serial(uplo_p, trans_p, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt,
+                      beta_, c, &ldc_pt, uplo_len, trans_len);
         return;
     }
+#endif
+    (void)uplo_len; (void)trans_len;
+    const ptrdiff_t N = *n_, K = *k_;
+    const T alphar = alpha_[0], alphai = alpha_[1];
+    const T beta_r = beta_[0],  beta_i = beta_[1];
+    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const int uplo  = (char)toupper((unsigned char)*uplo_p);
+    const int trans = (char)toupper((unsigned char)*trans_p);
+
+    if (N <= 0) return;
+
+    if (uplo == 'U') qblas_ysyrk_beta_u(N, beta_r, beta_i, c, ldc);
+    else             qblas_ysyrk_beta_l(N, beta_r, beta_i, c, ldc);
+
+    if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
+
+    int MC0, KC0, NC0;
+    qblas_ygemm_blocks(&MC0, &KC0, &NC0);
+    ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
+
+    if (K <= KC) {
+        const long L2_TARGET_BYTES = 256L * 1024L;
+        long target_mc = L2_TARGET_BYTES / ((long)K * 2L * (long)sizeof(T));
+        if (target_mc > MC) {
+            if (target_mc > 4L * MC0) target_mc = 4L * MC0;
+            MC = round_up((ptrdiff_t)target_mc, MR);
+            if (MC < MC0) MC = MC0;
+        }
+    }
+
+    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(T);
+    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(T);
 
 #ifdef _OPENMP
-    const int use_omp = (N >= XSYR2K_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
-    #pragma omp parallel for if(use_omp) schedule(static)
-    for (int j = 0; j < N; ++j)
-        xsyr2k_core(j, j + 1, N, K, UPLO, TR, alpha, beta, a, lda, b, ldb, c, ldc);
+    ptrdiff_t nthreads = omp_get_max_threads();
+    if (nthreads < 1) nthreads = 1;
 #else
-    xsyr2k_core(0, N, N, K, UPLO, TR, alpha, beta, a, lda, b, ldb, c, ldc);
+    ptrdiff_t nthreads = 1;
 #endif
+
+    long nnk = (long)N * (long)N * (long)K;
+    if (nnk < 64L * 64L * 64L) nthreads = 1;
+
+    /* Two shared B-packs, two private A-packs per thread, all allocated BEFORE
+     * the region: a thread that skipped the loop on a failed in-region alloc
+     * would deadlock the others at the Bp barrier. */
+    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    T **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
+    T **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
+    ptrdiff_t alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
+    for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
+        Ap_A_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        Ap_B_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        if (!Ap_A_arr[t] || !Ap_B_arr[t]) alloc_ok = 0;
+    }
+    if (alloc_ok) {
+#ifdef _OPENMP
+        #pragma omp parallel num_threads(nthreads)
+#endif
+        {
+#ifdef _OPENMP
+            const ptrdiff_t tid = omp_get_thread_num();
+            const ptrdiff_t nth = omp_get_num_threads();
+#else
+            const ptrdiff_t tid = 0, nth = 1;
+#endif
+            T *Ap_A = Ap_A_arr[tid];
+            T *Ap_B = Ap_B_arr[tid];
+
+            /* M-axis (= N output rows) partition into per-thread chunks. */
+            const ptrdiff_t m_chunk = round_up((N + nth - 1) / nth, MR);
+            const ptrdiff_t m_lo = tid * m_chunk;
+            ptrdiff_t m_hi = m_lo + m_chunk;
+            if (m_hi > N) m_hi = N;
+
+            for (ptrdiff_t js = 0; js < N; js += NC) {
+                const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+
+                ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
+                ptrdiff_t m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
+                if (m_lo_eff < m_lo) m_lo_eff = m_lo;
+
+                for (ptrdiff_t ls = 0; ls < K; ls += KC) {
+                    const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+
+#ifdef _OPENMP
+                    #pragma omp barrier
+                    #pragma omp single
+#endif
+                    {
+                        if (trans == 'N') {
+                            qblas_ygemm_tcopy(pb, jb, 0, &a[((size_t)ls * lda + js) * 2], lda, Bp_A);
+                            qblas_ygemm_tcopy(pb, jb, 0, &b[((size_t)ls * ldb + js) * 2], ldb, Bp_B);
+                        } else {
+                            qblas_ygemm_ncopy(pb, jb, 0, &a[((size_t)js * lda + ls) * 2], lda, Bp_A);
+                            qblas_ygemm_ncopy(pb, jb, 0, &b[((size_t)js * ldb + ls) * 2], ldb, Bp_B);
+                        }
+                    }
+                    /* implicit barrier at end of `single` → Bp safe to read */
+
+                    for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
+                        const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+
+                        if (trans == 'N') {
+                            qblas_ygemm_tcopy(pb, min_i, 0, &a[((size_t)ls * lda + is) * 2], lda, Ap_A);
+                            qblas_ygemm_tcopy(pb, min_i, 0, &b[((size_t)ls * ldb + is) * 2], ldb, Ap_B);
+                        } else {
+                            qblas_ygemm_ncopy(pb, min_i, 0, &a[((size_t)is * lda + ls) * 2], lda, Ap_A);
+                            qblas_ygemm_ncopy(pb, min_i, 0, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
+                        }
+
+                        T *cij = &c[((size_t)js * ldc + is) * 2];
+                        const ptrdiff_t off = is - js;
+
+                        /* Pass 1: alpha·A·Bᵀ + symmetric diagonal merge. */
+                        if (uplo == 'U')
+                            qblas_ysyr2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
+                        else
+                            qblas_ysyr2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
+
+                        /* Pass 2: alpha·B·Aᵀ into the off-diagonal strips. */
+                        if (uplo == 'U')
+                            qblas_ysyr2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_B, Bp_A, cij, ldc, off, 0);
+                        else
+                            qblas_ysyr2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_B, Bp_A, cij, ldc, off, 0);
+                    }
+                }
+            }
+        }
+    }
+
+    for (ptrdiff_t t = 0; t < nthreads && Ap_A_arr; ++t) free(Ap_A_arr[t]);
+    for (ptrdiff_t t = 0; t < nthreads && Ap_B_arr; ++t) free(Ap_B_arr[t]);
+    free(Ap_A_arr);
+    free(Ap_B_arr);
+    free(Bp_A);
+    free(Bp_B);
 }

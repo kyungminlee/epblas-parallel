@@ -190,6 +190,47 @@ void qblas_yhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
                           ptrdiff_t posX, ptrdiff_t posY,
                           __float128 *b);
 
+/* ── SYR2K / HER2K substrate (complex rank-2k packed-GEMM port) ──────
+ *
+ * Beta pre-passes scale the UPLO triangle of C in place: the SYR2K one
+ * takes a COMPLEX beta; the HER2K one a REAL beta and additionally
+ * forces the diagonal imag = 0 (Hermitian C contract). The two-pass
+ * diagonal-aware kernels mirror the real esyr2k twin — see xsyr2k.c /
+ * xher2k.c for the calling convention (pass 1 flag=1 folds the
+ * diagonal block via the symmetric/Hermitian mirror, pass 2 flag=0
+ * adds the off-diagonal strips). Port source: OpenBLAS
+ * driver/level3/{syr2k,zher2k}_kernel.c + {syrk,zherk}_beta.c.
+ */
+void qblas_ysyrk_beta_u(ptrdiff_t n, __float128 br, __float128 bi,
+                        __float128 *c, ptrdiff_t ldc);
+void qblas_ysyrk_beta_l(ptrdiff_t n, __float128 br, __float128 bi,
+                        __float128 *c, ptrdiff_t ldc);
+void qblas_yherk_beta_u(ptrdiff_t n, __float128 br,
+                        __float128 *c, ptrdiff_t ldc);
+void qblas_yherk_beta_l(ptrdiff_t n, __float128 br,
+                        __float128 *c, ptrdiff_t ldc);
+
+void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                           __float128 alphar, __float128 alphai,
+                           const __float128 *a, const __float128 *b,
+                           __float128 *c, ptrdiff_t ldc,
+                           ptrdiff_t offset, int flag);
+void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                           __float128 alphar, __float128 alphai,
+                           const __float128 *a, const __float128 *b,
+                           __float128 *c, ptrdiff_t ldc,
+                           ptrdiff_t offset, int flag);
+void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                           __float128 alphar, __float128 alphai,
+                           const __float128 *a, const __float128 *b,
+                           __float128 *c, ptrdiff_t ldc,
+                           ptrdiff_t offset, int flag);
+void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                           __float128 alphar, __float128 alphai,
+                           const __float128 *a, const __float128 *b,
+                           __float128 *c, ptrdiff_t ldc,
+                           ptrdiff_t offset, int flag);
+
 #ifdef __cplusplus
 }
 #endif

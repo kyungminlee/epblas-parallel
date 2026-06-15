@@ -1,65 +1,63 @@
 /*
- * xher2k_kernel.h — internal kernel surface shared by the two translation
- * units the kind16 xher2k overlay is split across:
+ * xher2k_kernel.h — internal surface shared by the two translation units the
+ * kind16 complex (__complex128 / interleaved __float128) xher2k overlay is
+ * split across:
  *
- *   xher2k_serial.c    The pure single-thread Hermitian rank-2k (no OpenMP).
- *                      Owns the uplo decode and the per-column compute core,
- *                      plus the public `xher2k_serial_` entry. Safe to call
- *                      from inside another routine's parallel region.
+ *   xher2k_serial.c    The pure single-thread Hermitian rank-2k update (no
+ *                      OpenMP). Owns the fused serial packed-GEMM driver plus
+ *                      the internal serial entry `xher2k_serial`. Called
+ *                      directly by xher2k_ as its OOM fallback / nesting
+ *                      delegate.
  *
- *   xher2k_parallel.c  The public Fortran entry `xher2k_` — threading
- *                      orchestration only (one omp-parallel-for over the
- *                      columns of C). Each column is independent, so the
- *                      static per-column partition is race-free and
- *                      bitwise-identical to the serial path.
+ *   xher2k_parallel.c  The public Fortran entry `xher2k_` — threading only.
+ *                      Fans the same pieces across an OpenMP team (two shared
+ *                      B-packs under `omp single`, each thread an M-row slice
+ *                      of the output, UPLO-clipped per N-band). Delegates to
+ *                      xher2k_serial when called from inside another routine's
+ *                      parallel region (the libgomp barrier-wedge guard).
  *
- * alpha is COMPLEX, beta is REAL, and the diagonal of C stays real (the
- * imaginary part is dropped at every touch — see xher2k_core). kind16 is
- * arithmetic-bound (__complex128 lowers to libquadmath calls), so the overlay
- * uses the unblocked reference with no packing — the shared surface is the
- * uplo decode and the per-column compute core.
+ * Faithful port of OpenBLAS ZHER2K (interface/syr2k.c with the HEMM macro →
+ * driver/level3/zher2k_k.c blocking nest → driver/level3/zher2k_kernel.c
+ * diagonal kernel, the latter transcribed into the shared xl3_complex.c
+ * substrate as qblas_yher2k_kernel_{u,l}):
+ *
+ *   C := alpha·A·Bᴴ + conj(alpha)·B·Aᴴ + beta·C   (trans='N', A,B are N×K)
+ *   C := alpha·Aᴴ·B + conj(alpha)·Bᴴ·A + beta·C   (trans='C', A,B are K×N)
+ *
+ * alpha is COMPLEX, beta is REAL, C is HERMITIAN: only the UPLO triangle is
+ * read/written and the diagonal stays real on output (the β pre-pass
+ * qblas_yherk_beta_{u,l} unconditionally clears the diagonal imaginary part).
+ * Each (is,js) tile does TWO kernel passes: pass 1 (Ap=A-pack, Bp=B-pack,
+ * flag=1) GEMMs the diagonal NR×NR block to a subbuffer and merges it
+ * Hermitian-symmetrically, covering both A·Bᴴ and conj(alpha)·B·Aᴴ on the
+ * diagonal; pass 2 (Ap=B-pack, Bp=A-pack, conj(alpha) via −alphai, flag=0)
+ * adds the off-diagonal B·Aᴴ strips. Conjugation is absorbed at pack time:
+ * TRANS='N' conjugates the Bp side, TRANS='C' conjugates the Ap side. The
+ * triangular β pre-pass and the diagonal kernel both live in the shared
+ * complex L3 substrate (xl3_complex.h) — the same one xgemm/xsymm/xsyrk use —
+ * because the kernel indexes the packed buffers at arbitrary (possibly odd)
+ * offsets, valid only under OpenBLAS's contiguous-odd-tail packing.
  */
 #ifndef EPBLAS_PARALLEL_KIND16_XHER2K_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_XHER2K_KERNEL_H
 
 #include <stddef.h>
-#include <quadmath.h>   /* __complex128 */
 
-typedef __complex128 xher2k_TC;
-typedef __float128   xher2k_TR;
+/* Arrays are interleaved (re,im) pairs of __float128, indexed as the ob
+ * driver does (×2 per complex element); ld* are in COMPLEX elements. alpha is
+ * a (re,im) pair; beta is a single real __float128. */
+typedef __float128 xher2k_T;
 
-/* Uppercase a Fortran uplo/trans char (de-static'd original `up`). */
-char xher2k_uplo(const char *p);
-
-/* Compute columns [j0,j1) of C — full per-column rank-2k work: the beta
- * scaling of the UPLO triangle slice (with the Hermitian diagonal kept real)
- * followed by both rank-update terms (TRANS branch handled inside, exactly as
- * the original omp loop body). The diagonal element (i == j) takes only the
- * real part of its rank-update contribution. Each column is independent, so
- * any [j0,j1) sub-range is race-free.
- *
- * UPLO is the decoded uplo char ('L'/'U'); TR is the decoded trans char
- * ('N' or 'C'). alpha_conj is conjq(alpha). Caller guarantees
- * alpha != 0 && K > 0. */
-void xher2k_core(
-    int j0, int j1, int N, int K,
-    char UPLO, char TR,
-    xher2k_TC alpha, xher2k_TC alpha_conj, xher2k_TR beta,
-    const xher2k_TC *a, int lda,
-    const xher2k_TC *b, int ldb,
-    xher2k_TC *c, int ldc);
-
-/* Pure-serial Fortran entry. No OpenMP on this call path; keeps the exact
- * Fortran-ABI signature of xher2k_ so callers already inside a parallel
- * region can swap the symbol name only. */
-void xher2k_serial_(
+/* Pure-serial entry (no OpenMP). Same Fortran-ABI argument shape as xher2k_
+ * but with ptrdiff_t dimension pointers, mirroring the kind10 eher2k_serial. */
+void xher2k_serial(
     const char *uplo, const char *trans,
-    const int *n_, const int *k_,
-    const xher2k_TC *alpha_,
-    const xher2k_TC *restrict a, const int *lda_,
-    const xher2k_TC *restrict b, const int *ldb_,
-    const xher2k_TR *beta_,
-    xher2k_TC *restrict c, const int *ldc_,
+    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    const xher2k_T *alpha_,
+    const xher2k_T *a, const ptrdiff_t *lda_,
+    const xher2k_T *b, const ptrdiff_t *ldb_,
+    const xher2k_T *beta_,
+    xher2k_T *c, const ptrdiff_t *ldc_,
     size_t uplo_len, size_t trans_len);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XHER2K_KERNEL_H */
