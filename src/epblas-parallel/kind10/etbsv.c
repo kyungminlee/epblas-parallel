@@ -34,15 +34,19 @@ void etbsv_(
 
     if (incx == 1) {
         /* incx==1 hot path: hoist the column base pointer so the two array
-         * walks (band column + x) collapse onto a SINGLE byte-offset
-         * induction (col[off+i] and x[i] share i). Verified in-process to be
-         * parity-or-better than the A_() macro form in every U/L × N/T cell,
-         * with a reproducible ~0.5-1% edge on the Upper shapes (where the
-         * macro's L=K-j offset otherwise lengthens the per-element address
-         * arithmetic). Walk direction is irrelevant to the codegen — keep the
-         * forward inner walks (hardware-prefetcher friendly). The strided
-         * branch below cannot collapse (its ix induction is independent of the
-         * band index) so it stays on the macro form. */
+         * walks (band column + x) collapse onto a SINGLE byte-offset induction
+         * (col[off+i] and x[i] share i). The strided branch below cannot
+         * collapse (its ix induction is independent of the band index) so it
+         * stays on the macro form.
+         *
+         * Codegen of these K-deep inner loops is delicate: the i_lo guard form
+         * and the loop-bound form decide whether GCC fuses the per-column base
+         * addresses into running inductions or recomputes them each column.
+         * The right idiom differs per shape (store-loop vs accumulate-loop) and
+         * is pinned by measurement at each loop, not unified. Status vs the
+         * netlib-fortran reference (mig): L NoTrans, U/L Trans are parity-or-
+         * better; U NoTrans still trails mig ~14% (the same forward-walk gap ob
+         * never closed, ob/mig ~1.12) — open. */
         if (TR == 'N') {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = N - 1; j >= 0; --j) {
@@ -73,7 +77,15 @@ void etbsv_(
                     T tmp = x[j];
                     const T *restrict col = &a[(size_t)j * lda];
                     const ptrdiff_t off = K - j;
-                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    /* (j > K), not the equivalent (j - K > 0): the unconditional
+                     * j-K subtraction spawns an extra induction variable that
+                     * blocks GCC from fusing &a[j*lda]+(K-j) into the single
+                     * stride-(lda-1) band-diagonal pointer ob walks, forcing a
+                     * per-column address recompute. The compare-only form lets
+                     * the fusion happen → UTN par/ob 1.05->1.01, UTU ->0.97.
+                     * (Opposite for the NoTrans store-loop above, which prefers
+                     * the subtraction form — measured per-shape, do not unify.) */
+                    const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
                     for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= col[off + i] * x[i];
                     if (nounit) tmp /= col[K];
                     x[j] = tmp;
