@@ -14,6 +14,22 @@ static inline char up(const char *p) {
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
+/* x[lo..hi) -= tmp * cb[lo..hi); 8x unrolled (K=16 → exactly two iterations).
+ * The contiguous NoTrans solve store-loops amortize loop-control overhead
+ * across 8 independent stores (fp80 has no SIMD; this is the one lever).
+ * Bit-exact: each x[i] -= tmp*cb[i] is an independent store, no reassociation. */
+static inline void band_msub(T *restrict x, const T *restrict cb, T tmp,
+                             ptrdiff_t lo, ptrdiff_t hi) {
+    ptrdiff_t i = lo;
+    for (; i + 8 <= hi; i += 8) {
+        x[i]   -= tmp * cb[i];   x[i+1] -= tmp * cb[i+1];
+        x[i+2] -= tmp * cb[i+2]; x[i+3] -= tmp * cb[i+3];
+        x[i+4] -= tmp * cb[i+4]; x[i+5] -= tmp * cb[i+5];
+        x[i+6] -= tmp * cb[i+6]; x[i+7] -= tmp * cb[i+7];
+    }
+    for (; i < hi; ++i) x[i] -= tmp * cb[i];
+}
+
 void etbsv_(
     const char *uplo, const char *trans, const char *diag,
     const int *n_, const int *k_,
@@ -43,10 +59,12 @@ void etbsv_(
          * and the loop-bound form decide whether GCC fuses the per-column base
          * addresses into running inductions or recomputes them each column.
          * The right idiom differs per shape (store-loop vs accumulate-loop) and
-         * is pinned by measurement at each loop, not unified. Status vs the
-         * netlib-fortran reference (mig): L NoTrans, U/L Trans are parity-or-
-         * better; U NoTrans still trails mig ~14% (the same forward-walk gap ob
-         * never closed, ob/mig ~1.12) — open. */
+         * is pinned by measurement at each loop, not unified. The NoTrans store
+         * loops go through band_msub (8x manual unroll) — at K=16 the inner
+         * trip count is short, so loop-control overhead dominates and GCC's own
+         * rolling left par ~14% behind the netlib reference; unrolling closes
+         * it. par is now parity-or-better than both ob and the netlib-fortran
+         * reference (mig) on every incx==1 cell. */
         if (TR == 'N') {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = N - 1; j >= 0; --j) {
@@ -56,7 +74,7 @@ void etbsv_(
                         if (nounit) x[j] /= col[K];
                         const T tmp = x[j];
                         const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
-                        for (ptrdiff_t i = i_lo; i < j; ++i) x[i] -= tmp * col[off + i];
+                        band_msub(x, col + off, tmp, i_lo, j);
                     }
                 }
             } else {
@@ -67,7 +85,7 @@ void etbsv_(
                         if (nounit) x[j] /= col[0];
                         const T tmp = x[j];
                         const ptrdiff_t i_hi = (j + K < N - 1) ? (j + K) : (N - 1);
-                        for (ptrdiff_t i = j + 1; i <= i_hi; ++i) x[i] -= tmp * col[off + i];
+                        band_msub(x, col + off, tmp, j + 1, i_hi + 1);
                     }
                 }
             }
