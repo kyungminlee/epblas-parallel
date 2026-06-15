@@ -133,30 +133,60 @@ void etbsv_(
         ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
-                kx += (N - 1) * incx;
-                ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
-                    kx -= incx;
-                    if (x[jx] != zero) {
-                        ptrdiff_t ix = kx;
-                        const T *restrict col = &a[(size_t)j * lda];
-                        const ptrdiff_t off = K - j;
-                        if (nounit) x[jx] /= col[K];
-                        const T tmp = x[jx];
-                        const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
-                        for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
-                            x[ix] -= tmp * col[off + i];
-                            ix -= incx;
+                /* Upper NoTrans: the band x-window for column j ends just above
+                 * the diagonal at row j-1, i.e. x[jx - incx], descending. ix is
+                 * derived as jx - incx (drops the redundant running kx). The
+                 * per-column `if (nounit)` divide is HOISTED out of the j-loop:
+                 * left inside, GCC keeps the diag char live in a register to
+                 * re-test it every column and spills the two hot loop-invariants
+                 * (col[K] byte offset + x base ptr) to the stack — reloaded each
+                 * nounit column (the UNN strided gap; the unit path skips the
+                 * divide block, so only nounit was hit). Specializing per diag
+                 * removes the per-column test so both pointers stay resident. */
+                T *restrict xj = &x[kx + (N - 1) * incx];
+                if (nounit) {
+                    for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                        if (*xj != zero) {
+                            const T *restrict col = &a[(size_t)j * lda];
+                            const ptrdiff_t off = K - j;
+                            *xj /= col[K];
+                            const T tmp = *xj;
+                            const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
+                            T *restrict xi = xj - incx;
+                            for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
+                                *xi -= tmp * col[off + i];
+                                xi -= incx;
+                            }
                         }
+                        xj -= incx;
                     }
-                    jx -= incx;
+                } else {
+                    for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                        if (*xj != zero) {
+                            const T *restrict col = &a[(size_t)j * lda];
+                            const ptrdiff_t off = K - j;
+                            const T tmp = *xj;
+                            const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
+                            T *restrict xi = xj - incx;
+                            for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
+                                *xi -= tmp * col[off + i];
+                                xi -= incx;
+                            }
+                        }
+                        xj -= incx;
+                    }
                 }
             } else {
+                /* Lower NoTrans: the band x-window for column j starts at row
+                 * j+1, i.e. x[jx + incx]. The faithful-ob form maintains a
+                 * separate running kx == jx + incx — pure redundancy that costs
+                 * an extra live induction. Deriving ix = jx + incx drops it,
+                 * which lets the column bound stay in a register instead of
+                 * spilling to the stack each column (the LNU unit-diag gap). */
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < N; ++j) {
-                    kx += incx;
                     if (x[jx] != zero) {
-                        ptrdiff_t ix = kx;
+                        ptrdiff_t ix = jx + incx;
                         const T *restrict col = &a[(size_t)j * lda];
                         const ptrdiff_t off = -j;
                         if (nounit) x[jx] /= col[0];
@@ -172,13 +202,21 @@ void etbsv_(
             }
         } else {
             if (UPLO == 'U') {
+                /* Upper Trans: ix walks i_lo..j-1. The faithful-ob form keeps a
+                 * running kx slid by a per-column conditional (if j>=K kx+=incx),
+                 * which forces a cmov AND spills the loop-invariant column bound
+                 * to the stack (reloaded every column — the UTU unit-diag gap,
+                 * exposed once the per-column divide is absent). Deriving the
+                 * start ix = jx - min(j,K)*incx from the diagonal index jx drops
+                 * both the running kx and the cmov; the bound stays in a
+                 * register. (i ascends for bit-exact accumulation order.) */
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[jx];
-                    ptrdiff_t ix = kx;
                     const T *restrict col = &a[(size_t)j * lda];
                     const ptrdiff_t off = K - j;
                     const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
+                    ptrdiff_t ix = jx - (j - i_lo) * incx;
                     for (ptrdiff_t i = i_lo; i < j; ++i) {
                         tmp -= col[off + i] * x[ix];
                         ix += incx;
@@ -186,7 +224,6 @@ void etbsv_(
                     if (nounit) tmp /= col[K];
                     x[jx] = tmp;
                     jx += incx;
-                    if (j >= K) kx += incx;
                 }
             } else {
                 kx += (N - 1) * incx;
