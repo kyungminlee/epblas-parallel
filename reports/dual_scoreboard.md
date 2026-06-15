@@ -1,13 +1,13 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-15 20:58 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-15 23:07 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
 | m | 2145 | 96.6% | 98.2% |
-| e | 2145 | 89.8% | 97.3% |
+| e | 2145 | 89.9% | 97.3% |
 | q | 2145 | 97.5% | 98.2% |
 
 ## m — multifloats (double-double)
@@ -184,7 +184,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## e — kind10 (fp80)
 
-2145 cells, 71 routines.  **Pass@1.02: serial 89.8% · omp4 97.3%.**  40 routine(s) with ≥1 flagged cell.
+2145 cells, 71 routines.  **Pass@1.02: serial 89.9% · omp4 97.3%.**  39 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
@@ -195,7 +195,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **eswap** | 3 | 1.000 | 1.356 @-/1024 | ⚠ |
 | **ysyrk** | 12 | 1.033 mig @UT/256 | 1.349 @UN/64 | ⚠ |
 | **yescal** | 3 | 1.004 | 1.261 @-/1024 | ⚠ |
-| **enrm2** | 3 | 1.196 ob1 @-/1024 | 1.198 @-/1024 | ⚠ |
 | **erot** | 3 | 1.003 | 1.181 @-/1024 | ⚠ |
 | **yher2k** | 12 | 0.993 | 1.171 @UN/64 | ⚠ |
 | **yscal** | 3 | 1.001 | 1.169 @-/1024 | ⚠ |
@@ -249,6 +248,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | easum | 3 | 1.002 | 1.002 | ✅ |
 | ydotu | 3 | 1.001 | 1.001 | ✅ |
 | eyasum | 3 | 0.705 | 0.941 | ✅ |
+| enrm2 | 3 | 0.940 | 0.940 | ✅ |
 | iyamax | 3 | 0.742 | 0.900 | ✅ |
 | yhbmv | 18 | 0.899 | 0.733 | ✅ |
 | esbmv | 24 | 0.856 | 0.825 | ✅ |
@@ -260,7 +260,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | ieamax | 3 | 0.738 | 0.738 | ✅ |
 | yrotg | 1 | 0.080 | 0.080 | ✅ |
 
-<details><summary>e: 260 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>e: 257 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
@@ -279,16 +279,13 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | ysyrk | LN | 64 | 471,890 | 482,873 | 519,957 | 360,784 | 268,129 | 0.977 | 1.346 | ob1 |
 | ysymm | LL | 64 | 750,976 | 914,827 | 873,623 | 404,691 | 301,942 | 0.860 | 1.340 | mig |
 | yescal | - | 1024 | 2,838 | 2,829 | 2,828 | 3,577 | 2,838 | 1.004 | 1.261 | mig |
-| enrm2 | - | 1024 | 2,100 | 1,756 | 2,529 | 2,098 | 1,752 | 1.196 | 1.198 | ob1 |
 | erot | - | 1024 | 2,926 | 2,929 | 3,147 | 3,470 | 2,938 | 0.999 | 1.181 | ob1 |
-| enrm2 | - | 65536 | 133,586 | 113,396 | 162,503 | 24,597 | 113,366 | 1.178 | 0.217 | ob1 |
 | yher2k | UN | 64 | 818,843 | 1,066,436 | 832,694 | 653,317 | 558,114 | 0.983 | 1.171 | mig |
 | yscal | - | 1024 | 3,065 | 3,063 | 3,069 | 3,589 | 3,072 | 1.001 | 1.169 | ob1 |
 | yher2k | LN | 64 | 814,531 | 1,066,208 | 974,028 | 650,319 | 558,649 | 0.836 | 1.164 | mig |
 | yherk | UC | 64 | 390,108 | 481,717 | 351,400 | 305,755 | 263,801 | 1.110 | 1.159 | mig |
 | ygemv | N/x-1 | 256 | 203,296 | 231,637 | 175,569 | 54,984 | 231,652 | 1.158 | 0.237 | mig |
 | ygemv | N/x2 | 256 | 203,360 | 231,680 | 175,692 | 55,752 | 232,179 | 1.157 | 0.240 | mig |
-| enrm2 | - | 1048576 | 2,374,610 | 2,053,181 | 2,848,813 | 446,940 | 2,043,991 | 1.157 | 0.219 | ob1 |
 | ygemv | N/x-1 | 128 | 51,406 | 58,632 | 44,568 | 15,080 | 58,648 | 1.153 | 0.257 | mig |
 | ygemv | N/x2 | 128 | 51,438 | 58,664 | 44,599 | 15,424 | 58,662 | 1.153 | 0.263 | mig |
 | ygemv | N/x-1 | 512 | 827,512 | 945,588 | 717,762 | 220,999 | 941,868 | 1.153 | 0.235 | mig |
