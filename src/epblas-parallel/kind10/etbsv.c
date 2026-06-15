@@ -62,8 +62,8 @@ void etbsv_(
                         const ptrdiff_t off = -j;
                         if (nounit) x[j] /= col[0];
                         const T tmp = x[j];
-                        const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (ptrdiff_t i = j + 1; i < i_hi; ++i) x[i] -= tmp * col[off + i];
+                        const ptrdiff_t i_hi = (j + K < N - 1) ? (j + K) : (N - 1);
+                        for (ptrdiff_t i = j + 1; i <= i_hi; ++i) x[i] -= tmp * col[off + i];
                     }
                 }
             }
