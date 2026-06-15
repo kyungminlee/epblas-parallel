@@ -121,6 +121,15 @@ void etbsv_(
             }
         }
     } else {
+        /* Strided (incx != 1) branch. The ix induction is independent of the
+         * band index, so it cannot collapse onto a single byte-offset walk the
+         * way the incx==1 paths do. Instead hoist the column base pointer
+         * (col = &a[j*lda]) ONCE per column and walk col[off+i] — faithful to
+         * the ob/netlib form. With K=16 the inner trip count is short, so the
+         * per-column addressing setup is a meaningful fraction; expressing the
+         * band element through the A_(i,j) macro re-derived (size_t)j*lda at
+         * each access and left par ~4% behind ob on the strided Upper cells.
+         * Hoisting the pointer brings every strided cell to parity-or-better. */
         ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
@@ -130,12 +139,13 @@ void etbsv_(
                     kx -= incx;
                     if (x[jx] != zero) {
                         ptrdiff_t ix = kx;
-                        const ptrdiff_t L = K - j;
-                        if (nounit) x[jx] /= A_(K, j);
+                        const T *restrict col = &a[(size_t)j * lda];
+                        const ptrdiff_t off = K - j;
+                        if (nounit) x[jx] /= col[K];
                         const T tmp = x[jx];
-                        const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                        const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
                         for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
-                            x[ix] -= tmp * A_(L + i, j);
+                            x[ix] -= tmp * col[off + i];
                             ix -= incx;
                         }
                     }
@@ -147,11 +157,13 @@ void etbsv_(
                     kx += incx;
                     if (x[jx] != zero) {
                         ptrdiff_t ix = kx;
-                        if (nounit) x[jx] /= A_(0, j);
+                        const T *restrict col = &a[(size_t)j * lda];
+                        const ptrdiff_t off = -j;
+                        if (nounit) x[jx] /= col[0];
                         const T tmp = x[jx];
-                        const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
-                            x[ix] -= tmp * A_(i - j, j);
+                        const ptrdiff_t i_hi = (j + K < N - 1) ? (j + K) : (N - 1);
+                        for (ptrdiff_t i = j + 1; i <= i_hi; ++i) {
+                            x[ix] -= tmp * col[off + i];
                             ix += incx;
                         }
                     }
@@ -164,13 +176,14 @@ void etbsv_(
                 for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = kx;
-                    const ptrdiff_t L = K - j;
-                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    const T *restrict col = &a[(size_t)j * lda];
+                    const ptrdiff_t off = K - j;
+                    const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
                     for (ptrdiff_t i = i_lo; i < j; ++i) {
-                        tmp -= A_(L + i, j) * x[ix];
+                        tmp -= col[off + i] * x[ix];
                         ix += incx;
                     }
-                    if (nounit) tmp /= A_(K, j);
+                    if (nounit) tmp /= col[K];
                     x[jx] = tmp;
                     jx += incx;
                     if (j >= K) kx += incx;
@@ -181,12 +194,14 @@ void etbsv_(
                 for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = kx;
-                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    for (ptrdiff_t i = i_hi - 1; i > j; --i) {
-                        tmp -= A_(i - j, j) * x[ix];
+                    const T *restrict col = &a[(size_t)j * lda];
+                    const ptrdiff_t off = -j;
+                    const ptrdiff_t i_hi = (j + K < N - 1) ? (j + K) : (N - 1);
+                    for (ptrdiff_t i = i_hi; i > j; --i) {
+                        tmp -= col[off + i] * x[ix];
                         ix -= incx;
                     }
-                    if (nounit) tmp /= A_(0, j);
+                    if (nounit) tmp /= col[0];
                     x[jx] = tmp;
                     jx -= incx;
                     if ((N - 1 - j) >= K) kx -= incx;
