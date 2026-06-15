@@ -175,6 +175,17 @@ if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
         -march=${EPBLAS_PARALLEL_MARCH})
 endif()
 
+# enrm2 wants 32-byte loop alignment, not the archive-wide 16. Its Blue's-algo
+# hot loop carries a deeper x87 working set than ieamax/eynrm2 (three magnitude
+# buckets + four resident thresholds), so where it lands at 16-byte granularity
+# swings wildly with final-binary placement: two byte-identical copies of the
+# loop measured 1.0x vs 1.46x apart in the SAME binary at -falign-loops=16, and
+# the dual-link bench caught par at an unlucky offset (par/ob ~1.20 serial).
+# Pinning the loop to a 32-byte boundary makes placement irrelevant: the twin
+# copies collapse to 1.000x and par returns to ~0.95 vs ob. Source COMPILE_OPTIONS
+# append after the target's -falign-loops=16, and GCC honours the last one.
+set_source_files_properties(enrm2.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
+
 # OpenMP comes in at step 4. Wire it now so the per-kernel #pragmas
 # compile from the start.
 if(OpenMP_C_FOUND)
