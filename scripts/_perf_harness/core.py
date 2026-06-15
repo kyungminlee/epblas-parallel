@@ -22,24 +22,24 @@ KIND10 = (
 ).split()
 KIND16 = (
     'qgemm xgemm qgemmtr xgemmtr qtrsm xtrsm qtrmm xtrmm '
-    'qsyrk xsyrk xherk qsyr2k qsymm xsymm xhemm qgemv xgemv '
+    'qsyrk xsyrk xherk qsyr2k xsyr2k xher2k qsymm xsymm xhemm qgemv xgemv '
     'qger xgeru xgerc qsymv xhemv qtrsv xtrsv qtrmv xtrmv '
     'qsyr xher qscal qaxpy qcopy qswap qrot qdot qasum '
     'xscal xqscal xaxpy xcopy xswap xqrot xdotu xdotc '
     'qxasum qgbmv xgbmv qsbmv xhbmv qspmv xhpmv qtbmv xtbmv '
     'qtbsv xtbsv qtpmv xtpmv qtpsv xtpsv qspr xhpr '
     'iqamax ixamax qrotg qrotm qrotmg xrotg '
-    'qnrm2 qxnrm2'
+    'qcabs1 qnrm2 qxnrm2'
 ).split()
 MULTIFLOATS = (
     'mgemm wgemm mgemmtr wgemmtr mtrsm wtrsm mtrmm wtrmm '
-    'msyrk wsyrk wherk msymm wsymm whemm mgemv wgemv '
+    'msyrk wsyrk wherk msyr2k wsyr2k wher2k msymm wsymm whemm mgemv wgemv '
     'mger wgeru wgerc msymv whemv mtrsv wtrsv mtrmv wtrmv '
     'msyr wher mscal wscal wmscal maxpy waxpy mcopy wcopy '
     'mswap wswap mrot wmrot mdot masum mwasum wdotu wdotc '
     'mgbmv wgbmv msbmv whbmv mspmv whpmv mtbmv wtbmv '
     'mtbsv wtbsv mtpmv wtpmv mtpsv wtpsv mspr whpr '
-    'mnrm2 mwnrm2 '
+    'mcabs1 mnrm2 mwnrm2 '
     'imamax iwamax mrotg mrotm mrotmg wrotg'
 ).split()
 
