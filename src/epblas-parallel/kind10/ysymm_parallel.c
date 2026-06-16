@@ -88,21 +88,28 @@ void ysymm_(
     }
 
     if (SIDE == 'L') {
+        ptrdiff_t pw = nb;
 #ifdef _OPENMP
         const ptrdiff_t use_omp = (N >= YSYMM_OMP_MIN && nt > 1);
+        /* Thin the column panels so the team has ~1 panel/thread at small N
+         * (N=64, nb=32 -> 2 panels -> 2 idle threads); inner nb is preserved
+         * for the trailing-GEMM blocking. Rectangular work -> ppt=1, static. */
+        if (use_omp) pw = blas_omp_panel_width(N, (int)nt, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t jc = 0; jc < N; jc += nb) {
-            const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
+        for (ptrdiff_t jc = 0; jc < N; jc += pw) {
+            const ptrdiff_t jb = (N - jc < pw) ? (N - jc) : pw;
             ysymm_L_panel(jc, jb, M, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
         }
     } else {
+        ptrdiff_t pw = nb;
 #ifdef _OPENMP
         const ptrdiff_t use_omp = (M >= YSYMM_OMP_MIN && nt > 1);
+        if (use_omp) pw = blas_omp_panel_width(M, (int)nt, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t ic = 0; ic < M; ic += nb) {
-            const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
+        for (ptrdiff_t ic = 0; ic < M; ic += pw) {
+            const ptrdiff_t ib = (M - ic < pw) ? (M - ic) : pw;
             ysymm_R_panel(ic, ib, N, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
         }
     }

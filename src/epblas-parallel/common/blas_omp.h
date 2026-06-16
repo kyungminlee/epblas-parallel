@@ -30,6 +30,28 @@ static inline int blas_omp_max_threads(void) {
 static inline int blas_omp_max_threads(void) { return 1; }
 #endif
 
+#include <stddef.h>
+
+/* Outer panel width for a threaded L3 panel loop. The cache-tuned serial
+ * block `nb` leaves too few panels to feed the team at small problem sizes
+ * (axis=64, nb=32 -> 2 panels, so 2 of 4 threads sit idle). When the default
+ * step already yields enough panels (>= nt*ppt) the cache-optimal `nb` is
+ * returned unchanged, so larger N is never disturbed. Otherwise the width is
+ * shrunk to deliver about nt*ppt panels, floored at 8 so each panel still
+ * amortizes its trailing-GEMM overhead, and never wider than nb. Use ppt=1
+ * for equal-work (rectangular) panels balanced by schedule(static); a larger
+ * ppt for triangular work that needs finer granularity for dynamic balance. */
+static inline ptrdiff_t blas_omp_panel_width(ptrdiff_t axis, int nt,
+                                             ptrdiff_t nb, int ppt) {
+    if (nt <= 1) return nb;
+    const ptrdiff_t want = (ptrdiff_t)nt * ppt;
+    if ((axis + nb - 1) / nb >= want) return nb;   /* nb already feeds the team */
+    ptrdiff_t pw = axis / want;
+    if (pw < 8)  pw = 8;
+    if (pw > nb) pw = nb;
+    return pw;
+}
+
 #ifdef __cplusplus
 }
 #endif

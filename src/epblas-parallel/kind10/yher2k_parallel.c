@@ -78,12 +78,18 @@ void yher2k_(
     const ptrdiff_t nb = yher2k_nb();
     const ptrdiff_t lda = *lda_, ldb = *ldb_;
 
+    ptrdiff_t pw = nb;
 #ifdef _OPENMP
-    const ptrdiff_t use_omp = (N >= YHER2K_OMP_MIN && blas_omp_max_threads() > 1);
+    const ptrdiff_t nt = blas_omp_max_threads();
+    const ptrdiff_t use_omp = (N >= YHER2K_OMP_MIN && nt > 1);
+    /* Thin the diagonal blocks so the team can balance the triangular
+     * per-block load at small N (N=64, nb=32 -> 2 blocks -> at most 2x);
+     * triangular + schedule(dynamic) -> ppt=2 for finer balance. */
+    if (use_omp) pw = blas_omp_panel_width(N, (int)nt, nb, 2);
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
+    for (ptrdiff_t jc = 0; jc < N; jc += pw) {
+        const ptrdiff_t jb = (N - jc < pw) ? (N - jc) : pw;
         yher2k_block(jc, jb, N, K, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR_c);
     }
 }
