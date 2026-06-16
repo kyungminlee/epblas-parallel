@@ -12,11 +12,28 @@ typedef long double R;
  * contiguous case becomes one flat 2n real loop (the epblas-openblas
  * shape) — load-first, no _Complex multiply, accumulators stay on the
  * x87 register stack.  Same ops in the same order — bit-identical.
- * n is the COMPLEX count; the kernel walks 2n reals. */
+ * n is the COMPLEX count; the kernel walks 2n reals.
+ *
+ * 4-way unrolled (sequentially) to amortize per-element loop overhead — the
+ * only lever for fp80, which has no SIMD. Reinterpreting complex as 2n reals
+ * makes this the plain real rotation, so it is identical to the erot kernel and
+ * (being real) never nears the x87 8-deep cap. Closes the same N=64k-OMP4 /
+ * serial loop-overhead residual as erot/yscal. */
 static void yerot_unit(ptrdiff_t n, R c, R s, R *px, R *py)
 {
     const long two_n = 2L * n;
-    for (long i = 0; i < two_n; ++i) {
+    long i, m = two_n & -4;
+    for (i = 0; i < m; i += 4) {
+        R x0 = px[i+0], y0 = py[i+0];
+        px[i+0] = c * x0 + s * y0;  py[i+0] = c * y0 - s * x0;
+        R x1 = px[i+1], y1 = py[i+1];
+        px[i+1] = c * x1 + s * y1;  py[i+1] = c * y1 - s * x1;
+        R x2 = px[i+2], y2 = py[i+2];
+        px[i+2] = c * x2 + s * y2;  py[i+2] = c * y2 - s * x2;
+        R x3 = px[i+3], y3 = py[i+3];
+        px[i+3] = c * x3 + s * y3;  py[i+3] = c * y3 - s * x3;
+    }
+    for (; i < two_n; ++i) {
         R xi = px[i], yi = py[i];
         px[i] = c * xi + s * yi;
         py[i] = c * yi - s * xi;
