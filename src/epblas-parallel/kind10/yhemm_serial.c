@@ -39,6 +39,36 @@ static const T ONE  = 1.0L + 0.0Li;
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
+/* Fused Hermitian-Left inner sweep over k in [k_lo, k_hi):
+ *     cj[k]  += temp1 * ai[k]
+ *     temp2  += bj[k] * conj(ai[k])
+ * returning temp2. Driven as scalar long double re/im chains over the complex
+ * data reinterpreted as 2n reals: each ai[k]/bj[k] element is loaded ONCE and
+ * shared by both the cj axpy and the temp2 conj-dot, so the cj[k] store can't
+ * force a reload of ai/bj — the gcc aliasing-reload (ai[k] and bj[k] each
+ * fetched twice per iter) that cost par ~7% vs gfortran's zhemm on LL. The
+ * conj sign is folded into the products, dropping the per-element fchs.
+ * Bit-identical to the _Complex form (same decomposition as yherk UC/LC). */
+static inline T hemm_L_conj_sweep(T *restrict cj, const T *restrict bj,
+                                  const T *restrict ai, T temp1,
+                                  ptrdiff_t k_lo, ptrdiff_t k_hi)
+{
+    long double *restrict cR = (long double *)cj;
+    const long double *restrict bR = (const long double *)bj;
+    const long double *restrict aR = (const long double *)ai;
+    const long double t1r = __real__ temp1, t1i = __imag__ temp1;
+    long double s2r = 0.0L, s2i = 0.0L;
+    for (ptrdiff_t k = k_lo; k < k_hi; ++k) {
+        const long double akr = aR[2 * k], aki = aR[2 * k + 1];
+        const long double bkr = bR[2 * k], bki = bR[2 * k + 1];
+        cR[2 * k]     += t1r * akr - t1i * aki;
+        cR[2 * k + 1] += t1r * aki + t1i * akr;
+        s2r += bkr * akr + bki * aki;
+        s2i += bki * akr - bkr * aki;
+    }
+    return s2r + s2i * 1.0iL;
+}
+
 /* Scalar Hermitian diagonal block, SIDE='L' (see original yhemm for the
  * Netlib stride-1 access rationale). */
 static void hemm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t jb, T alpha,
@@ -52,23 +82,15 @@ static void hemm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t 
         if (UPLO == 'L') {
             for (ptrdiff_t i = ic + ib - 1; i >= ic; --i) {
                 const T temp1 = alpha * bj[i];
-                T temp2 = ZERO;
                 const T *ai = &A_(0, i);
-                for (ptrdiff_t k = i + 1; k < ic + ib; ++k) {
-                    cj[k]  += temp1 * ai[k];
-                    temp2  += bj[k] * cconj(ai[k]);
-                }
+                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, i + 1, ic + ib);
                 cj[i] += temp1 * __real__ ai[i] + alpha * temp2;
             }
         } else {
             for (ptrdiff_t i = ic; i < ic + ib; ++i) {
                 const T temp1 = alpha * bj[i];
-                T temp2 = ZERO;
                 const T *ai = &A_(0, i);
-                for (ptrdiff_t k = ic; k < i; ++k) {
-                    cj[k]  += temp1 * ai[k];
-                    temp2  += bj[k] * cconj(ai[k]);
-                }
+                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, ic, i);
                 cj[i] += temp1 * __real__ ai[i] + alpha * temp2;
             }
         }
@@ -129,12 +151,8 @@ void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
         if (UPLO == 'L') {
             for (ptrdiff_t i = M - 1; i >= 0; --i) {
                 const T temp1 = alpha * bj[i];
-                T temp2 = ZERO;
                 const T *ai = &A_(0, i);
-                for (ptrdiff_t k = i + 1; k < M; ++k) {
-                    cj[k]  += temp1 * ai[k];
-                    temp2  += bj[k] * cconj(ai[k]);
-                }
+                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, i + 1, M);
                 const T diag = temp1 * __real__ ai[i] + alpha * temp2;
                 if (beta == ZERO)     cj[i] = diag;
                 else if (beta == ONE) cj[i] += diag;
@@ -143,12 +161,8 @@ void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
         } else {
             for (ptrdiff_t i = 0; i < M; ++i) {
                 const T temp1 = alpha * bj[i];
-                T temp2 = ZERO;
                 const T *ai = &A_(0, i);
-                for (ptrdiff_t k = 0; k < i; ++k) {
-                    cj[k]  += temp1 * ai[k];
-                    temp2  += bj[k] * cconj(ai[k]);
-                }
+                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, 0, i);
                 const T diag = temp1 * __real__ ai[i] + alpha * temp2;
                 if (beta == ZERO)     cj[i] = diag;
                 else if (beta == ONE) cj[i] += diag;
