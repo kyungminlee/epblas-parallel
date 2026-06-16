@@ -116,12 +116,15 @@ extern "C" void mger_(
 #else
         const int use_omp = 0;
 #endif
-        /* Threaded + strided x: copy x once to a unit-stride buffer so the
-         * column loop reads it contiguously; mirrors ob ger_thread.c. Columns
-         * of A are disjoint → OMP-over-j is race-free and bit-exact. */
+        /* Strided x: copy x once to a unit-stride buffer so every column reads
+         * it contiguously (the fast t*xp[i] core), instead of re-gathering the
+         * strided x for each of the N columns. O(M) pack vs O(M*N) repeated
+         * gathers — the project_l2_strided_gather pattern; bit-exact. Applies
+         * serial and threaded alike (columns of A are disjoint → OMP-over-j is
+         * race-free); mirrors ob ger_thread.c. */
         const T *xp = x;
         T *x_buf = NULL;
-        if (use_omp && incx != 1) {
+        if (incx != 1) {
             x_buf = static_cast<T *>(std::malloc(static_cast<size_t>(M) * sizeof(T)));
             if (x_buf) { int ix = ix0; for (int i = 0; i < M; ++i) { x_buf[i] = x[ix]; ix += incx; } xp = x_buf; }
         }
