@@ -7,22 +7,24 @@
 typedef long double T;
 
 /* Unit-stride kernel, shared by the serial entry and the per-thread OMP slices.
- * 5-way unrolled to match the NETLIB DSCAL reference: each x87 `fmulp` has
- * ~3-cycle latency; unrolling lets the OOO core dispatch independent
- * fldt/fmul/fstpt sequences in parallel since all five mults share alpha but
- * touch distinct x[i]. Plain `for(i) x[i] *= alpha` lost ~25% vs migrated at
- * every size above N=128 without it. */
+ * 8-way unrolled: each x87 `fmulp` has ~3-cycle latency; unrolling lets the OOO
+ * core dispatch independent fldt/fmul/fstpt sequences in parallel since all
+ * mults share alpha but touch distinct x[i]. Plain `for(i) x[i] *= alpha` lost
+ * ~25% vs the references. This is OpenBLAS dscal's shape (8-way, remainder
+ * last); the narrower 5-way netlib form left ~3% on the table vs ob at the
+ * L2-band size (N~64k), where the per-element loop overhead is still exposed —
+ * matching the 8-way head closes it. Each *= is independent, so the wider
+ * unroll and the head→tail remainder move are bit-identical. */
 static void escal_unit(ptrdiff_t n, T alpha, T *x)
 {
-    const ptrdiff_t m = n % 5;
-    for (ptrdiff_t i = 0; i < m; ++i) x[i] *= alpha;
-    for (ptrdiff_t i = m; i < n; i += 5) {
-        x[i    ] *= alpha;
-        x[i + 1] *= alpha;
-        x[i + 2] *= alpha;
-        x[i + 3] *= alpha;
-        x[i + 4] *= alpha;
+    ptrdiff_t i, n1 = n & -8;
+    for (i = 0; i < n1; i += 8) {
+        x[i    ] *= alpha; x[i + 1] *= alpha;
+        x[i + 2] *= alpha; x[i + 3] *= alpha;
+        x[i + 4] *= alpha; x[i + 5] *= alpha;
+        x[i + 6] *= alpha; x[i + 7] *= alpha;
     }
+    for (; i < n; ++i) x[i] *= alpha;
 }
 
 #ifdef _OPENMP
