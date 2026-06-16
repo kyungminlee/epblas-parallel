@@ -1,22 +1,21 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-16 14:40 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-16 15:36 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
-| m | 2145 | 96.6% | 98.2% |
+| m | 2145 | 96.6% | 98.3% |
 | e | 2145 | 91.6% | 98.3% |
 | q | 2145 | 97.5% | 98.2% |
 
 ## m — multifloats (double-double)
 
-2145 cells, 71 routines.  **Pass@1.02: serial 96.6% · omp4 98.2%.**  17 routine(s) with ≥1 flagged cell.
+2145 cells, 71 routines.  **Pass@1.02: serial 96.6% · omp4 98.3%.**  16 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| **mcabs1** | 1 | 1.970 ob1 @-/0 | 1.970 @-/0 | ⚠ |
 | **whemm** | 12 | 0.336 | 1.285 @RU/64 | ⚠ |
 | **wsymm** | 12 | 0.340 | 1.283 @RU/64 | ⚠ |
 | **msyrk** | 16 | 0.539 | 1.252 @LT/64 | ⚠ |
@@ -42,6 +41,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wswap | 3 | 1.004 | 1.006 | ✅ |
 | mswap | 3 | 1.003 | 0.999 | ✅ |
 | wtrmv | 108 | 1.002 | 0.928 | ✅ |
+| mcabs1 | 1 | 1.000 | 1.000 | ✅ |
 | iwamax | 3 | 0.995 | 0.998 | ✅ |
 | mrotmg | 1 | 0.998 | 0.996 | ✅ |
 | imamax | 3 | 0.992 | 0.983 | ✅ |
@@ -88,11 +88,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
 
-<details><summary>m: 87 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>m: 86 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| mcabs1 | - | 0 | 6 | 3 | 175 | 6 | 3 | 1.970 | 1.970 | ob1 |
 | whemm | RU | 64 | 2,152,355 | 6,409,562 | 11,545,662 | 2,306,497 | 1,795,206 | 0.336 | 1.285 | ob1 |
 | wsymm | RU | 64 | 2,129,320 | 6,376,024 | 11,552,514 | 2,299,862 | 1,792,682 | 0.334 | 1.283 | ob1 |
 | wsymm | RL | 64 | 2,171,819 | 6,384,647 | 11,545,775 | 2,279,302 | 1,793,301 | 0.340 | 1.271 | ob1 |
@@ -216,7 +215,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **etrsm** | 64 | 1.044 ob1 @LLTU/64 | 1.023 @LUNN/64 | ⚠ |
 | **yerot** | 3 | 1.001 | 1.040 @-/65536 | ⚠ |
 | **egemm** | 16 | 1.024 ob1 @TN/128 | 1.037 @TN/128 | ⚠ |
-| **ysyrk** | 12 | 1.031 mig @UT/256 | 0.703 | ⚠ |
+| **ysyrk** | 12 | 1.029 mig @UT/64 | 0.701 | ⚠ |
 | **escal** | 3 | 1.028 ob1 @-/65536 | 1.026 @-/1024 | ⚠ |
 | **yhpr** | 18 | 1.027 ob1 @L/128 | 0.999 | ⚠ |
 | **esyr2k** | 16 | 1.023 mig @LT/64 | 1.002 | ⚠ |
@@ -405,17 +404,17 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | ytbmv | UTU | 512 | 20,212 | 19,596 | 20,272 | 8,106 | 14,325 | 1.031 | 0.566 | ob1 |
 | ytrsm | RUTN | 64 | 511,426 | 495,871 | 511,206 | 168,149 | 254,904 | 1.031 | 0.660 | ob1 |
 | ytrsm | RUCN | 64 | 511,598 | 496,040 | 511,052 | 168,192 | 254,699 | 1.031 | 0.660 | ob1 |
-| ysyrk | UT | 256 | 20,619,407 | 28,307,023 | 19,995,649 | 7,577,847 | 13,360,227 | 1.031 | 0.567 | mig |
 | yhemm | LL | 64 | 735,665 | 916,206 | 713,515 | 200,353 | 302,954 | 1.031 | 0.661 | mig |
 | espmv | L/x-1 | 128 | 18,007 | 20,832 | 17,465 | 18,014 | 20,850 | 1.031 | 0.864 | mig |
-| ysyrk | UT | 64 | 326,459 | 482,397 | 316,681 | 124,770 | 264,660 | 1.031 | 0.471 | mig |
 | ytrsm | RLTN | 64 | 510,815 | 495,761 | 512,035 | 167,324 | 253,913 | 1.030 | 0.659 | ob1 |
 | etrsm | LLTN | 128 | 777,701 | 754,986 | 1,021,772 | 417,538 | 408,671 | 1.030 | 1.022 | ob1 |
 | ytrsm | RLCN | 64 | 510,992 | 496,072 | 512,130 | 168,138 | 255,619 | 1.030 | 0.658 | ob1 |
+| ysyrk | UT | 64 | 326,925 | 482,454 | 317,640 | 124,751 | 263,977 | 1.029 | 0.473 | mig |
 | espmv | L/x2 | 128 | 18,025 | 20,835 | 17,514 | 18,011 | 20,814 | 1.029 | 0.865 | mig |
 | ytpmv | UTU | 128 | 20,248 | 19,675 | 20,266 | 12,249 | 12,103 | 1.029 | 1.012 | ob1 |
 | ytbmv | LTU | 512 | 19,880 | 19,324 | 19,898 | 8,401 | 14,889 | 1.029 | 0.564 | ob1 |
 | esymv | U/x2 | 256 | 68,426 | 80,986 | 66,518 | 69,952 | 82,814 | 1.029 | 0.845 | mig |
+| ysyrk | UT | 128 | 2,609,805 | 3,635,652 | 2,538,338 | 964,058 | 1,726,019 | 1.028 | 0.559 | mig |
 | escal | - | 65536 | 78,847 | 76,718 | 78,845 | 40,086 | 39,684 | 1.028 | 1.010 | ob1 |
 | etrsm | LUNN | 128 | 774,355 | 753,514 | 1,959,416 | 415,517 | 408,632 | 1.028 | 1.017 | ob1 |
 | espmv | U/x-1 | 256 | 68,518 | 80,860 | 66,685 | 68,524 | 80,868 | 1.027 | 0.847 | mig |
@@ -424,7 +423,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | etrsm | LUNU | 128 | 773,796 | 753,178 | 1,947,184 | 416,089 | 408,836 | 1.027 | 1.018 | ob1 |
 | espmv | U/x2 | 256 | 68,583 | 80,900 | 66,758 | 68,587 | 80,901 | 1.027 | 0.848 | mig |
 | etrsm | LUTU | 128 | 777,247 | 756,756 | 976,732 | 418,392 | 411,678 | 1.027 | 1.016 | ob1 |
-| ysyrk | UT | 128 | 2,607,189 | 3,634,558 | 2,538,554 | 963,508 | 1,723,829 | 1.027 | 0.559 | mig |
 | ytpmv | UTU | 512 | 324,282 | 315,789 | 325,116 | 90,531 | 90,473 | 1.027 | 1.001 | ob1 |
 | ytpmv | UTN | 512 | 325,478 | 316,963 | 326,167 | 90,580 | 90,581 | 1.027 | 1.000 | ob1 |
 | egemmtr | UTN | 512 | 43,120,358 | 50,115,665 | 60,712,567 | 14,945,110 | 14,556,482 | 0.860 | 1.027 | ob1 |
@@ -438,6 +436,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | etbmv | LTU/x2 | 512 | 7,206 | 7,110 | 7,026 | 7,745 | 8,891 | 1.026 | 0.871 | mig |
 | etrsm | LUTN | 128 | 771,816 | 752,640 | 978,783 | 419,553 | 413,414 | 1.025 | 1.015 | ob1 |
 | espmv | U/x2 | 512 | 274,960 | 333,902 | 268,221 | 266,086 | 319,215 | 1.025 | 0.834 | mig |
+| ysyrk | UT | 256 | 20,715,302 | 28,541,027 | 20,207,814 | 7,584,054 | 13,394,478 | 1.025 | 0.566 | mig |
 | etrsm | RLTN | 128 | 773,185 | 754,367 | 1,899,216 | 418,899 | 412,108 | 1.025 | 1.016 | ob1 |
 | etbmv | LTU/x-1 | 512 | 7,157 | 7,058 | 6,984 | 7,686 | 8,794 | 1.025 | 0.874 | mig |
 | etrsm | RUNN | 128 | 771,967 | 753,376 | 1,903,141 | 421,282 | 414,641 | 1.025 | 1.016 | ob1 |
