@@ -6,15 +6,35 @@
 /* eswap — kind10 real: swap X ↔ Y. */
 typedef long double T;
 
-/* Unit-stride kernel, shared by the serial entry and the per-thread OMP slices.
- * 4-way unrolled and PHASE-SEPARATED: load all four x's, then overwrite x from
- * y, then drain the saved temps into y. The interleaved per-element form
- * (t=x;x=y;y=t) keeps a tight load->store chain at fp80 stack-depth 2; lifting
- * the loads ahead of the stores deepens the x87 stack to 4 and lets several
- * loads/stores stay in flight, which matters at the L2/L3-bandwidth size
- * (N~64k). This is OpenBLAS dswap's shape; matching it closes a stable ~9%
- * par/ob gap at N=65536 OMP4 with no change to small-N or 1M behavior. */
+/* eswap has two unit-stride kernels because the serial and threaded regimes
+ * have OPPOSITE optima (each measured to within ~1% and cross-checked: using
+ * either kernel in the other's regime reproduces that regime's gap).
+ *
+ * eswap_unit (serial path): gfortran netlib dswap shape — 3-way unrolled,
+ * INTERLEAVED per element (t=x; x=y; y=t). Keeps a tight load->store chain at
+ * x87 stack-depth 2. This is the latency-bound regime; the phase-separated
+ * 4-way form below loses a stable ~3% here (par/mig 1.03 at every size). With
+ * the interleaved form par/mig is 1.01@1024, 0.98@65536, 0.99@1M (par now
+ * beats mig — it was NOT a gfortran-codegen floor, just the wrong shape). */
 static void eswap_unit(ptrdiff_t n, T *x, T *y)
+{
+    ptrdiff_t i, m = n % 3;
+    for (i = 0; i < m; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
+    for (; i < n; i += 3) {
+        T t0 = x[i+0]; x[i+0] = y[i+0]; y[i+0] = t0;
+        T t1 = x[i+1]; x[i+1] = y[i+1]; y[i+1] = t1;
+        T t2 = x[i+2]; x[i+2] = y[i+2]; y[i+2] = t2;
+    }
+}
+
+#ifdef _OPENMP
+/* eswap_slice (per-thread OMP slices): OpenBLAS dswap shape — 4-way unrolled
+ * and PHASE-SEPARATED (load all four x's, overwrite x from y, then drain the
+ * temps into y). Deepening the x87 stack to 4 lets several loads/stores stay in
+ * flight, which wins in the bandwidth-bound threaded regime: it closes a stable
+ * ~9% par/ob gap at N=65536 OMP4. Using the interleaved serial kernel here
+ * instead reopens that gap (par/ob 1.09 @65536 OMP4). */
+static void eswap_slice(ptrdiff_t n, T *x, T *y)
 {
     ptrdiff_t i, n1 = n & -4;
     for (i = 0; i < n1; i += 4) {
@@ -25,7 +45,6 @@ static void eswap_unit(ptrdiff_t n, T *x, T *y)
     for (; i < n; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
 }
 
-#ifdef _OPENMP
 /* Threaded unit-stride SWAP — same cache-bandwidth rationale as eaxpy_omp
  * (see eaxpy.c). swap is the heaviest RMW (2 reads + 2 writes/elem). Threshold
  * is set by par4<=ob4 (ob keeps swap serial at small N, so par's 4-thread time
@@ -43,7 +62,7 @@ static int eswap_omp(ptrdiff_t n, T *x, T *y)
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
         ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
         ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
-        if (lo < hi) eswap_unit(hi - lo, x + lo, y + lo);
+        if (lo < hi) eswap_slice(hi - lo, x + lo, y + lo);
     }
     return 1;
 }
