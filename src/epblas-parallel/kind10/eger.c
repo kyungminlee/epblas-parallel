@@ -19,6 +19,31 @@ typedef long double T;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
+/* Unit-stride column update  aj[i] += t · x[i]  (one A column, x contiguous).
+ * Same shape as eaxpy_unit: per-element x87 op count is fixed at any unroll
+ * factor (2 fldt, 1 fmul, 1 faddp, 1 fstpt — no SIMD for fp80), so the only
+ * lever is loop-overhead amortization. gfortran's dger runs a 1-way loop yet
+ * out-scheduled gcc's 1-way body by ~14% (par tied the openblas clone, both
+ * behind netlib); the 8-way head (the epblas-openblas daxpy head) halves the
+ * per-element increment/compare/branch cost and recovers it. restrict re-states
+ * the aj/x no-alias fact the caller has but a plain helper would lose, so the
+ * aj[i] store can't force an x[i] reload. Bit-exact: each aj[i] is independent. */
+static void eger_col_unit(ptrdiff_t M, T t, const T *restrict x, T *restrict aj)
+{
+    const ptrdiff_t m = M % 8;
+    for (ptrdiff_t i = 0; i < m; ++i) aj[i] += t * x[i];
+    for (ptrdiff_t i = m; i < M; i += 8) {
+        aj[i    ] += t * x[i    ];
+        aj[i + 1] += t * x[i + 1];
+        aj[i + 2] += t * x[i + 2];
+        aj[i + 3] += t * x[i + 3];
+        aj[i + 4] += t * x[i + 4];
+        aj[i + 5] += t * x[i + 5];
+        aj[i + 6] += t * x[i + 6];
+        aj[i + 7] += t * x[i + 7];
+    }
+}
+
 void eger_(
     const int *m_, const int *n_,
     const T *alpha_,
@@ -42,13 +67,9 @@ void eger_(
 #endif
         /* C-source branch on use_omp to dodge Add-16 outlining tax. */
 #define EGER_BODY                                                            \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                  \
             const T yj = y[j];                                               \
-            if (yj != zero) {                                                \
-                const T t = alpha * yj;                                      \
-                T *aj = &A_(0, j);                                           \
-                for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * x[i];               \
-            }                                                                \
+            if (yj != zero) eger_col_unit(M, alpha * yj, x, &A_(0, j));      \
         }
         if (use_omp) {
 #ifdef _OPENMP
@@ -95,7 +116,7 @@ void eger_(
                 const T t = alpha * yj;                                      \
                 T *aj = &A_(0, j);                                           \
                 if (x_unit) {                                                \
-                    for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * xp[i];    \
+                    eger_col_unit(M, t, xp, aj);                             \
                 } else {                                                     \
                     ptrdiff_t ix = ix0;                                      \
                     for (ptrdiff_t i = 0; i < M; ++i) {                      \
