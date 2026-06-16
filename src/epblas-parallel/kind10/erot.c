@@ -11,10 +11,30 @@ typedef long double T;
  * compiler can't prove non-aliasing for, so reading them inline across the
  * interleaved writes forces an 80-bit reload each iteration. Hoisting to locals
  * (the epblas-openblas shape) keeps them on the x87 register stack. Same ops in
- * the same order — bit-identical. */
+ * the same order — bit-identical.
+ *
+ * 4-way unrolled. fp80 has no SIMD, so the only lever over the 1-element loop is
+ * amortizing the per-element loop overhead (add/cmp/jb ~3 insns vs the ~16-insn
+ * rotation body). The four elements are emitted SEQUENTIALLY — each completes its
+ * c,s products and both stores before the next begins — so peak x87 stack depth
+ * is unchanged (c,s pinned + one element's working set); unlike a complex MAC,
+ * real rotation never approaches the 8-deep cap, so this cannot spill. This wins
+ * the L2-band size (N~64k OMP4), where the per-element overhead is exposed; at
+ * cache-overflow (~1M) it is bandwidth-bound and the unroll is neutral. */
 static void erot_unit(ptrdiff_t n, T c, T s, T *x, T *y)
 {
-    for (ptrdiff_t i = 0; i < n; ++i) {
+    ptrdiff_t i, n1 = n & -4;
+    for (i = 0; i < n1; i += 4) {
+        T x0 = x[i+0], y0 = y[i+0];
+        x[i+0] = c * x0 + s * y0;  y[i+0] = c * y0 - s * x0;
+        T x1 = x[i+1], y1 = y[i+1];
+        x[i+1] = c * x1 + s * y1;  y[i+1] = c * y1 - s * x1;
+        T x2 = x[i+2], y2 = y[i+2];
+        x[i+2] = c * x2 + s * y2;  y[i+2] = c * y2 - s * x2;
+        T x3 = x[i+3], y3 = y[i+3];
+        x[i+3] = c * x3 + s * y3;  y[i+3] = c * y3 - s * x3;
+    }
+    for (; i < n; ++i) {
         T xi = x[i], yi = y[i];
         x[i] = c * xi + s * yi;
         y[i] = c * yi - s * xi;
