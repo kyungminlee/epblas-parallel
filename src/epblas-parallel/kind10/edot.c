@@ -6,23 +6,31 @@
 #endif
 typedef long double T;
 
-/* Σ x·y over a contiguous logical range. 5-accumulator unroll matches NETLIB
- * DDOT, masks the ~3-cycle x87 fadd latency. Unit-stride fast path; strided
- * walk handles arbitrary (possibly negative) increments for the serial case. */
+/* Σ x·y over a contiguous logical range. FOUR independent accumulators hide
+ * the ~3-cycle x87 fadd latency; four is the most chains that fit the 8-deep
+ * x87 stack alongside the two load temps without spilling (a 5th chain pushed
+ * the stack to 7/8 and cost ~10% vs the openblas clone at L1-resident N=1024).
+ * The 8-way unroll (two elements per chain) amortizes the per-iteration
+ * increment/compare/branch over more work, recovering the small-N overhead and
+ * keeping the large-N win. Unit-stride fast path; strided walk handles
+ * arbitrary (possibly negative) increments for the serial case. */
 static T edot_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdiff_t incy)
 {
     T s = 0.0L;
     if (incx == 1 && incy == 1) {
-        T s0 = 0.0L, s1 = 0.0L, s2 = 0.0L, s3 = 0.0L, s4 = 0.0L;
+        T s0 = 0.0L, s1 = 0.0L, s2 = 0.0L, s3 = 0.0L;
         ptrdiff_t i = 0;
-        for (; i + 4 < n; i += 5) {
+        for (; i + 7 < n; i += 8) {
             s0 += x[i    ] * y[i    ];
             s1 += x[i + 1] * y[i + 1];
             s2 += x[i + 2] * y[i + 2];
             s3 += x[i + 3] * y[i + 3];
-            s4 += x[i + 4] * y[i + 4];
+            s0 += x[i + 4] * y[i + 4];
+            s1 += x[i + 5] * y[i + 5];
+            s2 += x[i + 6] * y[i + 6];
+            s3 += x[i + 7] * y[i + 7];
         }
-        s = s0 + s1 + s2 + s3 + s4;
+        s = (s0 + s1) + (s2 + s3);
         for (; i < n; ++i) s += x[i] * y[i];
     } else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
