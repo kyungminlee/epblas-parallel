@@ -14,9 +14,9 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP
-#include <stdlib.h>
 #include <math.h>
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -70,6 +70,32 @@ T espmv_axpydot_strided(ptrdiff_t cnt, T t1, const T *restrict ap,
         ix += incx; iy += incy;
     }
     return t2;
+}
+
+/* Serial stride-1 packed two-pass core (shared by the contiguous path and the
+ * strided gather path). Bit-identical column-order accumulation to the direct
+ * strided form. */
+__attribute__((noinline)) static
+void espmv_serial_core(char UPLO, ptrdiff_t N, T alpha,
+                       const T *restrict ap, const T *restrict x, T *restrict y)
+{
+    ptrdiff_t kk = 0;
+    if (UPLO == 'U') {
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            const T t1 = alpha * x[j];
+            const T t2 = espmv_axpydot(j, t1, &ap[kk], x, y);
+            y[j] += t1 * ap[kk + j] + alpha * t2;
+            kk += j + 1;
+        }
+    } else {
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            const T t1 = alpha * x[j];
+            y[j] += t1 * ap[kk];
+            const T t2 = espmv_axpydot(N - 1 - j, t1, &ap[kk + 1], &x[j + 1], &y[j + 1]);
+            y[j] += alpha * t2;
+            kk += N - j;
+        }
+    }
 }
 
 #ifdef _OPENMP
@@ -201,25 +227,41 @@ void espmv_(
             free(buf);
         }
 #endif
-        if (UPLO == 'U') {
-            for (ptrdiff_t j = 0; j < N; ++j) {
-                const T t1 = alpha * x[j];
-                const T t2 = espmv_axpydot(j, t1, &ap[kk], x, y);
-                y[j] += t1 * ap[kk + j] + alpha * t2;
-                kk += j + 1;
-            }
-        } else {
-            for (ptrdiff_t j = 0; j < N; ++j) {
-                const T t1 = alpha * x[j];
-                y[j] += t1 * ap[kk];
-                const T t2 = espmv_axpydot(N - 1 - j, t1, &ap[kk + 1], &x[j + 1], &y[j + 1]);
-                y[j] += alpha * t2;
-                kk += N - j;
-            }
-        }
+        espmv_serial_core(UPLO, N, alpha, ap, x, y);
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        /* General-stride: gather x and the (already beta-scaled) y into
+         * contiguous scratch, run the stride-1 packed core — which beats both
+         * the OpenBLAS clone and the gfortran reference, neither of which
+         * gathers — then scatter y back. O(N) gather/scatter against O(N^2)
+         * work, so free past tiny N. Same column-order accumulation as the
+         * direct strided walk, so bit-identical. Falls back to the direct
+         * strided helper if the scratch allocation fails. */
+        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        /* Stack scratch for the common small-N case avoids malloc latency;
+         * spill to the heap for large N. */
+        T stackbuf[2 * 512];
+        T *heap = NULL;
+        T *xc, *yc;
+        if (N <= 512) {
+            xc = stackbuf; yc = stackbuf + N;
+        } else {
+            heap = (T *)malloc((size_t)2 * N * sizeof(T));
+            xc = heap; yc = heap ? heap + N : NULL;
+        }
+        if (xc && yc) {
+            ptrdiff_t ix = kx, iy = ky;
+            for (ptrdiff_t k = 0; k < N; ++k) {
+                xc[k] = x[ix]; yc[k] = y[iy];
+                ix += incx; iy += incy;
+            }
+            espmv_serial_core(UPLO, N, alpha, ap, xc, yc);
+            iy = ky;
+            for (ptrdiff_t k = 0; k < N; ++k) { y[iy] = yc[k]; iy += incy; }
+            free(heap);
+            return;
+        }
+        free(heap);
         if (UPLO == 'U') {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < N; ++j) {

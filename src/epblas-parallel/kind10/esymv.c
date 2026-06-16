@@ -67,6 +67,31 @@ T esymv_axpydot_strided(ptrdiff_t cnt, T temp1, const T *restrict ak,
     return temp2;
 }
 
+/* Serial stride-1 two-pass core (shared by the contiguous path and the
+ * strided gather path). Bit-identical column-order accumulation to the
+ * direct strided form. */
+__attribute__((noinline)) static
+void esymv_serial_core(char UPLO, ptrdiff_t N, ptrdiff_t lda, T alpha,
+                       const T *restrict a, const T *restrict x, T *restrict y)
+{
+    if (UPLO == 'L') {
+        for (ptrdiff_t i = 0; i < N; ++i) {
+            const T temp1 = alpha * x[i];
+            const T *ai = &A_(0, i);
+            y[i] += temp1 * ai[i];
+            const T temp2 = esymv_axpydot(i + 1, N, temp1, ai, x, y);
+            y[i] += alpha * temp2;
+        }
+    } else {
+        for (ptrdiff_t i = 0; i < N; ++i) {
+            const T temp1 = alpha * x[i];
+            const T *ai = &A_(0, i);
+            const T temp2 = esymv_axpydot(0, i, temp1, ai, x, y);
+            y[i] += temp1 * ai[i] + alpha * temp2;
+        }
+    }
+}
+
 void esymv_(
     const char *uplo,
     const int *n_,
@@ -169,31 +194,41 @@ void esymv_(
             }
             /* aligned_alloc failed — fall through to serial. */
         }
-        if (UPLO == 'L') {
-            /* Iterate i forward; the inner k loop covers k = i..N-1
-             * (stored lower triangle). Uses A_(k, i) (stride-1 in k). */
-            for (ptrdiff_t i = 0; i < N; ++i) {
-                const T temp1 = alpha * x[i];
-                const T *ai = &A_(0, i);
-                y[i] += temp1 * ai[i];
-                const T temp2 = esymv_axpydot(i + 1, N, temp1, ai, x, y);
-                y[i] += alpha * temp2;
-            }
-        } else {
-            /* UPLO='U': iterate i forward; inner k = 0..i-1
-             * (stored upper triangle). */
-            for (ptrdiff_t i = 0; i < N; ++i) {
-                const T temp1 = alpha * x[i];
-                const T *ai = &A_(0, i);
-                const T temp2 = esymv_axpydot(0, i, temp1, ai, x, y);
-                y[i] += temp1 * ai[i] + alpha * temp2;
-            }
-        }
+        esymv_serial_core(UPLO, N, lda, alpha, a, x, y);
     } else {
-        /* General-stride fallback: walks ix/iy by incrementing (matches
-         * Netlib reference's IX=IX+INCX, not k*incx recomputation). */
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        /* General-stride: gather x and the (already beta-scaled) y into
+         * contiguous scratch, run the stride-1 core — which beats both the
+         * OpenBLAS clone and the gfortran reference, neither of which gathers
+         * — then scatter y back. The gather/scatter is O(N) against O(N^2)
+         * work, so it is free past tiny N. Same column-order accumulation as
+         * the direct strided walk, so bit-identical. Falls back to the direct
+         * strided helper if the scratch allocation fails. */
+        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        /* Stack scratch for the common small-N case avoids malloc latency;
+         * spill to the heap for large N. */
+        T stackbuf[2 * 512];
+        T *heap = NULL;
+        T *xc, *yc;
+        if (N <= 512) {
+            xc = stackbuf; yc = stackbuf + N;
+        } else {
+            heap = (T *)malloc((size_t)2 * N * sizeof(T));
+            xc = heap; yc = heap ? heap + N : NULL;
+        }
+        if (xc && yc) {
+            ptrdiff_t ix = kx, iy = ky;
+            for (ptrdiff_t k = 0; k < N; ++k) {
+                xc[k] = x[ix]; yc[k] = y[iy];
+                ix += incx; iy += incy;
+            }
+            esymv_serial_core(UPLO, N, lda, alpha, a, xc, yc);
+            iy = ky;
+            for (ptrdiff_t k = 0; k < N; ++k) { y[iy] = yc[k]; iy += incy; }
+            free(heap);
+            return;
+        }
+        free(heap);
         if (UPLO == 'L') {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t i = 0; i < N; ++i) {
