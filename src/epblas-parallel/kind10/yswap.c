@@ -21,11 +21,18 @@ static void yswap_unit(ptrdiff_t n, T *x, T *y)
 
 #ifdef _OPENMP
 /* Threaded unit-stride complex SWAP — same cache-bandwidth rationale as
- * eaxpy_omp (see eaxpy.c). Heaviest RMW (2 reads + 2 writes/elem) but a complex
- * element is 2x bytes, so the cache regime is reached early: measured
- * proto4/par1 ~0.86 at N=192, <1.0 to 4M (~0.71), no upper bound. Break-even
- * ~N=150; 256 keeps margin. */
-#define YSWAP_OMP_MIN 256
+ * eaxpy_omp (see eaxpy.c). Heaviest RMW (2 reads + 2 writes/elem); a complex
+ * element is 2x bytes, so the bandwidth regime — and thus the fork/join
+ * break-even — is reached at ~half eswap's element count (eswap floor 3072,
+ * 16B/elem; yswap 32B/elem). The threshold is set by par4<=par1 AND par4<=ob4
+ * (ob keeps swap serial at small N). Re-measured under iomp5 at reps=60 (the old
+ * "break-even ~150" was stale): par4/par1 is 1.077@1024 (5558 vs 5159 serial —
+ * threading LOSES), 1.021@1536 (7895 vs 7730 — still loses), then 0.93@2048
+ * (9675 vs 10397 — wins) and 0.59@4096; par4/ob4 tracks it (1.041@1024,
+ * 0.989@1536, 0.90@2048). Break-even ~N=1800, so stay serial through 1536 and
+ * thread from 2048 — par's serial is already fastest below break-even (par/ref
+ * ~0.94), so threading there would only regress it. */
+#define YSWAP_OMP_MIN 1536
 static int yswap_omp(ptrdiff_t n, T *x, T *y)
 {
     if (n <= YSWAP_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
