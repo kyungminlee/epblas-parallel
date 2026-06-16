@@ -21,10 +21,12 @@ static void eswap_unit(ptrdiff_t n, T *x, T *y)
 
 #ifdef _OPENMP
 /* Threaded unit-stride SWAP — same cache-bandwidth rationale as eaxpy_omp
- * (see eaxpy.c). swap is the heaviest RMW (2 reads + 2 writes/elem) so it
- * threads a touch less at the top end, but par4/par1 stays <1.0 out to 4M; no
- * upper bound. Break-even ~N=512; 512 is the floor. */
-#define ESWAP_OMP_MIN 512
+ * (see eaxpy.c). swap is the heaviest RMW (2 reads + 2 writes/elem). Threshold
+ * is set by par4<=ob4 (ob keeps swap serial at small N, so par's 4-thread time
+ * must beat ob's *serial* time). Measured under iomp5: par4/ob4 1.34@1024,
+ * 1.12@2048, 1.03@3072, then 0.96@4096 and 0.77@6144 — break-even ~4096, stay
+ * serial through 3072. */
+#define ESWAP_OMP_MIN 3072
 static int eswap_omp(ptrdiff_t n, T *x, T *y)
 {
     if (n <= ESWAP_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())

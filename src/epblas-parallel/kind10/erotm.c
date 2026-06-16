@@ -29,9 +29,10 @@ static void erotm_unit(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T 
 
 #ifdef _OPENMP
 /* Threaded modified Givens — same cache-bandwidth rationale as eaxpy_omp (see
- * eaxpy.c). Compute-bound; measured proto4/par1 ~1.04 at N=256, 0.78 at 384,
- * <1.0 to 4M (~0.61), no upper bound. Break-even ~N=300; 512 keeps margin. */
-#define EROTM_OMP_MIN 512
+ * eaxpy.c). Compute-bound (mul/add per element). Threshold set by par4<=ob4 (ob
+ * keeps rotm serial at small N). Measured under iomp5: par4/ob4 1.09@1024, then
+ * 0.95@1536 — break-even ~1536, stay serial through 1024. */
+#define EROTM_OMP_MIN 1024
 static int erotm_omp(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y)
 {
     if (n <= EROTM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())

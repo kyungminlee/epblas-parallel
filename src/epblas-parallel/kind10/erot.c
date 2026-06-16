@@ -24,9 +24,11 @@ static void erot_unit(ptrdiff_t n, T c, T s, T *x, T *y)
 #ifdef _OPENMP
 /* Threaded real Givens — same cache-bandwidth rationale as eaxpy_omp (see
  * eaxpy.c). Compute-bound (4 mul + 2 add per element); measured proto4/par1
- * ~1.11 at N=256, 0.78 at 384, <1.0 to 4M (~0.60), no upper bound. Break-even
- * ~N=330; 512 keeps margin. */
-#define EROT_OMP_MIN 512
+ * 4 mul + 2 add per element, so heavy enough to break even early. Threshold set
+ * by par4<=ob4 (ob keeps rot serial at small N). Measured under iomp5: par4/ob4
+ * 1.15@1024, then 1.009@1536 and 0.95@3072 — break-even ~1536, stay serial
+ * through 1024. */
+#define EROT_OMP_MIN 1024
 static int erot_omp(ptrdiff_t n, T c, T s, T *x, T *y)
 {
     if (n <= EROT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())

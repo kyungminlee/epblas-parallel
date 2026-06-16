@@ -25,10 +25,11 @@ static void yescal_unit(ptrdiff_t n, R alpha, long double *p)
 
 #ifdef _OPENMP
 /* Threaded unit-stride real-alpha complex SCAL — cache-bandwidth rationale as
- * eaxpy_omp (see eaxpy.c); complex element = 2x bytes so break-even ~half the
- * count: measured proto4/par1 ~0.98 at N=256, <1.0 to 4M (~0.57), no upper
- * bound. Break-even ~N=250; 384 keeps margin. */
-#define YESCAL_OMP_MIN 384
+ * eaxpy_omp (see eaxpy.c); complex element = 2x bytes so the break-even count is
+ * lower than the real scal. Threshold set by par4<=ob4 (ob keeps scal serial at
+ * small N). Measured under iomp5: par4/ob4 1.23@1024, 1.05@2048, then 1.003@3072
+ * and 0.92@4096 — break-even ~3072, stay serial through 2048. */
+#define YESCAL_OMP_MIN 2048
 static int yescal_omp(ptrdiff_t n, R alpha, long double *base)
 {
     if (n <= YESCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())

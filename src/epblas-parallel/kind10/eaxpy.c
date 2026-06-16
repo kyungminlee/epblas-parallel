@@ -35,10 +35,13 @@ static void eaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
  * >=1M main-memory regime. In the cache-resident regime (~N=768..512K) per-core
  * L1/L2 bandwidth scales with threads: OpenBLAS threads daxpy ~3.8x there, so an
  * unthreaded par lost up to ~3.9x at OMP=4. Threading par's own tuned kernel on
- * index slices recovers it — measured par4/par1 ~0.30 in cache, and still <1.0
- * (net win, ~1.3-1.6x) out to 4M, so no upper bound is needed. Break-even
- * ~N=512; 768 keeps margin. Strided cases stay serial (rare; not bandwidth-hot). */
-#define EAXPY_OMP_MIN 768
+ * index slices recovers it — net win out to 4M, so no upper bound is needed.
+ * Threshold is set by par4<=ob4 (the real bar), NOT par4<par1: ob keeps this op
+ * SERIAL at small N, so par's 4-thread time must beat ob's *serial* time, which
+ * needs the work to dwarf the fork/join cost. Measured under iomp5: par4/ob4 is
+ * 1.57@1024, 1.19@2048, 1.05@3072, then 0.99@4096 and 0.85@6144 — break-even
+ * ~4096, so stay serial through 3072. Strided cases stay serial (rare). */
+#define EAXPY_OMP_MIN 3072
 static int eaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
 {
     if (n <= EAXPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())

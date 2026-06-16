@@ -27,9 +27,13 @@ static void escal_unit(ptrdiff_t n, T alpha, T *x)
 
 #ifdef _OPENMP
 /* Threaded unit-stride SCAL — same cache-bandwidth rationale as eaxpy_omp
- * (see eaxpy.c): cache-resident regime threads ~3.5x where OpenBLAS does too;
- * net win out to 4M, so no upper bound. Break-even ~N=768; 1024 keeps margin. */
-#define ESCAL_OMP_MIN 1024
+ * (see eaxpy.c): cache-resident regime threads where OpenBLAS does too; net win
+ * out to 4M, so no upper bound. SCAL is the lightest RMW (1 read+1 write, 1 mul/
+ * elem) so it has the highest break-even of the family: threshold set by
+ * par4<=ob4 (ob keeps scal serial at small N). Measured under iomp5: par4/ob4
+ * 1.68@1536, 1.23@3072, 1.08@6144, then 1.006@8192 — break-even ~8192, stay
+ * serial through 6144. */
+#define ESCAL_OMP_MIN 6144
 static int escal_omp(ptrdiff_t n, T alpha, T *x)
 {
     if (n <= ESCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
