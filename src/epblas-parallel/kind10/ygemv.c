@@ -165,11 +165,27 @@ void ygemv_(
             for (; j + 1 < N; j += 2) {                                      \
                 const T t0 = alpha * x[jx];                                  \
                 const T t1 = alpha * x[jx + incx];                          \
-                const T *a0 = &A_(0, j);                                     \
-                const T *a1 = &A_(0, j + 1);                                 \
+                /* Decompose the loop-invariant scalars into real/imag      \
+                 * long-double locals and stride the complex A/y columns    \
+                 * as 2n reals. _Complex t0/t1 otherwise force gfortran's    \
+                 * J-unroll-by-2 constants onto the 8-slot x87 stack, which  \
+                 * spills and reloads them every iteration (13 fp-loads vs   \
+                 * gfortran's 10); the scalar form keeps them register-      \
+                 * resident, restoring parity. Same association as the       \
+                 * complex form — (y + t0·a0) + t1·a1 — so bit-identical. */  \
+                const long double t0r = __real__ t0, t0i = __imag__ t0;      \
+                const long double t1r = __real__ t1, t1i = __imag__ t1;      \
+                const long double *A0 = (const long double *)&A_(0, j);      \
+                const long double *A1 = (const long double *)&A_(0, j + 1);  \
                 ptrdiff_t iy = iy0 + (i_lo) * incy;                          \
                 for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) {                \
-                    y[iy] = (y[iy] + t0 * a0[i]) + t1 * a1[i];               \
+                    const long double a0r = A0[2 * i], a0i = A0[2 * i + 1];  \
+                    const long double a1r = A1[2 * i], a1i = A1[2 * i + 1];  \
+                    long double *Y = (long double *)&y[iy];                  \
+                    Y[0] = (Y[0] + (t0r * a0r - t0i * a0i))                  \
+                                 + (t1r * a1r - t1i * a1i);                  \
+                    Y[1] = (Y[1] + (t0r * a0i + t0i * a0r))                  \
+                                 + (t1r * a1i + t1i * a1r);                  \
                     iy += incy;                                             \
                 }                                                           \
                 jx += 2 * incx;                                             \
