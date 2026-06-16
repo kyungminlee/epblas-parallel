@@ -63,15 +63,26 @@ static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TR alpha,
             }
         }
     } else {
+        /* Conjugate dot, scalar re/im chains (bit-identical to
+         * cconj(Ai[l])*Aj[l]; folds the conj sign into the products so
+         * the imag chain has no fchs on its critical path — same ~8% win
+         * as ygemm_tn_core's 'C' path; this diagonal block is ~half the
+         * work at the small N where yherk UC/LC trails gfortran). */
         for (ptrdiff_t j = jc; j < jc + jb; ++j) {
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
             TC *cj = c + (size_t)j * ldc;
-            const TC *Aj = a + (size_t)j * lda;
+            const long double *Aj = (const long double *)(a + (size_t)j * lda);
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                const TC *Ai = a + (size_t)i * lda;
-                TC s = czero;
-                for (ptrdiff_t l = 0; l < K; ++l) s += cconj(Ai[l]) * Aj[l];
+                const long double *Ai = (const long double *)(a + (size_t)i * lda);
+                long double sr = 0.0L, si = 0.0L;
+                for (ptrdiff_t l = 0; l < K; ++l) {
+                    const long double ar = Ai[2*l], aim = Ai[2*l+1];
+                    const long double br = Aj[2*l], bim = Aj[2*l+1];
+                    sr += ar * br + aim * bim;
+                    si += ar * bim - aim * br;
+                }
+                const TC s = sr + si * 1.0Li;
                 if (i == j) cj[i] += alpha * __real__ s;
                 else        cj[i] += alpha * s;
             }
