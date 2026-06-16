@@ -1,13 +1,13 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-15 23:07 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-16 00:26 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
 | m | 2145 | 96.6% | 98.2% |
-| e | 2145 | 89.9% | 97.3% |
+| e | 2145 | 90.2% | 97.3% |
 | q | 2145 | 97.5% | 98.2% |
 
 ## m — multifloats (double-double)
@@ -184,7 +184,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## e — kind10 (fp80)
 
-2145 cells, 71 routines.  **Pass@1.02: serial 89.9% · omp4 97.3%.**  39 routine(s) with ≥1 flagged cell.
+2145 cells, 71 routines.  **Pass@1.02: serial 90.2% · omp4 97.3%.**  38 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
@@ -198,7 +198,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **erot** | 3 | 1.003 | 1.181 @-/1024 | ⚠ |
 | **yher2k** | 12 | 0.993 | 1.171 @UN/64 | ⚠ |
 | **yscal** | 3 | 1.001 | 1.169 @-/1024 | ⚠ |
-| **ygemv** | 27 | 1.158 mig @N/x-1/256 | 1.000 | ⚠ |
 | **espmv** | 24 | 1.143 mig @U/x-1/128 | 1.001 | ⚠ |
 | **eger** | 12 | 1.140 mig @-/512 | 1.010 | ⚠ |
 | **esymv** | 24 | 1.140 mig @U/x-1/128 | 0.988 | ⚠ |
@@ -243,6 +242,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | egemv | 24 | 1.006 | 1.006 | ✅ |
 | ytpsv | 108 | 1.005 | 1.002 | ✅ |
 | ydotc | 3 | 1.005 | 1.000 | ✅ |
+| ygemv | 27 | 1.002 | 1.003 | ✅ |
 | esyrk | 16 | 1.001 | 1.003 | ✅ |
 | etrmv | 96 | 1.002 | 1.000 | ✅ |
 | easum | 3 | 1.002 | 1.002 | ✅ |
@@ -260,7 +260,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | ieamax | 3 | 0.738 | 0.738 | ✅ |
 | yrotg | 1 | 0.080 | 0.080 | ✅ |
 
-<details><summary>e: 257 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>e: 251 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
@@ -284,12 +284,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | yscal | - | 1024 | 3,065 | 3,063 | 3,069 | 3,589 | 3,072 | 1.001 | 1.169 | ob1 |
 | yher2k | LN | 64 | 814,531 | 1,066,208 | 974,028 | 650,319 | 558,649 | 0.836 | 1.164 | mig |
 | yherk | UC | 64 | 390,108 | 481,717 | 351,400 | 305,755 | 263,801 | 1.110 | 1.159 | mig |
-| ygemv | N/x-1 | 256 | 203,296 | 231,637 | 175,569 | 54,984 | 231,652 | 1.158 | 0.237 | mig |
-| ygemv | N/x2 | 256 | 203,360 | 231,680 | 175,692 | 55,752 | 232,179 | 1.157 | 0.240 | mig |
-| ygemv | N/x-1 | 128 | 51,406 | 58,632 | 44,568 | 15,080 | 58,648 | 1.153 | 0.257 | mig |
-| ygemv | N/x2 | 128 | 51,438 | 58,664 | 44,599 | 15,424 | 58,662 | 1.153 | 0.263 | mig |
-| ygemv | N/x-1 | 512 | 827,512 | 945,588 | 717,762 | 220,999 | 941,868 | 1.153 | 0.235 | mig |
-| ygemv | N/x2 | 512 | 827,865 | 945,951 | 718,896 | 222,644 | 943,339 | 1.152 | 0.236 | mig |
 | yherk | LC | 64 | 389,911 | 481,604 | 350,579 | 306,186 | 266,699 | 1.112 | 1.148 | mig |
 | espmv | U/x-1 | 128 | 19,602 | 20,741 | 17,149 | 19,606 | 20,738 | 1.143 | 0.945 | mig |
 | espmv | U/x2 | 128 | 19,597 | 20,747 | 17,162 | 19,611 | 20,760 | 1.142 | 0.945 | mig |
