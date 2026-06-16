@@ -10,13 +10,19 @@ typedef long double T;
  * the OMP path. 8-way unroll: per-element x87 op counts are identical at any
  * unroll factor (2 fldt, 1 fmul, 1 faddp, 1 fstpt — no SIMD for fp80), so the
  * only lever is loop-overhead amortization; unrolling by 8 (the epblas-openblas
- * daxpy head) halves the per-element increment/compare/branch cost vs a 4-way
- * body and recovers ~3% over the L1-resident range. Scalar tail handles n % 8. */
+ * daxpy shape) halves the per-element increment/compare/branch cost vs a 4-way
+ * body and recovers ~3% over the L1-resident range.
+ *
+ * Remainder LAST (n1 = n & -8 main loop from 0, scalar tail), matching ob's
+ * daxpy. The earlier remainder-FIRST form (n % 8 head, main loop from m) made
+ * GCC compile a branchy Duff's-device ladder at the function entry — paid on
+ * every call — and started the aligned main loop at the unaligned offset m,
+ * leaving ~2% on the table at the L2-band size (N~64k) vs ob. Each += is
+ * independent, so the head→tail remainder move is bit-identical. */
 static void eaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
 {
-    const ptrdiff_t m = n % 8;
-    for (ptrdiff_t i = 0; i < m; ++i) y[i] += alpha * x[i];
-    for (ptrdiff_t i = m; i < n; i += 8) {
+    ptrdiff_t i, n1 = n & -8;
+    for (i = 0; i < n1; i += 8) {
         y[i    ] += alpha * x[i    ];
         y[i + 1] += alpha * x[i + 1];
         y[i + 2] += alpha * x[i + 2];
@@ -26,6 +32,7 @@ static void eaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
         y[i + 6] += alpha * x[i + 6];
         y[i + 7] += alpha * x[i + 7];
     }
+    for (; i < n; ++i) y[i] += alpha * x[i];
 }
 
 #ifdef _OPENMP
