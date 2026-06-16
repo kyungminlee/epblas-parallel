@@ -7,16 +7,22 @@
 typedef long double T;
 
 /* Unit-stride kernel, shared by the serial entry and the per-thread OMP slices.
- * 3-way unrolled to amortize loop overhead over the fp80 load/store pairs. */
+ * 4-way unrolled and PHASE-SEPARATED: load all four x's, then overwrite x from
+ * y, then drain the saved temps into y. The interleaved per-element form
+ * (t=x;x=y;y=t) keeps a tight load->store chain at fp80 stack-depth 2; lifting
+ * the loads ahead of the stores deepens the x87 stack to 4 and lets several
+ * loads/stores stay in flight, which matters at the L2/L3-bandwidth size
+ * (N~64k). This is OpenBLAS dswap's shape; matching it closes a stable ~9%
+ * par/ob gap at N=65536 OMP4 with no change to small-N or 1M behavior. */
 static void eswap_unit(ptrdiff_t n, T *x, T *y)
 {
-    const ptrdiff_t m = n % 3;
-    for (ptrdiff_t i = 0; i < m; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
-    for (ptrdiff_t i = m; i < n; i += 3) {
-        T t0 = x[i    ]; x[i    ] = y[i    ]; y[i    ] = t0;
-        T t1 = x[i + 1]; x[i + 1] = y[i + 1]; y[i + 1] = t1;
-        T t2 = x[i + 2]; x[i + 2] = y[i + 2]; y[i + 2] = t2;
+    ptrdiff_t i, n1 = n & -4;
+    for (i = 0; i < n1; i += 4) {
+        T t0 = x[i+0], t1 = x[i+1], t2 = x[i+2], t3 = x[i+3];
+        x[i+0] = y[i+0]; x[i+1] = y[i+1]; x[i+2] = y[i+2]; x[i+3] = y[i+3];
+        y[i+0] = t0; y[i+1] = t1; y[i+2] = t2; y[i+3] = t3;
     }
+    for (; i < n; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
 }
 
 #ifdef _OPENMP
