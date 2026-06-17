@@ -152,6 +152,14 @@ if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
         -march=${EPBLAS_PARALLEL_MARCH})
 endif()
 
+# mtbsv is a faithful char-for-char port of the OpenBLAS clone's band solve,
+# yet par trailed ob ~3-5% on the strided Trans/NoTrans leaves at every N — the
+# consistent-across-N signature of a loop-placement/alignment artifact (GCC
+# lands the strided recurrence loops a few bytes off a 32B boundary). Pin loop
+# alignment so the hot recurrence sits on a fetch boundary, matching ob. Same
+# diagnostic family as kind10 enrm2/ieamax.
+set_source_files_properties(mtbsv.cpp PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
+
 # multifloats C library provides adddd / muldd / fmadd / cmuldd / ...
 target_link_libraries(${LIB_PREFIX}blas_parallel PUBLIC multifloats)
 
