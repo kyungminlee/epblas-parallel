@@ -4,6 +4,7 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_dotkernel.h"
 #ifdef _OPENMP
 #include <cstdlib>
 #include <omp.h>
@@ -235,26 +236,29 @@ extern "C" void wtpmv_(
                 }
             }
         } else {
+            /* Contiguous Trans/ConjTrans: each output is a unit-stride complex-DD
+             * dot of a packed column against x. Route it through the AVX2
+             * Bailey-wide wdotu/wdotc kernel (4 cells/iter) rather than a scalar
+             * cmul loop — faster and free of the scalar loop's codegen/alignment
+             * lottery. The kernel reorders summation → within fuzz tol, not
+             * bit-exact (matches the threaded path's tolerance). */
             if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
+                int kk = (N * (N + 1)) / 2 - 1;          /* diag of column j */
                 for (int j = N - 1; j >= 0; --j) {
-                    T tmp = x[j];
-                    if (nounit) tmp = cmul(tmp, (noconj ? ap[kk] : cconj(ap[kk])));
-                    int k = kk - 1;
-                    if (noconj) for (int i = j - 1; i >= 0; --i) { tmp = cadd(tmp, cmul(ap[k], x[i])); --k; }
-                    else        for (int i = j - 1; i >= 0; --i) { tmp = cadd(tmp, cmul(cconj(ap[k]), x[i])); --k; }
-                    x[j] = tmp;
+                    T dot = noconj ? mfdot::wdotu_unit(j, &ap[kk - j], x)
+                                   : mfdot::wdotc_unit(j, &ap[kk - j], x);
+                    T r = nounit ? cmul(x[j], (noconj ? ap[kk] : cconj(ap[kk]))) : x[j];
+                    x[j] = cadd(r, dot);
                     kk -= j + 1;
                 }
             } else {
-                int kk = 0;
+                int kk = 0;                              /* diag of column j */
                 for (int j = 0; j < N; ++j) {
-                    T tmp = x[j];
-                    if (nounit) tmp = cmul(tmp, (noconj ? ap[kk] : cconj(ap[kk])));
-                    int k = kk + 1;
-                    if (noconj) for (int i = j + 1; i < N; ++i) { tmp = cadd(tmp, cmul(ap[k], x[i])); ++k; }
-                    else        for (int i = j + 1; i < N; ++i) { tmp = cadd(tmp, cmul(cconj(ap[k]), x[i])); ++k; }
-                    x[j] = tmp;
+                    const int len = N - 1 - j;
+                    T dot = noconj ? mfdot::wdotu_unit(len, &ap[kk + 1], &x[j + 1])
+                                   : mfdot::wdotc_unit(len, &ap[kk + 1], &x[j + 1]);
+                    T r = nounit ? cmul(x[j], (noconj ? ap[kk] : cconj(ap[kk]))) : x[j];
+                    x[j] = cadd(r, dot);
                     kk += N - j;
                 }
             }

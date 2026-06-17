@@ -2,6 +2,7 @@
  * conj(X)·Y = (xr·yr + xi·yi) + j·(xr·yi - xi·yr). */
 #include <cstddef>
 #include <multifloats.h>
+#include "mf_dotkernel.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -86,8 +87,9 @@ inline void dd_prod(__m256d xh, __m256d xl, __m256d yh, __m256d yl,
 #endif
 
 /* Σ conj(X)·Y over contiguous unit-stride ranges — serial kernel, unchanged.
- * Carved out so the OpenMP partial-reduction can call it per sub-range. */
-static T wdotc_unit(int n, const T *x, const T *y)
+ * Carved out so the OpenMP partial-reduction (and packed/banded triangular
+ * matvecs, via mf_dotkernel.h) can call it per sub-range. */
+T mfdot::wdotc_unit(int n, const T *x, const T *y)
 {
     T s{R{0.0, 0.0}, R{0.0, 0.0}};
 #ifdef MBLAS_SIMD_DD
@@ -147,7 +149,7 @@ __attribute__((noinline)) static int wdotc_omp(int n, const T *x, const T *y, T 
         int nth = omp_get_num_threads();
         int lo = (int)((long long)n * tid / nth);
         int hi = (int)((long long)n * (tid + 1) / nth);
-        partial[tid] = (lo < hi) ? wdotc_unit(hi - lo, x + lo, y + lo)
+        partial[tid] = (lo < hi) ? mfdot::wdotc_unit(hi - lo, x + lo, y + lo)
                                  : T{R{0.0, 0.0}, R{0.0, 0.0}};
     }
     T s{R{0.0, 0.0}, R{0.0, 0.0}};
@@ -169,7 +171,7 @@ extern "C" T wdotc_(const int *n_,
 #ifdef _OPENMP
         if (wdotc_omp(n, x, y, &s)) return s;
 #endif
-        return wdotc_unit(n, x, y);
+        return mfdot::wdotc_unit(n, x, y);
     }
 
     int ix = (incx < 0) ? (-n + 1) * incx : 0;
