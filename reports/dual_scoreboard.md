@@ -1,18 +1,18 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-17 02:58 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-17 03:22 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
-| m | 2145 | 98.0% | 98.8% |
+| m | 2145 | 98.1% | 98.9% |
 | e | 2145 | 91.7% | 98.9% |
 | q | 2145 | 97.7% | 98.2% |
 
 ## m — multifloats (double-double)
 
-2145 cells, 71 routines.  **Pass@1.02: serial 98.0% · omp4 98.8%.**  7 routine(s) with ≥1 flagged cell.
+2145 cells, 71 routines.  **Pass@1.02: serial 98.1% · omp4 98.9%.**  6 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
@@ -20,7 +20,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **mtbmv** | 96 | 1.060 ob1 @LNU/x-1/1024 | 1.053 @LNU/x2/128 | ⚠ |
 | **mtbsv** | 96 | 1.052 ob1 @LNN/x-1/512 | 1.049 @LNN/x2/128 | ⚠ |
 | **wtpmv** | 108 | 1.049 ob1 @UTU/128 | 0.909 | ⚠ |
-| **mtrsv** | 96 | 1.036 ob1 @LTN/x-1/128 | 1.037 @LTN/x2/128 | ⚠ |
 | **mgemv** | 24 | 1.001 | 1.023 @N/x-1/256 | ⚠ |
 | **wtbsv** | 108 | 1.005 | 1.022 @UTU/128 | ⚠ |
 | msyr | 24 | 1.020 | 1.016 | ✅ |
@@ -72,6 +71,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | waxpy | 3 | 0.184 | 0.448 | ✅ |
 | wrotg | 1 | 0.410 | 0.410 | ✅ |
 | mgemmtr | 32 | 0.383 | 0.251 | ✅ |
+| mtrsv | 96 | 0.267 | 0.344 | ✅ |
 | mtrsm | 64 | 0.337 | 0.341 | ✅ |
 | wsymm | 12 | 0.337 | 0.201 | ✅ |
 | wtrmm | 72 | 0.335 | 0.289 | ✅ |
@@ -88,7 +88,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
 
-<details><summary>m: 47 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>m: 44 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
@@ -125,8 +125,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mtbsv | UTU/x-1 | 128 | 16,430 | 15,843 | 35,986 | 16,795 | 16,186 | 1.037 | 1.038 | ob1 |
 | mtbsv | UTU/x2 | 256 | 34,037 | 32,817 | 74,035 | 34,038 | 32,805 | 1.037 | 1.038 | ob1 |
 | mtbsv | UTU/x2 | 128 | 16,426 | 15,838 | 35,886 | 16,426 | 15,841 | 1.037 | 1.037 | ob1 |
-| mtrsv | LTN/x2 | 128 | 74,340 | 71,762 | 149,057 | 74,332 | 71,676 | 1.036 | 1.037 | ob1 |
-| mtrsv | LTN/x-1 | 128 | 74,324 | 71,732 | 149,064 | 74,324 | 71,679 | 1.036 | 1.037 | ob1 |
 | wtpmv | UTN | 128 | 201,597 | 194,475 | 362,398 | 49,316 | 111,059 | 1.037 | 0.444 | ob1 |
 | mspr | L/x-1 | 256 | 169,640 | 164,612 | 591,787 | 165,614 | 162,483 | 1.031 | 1.019 | ob1 |
 | mtbsv | UNN | 256 | 24,894 | 24,164 | 77,038 | 24,361 | 24,320 | 1.030 | 1.002 | ob1 |
@@ -138,7 +136,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mtbmv | UTU | 256 | 32,831 | 32,083 | 72,310 | 10,621 | 13,596 | 1.023 | 0.781 | ob1 |
 | mgemv | N/x-1 | 256 | 319,928 | 333,700 | 1,194,122 | 112,451 | 109,930 | 0.959 | 1.023 | ob1 |
 | wtbsv | UTU | 128 | 46,542 | 46,302 | 83,254 | 47,338 | 46,337 | 1.005 | 1.022 | ob1 |
-| mtrsv | UNU/x-1 | 512 | 685,467 | 671,228 | 2,374,196 | 685,108 | 686,132 | 1.021 | 0.999 | ob1 |
 
 </details>
 
