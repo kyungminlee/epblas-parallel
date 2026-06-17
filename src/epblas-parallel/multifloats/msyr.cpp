@@ -40,32 +40,73 @@ extern "C" void msyr_(
     if (incx == 1) {
 #ifdef _OPENMP
         const int use_omp = (N >= MSYR_OMP_MIN && blas_omp_max_threads() > 1);
-        /* static,1: cyclic interleave balances the triangular column skew
-         * (column j writes j+1 / N-j elems). Full storage → columns are lda
-         * apart so chunk-1 never false-shares (unlike packed mspr); mirrors
-         * the esyr twin. */
-        #pragma omp parallel for if(use_omp) schedule(static, 1)
+#else
+        const int use_omp = 0;
 #endif
-        for (int j = 0; j < N; ++j) {
-            const T xj = x[j];
-            if (!dd_iszero(xj)) {
-                const T t = alpha * xj;
+        const std::ptrdiff_t n = N;
+        /* The serial and threaded paths want different shapes, so split them
+         * at C++ source level instead of via `#pragma omp parallel for
+         * if(use_omp)` — the `if()` clause outlines the loop body
+         * unconditionally into a GOMP closure, forcing even the OMP=1 path
+         * through the outlined function, whose codegen lost ~3-5% on the
+         * serial UPPER triangle (par/ob ~1.03-1.06).
+         *
+         * Serial path: UPLO hoisted OUT of the column loop into two
+         * specialized loops, ptrdiff_t indices, `+=` — byte-for-byte the ob
+         * clone, so the inner address arithmetic strength-reduces to a pure
+         * pointer walk with no per-element sign extension.
+         *
+         * Threaded path: a single column loop with the branch inside (the
+         * `#pragma omp parallel for` must bind directly to a `for`); the
+         * per-column UPLO test is negligible against the threading win, and
+         * the outlined-closure cost is irrelevant once threads are live.
+         * static,1 cyclic interleave balances the triangular column skew
+         * (column j writes j+1 / N-j elems); full storage → columns lda
+         * apart, no false sharing. */
+        if (use_omp) {
+#ifdef _OPENMP
+            #pragma omp parallel for schedule(static, 1)
+#endif
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T t = alpha * x[j];
+                if (dd_iszero(t)) continue;
                 T *aj = &A_(0, j);
-                if (UPLO == 'L') for (int i = j; i < N; ++i) aj[i] = aj[i] + t * x[i];
-                else             for (int i = 0; i <= j; ++i) aj[i] = aj[i] + t * x[i];
+                if (UPLO == 'L') for (std::ptrdiff_t i = j; i < n; ++i) aj[i] += t * x[i];
+                else             for (std::ptrdiff_t i = 0; i <= j; ++i) aj[i] += t * x[i];
+            }
+        } else if (UPLO == 'L') {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T t = alpha * x[j];
+                if (dd_iszero(t)) continue;
+                T *aj = &A_(0, j);
+                for (std::ptrdiff_t i = j; i < n; ++i) aj[i] += t * x[i];
+            }
+        } else {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T t = alpha * x[j];
+                if (dd_iszero(t)) continue;
+                T *aj = &A_(0, j);
+                for (std::ptrdiff_t i = 0; i <= j; ++i) aj[i] += t * x[i];
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        for (int j = 0; j < N; ++j) {
-            const T xj = x[kx + j * incx];
-            if (!dd_iszero(xj)) {
-                const T t = alpha * xj;
-                if (UPLO == 'L') {
-                    for (int i = j; i < N; ++i) A_(i, j) = A_(i, j) + t * x[kx + i * incx];
-                } else {
-                    for (int i = 0; i <= j; ++i) A_(i, j) = A_(i, j) + t * x[kx + i * incx];
-                }
+        /* General-stride fallback. Hoist the column pointer and walk x with a
+         * running index (ix += incx) instead of recomputing A_(i,j) and
+         * x[kx+i*incx] each element — mirrors the contiguous path / ob clone.
+         * kx keeps the reference negative-incx start (first logical element at
+         * the high-memory end). Rare path, kept serial. */
+        const std::ptrdiff_t n = N;
+        const std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
+            const T t = alpha * x[kx + j * incx];
+            if (dd_iszero(t)) continue;
+            T *aj = &A_(0, j);
+            if (UPLO == 'L') {
+                std::ptrdiff_t ix = kx + j * incx;
+                for (std::ptrdiff_t i = j; i < n; ++i) { aj[i] += t * x[ix]; ix += incx; }
+            } else {
+                std::ptrdiff_t ix = kx;
+                for (std::ptrdiff_t i = 0; i <= j; ++i) { aj[i] += t * x[ix]; ix += incx; }
             }
         }
     }
