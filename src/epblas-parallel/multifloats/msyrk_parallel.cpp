@@ -69,12 +69,18 @@ extern "C" void msyrk_(
 
     const int nb = msyrk_block_nb();
 
+    int pw = nb;
 #ifdef _OPENMP
-    const bool use_omp = (N >= MSYRK_OMP_MIN && blas_omp_max_threads() > 1);
+    const int nt = blas_omp_max_threads();
+    const bool use_omp = (N >= MSYRK_OMP_MIN && nt > 1);
+    /* Shrink the block step so the team gets ~2·nt panels at small N
+     * (N=64, nb=32 -> 2 blocks -> idle threads). Triangular C output makes the
+     * per-block work uneven, so oversubscribe for dynamic balance -> ppt=2. */
+    if (use_omp) pw = (int)blas_omp_panel_width(N, nt, nb, 2);
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (int jc = 0; jc < N; jc += nb) {
-        const int jb = (N - jc < nb) ? (N - jc) : nb;
+    for (int jc = 0; jc < N; jc += pw) {
+        const int jb = (N - jc < pw) ? (N - jc) : pw;
         msyrk_block(jc, jb, N, K, UPLO, TR, alpha, beta, a, lda, c, ldc);
     }
 }

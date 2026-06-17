@@ -80,21 +80,30 @@ extern "C" void wsymm_(
     const int nb = wsymm_block_nb();
 
     if (SIDE == 'L') {
+        int pw = nb;
 #ifdef _OPENMP
-        const bool use_omp = (M >= WSYMM_OMP_MIN && blas_omp_max_threads() > 1);
+        const int nt = blas_omp_max_threads();
+        const bool use_omp = (M >= WSYMM_OMP_MIN && nt > 1);
+        /* Shrink the block step so the team gets ~nt panels at small M
+         * (M=64, nb=32 -> 2 blocks -> 2 idle threads of 4). Rectangular work
+         * (each row block multiplies its rows against full A·B) -> ppt=1. */
+        if (use_omp) pw = (int)blas_omp_panel_width(M, nt, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+        for (int ic = 0; ic < M; ic += pw) {
+            const int ib = (M - ic < pw) ? (M - ic) : pw;
             wsymm_block_L(ic, ib, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     } else {
+        int pw = nb;
 #ifdef _OPENMP
-        const bool use_omp = (N >= WSYMM_OMP_MIN && blas_omp_max_threads() > 1);
+        const int nt = blas_omp_max_threads();
+        const bool use_omp = (N >= WSYMM_OMP_MIN && nt > 1);
+        if (use_omp) pw = (int)blas_omp_panel_width(N, nt, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+        for (int jc = 0; jc < N; jc += pw) {
+            const int jb = (N - jc < pw) ? (N - jc) : pw;
             wsymm_block_R(jc, jb, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     }
