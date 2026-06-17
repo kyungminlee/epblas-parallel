@@ -8,7 +8,18 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+/* Threaded unit-stride copy engages only in the CACHE-RESIDENT window. The
+ * 16-byte DD element (two packed doubles) copies fastest as a compiler-
+ * vectorized typed loop (clean AVX moves) — that beats glibc memcpy's
+ * medium-copy `rep movsb` path when the slices live in L2/L3, and unlike
+ * memcpy it actually scales with threads there (ob's element loop does;
+ * par's threaded memcpy did not, losing N=65536). Past ~L3 (n > MAX, 4 MB
+ * byte-equivalent) the arrays stream from DRAM: a single-core memcpy's
+ * non-temporal stores already saturate the bus (par serial memcpy at N=1M
+ * beats its own threaded memcpy), so extra threads only add contention and
+ * we fall back to the serial memcpy. */
 #define MCOPY_OMP_MIN 8192
+#define MCOPY_OMP_MAX 262144
 #endif
 
 namespace mf = multifloats;
@@ -22,10 +33,8 @@ extern "C" void mcopy_(const int *n_,
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        /* Memory-bandwidth bound; multiple cores can pull more aggregate
-         * bandwidth, so split the memcpy into disjoint slices above the
-         * crossover. */
-        if (n > MCOPY_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+        if (n > MCOPY_OMP_MIN && n <= MCOPY_OMP_MAX &&
+            blas_omp_max_threads() > 1 && !omp_in_parallel()) {
             int nthreads = blas_omp_max_threads();
             #pragma omp parallel num_threads(nthreads)
             {
@@ -33,9 +42,7 @@ extern "C" void mcopy_(const int *n_,
                 int nth = omp_get_num_threads();
                 int lo = (int)((long long)n * tid / nth);
                 int hi = (int)((long long)n * (tid + 1) / nth);
-                if (lo < hi)
-                    std::memcpy(y + lo, x + lo,
-                                static_cast<std::size_t>(hi - lo) * sizeof(T));
+                for (int i = lo; i < hi; ++i) y[i] = x[i];
             }
             return;
         }
