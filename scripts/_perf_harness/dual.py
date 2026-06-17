@@ -2,10 +2,13 @@
 
 Emits ONE standalone C/C++ driver per routine that links the namespaced
 par_/ob_/mig_ archives (built by bench/dual/nsbuild.sh) into a single process
-and times all three legs interleaved per rep on the same buffers. This kills
-the cross-process layout/frequency bias the old separate-binary cmp5 harness
-suffered, while keeping the real linked routine (dispatch, thresholds, PLT) and
-the threaded path (OMP_NUM_THREADS).
+and times all three legs per rep on the same buffers, ROTATING which leg runs
+first each rep. This kills the cross-process layout/frequency bias the old
+separate-binary cmp5 harness suffered, AND the in-process DVFS slot bias (a
+fixed ob->par->mig order made par/mig always run in the prior leg's frequency/
+thermal wake — a ~5-6% penalty on high-power omp4 cells that min-over-reps could
+not cancel), while keeping the real linked routine (dispatch, thresholds, PLT)
+and the threaded path (OMP_NUM_THREADS).
 
 Output row format (one per (key, size) cell):
 
@@ -13,7 +16,7 @@ Output row format (one per (key, size) cell):
 
 reset_ns is the per-iter cost of the RMW reset (memcpy) and is subtracted from
 each leg; for read-mostly / value-return shapes there is no reset so it is ~0.
-min-over-reps per leg; per-rep interleave so par/ob/mig share the DVFS state.
+min-over-reps per leg; start-leg rotation so each leg's min is a cold-slot sample.
 
 This module is the harvest of scripts/_perf_harness/emit_*.py signatures into a
 3-leg form. The legacy single-subject generator stays in place as a validation
@@ -197,19 +200,31 @@ def render(name: str, fam: Family, is_c: bool, ret: str, sig: str, spec: Spec) -
 static void run_one({spec.params}, int iters, int reps) {{
 {spec.setup}
     double bp = 1e30, bo = 1e30, bg = 1e30, br = 1e30;
+    /* ROTATE leg order across reps. The three legs run block-sequentially
+     * within a rep, so a fixed ob->par->mig order would make par/mig always
+     * run in ob's DVFS/thermal wake — a frequency penalty present in EVERY
+     * rep that min-over-reps cannot cancel (~5-6% on high-power omp4 cells,
+     * confirmed by order-swap A/B). Cycling the start leg each rep gives every
+     * leg ~reps/3 turns in the cold slot-1 position; its min-over-reps then
+     * comes from a slot-1 sample, so all three are compared cold-to-cold. */
     for (int r = 0; r < reps; ++r) {{
         double t0 = now_s();
         for (int it = 0; it < iters; ++it) {{ {reset} }}
         {{ double t = (now_s() - t0) / iters; if (t < br) br = t; }}
-        t0 = now_s();
-        for (int it = 0; it < iters; ++it) {{ {reset} {leg_ob} }}
-        {{ double t = (now_s() - t0) / iters; if (t < bo) bo = t; }}
-        t0 = now_s();
-        for (int it = 0; it < iters; ++it) {{ {reset} {leg_par} }}
-        {{ double t = (now_s() - t0) / iters; if (t < bp) bp = t; }}
-        t0 = now_s();
-        for (int it = 0; it < iters; ++it) {{ {reset} {leg_mig} }}
-        {{ double t = (now_s() - t0) / iters; if (t < bg) bg = t; }}
+        for (int s = 0; s < 3; ++s) {{
+            int leg = (r + s) % 3;
+            t0 = now_s();
+            if (leg == 0) {{
+                for (int it = 0; it < iters; ++it) {{ {reset} {leg_ob} }}
+                {{ double t = (now_s() - t0) / iters; if (t < bo) bo = t; }}
+            }} else if (leg == 1) {{
+                for (int it = 0; it < iters; ++it) {{ {reset} {leg_par} }}
+                {{ double t = (now_s() - t0) / iters; if (t < bp) bp = t; }}
+            }} else {{
+                for (int it = 0; it < iters; ++it) {{ {reset} {leg_mig} }}
+                {{ double t = (now_s() - t0) / iters; if (t < bg) bg = t; }}
+            }}
+        }}
     }}
     gsink ^= (unsigned long)({spec.touch});
     double np = bp - br, no = bo - br, ng = bg - br;
