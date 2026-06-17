@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-17 01:18 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-17 01:26 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -12,11 +12,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## m — multifloats (double-double)
 
-2145 cells, 71 routines.  **Pass@1.02: serial 97.0% · omp4 98.6%.**  11 routine(s) with ≥1 flagged cell.
+2145 cells, 71 routines.  **Pass@1.02: serial 97.0% · omp4 98.6%.**  10 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| **wcopy** | 3 | 0.999 | 1.148 @-/65536 | ⚠ |
 | **mspr** | 24 | 1.062 ob1 @L/x-1/128 | 1.069 @L/x2/256 | ⚠ |
 | **mtbmv** | 96 | 1.060 ob1 @LNU/x-1/1024 | 1.053 @LNU/x2/128 | ⚠ |
 | **mtbsv** | 96 | 1.052 ob1 @LNN/x-1/512 | 1.049 @LNN/x2/128 | ⚠ |
@@ -37,6 +36,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wswap | 3 | 1.004 | 1.006 | ✅ |
 | mswap | 3 | 1.003 | 0.999 | ✅ |
 | wtrmv | 108 | 1.002 | 0.928 | ✅ |
+| wcopy | 3 | 0.998 | 1.000 | ✅ |
 | mcabs1 | 1 | 1.000 | 1.000 | ✅ |
 | iwamax | 3 | 0.995 | 0.998 | ✅ |
 | mrotmg | 1 | 0.998 | 0.996 | ✅ |
@@ -88,11 +88,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
 
-<details><summary>m: 71 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>m: 70 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| wcopy | - | 65536 | 55,347 | 67,087 | 55,398 | 45,874 | 39,949 | 0.999 | 1.148 | mig |
 | mspr | L/x2 | 256 | 169,735 | 160,072 | 585,725 | 169,820 | 158,804 | 1.060 | 1.069 | ob1 |
 | mspr | L/x-1 | 128 | 43,285 | 40,771 | 150,171 | 43,035 | 41,343 | 1.062 | 1.041 | ob1 |
 | mtbmv | LNU/x-1 | 1024 | 91,350 | 86,158 | 315,740 | 25,607 | 35,470 | 1.060 | 0.722 | ob1 |
