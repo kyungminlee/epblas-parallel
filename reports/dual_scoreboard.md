@@ -1,26 +1,22 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-17 00:09 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-17 01:18 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
-| m | 2145 | 97.0% | 98.2% |
+| m | 2145 | 97.0% | 98.6% |
 | e | 2145 | 91.7% | 98.9% |
 | q | 2145 | 97.7% | 98.2% |
 
 ## m — multifloats (double-double)
 
-2145 cells, 71 routines.  **Pass@1.02: serial 97.0% · omp4 98.2%.**  15 routine(s) with ≥1 flagged cell.
+2145 cells, 71 routines.  **Pass@1.02: serial 97.0% · omp4 98.6%.**  11 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| **whemm** | 12 | 0.336 | 1.285 @RU/64 | ⚠ |
-| **wsymm** | 12 | 0.340 | 1.283 @RU/64 | ⚠ |
-| **msyrk** | 16 | 0.539 | 1.252 @LT/64 | ⚠ |
 | **wcopy** | 3 | 0.999 | 1.148 @-/65536 | ⚠ |
-| **msymm** | 16 | 0.287 | 1.129 @RL/64 | ⚠ |
 | **mspr** | 24 | 1.062 ob1 @L/x-1/128 | 1.069 @L/x2/256 | ⚠ |
 | **mtbmv** | 96 | 1.060 ob1 @LNU/x-1/1024 | 1.053 @LNU/x2/128 | ⚠ |
 | **mtbsv** | 96 | 1.052 ob1 @LNN/x-1/512 | 1.049 @LNN/x2/128 | ⚠ |
@@ -70,37 +66,33 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wher2k | 12 | 0.241 | 0.565 | ✅ |
 | wmrot | 3 | 0.212 | 0.550 | ✅ |
 | mrot | 3 | 0.217 | 0.549 | ✅ |
-| wsyrk | 12 | 0.231 | 0.532 | ✅ |
+| msyrk | 16 | 0.539 | 0.153 | ✅ |
 | wherk | 12 | 0.225 | 0.531 | ✅ |
 | wscal | 3 | 0.224 | 0.498 | ✅ |
 | waxpy | 3 | 0.184 | 0.448 | ✅ |
 | wrotg | 1 | 0.410 | 0.410 | ✅ |
 | mgemmtr | 32 | 0.383 | 0.251 | ✅ |
 | mtrsm | 64 | 0.337 | 0.341 | ✅ |
+| wsymm | 12 | 0.337 | 0.201 | ✅ |
 | wtrmm | 72 | 0.335 | 0.289 | ✅ |
+| whemm | 12 | 0.334 | 0.202 | ✅ |
 | mdot | 3 | 0.192 | 0.326 | ✅ |
 | wgemmtr | 54 | 0.319 | 0.190 | ✅ |
 | mwasum | 3 | 0.228 | 0.315 | ✅ |
 | masum | 3 | 0.291 | 0.295 | ✅ |
+| msymm | 16 | 0.287 | 0.198 | ✅ |
 | wdotu | 3 | 0.187 | 0.277 | ✅ |
 | wdotc | 3 | 0.180 | 0.266 | ✅ |
 | mtrmm | 64 | 0.266 | 0.235 | ✅ |
+| wsyrk | 12 | 0.265 | 0.122 | ✅ |
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
 
-<details><summary>m: 79 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>m: 71 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| whemm | RU | 64 | 2,152,355 | 6,409,562 | 11,545,662 | 2,306,497 | 1,795,206 | 0.336 | 1.285 | ob1 |
-| wsymm | RU | 64 | 2,129,320 | 6,376,024 | 11,552,514 | 2,299,862 | 1,792,682 | 0.334 | 1.283 | ob1 |
-| wsymm | RL | 64 | 2,171,819 | 6,384,647 | 11,545,775 | 2,279,302 | 1,793,301 | 0.340 | 1.271 | ob1 |
-| whemm | RL | 64 | 2,116,845 | 6,414,485 | 11,660,605 | 2,275,303 | 1,796,388 | 0.330 | 1.267 | ob1 |
-| msyrk | LT | 64 | 409,952 | 761,264 | 2,447,447 | 442,108 | 353,220 | 0.539 | 1.252 | ob1 |
-| msyrk | UT | 64 | 409,645 | 760,319 | 2,448,340 | 441,438 | 356,539 | 0.539 | 1.238 | ob1 |
 | wcopy | - | 65536 | 55,347 | 67,087 | 55,398 | 45,874 | 39,949 | 0.999 | 1.148 | mig |
-| msymm | RL | 64 | 415,969 | 1,464,113 | 4,763,002 | 455,055 | 403,136 | 0.284 | 1.129 | ob1 |
-| msymm | RU | 64 | 420,675 | 1,466,841 | 4,766,339 | 455,047 | 403,410 | 0.287 | 1.128 | ob1 |
 | mspr | L/x2 | 256 | 169,735 | 160,072 | 585,725 | 169,820 | 158,804 | 1.060 | 1.069 | ob1 |
 | mspr | L/x-1 | 128 | 43,285 | 40,771 | 150,171 | 43,035 | 41,343 | 1.062 | 1.041 | ob1 |
 | mtbmv | LNU/x-1 | 1024 | 91,350 | 86,158 | 315,740 | 25,607 | 35,470 | 1.060 | 0.722 | ob1 |
