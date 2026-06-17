@@ -5,10 +5,10 @@
  */
 
 #include <cstddef>
+#include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
 #ifdef _OPENMP
-#include <cstdlib>
 #include <omp.h>
 #include "../common/blas_omp.h"
 #define MTPMV_OMP_MIN 128
@@ -23,6 +23,64 @@ inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
 inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
+
+/* In-place contiguous (incx==1) triangular packed matvec — the Fortran
+ * reference walk, ptrdiff_t indices throughout and `+=`/`*=` RMW so the
+ * inner packed/x walks strength-reduce to pure pointer increments (no
+ * per-element sign extension), byte-for-byte the ob clone. The strided
+ * entry gathers into contiguous scratch and reuses this, so a strided
+ * matvec runs the fast stride-1 kernel instead of a slower indexed walk. */
+void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
+                         std::ptrdiff_t n, const T *ap, T *x)
+{
+    if (!trans) {
+        if (upper) {
+            std::ptrdiff_t kk = 0;
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                if (!dd_iszero(x[j])) {
+                    const T tmp = x[j];
+                    std::ptrdiff_t k = kk;
+                    for (std::ptrdiff_t i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
+                    if (nounit) x[j] *= ap[kk + j];
+                }
+                kk += j + 1;
+            }
+        } else {
+            std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                if (!dd_iszero(x[j])) {
+                    const T tmp = x[j];
+                    std::ptrdiff_t k = kk;
+                    for (std::ptrdiff_t i = n - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
+                    if (nounit) x[j] *= ap[kk - (n - 1 - j)];
+                }
+                kk -= (n - j);
+            }
+        }
+    } else {
+        if (upper) {
+            std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                T tmp = x[j];
+                if (nounit) tmp *= ap[kk];
+                std::ptrdiff_t k = kk - 1;
+                for (std::ptrdiff_t i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
+                x[j] = tmp;
+                kk -= j + 1;
+            }
+        } else {
+            std::ptrdiff_t kk = 0;
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                T tmp = x[j];
+                if (nounit) tmp *= ap[kk];
+                std::ptrdiff_t k = kk + 1;
+                for (std::ptrdiff_t i = j + 1; i < n; ++i) { tmp += ap[k] * x[i]; ++k; }
+                x[j] = tmp;
+                kk += n - j;
+            }
+        }
+    }
+}
 }
 
 #ifdef _OPENMP
@@ -163,121 +221,110 @@ extern "C" void mtpmv_(
         return;
 #endif
 
+    const bool is_upper = (UPLO == 'U');
+    const bool is_trans = (TR != 'N');
+
     if (incx == 1) {
-        if (TR == 'N') {
-            if (UPLO == 'U') {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
-                    if (!dd_iszero(x[j])) {
-                        const T tmp = x[j];
-                        int k = kk;
-                        for (int i = 0; i < j; ++i) { x[i] = x[i] + tmp * ap[k]; ++k; }
-                        if (nounit) x[j] = x[j] * ap[kk + j];
-                    }
-                    kk += j + 1;
-                }
-            } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
-                    if (!dd_iszero(x[j])) {
-                        const T tmp = x[j];
-                        int k = kk;
-                        for (int i = N - 1; i > j; --i) { x[i] = x[i] + tmp * ap[k]; --k; }
-                        if (nounit) x[j] = x[j] * ap[kk - (N - 1 - j)];
-                    }
-                    kk -= (N - j);
-                }
-            }
-        } else {
-            if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
-                    T tmp = x[j];
-                    if (nounit) tmp = tmp * ap[kk];
-                    int k = kk - 1;
-                    for (int i = j - 1; i >= 0; --i) { tmp = tmp + ap[k] * x[i]; --k; }
-                    x[j] = tmp;
-                    kk -= j + 1;
-                }
-            } else {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
-                    T tmp = x[j];
-                    if (nounit) tmp = tmp * ap[kk];
-                    int k = kk + 1;
-                    for (int i = j + 1; i < N; ++i) { tmp = tmp + ap[k] * x[i]; ++k; }
-                    x[j] = tmp;
-                    kk += N - j;
-                }
-            }
+        mtpmv_serial_contig(is_upper, is_trans, nounit != 0, N, ap, x);
+        return;
+    }
+
+    /* Strided: gather x into contiguous scratch, run the stride-1 core (which
+     * beats the ob clone's indexed strided walk), scatter back. O(N)
+     * gather/scatter against O(N^2) work, bit-identical column order. Stack
+     * scratch for the common small-N case dodges malloc latency; spill to the
+     * heap past it. Falls back to the direct strided walk only if the heap
+     * alloc fails. */
+    {
+        const std::ptrdiff_t n = N, sx = incx;
+        const std::ptrdiff_t kx = (sx < 0) ? -(n - 1) * sx : 0;
+        T stackbuf[512];
+        T *heap = NULL;
+        T *xc = (n <= 512) ? stackbuf
+                           : (heap = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T))));
+        if (xc) {
+            std::ptrdiff_t ix = kx;
+            for (std::ptrdiff_t k = 0; k < n; ++k) { xc[k] = x[ix]; ix += sx; }
+            mtpmv_serial_contig(is_upper, is_trans, nounit != 0, n, ap, xc);
+            ix = kx;
+            for (std::ptrdiff_t k = 0; k < n; ++k) { x[ix] = xc[k]; ix += sx; }
+            std::free(heap);
+            return;
         }
-    } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        std::free(heap);
+    }
+
+    {
+        /* Direct strided fallback (heap alloc failed). ptrdiff_t indices so the
+         * packed (ap[k]) and strided x (x[ix]) walks need no per-element sign
+         * extension. */
+        const std::ptrdiff_t n = N, sx = incx;
+        std::ptrdiff_t kx = (sx < 0) ? -(n - 1) * sx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                std::ptrdiff_t kk = 0;
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = 0; j < n; ++j) {
                     if (!dd_iszero(x[jx])) {
                         const T tmp = x[jx];
-                        int ix = kx;
-                        for (int k = kk; k < kk + j; ++k) {
+                        std::ptrdiff_t ix = kx;
+                        for (std::ptrdiff_t k = kk; k < kk + j; ++k) {
                             x[ix] = x[ix] + tmp * ap[k];
-                            ix += incx;
+                            ix += sx;
                         }
                         if (nounit) x[jx] = x[jx] * ap[kk + j];
                     }
-                    jx += incx;
+                    jx += sx;
                     kk += j + 1;
                 }
             } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
+                kx += (n - 1) * sx;
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (!dd_iszero(x[jx])) {
                         const T tmp = x[jx];
-                        int ix = kx;
-                        for (int k = kk; k > kk - (N - 1 - j); --k) {
+                        std::ptrdiff_t ix = kx;
+                        for (std::ptrdiff_t k = kk; k > kk - (n - 1 - j); --k) {
                             x[ix] = x[ix] + tmp * ap[k];
-                            ix -= incx;
+                            ix -= sx;
                         }
-                        if (nounit) x[jx] = x[jx] * ap[kk - (N - 1 - j)];
+                        if (nounit) x[jx] = x[jx] * ap[kk - (n - 1 - j)];
                     }
-                    jx -= incx;
-                    kk -= (N - j);
+                    jx -= sx;
+                    kk -= (n - j);
                 }
             }
         } else {
             if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                int jx = kx + (N - 1) * incx;
-                for (int j = N - 1; j >= 0; --j) {
+                std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
+                std::ptrdiff_t jx = kx + (n - 1) * sx;
+                for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[jx];
-                    int ix = jx;
+                    std::ptrdiff_t ix = jx;
                     if (nounit) tmp = tmp * ap[kk];
-                    for (int k = kk - 1; k >= kk - j; --k) {
-                        ix -= incx;
+                    for (std::ptrdiff_t k = kk - 1; k >= kk - j; --k) {
+                        ix -= sx;
                         tmp = tmp + ap[k] * x[ix];
                     }
                     x[jx] = tmp;
-                    jx -= incx;
+                    jx -= sx;
                     kk -= j + 1;
                 }
             } else {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                std::ptrdiff_t kk = 0;
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[jx];
-                    int ix = jx;
+                    std::ptrdiff_t ix = jx;
                     if (nounit) tmp = tmp * ap[kk];
-                    for (int k = kk + 1; k < kk + N - j; ++k) {
-                        ix += incx;
+                    for (std::ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
+                        ix += sx;
                         tmp = tmp + ap[k] * x[ix];
                     }
                     x[jx] = tmp;
-                    jx += incx;
-                    kk += N - j;
+                    jx += sx;
+                    kk += n - j;
                 }
             }
         }
