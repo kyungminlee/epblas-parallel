@@ -1,25 +1,24 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-17 03:22 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-17 11:51 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
-| m | 2145 | 98.1% | 98.9% |
+| m | 2145 | 98.4% | 98.9% |
 | e | 2145 | 91.7% | 98.9% |
 | q | 2145 | 97.7% | 98.2% |
 
 ## m — multifloats (double-double)
 
-2145 cells, 71 routines.  **Pass@1.02: serial 98.1% · omp4 98.9%.**  6 routine(s) with ≥1 flagged cell.
+2145 cells, 71 routines.  **Pass@1.02: serial 98.4% · omp4 98.9%.**  5 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
 | **mspr** | 24 | 1.062 ob1 @L/x-1/128 | 1.069 @L/x2/256 | ⚠ |
 | **mtbmv** | 96 | 1.060 ob1 @LNU/x-1/1024 | 1.053 @LNU/x2/128 | ⚠ |
 | **mtbsv** | 96 | 1.052 ob1 @LNN/x-1/512 | 1.049 @LNN/x2/128 | ⚠ |
-| **wtpmv** | 108 | 1.049 ob1 @UTU/128 | 0.909 | ⚠ |
 | **mgemv** | 24 | 1.001 | 1.023 @N/x-1/256 | ⚠ |
 | **wtbsv** | 108 | 1.005 | 1.022 @UTU/128 | ⚠ |
 | msyr | 24 | 1.020 | 1.016 | ✅ |
@@ -47,6 +46,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mrotm | 3 | 0.964 | 0.963 | ✅ |
 | whpmv | 18 | 0.941 | 0.958 | ✅ |
 | whbmv | 18 | 0.954 | 0.941 | ✅ |
+| wtpmv | 108 | 0.952 | 0.910 | ✅ |
 | wher | 18 | 0.941 | 0.921 | ✅ |
 | whemv | 18 | 0.932 | 0.935 | ✅ |
 | wtrsm | 72 | 0.929 | 0.810 | ✅ |
@@ -81,14 +81,14 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mwasum | 3 | 0.228 | 0.315 | ✅ |
 | masum | 3 | 0.291 | 0.295 | ✅ |
 | msymm | 16 | 0.287 | 0.198 | ✅ |
-| wdotu | 3 | 0.187 | 0.277 | ✅ |
+| wdotu | 3 | 0.186 | 0.278 | ✅ |
 | wdotc | 3 | 0.180 | 0.266 | ✅ |
 | mtrmm | 64 | 0.266 | 0.235 | ✅ |
 | wsyrk | 12 | 0.265 | 0.122 | ✅ |
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
 
-<details><summary>m: 44 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>m: 39 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
@@ -106,11 +106,8 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mtbmv | LNU/x-1 | 128 | 10,062 | 9,566 | 35,119 | 10,291 | 9,783 | 1.052 | 1.052 | ob1 |
 | mtbmv | LNN/x-1 | 128 | 10,227 | 10,168 | 35,924 | 10,220 | 9,734 | 1.006 | 1.050 | ob1 |
 | mspr | L/x2 | 128 | 41,858 | 40,185 | 148,116 | 42,218 | 40,234 | 1.042 | 1.049 | ob1 |
-| wtpmv | UTU | 128 | 199,814 | 190,468 | 358,538 | 48,607 | 110,137 | 1.049 | 0.441 | ob1 |
-| wtpmv | UTU | 256 | 797,066 | 759,811 | 1,436,685 | 185,981 | 435,198 | 1.049 | 0.427 | ob1 |
 | mtbsv | LNN/x2 | 128 | 11,866 | 11,736 | 37,137 | 11,873 | 11,320 | 1.011 | 1.049 | ob1 |
 | mtbmv | UTN | 256 | 34,355 | 32,771 | 73,225 | 10,757 | 13,582 | 1.048 | 0.792 | ob1 |
-| wtpmv | UTN | 256 | 800,634 | 764,128 | 1,444,437 | 187,631 | 436,232 | 1.048 | 0.430 | ob1 |
 | mtbmv | UTN | 128 | 16,599 | 15,845 | 35,510 | 16,601 | 15,981 | 1.048 | 1.039 | ob1 |
 | mspr | L/x2 | 1024 | 2,829,690 | 2,725,580 | 9,427,802 | 2,846,036 | 2,717,004 | 1.038 | 1.047 | ob1 |
 | mspr | L/x2 | 512 | 656,277 | 626,886 | 2,325,600 | 654,344 | 629,406 | 1.047 | 1.040 | ob1 |
@@ -125,14 +122,12 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mtbsv | UTU/x-1 | 128 | 16,430 | 15,843 | 35,986 | 16,795 | 16,186 | 1.037 | 1.038 | ob1 |
 | mtbsv | UTU/x2 | 256 | 34,037 | 32,817 | 74,035 | 34,038 | 32,805 | 1.037 | 1.038 | ob1 |
 | mtbsv | UTU/x2 | 128 | 16,426 | 15,838 | 35,886 | 16,426 | 15,841 | 1.037 | 1.037 | ob1 |
-| wtpmv | UTN | 128 | 201,597 | 194,475 | 362,398 | 49,316 | 111,059 | 1.037 | 0.444 | ob1 |
 | mspr | L/x-1 | 256 | 169,640 | 164,612 | 591,787 | 165,614 | 162,483 | 1.031 | 1.019 | ob1 |
 | mtbsv | UNN | 256 | 24,894 | 24,164 | 77,038 | 24,361 | 24,320 | 1.030 | 1.002 | ob1 |
 | mspr | U | 128 | 42,664 | 41,426 | 149,966 | 20,243 | 41,190 | 1.030 | 0.491 | ob1 |
 | mtbmv | UTU | 128 | 16,289 | 15,832 | 35,830 | 15,926 | 15,607 | 1.029 | 1.020 | ob1 |
 | mtbmv | UTU | 512 | 67,093 | 65,283 | 146,894 | 19,986 | 26,451 | 1.028 | 0.756 | ob1 |
 | mtbmv | UTU | 1024 | 135,061 | 131,484 | 295,981 | 38,825 | 52,602 | 1.027 | 0.738 | ob1 |
-| wtpmv | UTN | 512 | 3,175,439 | 3,102,714 | 5,745,314 | 733,273 | 875,987 | 1.023 | 0.837 | ob1 |
 | mtbmv | UTU | 256 | 32,831 | 32,083 | 72,310 | 10,621 | 13,596 | 1.023 | 0.781 | ob1 |
 | mgemv | N/x-1 | 256 | 319,928 | 333,700 | 1,194,122 | 112,451 | 109,930 | 0.959 | 1.023 | ob1 |
 | wtbsv | UTU | 128 | 46,542 | 46,302 | 83,254 | 47,338 | 46,337 | 1.005 | 1.022 | ob1 |
