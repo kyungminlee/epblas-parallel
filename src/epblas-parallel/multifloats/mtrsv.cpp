@@ -251,41 +251,70 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
         }
 #endif
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        if (TR == 'N') {
+        /* Strided: gather x into contiguous scratch, run the incx==1 core (the
+         * packed-SIMD solve above — ~4x faster per element than a strided scalar
+         * walk), then scatter back. O(N) gather/scatter vs the O(N^2) solve, so
+         * free past tiny N. The contiguous core is the bit-exact reference for
+         * incx==1, so routing strided through it reproduces that exact result
+         * (same SIMD grouping). Stack scratch for small N, heap past it; a
+         * direct strided walk is the fallback if the heap alloc fails. */
+        const std::ptrdiff_t n = N, sx = incx;
+        const std::ptrdiff_t kx = (sx < 0) ? -(n - 1) * sx : 0;
+        std::ptrdiff_t ix;
+        T stackbuf[512];
+        T *buf = (N <= 512) ? stackbuf
+                            : static_cast<T *>(std::malloc(static_cast<std::size_t>(N) * sizeof(T)));
+        if (buf) {
+            std::ptrdiff_t ix = kx;
+            for (std::ptrdiff_t i = 0; i < n; ++i) { buf[i] = x[ix]; ix += sx; }
+            mtrsv_serial(UPLO, TR, nounit, N, a, lda, buf, 1);
+            ix = kx;
+            for (std::ptrdiff_t i = 0; i < n; ++i) { x[ix] = buf[i]; ix += sx; }
+            if (N > 512) std::free(buf);
+        } else if (TR == 'N') {
             if (UPLO == 'L') {
-                for (int i = 0; i < N; ++i) {
-                    const int ix = kx + i * incx;
-                    if (!dd_iszero(x[ix])) {
-                        if (nounit) x[ix] = x[ix] / A_(i, i);
-                        const T xi = x[ix];
-                        for (int k = i + 1; k < N; ++k) x[kx + k * incx] = x[kx + k * incx] - xi * A_(k, i);
+                for (std::ptrdiff_t i = 0; i < n; ++i) {
+                    const std::ptrdiff_t ixi = kx + i * sx;
+                    if (!dd_iszero(x[ixi])) {
+                        const T *ai = &A_(0, i);
+                        if (nounit) x[ixi] = x[ixi] / ai[i];
+                        const T xi = x[ixi];
+                        ix = ixi;
+                        for (std::ptrdiff_t k = i + 1; k < n; ++k) { ix += sx; x[ix] -= xi * ai[k]; }
                     }
                 }
             } else {
-                for (int i = N - 1; i >= 0; --i) {
-                    const int ix = kx + i * incx;
-                    if (!dd_iszero(x[ix])) {
-                        if (nounit) x[ix] = x[ix] / A_(i, i);
-                        const T xi = x[ix];
-                        for (int k = 0; k < i; ++k) x[kx + k * incx] = x[kx + k * incx] - xi * A_(k, i);
+                for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
+                    const std::ptrdiff_t ixi = kx + i * sx;
+                    if (!dd_iszero(x[ixi])) {
+                        const T *ai = &A_(0, i);
+                        if (nounit) x[ixi] = x[ixi] / ai[i];
+                        const T xi = x[ixi];
+                        ix = kx;
+                        for (std::ptrdiff_t k = 0; k < i; ++k) { x[ix] -= xi * ai[k]; ix += sx; }
                     }
                 }
             }
         } else {
             if (UPLO == 'L') {
-                for (int i = N - 1; i >= 0; --i) {
-                    T t = x[kx + i * incx];
-                    for (int k = i + 1; k < N; ++k) t = t - A_(k, i) * x[kx + k * incx];
-                    if (nounit) t = t / A_(i, i);
-                    x[kx + i * incx] = t;
+                for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
+                    const std::ptrdiff_t ixi = kx + i * sx;
+                    const T *ai = &A_(0, i);
+                    T t = x[ixi];
+                    ix = ixi;
+                    for (std::ptrdiff_t k = i + 1; k < n; ++k) { ix += sx; t = t - ai[k] * x[ix]; }
+                    if (nounit) t = t / ai[i];
+                    x[ixi] = t;
                 }
             } else {
-                for (int i = 0; i < N; ++i) {
-                    T t = x[kx + i * incx];
-                    for (int k = 0; k < i; ++k) t = t - A_(k, i) * x[kx + k * incx];
-                    if (nounit) t = t / A_(i, i);
-                    x[kx + i * incx] = t;
+                for (std::ptrdiff_t i = 0; i < n; ++i) {
+                    const std::ptrdiff_t ixi = kx + i * sx;
+                    const T *ai = &A_(0, i);
+                    T t = x[ixi];
+                    ix = kx;
+                    for (std::ptrdiff_t k = 0; k < i; ++k) { t = t - ai[k] * x[ix]; ix += sx; }
+                    if (nounit) t = t / ai[i];
+                    x[ixi] = t;
                 }
             }
         }
