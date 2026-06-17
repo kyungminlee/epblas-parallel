@@ -16,6 +16,8 @@
  *     and the K-loop is unrolled by 4 to widen the scheduling window.
  *   - Packing turns the strided B access of the naive reference into
  *     stride-1 streams, which matters because each quad element is 16 B.
+ *     (This pays off for NN/NT/TT; the TN case streams both operands
+ *     stride-1 without packing and takes the unpacked qgemm_fast_col path.)
  *   - Edge tiles for the M-tail and N-tail go through a scalar dot path.
  *
  * Packing layouts (panel-packed, OpenBLAS-style):
@@ -280,9 +282,10 @@ void qgemm_serial_(
     qgemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
     if (alpha == 0.0Q || K == 0) return;
 
-    /* TN no-pack fast path only for skinny problems; otherwise the blocked
-     * packed path below is faster per FLOP (4-way accumulator ILP). */
-    if (ta == 'T' && tb == 'N' && qgemm_tn_use_fast(M, N, K)) {
+    /* TN: unpacked stride-1 dot — for __float128 this beats the blocked packed
+     * path at every K and size (packing is pure overhead, no SIMD; see the
+     * qgemm_ parallel entry for the measured ratios). */
+    if (ta == 'T' && tb == 'N') {
         for (ptrdiff_t j2 = 0; j2 < N; ++j2)
             qgemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
         return;

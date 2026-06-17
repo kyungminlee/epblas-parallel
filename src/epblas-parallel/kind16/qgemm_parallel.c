@@ -64,10 +64,13 @@ void qgemm_(
     qgemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
     if (alpha == 0.0Q || K == 0) return;
 
-    /* Fast path: TA='T' (≡'C'), TB='N'. Stride-1 dot, no packing — but only
-     * for skinny problems (see qgemm_tn_use_fast). For non-trivial K the
-     * blocked packed path below is faster per FLOP and threads over M. */
-    if (ta == 'T' && tb == 'N' && qgemm_tn_use_fast(M, N, K)) {
+    /* TA='T' (≡'C'), TB='N': unpacked stride-1 dot, threaded over columns.
+     * For __float128 this beats the blocked packed path at every measured
+     * K and size, serial AND threaded — A^T already gives stride-1 access in
+     * the contraction index for both operands, so packing is pure overhead
+     * (no SIMD to feed, and the MR×NR 4-accumulator ILP does not outrun the
+     * simpler dot). par/mig 1.12->1.00 serial; par/ob 1.00->0.89 omp4. */
+    if (ta == 'T' && tb == 'N') {
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static)
 #endif

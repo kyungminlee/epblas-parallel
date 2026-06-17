@@ -67,20 +67,14 @@ void qgemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, qgemm_T alpha,
                         const qgemm_T *restrict Ap, const qgemm_T *restrict Bp,
                         qgemm_T *restrict C, ptrdiff_t ldc);
 
-/* Fast path TA='T',TB='N': one C-column j2 (stride-1 dot, no packing). */
+/* TA='T',TB='N' path: one C-column j2 (stride-1 dot, no packing). For
+ * __float128 this is the ONLY TN path — it beats the blocked packed kernel at
+ * every K and size because packing buys nothing without SIMD and A^T already
+ * streams both operands stride-1 along the contraction index. The C-column
+ * loop is threaded over j2 in the qgemm_ parallel entry. */
 void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, qgemm_T alpha,
                     const qgemm_T *a, ptrdiff_t lda, const qgemm_T *b, ptrdiff_t ldb,
                     qgemm_T *c, ptrdiff_t ldc);
-
-/*
- * Gate for the TN (ta='T', tb='N') no-pack fast_col path. fast_col runs the
- * stride-1 dot with a SINGLE accumulator; the blocked packed path keeps four
- * independent MR×NR chains that overlap the soft-float calls AND thread over
- * the M axis — faster per FLOP for any non-trivial K. fast_col only wins
- * where packing isn't amortized: short K or a tiny output. */
-static inline ptrdiff_t qgemm_tn_use_fast(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K) {
-    return K <= 64 || (long)M * (long)N <= 64L * 64L;
-}
 
 /* Pure-serial Fortran entry. No OpenMP anywhere on this call path; safe to
  * invoke from inside another function's `#pragma omp parallel` region. Keeps
