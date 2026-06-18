@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
@@ -272,51 +273,13 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
         }
 #endif
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                for (int i = 0; i < N; ++i) {
-                    const int ix = kx + i * incx;
-                    if (!cdd_iszero(x[ix])) {
-                        if (nounit) x[ix] = cdiv(x[ix], A_(i, i));
-                        const T xi = x[ix];
-                        for (int k = i + 1; k < N; ++k) x[kx + k * incx] = csub(x[kx + k * incx], cmul(xi, A_(k, i)));
-                    }
-                }
-            } else {
-                for (int i = N - 1; i >= 0; --i) {
-                    const int ix = kx + i * incx;
-                    if (!cdd_iszero(x[ix])) {
-                        if (nounit) x[ix] = cdiv(x[ix], A_(i, i));
-                        const T xi = x[ix];
-                        for (int k = 0; k < i; ++k) x[kx + k * incx] = csub(x[kx + k * incx], cmul(xi, A_(k, i)));
-                    }
-                }
-            }
-        } else {
-            const bool conj_a = (TR == 'C');
-            if (UPLO == 'L') {
-                for (int i = N - 1; i >= 0; --i) {
-                    T t = x[kx + i * incx];
-                    for (int k = i + 1; k < N; ++k) {
-                        const T aki = conj_a ? cconj(A_(k, i)) : A_(k, i);
-                        t = csub(t, cmul(aki, x[kx + k * incx]));
-                    }
-                    if (nounit) t = cdiv(t, (conj_a ? cconj(A_(i, i)) : A_(i, i)));
-                    x[kx + i * incx] = t;
-                }
-            } else {
-                for (int i = 0; i < N; ++i) {
-                    T t = x[kx + i * incx];
-                    for (int k = 0; k < i; ++k) {
-                        const T aki = conj_a ? cconj(A_(k, i)) : A_(k, i);
-                        t = csub(t, cmul(aki, x[kx + k * incx]));
-                    }
-                    if (nounit) t = cdiv(t, (conj_a ? cconj(A_(i, i)) : A_(i, i)));
-                    x[kx + i * incx] = t;
-                }
-            }
-        }
+        /* Strided: gather x to a contiguous scratch, run the SIMD incx==1 core,
+         * scatter back. O(N) gather vs the O(N^2) strided scalar sweep. */
+        T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
+        std::vector<T> xs(static_cast<std::size_t>(N));
+        for (int i = 0; i < N; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
+        wtrsv_serial(UPLO, TR, nounit, N, a, lda, xs.data(), 1);
+        for (int i = 0; i < N; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
     }
 }
 
