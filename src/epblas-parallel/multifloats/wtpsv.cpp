@@ -2,7 +2,9 @@
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
+#include "mf_tri_simd.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -51,132 +53,69 @@ inline T melem(const T &a, int noconj) { return noconj ? a : cconj(a); }
 #endif
 }
 
-/* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
- * incx!=1 fallback. */
+/* Contiguous (incx==1) serial core. NoTrans elimination is a column AXPY-sub
+ * (caxpy_sub, bit-exact); Trans/ConjTrans is a packed-column complex dot
+ * (cdot, reorders -> within fuzz tol). The cross-column recurrence (divide by
+ * the diagonal, feed the result forward) stays scalar here. */
+static void wtpsv_serial_contig(char UPLO, char TR, int noconj, int nounit,
+                                int N, const T *ap, T *x)
+{
+    if (TR == 'N') {
+        if (UPLO == 'U') {
+            int kk = (N * (N + 1)) / 2 - 1;
+            for (int j = N - 1; j >= 0; --j) {
+                if (!cdd_iszero(x[j])) {
+                    if (nounit) x[j] = cdiv(x[j], ap[kk]);
+                    mf_tri::caxpy_sub(j, &x[0], &ap[kk - j], x[j]);
+                }
+                kk -= j + 1;
+            }
+        } else {
+            int kk = 0;
+            for (int j = 0; j < N; ++j) {
+                if (!cdd_iszero(x[j])) {
+                    if (nounit) x[j] = cdiv(x[j], ap[kk]);
+                    mf_tri::caxpy_sub(N - 1 - j, &x[j + 1], &ap[kk + 1], x[j]);
+                }
+                kk += N - j;
+            }
+        }
+    } else {
+        const bool conj = (noconj == 0);
+        if (UPLO == 'U') {
+            int kk = 0;
+            for (int j = 0; j < N; ++j) {
+                T tmp = csub(x[j], mf_tri::cdot(j, &ap[kk], &x[0], conj));
+                if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk + j] : cconj(ap[kk + j])));
+                x[j] = tmp;
+                kk += j + 1;
+            }
+        } else {
+            int kk = (N * (N + 1)) / 2 - 1;
+            for (int j = N - 1; j >= 0; --j) {
+                T tmp = csub(x[j], mf_tri::cdot(N - 1 - j, &ap[kk - (N - 2 - j)], &x[j + 1], conj));
+                if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk - (N - 1 - j)] : cconj(ap[kk - (N - 1 - j)])));
+                x[j] = tmp;
+                kk -= (N - j);
+            }
+        }
+    }
+}
+
+/* Serial entry / <threshold / strided fallback. Strided gathers x to a
+ * contiguous scratch, runs the SIMD core, and scatters back. */
 static void wtpsv_serial(char UPLO, char TR, int noconj, int nounit,
                          int N, const T *ap, T *x, int incx)
 {
     if (incx == 1) {
-        if (TR == 'N') {
-            if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
-                    if (!cdd_iszero(x[j])) {
-                        if (nounit) x[j] = cdiv(x[j], ap[kk]);
-                        const T tmp = x[j];
-                        int k = kk - 1;
-                        for (int i = j - 1; i >= 0; --i) { x[i] = csub(x[i], cmul(tmp, ap[k])); --k; }
-                    }
-                    kk -= j + 1;
-                }
-            } else {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
-                    if (!cdd_iszero(x[j])) {
-                        if (nounit) x[j] = cdiv(x[j], ap[kk]);
-                        const T tmp = x[j];
-                        int k = kk + 1;
-                        for (int i = j + 1; i < N; ++i) { x[i] = csub(x[i], cmul(tmp, ap[k])); ++k; }
-                    }
-                    kk += N - j;
-                }
-            }
-        } else {
-            if (UPLO == 'U') {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
-                    T tmp = x[j];
-                    int k = kk;
-                    if (noconj) for (int i = 0; i < j; ++i) { tmp = csub(tmp, cmul(ap[k], x[i])); ++k; }
-                    else        for (int i = 0; i < j; ++i) { tmp = csub(tmp, cmul(cconj(ap[k]), x[i])); ++k; }
-                    if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk + j] : cconj(ap[kk + j])));
-                    x[j] = tmp;
-                    kk += j + 1;
-                }
-            } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
-                    T tmp = x[j];
-                    int k = kk;
-                    if (noconj) for (int i = N - 1; i > j; --i) { tmp = csub(tmp, cmul(ap[k], x[i])); --k; }
-                    else        for (int i = N - 1; i > j; --i) { tmp = csub(tmp, cmul(cconj(ap[k]), x[i])); --k; }
-                    if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk - (N - 1 - j)] : cconj(ap[kk - (N - 1 - j)])));
-                    x[j] = tmp;
-                    kk -= (N - j);
-                }
-            }
-        }
-    } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        if (TR == 'N') {
-            if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                int jx = kx + (N - 1) * incx;
-                for (int j = N - 1; j >= 0; --j) {
-                    if (!cdd_iszero(x[jx])) {
-                        if (nounit) x[jx] = cdiv(x[jx], ap[kk]);
-                        const T tmp = x[jx];
-                        int ix = jx;
-                        for (int k = kk - 1; k >= kk - j; --k) {
-                            ix -= incx;
-                            x[ix] = csub(x[ix], cmul(tmp, ap[k]));
-                        }
-                    }
-                    jx -= incx;
-                    kk -= j + 1;
-                }
-            } else {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
-                    if (!cdd_iszero(x[jx])) {
-                        if (nounit) x[jx] = cdiv(x[jx], ap[kk]);
-                        const T tmp = x[jx];
-                        int ix = jx;
-                        for (int k = kk + 1; k < kk + N - j; ++k) {
-                            ix += incx;
-                            x[ix] = csub(x[ix], cmul(tmp, ap[k]));
-                        }
-                    }
-                    jx += incx;
-                    kk += N - j;
-                }
-            }
-        } else {
-            if (UPLO == 'U') {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
-                    T tmp = x[jx];
-                    int ix = kx;
-                    for (int k = kk; k < kk + j; ++k) {
-                        tmp = csub(tmp, cmul((noconj ? ap[k] : cconj(ap[k])), x[ix]));
-                        ix += incx;
-                    }
-                    if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk + j] : cconj(ap[kk + j])));
-                    x[jx] = tmp;
-                    jx += incx;
-                    kk += j + 1;
-                }
-            } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
-                    T tmp = x[jx];
-                    int ix = kx;
-                    for (int k = kk; k > kk - (N - 1 - j); --k) {
-                        tmp = csub(tmp, cmul((noconj ? ap[k] : cconj(ap[k])), x[ix]));
-                        ix -= incx;
-                    }
-                    if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk - (N - 1 - j)] : cconj(ap[kk - (N - 1 - j)])));
-                    x[jx] = tmp;
-                    jx -= incx;
-                    kk -= (N - j);
-                }
-            }
-        }
+        wtpsv_serial_contig(UPLO, TR, noconj, nounit, N, ap, x);
+        return;
     }
+    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
+    std::vector<T> xs(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
+    wtpsv_serial_contig(UPLO, TR, noconj, nounit, N, ap, xs.data());
+    for (int i = 0; i < N; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
 }
 
 #ifdef _OPENMP
@@ -186,38 +125,35 @@ static void wtpsv_block(char UPLO, char TR, int noconj, int nounit,
                         int j0, int j1, int N, const T *ap, T *x)
 {
     const bool lower = (UPLO == 'L');
+    const bool conj = (noconj == 0);
     if (TR == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (int j = j1 - 1; j >= j0; --j) {
                 if (cdd_iszero(x[j])) continue;
                 const std::size_t b = cbU(j);
                 if (nounit) x[j] = cdiv(x[j], ap[b + j]);
-                const T tmp = x[j];
-                for (int i = j0; i < j; ++i) x[i] = csub(x[i], cmul(tmp, ap[b + i]));
+                mf_tri::caxpy_sub(j - j0, &x[j0], &ap[b + j0], x[j]);
             }
         } else {                                        /* Lower: forward */
             for (int j = j0; j < j1; ++j) {
                 if (cdd_iszero(x[j])) continue;
                 const std::size_t b = cbL(j, N);
                 if (nounit) x[j] = cdiv(x[j], ap[b]);
-                const T tmp = x[j];
-                for (int i = j + 1; i < j1; ++i) x[i] = csub(x[i], cmul(tmp, ap[b + (i - j)]));
+                mf_tri::caxpy_sub(j1 - (j + 1), &x[j + 1], &ap[b + 1], x[j]);
             }
         }
     } else {
         if (!lower) {                                   /* Upper^(T/C): forward, k<j */
             for (int j = j0; j < j1; ++j) {
                 const std::size_t b = cbU(j);
-                T tmp = x[j];
-                for (int i = j0; i < j; ++i) tmp = csub(tmp, cmul(melem(ap[b + i], noconj), x[i]));
+                T tmp = csub(x[j], mf_tri::cdot(j - j0, &ap[b + j0], &x[j0], conj));
                 if (nounit) tmp = cdiv(tmp, melem(ap[b + j], noconj));
                 x[j] = tmp;
             }
         } else {                                        /* Lower^(T/C): backward, k>j */
             for (int j = j1 - 1; j >= j0; --j) {
                 const std::size_t b = cbL(j, N);
-                T tmp = x[j];
-                for (int i = j + 1; i < j1; ++i) tmp = csub(tmp, cmul(melem(ap[b + (i - j)], noconj), x[i]));
+                T tmp = csub(x[j], mf_tri::cdot(j1 - (j + 1), &ap[b + 1], &x[j + 1], conj));
                 if (nounit) tmp = cdiv(tmp, melem(ap[b], noconj));
                 x[j] = tmp;
             }
@@ -237,6 +173,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
     if (nthreads > WTPSV_MAX_CPUS) nthreads = WTPSV_MAX_CPUS;
     const bool lower = (UPLO == 'L');
     const bool trans = (TR != 'N');
+    const bool conj = (noconj == 0);
 
     if (!trans) {
         if (lower) {
@@ -253,7 +190,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                         const T xi = x[i];
                         if (cdd_iszero(xi)) continue;
                         const T *col = &ap[cbL(i, N)];      /* col[k-i] = A(k,i) */
-                        for (int k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, col[k - i]));
+                        mf_tri::caxpy_sub(rhi - rlo, &x[rlo], &col[rlo - i], xi);
                     }
                 }
             }
@@ -271,7 +208,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                         const T xi = x[i];
                         if (cdd_iszero(xi)) continue;
                         const T *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
-                        for (int k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, col[k]));
+                        mf_tri::caxpy_sub(rhi - rlo, &x[rlo], &col[rlo], xi);
                     }
                 }
             }
@@ -288,9 +225,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbL(i, N)];
-                            T s = czero;
-                            for (int k = j1; k < N; ++k) s = cadd(s, cmul(melem(col[k - i], noconj), x[k]));
-                            x[i] = csub(x[i], s);
+                            x[i] = csub(x[i], mf_tri::cdot(N - j1, &col[j1 - i], &x[j1], conj));
                         }
                     }
                 }
@@ -307,9 +242,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbU(i)];
-                            T s = czero;
-                            for (int k = 0; k < j0; ++k) s = cadd(s, cmul(melem(col[k], noconj), x[k]));
-                            x[i] = csub(x[i], s);
+                            x[i] = csub(x[i], mf_tri::cdot(j0, &col[0], &x[0], conj));
                         }
                     }
                 }
