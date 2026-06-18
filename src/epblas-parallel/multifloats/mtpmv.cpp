@@ -105,15 +105,12 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
             #pragma omp for schedule(static, 1)
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T *aj = upper ? &ap[kk_upper(j)] : &ap[kk_lower(j, n)];
-                T s = zero_dd;
                 if (upper) {
                     T temp = nounit ? (aj[j] * x[j]) : x[j];
-                    for (std::ptrdiff_t c = 0; c < j; ++c) s = s + aj[c] * x[c];
-                    y_buf[j] = temp + s;
+                    y_buf[j] = temp + mf_tri::dot(j, &aj[0], &x[0]);
                 } else {
                     T temp = nounit ? (aj[0] * x[j]) : x[j];
-                    for (std::ptrdiff_t c = j + 1; c < n; ++c) s = s + aj[c - j] * x[c];
-                    y_buf[j] = temp + s;
+                    y_buf[j] = temp + mf_tri::dot(n - 1 - j, &aj[1], &x[j + 1]);
                 }
             }
             #pragma omp for schedule(static)
@@ -135,14 +132,12 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
                 const T xj = x[j];
                 if (upper) {
                     const T *aj = &ap[kk_upper(j)];
-                    for (std::ptrdiff_t i = 0; i < j; ++i)
-                        y_priv[i] = y_priv[i] + xj * aj[i];
+                    if (!dd_iszero(xj)) mf_tri::axpy_add(j, &y_priv[0], &aj[0], xj);
                     y_priv[j] = y_priv[j] + xj * (nounit ? aj[j] : one_dd);
                 } else {
                     const T *aj = &ap[kk_lower(j, n)];
                     y_priv[j] = y_priv[j] + xj * (nounit ? aj[0] : one_dd);
-                    for (std::ptrdiff_t i = j + 1; i < n; ++i)
-                        y_priv[i] = y_priv[i] + xj * aj[i - j];
+                    if (!dd_iszero(xj)) mf_tri::axpy_add(n - 1 - j, &y_priv[j + 1], &aj[1], xj);
                 }
             }
             #pragma omp for schedule(static)
