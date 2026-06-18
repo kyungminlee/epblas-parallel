@@ -1,7 +1,14 @@
 /* whpr2 — multifloats complex DD Hermitian packed rank-2 update.
  *   A := alpha*x*y^H + conj(alpha)*y*x^H + A
  *
- * Columns independent → OMP over j.
+ * Columns independent → OMP over j. The packed triangular output makes a
+ * contiguous static block hand one thread the heavy triangle end (par caps
+ * at ~2.3x on 4 cores); cyclic schedule(static,1) interleaves short and long
+ * columns across the team, balancing the skew symmetrically for both UPLO
+ * (mirrors the proven kind10 yhpr2). The per-column body is carved into a
+ * noinline helper so the inner loop keeps clean register allocation and the
+ * serial + threaded paths share one tight loop (inlining into the omp region
+ * spills the kept-resident column scalars and loses the UPPER triangle).
  */
 
 #include <cstddef>
@@ -29,6 +36,33 @@ inline T cmul(T const &a, T const &b) {
 }
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+
+/* Per-column rank-2 update, carved out noinline so the inner loop compiles
+ * with clean register allocation (see file header). The Hermitian diagonal
+ * is forced real: the off-diagonal run plus the single real diagonal write. */
+__attribute__((noinline))
+void whpr2_col_upper(int j, T t1, T t2, const T *x, const T *y, T *ap) {
+    T *c = ap + static_cast<std::size_t>(j) * (j + 1) / 2;
+    for (int i = 0; i < j; ++i)
+        c[i] = cadd(c[i], cadd(cmul(x[i], t1), cmul(y[i], t2)));
+    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
+    c[j] = T{ c[j].re + prod.re, rzero };
+}
+
+__attribute__((noinline))
+void whpr2_col_lower(int j, int N, T t1, T t2, const T *x, const T *y, T *ap) {
+    /* Pre-advance the off-diagonal bases so the loop runs 0-based over one
+     * induction variable indexing three pointers — the tight form gcc picks
+     * for the upper helper. Diagonal last, on a clean stack. */
+    const int mo = N - j - 1;
+    T *c0 = ap + (static_cast<std::size_t>(j) * N - static_cast<std::size_t>(j) * (j - 1) / 2);
+    T *c = c0 + 1;
+    const T *xc = x + j + 1, *yc = y + j + 1;
+    for (int i = 0; i < mo; ++i)
+        c[i] = cadd(c[i], cadd(cmul(xc[i], t1), cmul(yc[i], t2)));
+    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
+    c0[0] = T{ c0[0].re + prod.re, rzero };
+}
 }
 
 extern "C" void whpr2_(
@@ -52,36 +86,29 @@ extern "C" void whpr2_(
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const int use_omp = (N >= WHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
-                const int kk = (j * (j + 1)) / 2;
-                if (!cdd_iszero(x[j]) || !cdd_iszero(y[j])) {
-                    const T t1 = cmul(alpha, cconj(y[j]));
-                    const T t2 = cconj(cmul(alpha, x[j]));
-                    for (int i = 0; i < j; ++i)
-                        ap[kk + i] = cadd(ap[kk + i], cadd(cmul(x[i], t1), cmul(y[i], t2)));
-                    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
-                    ap[kk + j] = T{ ap[kk + j].re + prod.re, rzero };
-                } else {
+                if (!cdd_iszero(x[j]) || !cdd_iszero(y[j]))
+                    whpr2_col_upper(j, cmul(alpha, cconj(y[j])),
+                                    cconj(cmul(alpha, x[j])), x, y, ap);
+                else {
+                    const std::size_t kk = static_cast<std::size_t>(j) * (j + 1) / 2;
                     ap[kk + j] = T{ ap[kk + j].re, rzero };
                 }
             }
         } else {
 #ifdef _OPENMP
             const int use_omp = (N >= WHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (int j = 0; j < N; ++j) {
-                const int kk = j * N - (j * (j - 1)) / 2;
-                if (!cdd_iszero(x[j]) || !cdd_iszero(y[j])) {
-                    const T t1 = cmul(alpha, cconj(y[j]));
-                    const T t2 = cconj(cmul(alpha, x[j]));
-                    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
-                    ap[kk] = T{ ap[kk].re + prod.re, rzero };
-                    for (int i = j + 1; i < N; ++i)
-                        ap[kk + (i - j)] = cadd(ap[kk + (i - j)], cadd(cmul(x[i], t1), cmul(y[i], t2)));
-                } else {
+                if (!cdd_iszero(x[j]) || !cdd_iszero(y[j]))
+                    whpr2_col_lower(j, N, cmul(alpha, cconj(y[j])),
+                                    cconj(cmul(alpha, x[j])), x, y, ap);
+                else {
+                    const std::size_t kk = static_cast<std::size_t>(j) * N
+                                         - static_cast<std::size_t>(j) * (j - 1) / 2;
                     ap[kk] = T{ ap[kk].re, rzero };
                 }
             }
