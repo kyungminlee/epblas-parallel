@@ -178,6 +178,15 @@ static inline cx4 cconj_soa(const cx4 &a)
     return cx4{ a.reh, a.rel, _mm256_xor_pd(a.imh, sgn), _mm256_xor_pd(a.iml, sgn) };
 }
 
+/* (a - b) per complex lane, faithful to the scalar complex subtract. */
+static inline cx4 csub_soa(const cx4 &a, const cx4 &b)
+{
+    cx4 r;
+    dd_sub(a.reh, a.rel, b.reh, b.rel, r.reh, r.rel);
+    dd_sub(a.imh, a.iml, b.imh, b.iml, r.imh, r.iml);
+    return r;
+}
+
 /* A complex vector held as four parallel SoA limb arrays. */
 struct cvec { double *reh, *rel, *imh, *iml; };
 
@@ -225,6 +234,35 @@ static inline cx4 cload4(const multifloats::complex64x2 *p)
     r.rel = _mm256_permute2f128_pd(t1, t3, 0x20);
     r.iml = _mm256_permute2f128_pd(t1, t3, 0x31);
     return r;
+}
+
+/* Interleave 4 SoA complex lanes back to 4 contiguous complex64x2 (16 doubles) —
+ * the exact inverse of cload4 (a 4×4 double transpose). Used to write the result
+ * of a NoTrans complex AXPY back to a contiguous x/y run. */
+static inline __attribute__((always_inline)) void
+cstore4(multifloats::complex64x2 *p, const cx4 &c)
+{
+    __m256d t0 = _mm256_unpacklo_pd(c.reh, c.rel);   /* reh0 rel0 reh2 rel2 */
+    __m256d t1 = _mm256_unpackhi_pd(c.reh, c.rel);   /* reh1 rel1 reh3 rel3 */
+    __m256d t2 = _mm256_unpacklo_pd(c.imh, c.iml);   /* imh0 iml0 imh2 iml2 */
+    __m256d t3 = _mm256_unpackhi_pd(c.imh, c.iml);   /* imh1 iml1 imh3 iml3 */
+    __m256d c0 = _mm256_permute2f128_pd(t0, t2, 0x20);  /* reh0 rel0 imh0 iml0 */
+    __m256d c1 = _mm256_permute2f128_pd(t1, t3, 0x20);  /* reh1 rel1 imh1 iml1 */
+    __m256d c2 = _mm256_permute2f128_pd(t0, t2, 0x31);  /* reh2 rel2 imh2 iml2 */
+    __m256d c3 = _mm256_permute2f128_pd(t1, t3, 0x31);  /* reh3 rel3 imh3 iml3 */
+    double *d = reinterpret_cast<double *>(p);
+    _mm256_storeu_pd(d,      c0);
+    _mm256_storeu_pd(d + 4,  c1);
+    _mm256_storeu_pd(d + 8,  c2);
+    _mm256_storeu_pd(d + 12, c3);
+}
+
+/* Horizontal reduce of a 4-lane complex accumulator to one complex64x2, folding
+ * real and imag limbs through the faithful dd_add tree (reorders -> within tol). */
+static inline __attribute__((always_inline)) multifloats::complex64x2
+chreduce(const cx4 &s)
+{
+    return multifloats::complex64x2{ hreduce(s.reh, s.rel), hreduce(s.imh, s.iml) };
 }
 
 /* Gather 4 complex64x2 at p[0], p[s], p[2s], p[3s] into SoA lanes (lane t<-p[ts]).

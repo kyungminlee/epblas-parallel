@@ -1,11 +1,12 @@
 /* wtrmv — multifloats complex DD triangular matrix-vector. */
 
 #include <cstddef>
+#include <cstdlib>
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_tri_simd.h"   /* mf_tri::caxpy_add / cdot — shared complex SoA kernels */
 #ifdef _OPENMP
-#include <cstdlib>
 #include <cmath>
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -54,13 +55,13 @@ static void wtrmv_serial_N_lower(bool nounit, int n,
             const T xj = x[j];
             if (cdd_iszero(xj)) continue;
             const T *col = &A_(0, j);
-            for (int i = j + 1; i < ie; ++i) y[i] = cadd(y[i], cmul(xj, col[i]));
+            mf_tri::caxpy_add(ie - (j + 1), &y[j + 1], &col[j + 1], xj);
         }
         for (int j = ib - 1; j >= 0; --j) {             /* below-tile columns, descending j */
             const T xj = x[j];
             if (cdd_iszero(xj)) continue;
             const T *col = &A_(0, j);
-            for (int i = ib; i < ie; ++i) y[i] = cadd(y[i], cmul(xj, col[i]));
+            mf_tri::caxpy_add(ie - ib, &y[ib], &col[ib], xj);
         }
     }
     for (int i = 0; i < n; ++i) x[i] = y[i];
@@ -265,6 +266,48 @@ __attribute__((noinline)) static bool wtrmv_omp(
 }
 #endif
 
+/* Contiguous (incx==1) in-place serial triangular matvec. NoTrans is a column
+ * AXPY (mf_tri::caxpy_add, bit-exact); Trans/ConjTrans is a column dot (mf_tri::cdot,
+ * within DD fuzz tol). The strided entry gathers x to scratch and reuses this. */
+static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
+                                int n, const T *a, std::size_t lda, T *x)
+{
+    if (!trans) {
+        if (!upper) {
+            if (n >= 128) { wtrmv_serial_N_lower(nounit, n, a, lda, x); return; }
+            for (int j = n - 1; j >= 0; --j) {
+                const T temp = x[j];
+                if (!cdd_iszero(temp))
+                    mf_tri::caxpy_add(n - 1 - j, &x[j + 1], &A_(j + 1, j), temp);
+                if (nounit) x[j] = cmul(x[j], A_(j, j));
+            }
+        } else {
+            for (int j = 0; j < n; ++j) {
+                const T temp = x[j];
+                if (!cdd_iszero(temp))
+                    mf_tri::caxpy_add(j, &x[0], &A_(0, j), temp);
+                if (nounit) x[j] = cmul(x[j], A_(j, j));
+            }
+        }
+    } else {
+        if (!upper) {
+            for (int j = 0; j < n; ++j) {
+                T temp = x[j];
+                if (nounit) temp = cmul(temp, conj ? cconj(A_(j, j)) : A_(j, j));
+                temp = cadd(temp, mf_tri::cdot(n - 1 - j, &A_(j + 1, j), &x[j + 1], conj));
+                x[j] = temp;
+            }
+        } else {
+            for (int j = n - 1; j >= 0; --j) {
+                T temp = x[j];
+                if (nounit) temp = cmul(temp, conj ? cconj(A_(j, j)) : A_(j, j));
+                temp = cadd(temp, mf_tri::cdot(j, &A_(0, j), &x[0], conj));
+                x[j] = temp;
+            }
+        }
+    }
+}
+
 extern "C" void wtrmv_(
     const char *uplo, const char *trans, const char *diag,
     const int *n_,
@@ -289,59 +332,25 @@ extern "C" void wtrmv_(
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                if (N >= 128) {
-                    wtrmv_serial_N_lower(nounit, N, a, lda, x);
-                } else {
-                    for (int j = N - 1; j >= 0; --j) {
-                        const T temp = x[j];
-                        if (!cdd_iszero(temp)) {
-                            const T *aj = &A_(0, j);
-                            for (int i = j + 1; i < N; ++i) x[i] = cadd(x[i], cmul(temp, aj[i]));
-                        }
-                        if (nounit) x[j] = cmul(x[j], A_(j, j));
-                    }
-                }
-            } else {
-                for (int j = 0; j < N; ++j) {
-                    const T temp = x[j];
-                    if (!cdd_iszero(temp)) {
-                        const T *aj = &A_(0, j);
-                        for (int i = 0; i < j; ++i) x[i] = cadd(x[i], cmul(temp, aj[i]));
-                    }
-                    if (nounit) x[j] = cmul(x[j], A_(j, j));
-                }
-            }
-        } else {
-            const bool conj_a = (TR == 'C');
-            if (UPLO == 'L') {
-                for (int j = 0; j < N; ++j) {
-                    T temp = x[j];
-                    if (nounit) temp = cmul(temp, conj_a ? cconj(A_(j, j)) : A_(j, j));
-                    const T *aj = &A_(0, j);
-                    if (conj_a) {
-                        for (int i = j + 1; i < N; ++i) temp = cadd(temp, cmul(cconj(aj[i]), x[i]));
-                    } else {
-                        for (int i = j + 1; i < N; ++i) temp = cadd(temp, cmul(aj[i], x[i]));
-                    }
-                    x[j] = temp;
-                }
-            } else {
-                for (int j = N - 1; j >= 0; --j) {
-                    T temp = x[j];
-                    if (nounit) temp = cmul(temp, conj_a ? cconj(A_(j, j)) : A_(j, j));
-                    const T *aj = &A_(0, j);
-                    if (conj_a) {
-                        for (int i = 0; i < j; ++i) temp = cadd(temp, cmul(cconj(aj[i]), x[i]));
-                    } else {
-                        for (int i = 0; i < j; ++i) temp = cadd(temp, cmul(aj[i], x[i]));
-                    }
-                    x[j] = temp;
-                }
-            }
+        wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, N, a, lda, x);
+        return;
+    }
+
+    /* Strided: gather x to contiguous scratch, run the SIMD contiguous core,
+     * scatter back. The in-place strided walk is the alloc-fail fallback. */
+    {
+        const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+        T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+        if (xs) {
+            for (int i = 0; i < N; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
+            wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, N, a, lda, xs);
+            for (int i = 0; i < N; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
+            std::free(xs);
+            return;
         }
-    } else {
+    }
+
+    {
         int kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'L') {
