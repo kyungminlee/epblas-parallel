@@ -13,6 +13,11 @@
 #include <cstddef>
 #include <cctype>
 #include <multifloats.h>
+#ifdef MBLAS_SIMD_DD
+#include <cstdlib>
+#include <immintrin.h>
+#include "mf_rank1_simd.h"   /* faithful SoA dd_mul/dd_add + load_dd4 */
+#endif
 #ifdef _OPENMP
 #include <cstdlib>
 #include <omp.h>
@@ -159,6 +164,72 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
     }
 }
 
+#ifdef MBLAS_SIMD_DD
+/* NoTrans unit-stride, 4-wide SoA.  x := A*x is, per column j, an axpy of the
+ * band segment of column j scaled by the broadcast x[j].  x is split to SoA
+ * limb arrays ONCE (reused as both the broadcast source and the accumulation
+ * target, so the split also serves every column); the matrix column — read
+ * once — is deinterleaved inline with load_dd4.  Columns run in reference order
+ * (upper ascending / lower descending) and within a column every write lands on
+ * a distinct row i != j, so 4-wide-over-i is order-free and the result is
+ * bit-identical to the scalar reference on every non-degenerate lane (mf_rank1
+ * dd_mul/dd_add mirror the float64x2 multiply/add operators op-for-op).  Returns
+ * true if it ran; false (alloc failure) falls back to the scalar core. */
+static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
+                              const T *a, std::ptrdiff_t lda, T *x)
+{
+    const std::size_t np = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
+    double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+    double *xl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+    if (!xh || !xl) { std::free(xh); std::free(xl); return false; }
+    for (int i = 0; i < n; ++i) { xh[i] = x[i].limbs[0]; xl[i] = x[i].limbs[1]; }
+    for (std::size_t i = n; i < np; ++i) { xh[i] = 0.0; xl[i] = 0.0; }
+
+    if (upper) {
+        for (int j = 0; j < n; ++j) {
+            if (xh[j] == 0.0 && xl[j] == 0.0) continue;
+            const __m256d bh = _mm256_set1_pd(xh[j]), bl = _mm256_set1_pd(xl[j]);
+            const T *col = &A_(0, j);
+            const std::ptrdiff_t off = k - j;
+            int i = (j > k) ? j - k : 0;
+            for (; i + 4 <= j; i += 4) {
+                __m256d mh, ml; mf_rank1::load_dd4(&col[off + i], mh, ml);
+                __m256d ph, pl; mf_rank1::dd_mul(mh, ml, bh, bl, ph, pl);
+                __m256d rh, rl;
+                mf_rank1::dd_add(_mm256_loadu_pd(xh + i), _mm256_loadu_pd(xl + i), ph, pl, rh, rl);
+                _mm256_storeu_pd(xh + i, rh); _mm256_storeu_pd(xl + i, rl);
+            }
+            const T xj{xh[j], xl[j]};
+            for (; i < j; ++i) { T xi{xh[i], xl[i]}; xi = xi + xj * col[off + i]; xh[i] = xi.limbs[0]; xl[i] = xi.limbs[1]; }
+            if (nounit) { T d{xh[j], xl[j]}; d = d * col[k]; xh[j] = d.limbs[0]; xl[j] = d.limbs[1]; }
+        }
+    } else {
+        for (int j = n - 1; j >= 0; --j) {
+            if (xh[j] == 0.0 && xl[j] == 0.0) continue;
+            const __m256d bh = _mm256_set1_pd(xh[j]), bl = _mm256_set1_pd(xl[j]);
+            const T *col = &A_(0, j);
+            const std::ptrdiff_t off = -j;
+            const int i_hi = (j + k < n - 1) ? j + k : n - 1;   /* inclusive top row */
+            int i = j + 1;
+            for (; i + 4 <= i_hi + 1; i += 4) {
+                __m256d mh, ml; mf_rank1::load_dd4(&col[off + i], mh, ml);
+                __m256d ph, pl; mf_rank1::dd_mul(mh, ml, bh, bl, ph, pl);
+                __m256d rh, rl;
+                mf_rank1::dd_add(_mm256_loadu_pd(xh + i), _mm256_loadu_pd(xl + i), ph, pl, rh, rl);
+                _mm256_storeu_pd(xh + i, rh); _mm256_storeu_pd(xl + i, rl);
+            }
+            const T xj{xh[j], xl[j]};
+            for (; i <= i_hi; ++i) { T xi{xh[i], xl[i]}; xi = xi + xj * col[off + i]; xh[i] = xi.limbs[0]; xl[i] = xi.limbs[1]; }
+            if (nounit) { T d{xh[j], xl[j]}; d = d * col[0]; xh[j] = d.limbs[0]; xl[j] = d.limbs[1]; }
+        }
+    }
+
+    for (int i = 0; i < n; ++i) { x[i].limbs[0] = xh[i]; x[i].limbs[1] = xl[i]; }
+    std::free(xh); std::free(xl);
+    return true;
+}
+#endif
+
 #ifdef _OPENMP
 /* Row-gather for the Trans triangle: x := A^T*x is an in-place band matvec, so
  * each output row r is an independent dot once the original x is preserved in a
@@ -225,6 +296,67 @@ static void mtbmv_colscatter(bool upper, bool nounit, int n, int k,
     }
 }
 
+#ifdef MBLAS_SIMD_DD
+/* 4-wide SoA twin of mtbmv_colscatter: same disjoint-row ownership and same
+ * per-row column order (hence bit-exact), with x in/y out as SoA limb arrays so
+ * the inner axpy runs packed. The matrix column is deinterleaved inline; y rows
+ * are plain (loadu) since y is SoA. y[lo,hi) is seeded at each row's diagonal
+ * column before any += reaches it (no pre-zero needed). */
+static void mtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
+                                 int lo, int hi, const T *a, std::ptrdiff_t lda,
+                                 const double *xh, const double *xl,
+                                 double *yh, double *yl)
+{
+    if (upper) {
+        const int jmax = (hi + k < n) ? (hi + k) : n;
+        for (int j = lo; j < jmax; ++j) {
+            const __m256d bh = _mm256_set1_pd(xh[j]), bl = _mm256_set1_pd(xl[j]);
+            const T *col = &A_(0, j);
+            const std::ptrdiff_t off = k - j;            /* A(i,j) = col[off+i] */
+            const int i_lo = (j - k > lo) ? (j - k) : lo;
+            const int i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
+            int i = i_lo;
+            for (; i + 4 <= i_hi; i += 4) {
+                __m256d mh, ml; mf_rank1::load_dd4(&col[off + i], mh, ml);
+                __m256d ph, pl; mf_rank1::dd_mul(mh, ml, bh, bl, ph, pl);
+                __m256d rh, rl;
+                mf_rank1::dd_add(_mm256_loadu_pd(yh + i), _mm256_loadu_pd(yl + i), ph, pl, rh, rl);
+                _mm256_storeu_pd(yh + i, rh); _mm256_storeu_pd(yl + i, rl);
+            }
+            const T tmp{xh[j], xl[j]};
+            for (; i < i_hi; ++i) { T yi{yh[i], yl[i]}; yi = yi + tmp * col[off + i]; yh[i] = yi.limbs[0]; yl[i] = yi.limbs[1]; }
+            if (j >= lo && j < hi) {                      /* diagonal seed */
+                if (nounit) { const T d = tmp * col[k]; yh[j] = d.limbs[0]; yl[j] = d.limbs[1]; }
+                else { yh[j] = xh[j]; yl[j] = xl[j]; }
+            }
+        }
+    } else {
+        const int jmin = (lo - k > 0) ? (lo - k) : 0;
+        for (int j = hi - 1; j >= jmin; --j) {
+            const __m256d bh = _mm256_set1_pd(xh[j]), bl = _mm256_set1_pd(xl[j]);
+            const T *col = &A_(0, j);
+            const std::ptrdiff_t off = -j;               /* A(i,j) = col[off+i] */
+            const int i_lo = (j + 1 > lo) ? (j + 1) : lo;
+            const int i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
+            int i = i_lo;
+            for (; i + 4 <= i_hi; i += 4) {
+                __m256d mh, ml; mf_rank1::load_dd4(&col[off + i], mh, ml);
+                __m256d ph, pl; mf_rank1::dd_mul(mh, ml, bh, bl, ph, pl);
+                __m256d rh, rl;
+                mf_rank1::dd_add(_mm256_loadu_pd(yh + i), _mm256_loadu_pd(yl + i), ph, pl, rh, rl);
+                _mm256_storeu_pd(yh + i, rh); _mm256_storeu_pd(yl + i, rl);
+            }
+            const T tmp{xh[j], xl[j]};
+            for (; i < i_hi; ++i) { T yi{yh[i], yl[i]}; yi = yi + tmp * col[off + i]; yh[i] = yi.limbs[0]; yl[i] = yi.limbs[1]; }
+            if (j >= lo && j < hi) {                      /* diagonal seed */
+                if (nounit) { const T d = tmp * col[0]; yh[j] = d.limbs[0]; yl[j] = d.limbs[1]; }
+                else { yh[j] = xh[j]; yl[j] = xl[j]; }
+            }
+        }
+    }
+}
+#endif
+
 /* Threaded in-place triangular band matvec. Each thread owns a disjoint output-
  * row range [lo,hi): it gathers y[lo,hi) reading x (never written here), a
  * barrier, then copies its own range back to x. NoTrans uses the contiguous
@@ -242,6 +374,41 @@ __attribute__((noinline)) static bool mtbmv_omp(
     if (nthreads > MTBMV_MAX_CPUS) nthreads = MTBMV_MAX_CPUS;
 
     if (incx < 0) x -= (std::ptrdiff_t)(n - 1) * incx;   /* x at logical 0 */
+
+#ifdef MBLAS_SIMD_DD
+    /* NoTrans threads the 4-wide SoA column-scatter: split x to SoA limb arrays
+     * once, each thread scatters into its owned yh/yl rows, barrier, merge back.
+     * Same disjoint-row ownership and per-row column order as the scalar path
+     * (bit-exact). Trans falls through to the scalar row-gather below. */
+    if (!trans) {
+        const std::size_t np = ((std::size_t)n + 3) & ~(std::size_t)3;
+        double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+        double *xl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+        double *yh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+        double *yl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+        if (xh && xl && yh && yl) {
+            for (int i = 0; i < n; ++i) {
+                const T v = x[(std::ptrdiff_t)i * incx];
+                xh[i] = v.limbs[0]; xl[i] = v.limbs[1];
+            }
+            for (std::size_t i = n; i < np; ++i) { xh[i] = 0.0; xl[i] = 0.0; }
+            #pragma omp parallel num_threads(nthreads)
+            {
+                int tid = omp_get_thread_num();
+                int lo = (int)((long long)n * tid / nthreads);
+                int hi = (int)((long long)n * (tid + 1) / nthreads);
+                mtbmv_colscatter_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
+                #pragma omp barrier          /* all reads of x done before write-back */
+                for (int i = lo; i < hi; ++i)
+                    x[(std::ptrdiff_t)i * incx] = T{yh[i], yl[i]};
+            }
+            std::free(xh); std::free(xl); std::free(yh); std::free(yl);
+            return true;
+        }
+        std::free(xh); std::free(xl); std::free(yh); std::free(yl);
+        /* alloc failure -> scalar path below */
+    }
+#endif
 
     const T *xptr = x;
     T *xbuf = NULL;
@@ -295,6 +462,14 @@ extern "C" void mtbmv_(
 
     T *xp = x;
     if (incx < 0) xp -= (std::ptrdiff_t)(N - 1) * incx;   /* x at logical 0 */
+
+#ifdef MBLAS_SIMD_DD
+    /* Unit-stride NoTrans: 4-wide SoA axpy-per-column. */
+    if (incx == 1 && TR == 'N'
+        && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp))
+        return;
+#endif
+
     mtbmv_serial(UPLO == 'U', TR != 'N', nounit != 0,
                  N, K, a, lda, xp, incx);
 }
