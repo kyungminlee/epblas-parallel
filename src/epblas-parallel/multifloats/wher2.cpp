@@ -1,7 +1,19 @@
-/* wher2 — multifloats Hermitian rank-2 update (alpha complex, diag real). */
+/* wher2 — multifloats Hermitian rank-2 update (alpha complex, diag real).
+ *   A := alpha*x*y^H + conj(alpha)*y*x^H + A
+ *
+ * Columns independent -> OMP over j. The triangular output makes a contiguous
+ * static block hand one thread the heavy triangle end (par caps at ~2.3x on 4
+ * cores); cyclic schedule(static,1) interleaves short and long columns across
+ * the team, balancing the skew symmetrically for both UPLO (mirrors the proven
+ * kind10 yher2/whpr2). The per-column body is carved into noinline helpers so
+ * the inner loop keeps clean register allocation and the serial + threaded
+ * paths share one tight loop (inlining into the omp region spills the
+ * kept-resident column scalars and loses the UPPER triangle).
+ */
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -25,6 +37,25 @@ inline T cmul(T const &a, T const &b) {
 }
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+
+/* Per-column rank-2 update, carved out noinline so the inner loop compiles
+ * with clean register allocation (see file header). aj = &A(0,j); the
+ * Hermitian diagonal is forced real. */
+__attribute__((noinline))
+void wher2_col_upper(int j, T t1, T t2, const T *x, const T *y, T *aj) {
+    for (int i = 0; i < j; ++i)
+        aj[i] = cadd(aj[i], cadd(cmul(x[i], t1), cmul(y[i], t2)));
+    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
+    aj[j] = T{ aj[j].re + prod.re, rzero };
+}
+
+__attribute__((noinline))
+void wher2_col_lower(int j, int N, T t1, T t2, const T *x, const T *y, T *aj) {
+    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
+    aj[j] = T{ aj[j].re + prod.re, rzero };
+    for (int i = j + 1; i < N; ++i)
+        aj[i] = cadd(aj[i], cadd(cmul(x[i], t1), cmul(y[i], t2)));
+}
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -46,50 +77,52 @@ extern "C" void wher2_(
 
     if (N == 0 || cdd_iszero(alpha)) return;
 
-    if (incx == 1 && incy == 1) {
+    /* Gather strided x,y into contiguous scratch once (O(N), handles negative
+     * incx/incy) so the column kernel is always unit-stride -- this both feeds
+     * the tight noinline helpers and lets the strided case thread like the
+     * contiguous one (the per-element kx+i*incx recompute otherwise left the
+     * dense strided-LOWER path ~2-3% behind ob and unthreaded). A is always
+     * contiguous-by-column, so only x,y need gathering. */
+    std::vector<T> xg, yg;
+    const T *xp = x, *yp = y;
+    if (incx != 1 || incy != 1) {
+        xg.resize(N); yg.resize(N);
+        std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+        std::ptrdiff_t iy = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
+        for (int j = 0; j < N; ++j) {
+            xg[j] = x[ix]; ix += incx;
+            yg[j] = y[iy]; iy += incy;
+        }
+        xp = xg.data(); yp = yg.data();
+    }
+
 #ifdef _OPENMP
-        const int use_omp = (N >= WHER2_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
+    const int use_omp = (N >= WHER2_OMP_MIN && blas_omp_max_threads() > 1);
+#endif
+    if (UPLO == 'L') {
+#ifdef _OPENMP
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
         for (int j = 0; j < N; ++j) {
-            const T xj = x[j], yj = y[j];
-            if (!cdd_iszero(xj) || !cdd_iszero(yj)) {
-                const T temp1 = cmul(alpha, cconj(yj));
-                const T temp2 = cconj(cmul(alpha, xj));
+            if (!cdd_iszero(xp[j]) || !cdd_iszero(yp[j]))
+                wher2_col_lower(j, N, cmul(alpha, cconj(yp[j])),
+                                cconj(cmul(alpha, xp[j])), xp, yp, &A_(0, j));
+            else {
                 T *aj = &A_(0, j);
-                if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i)
-                        aj[i] = cadd(aj[i], cadd(cmul(x[i], temp1), cmul(y[i], temp2)));
-                    T prod = cadd(cmul(x[j], temp1), cmul(y[j], temp2));
-                    aj[j] = T{ aj[j].re + prod.re, rzero };
-                } else {
-                    for (int i = 0; i < j; ++i)
-                        aj[i] = cadd(aj[i], cadd(cmul(x[i], temp1), cmul(y[i], temp2)));
-                    T prod = cadd(cmul(x[j], temp1), cmul(y[j], temp2));
-                    aj[j] = T{ aj[j].re + prod.re, rzero };
-                }
+                aj[j] = T{ aj[j].re, rzero };
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
+#ifdef _OPENMP
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
+#endif
         for (int j = 0; j < N; ++j) {
-            const T xj = x[kx + j * incx];
-            const T yj = y[ky + j * incy];
-            if (!cdd_iszero(xj) || !cdd_iszero(yj)) {
-                const T temp1 = cmul(alpha, cconj(yj));
-                const T temp2 = cconj(cmul(alpha, xj));
-                if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i)
-                        A_(i, j) = cadd(A_(i, j), cadd(cmul(x[kx + i * incx], temp1), cmul(y[ky + i * incy], temp2)));
-                    T prod = cadd(cmul(xj, temp1), cmul(yj, temp2));
-                    A_(j, j) = T{ A_(j, j).re + prod.re, rzero };
-                } else {
-                    for (int i = 0; i < j; ++i)
-                        A_(i, j) = cadd(A_(i, j), cadd(cmul(x[kx + i * incx], temp1), cmul(y[ky + i * incy], temp2)));
-                    T prod = cadd(cmul(xj, temp1), cmul(yj, temp2));
-                    A_(j, j) = T{ A_(j, j).re + prod.re, rzero };
-                }
+            if (!cdd_iszero(xp[j]) || !cdd_iszero(yp[j]))
+                wher2_col_upper(j, cmul(alpha, cconj(yp[j])),
+                                cconj(cmul(alpha, xp[j])), xp, yp, &A_(0, j));
+            else {
+                T *aj = &A_(0, j);
+                aj[j] = T{ aj[j].re, rzero };
             }
         }
     }
