@@ -1,10 +1,17 @@
 /* mspr2 — multifloats real DD symmetric packed rank-2 update.
  *   A := alpha*x*y^T + alpha*y*x^T + A
+ *
+ * x and y are gathered+split once into SoA limb arrays (the strided->
+ * contiguous fix — ap is always packed contiguous) and fed to the fused
+ * 4-wide AVX2 SoA DD rank-2 axpy kernel (mf_rank1::dd_axpy2), bit-identical
+ * to the scalar operators. OMP over columns j (independent in packed storage).
  */
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
+#include "mf_rank1_simd.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -18,7 +25,7 @@ namespace {
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
-inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
+inline bool dd_iszero(double h, double l) { return h == 0.0 && l == 0.0; }
 }
 
 extern "C" void mspr2_(
@@ -36,69 +43,50 @@ extern "C" void mspr2_(
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
-    if (N == 0 || dd_iszero(alpha)) return;
+    if (N == 0 || dd_iszero(alpha.limbs[0], alpha.limbs[1])) return;
 
-    if (incx == 1 && incy == 1) {
-        if (UPLO == 'U') {
+    /* Gather x,y in logical order 0..N-1 and split into SoA limbs. O(N). */
+    std::vector<double> xh(N), xl(N), yh(N), yl(N);
+    {
+        std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+        std::ptrdiff_t iy = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
+        for (int j = 0; j < N; ++j) {
+            xh[j] = x[ix].limbs[0]; xl[j] = x[ix].limbs[1]; ix += incx;
+            yh[j] = y[iy].limbs[0]; yl[j] = y[iy].limbs[1]; iy += incy;
+        }
+    }
+    const double *xhp = xh.data(), *xlp = xl.data();
+    const double *yhp = yh.data(), *ylp = yl.data();
+
 #ifdef _OPENMP
-            const int use_omp = (N >= MSPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+    const int use_omp = (N >= MSPR2_OMP_MIN && blas_omp_max_threads() > 1);
+    /* static,8: packed columns are contiguous in ap, so cyclic static,1 would
+     * false-share cache lines; chunk-8 balances the triangular skew while
+     * keeping each thread's run local (mirrors the mspr/espr2 twins). */
 #endif
-            for (int j = 0; j < N; ++j) {
-                if (!dd_iszero(x[j]) || !dd_iszero(y[j])) {
-                    const T t1 = alpha * y[j];
-                    const T t2 = alpha * x[j];
-                    const int kk = (j * (j + 1)) / 2;
-                    for (int i = 0; i <= j; ++i) ap[kk + i] = ap[kk + i] + x[i] * t1 + y[i] * t2;
-                }
-            }
-        } else {
+    if (UPLO == 'U') {
 #ifdef _OPENMP
-            const int use_omp = (N >= MSPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+        #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
-            for (int j = 0; j < N; ++j) {
-                if (!dd_iszero(x[j]) || !dd_iszero(y[j])) {
-                    const T t1 = alpha * y[j];
-                    const T t2 = alpha * x[j];
-                    const int kk = j * N - (j * (j - 1)) / 2;
-                    for (int i = j; i < N; ++i) ap[kk + (i - j)] = ap[kk + (i - j)] + x[i] * t1 + y[i] * t2;
-                }
-            }
+        for (int j = 0; j < N; ++j) {
+            if (dd_iszero(xhp[j], xlp[j]) && dd_iszero(yhp[j], ylp[j])) continue;
+            const T t1 = alpha * T{yhp[j], ylp[j]};
+            const T t2 = alpha * T{xhp[j], xlp[j]};
+            const int kk = (j * (j + 1)) / 2;
+            mf_rank1::dd_axpy2(j + 1, xhp, xlp, t1.limbs[0], t1.limbs[1],
+                               yhp, ylp, t2.limbs[0], t2.limbs[1], &ap[kk]);
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        int kk = 0;
-        int jx = kx, jy = ky;
-        if (UPLO == 'U') {
-            for (int j = 0; j < N; ++j) {
-                if (!dd_iszero(x[jx]) || !dd_iszero(y[jy])) {
-                    const T t1 = alpha * y[jy];
-                    const T t2 = alpha * x[jx];
-                    int ix = kx, iy = ky;
-                    for (int k = kk; k < kk + j + 1; ++k) {
-                        ap[k] = ap[k] + x[ix] * t1 + y[iy] * t2;
-                        ix += incx; iy += incy;
-                    }
-                }
-                jx += incx; jy += incy;
-                kk += j + 1;
-            }
-        } else {
-            for (int j = 0; j < N; ++j) {
-                if (!dd_iszero(x[jx]) || !dd_iszero(y[jy])) {
-                    const T t1 = alpha * y[jy];
-                    const T t2 = alpha * x[jx];
-                    int ix = jx, iy = jy;
-                    for (int k = kk; k < kk + N - j; ++k) {
-                        ap[k] = ap[k] + x[ix] * t1 + y[iy] * t2;
-                        ix += incx; iy += incy;
-                    }
-                }
-                jx += incx; jy += incy;
-                kk += N - j;
-            }
+#ifdef _OPENMP
+        #pragma omp parallel for if(use_omp) schedule(static, 8)
+#endif
+        for (int j = 0; j < N; ++j) {
+            if (dd_iszero(xhp[j], xlp[j]) && dd_iszero(yhp[j], ylp[j])) continue;
+            const T t1 = alpha * T{yhp[j], ylp[j]};
+            const T t2 = alpha * T{xhp[j], xlp[j]};
+            const int kk = j * N - (j * (j - 1)) / 2;
+            mf_rank1::dd_axpy2(N - j, xhp + j, xlp + j, t1.limbs[0], t1.limbs[1],
+                               yhp + j, ylp + j, t2.limbs[0], t2.limbs[1], &ap[kk]);
         }
     }
 }

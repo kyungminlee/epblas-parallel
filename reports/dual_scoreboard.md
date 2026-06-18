@@ -1,25 +1,24 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-18 07:01 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-18 07:20 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
-| m | 2145 | 98.7% | 99.3% |
+| m | 2193 | 98.7% | 99.3% |
 | e | 2145 | 92.1% | 98.6% |
 | q | 2145 | 97.9% | 98.3% |
 
 ## m — multifloats (double-double)
 
-2145 cells, 71 routines.  **Pass@1.02: serial 98.7% · omp4 99.3%.**  3 routine(s) with ≥1 flagged cell.
+2193 cells, 73 routines.  **Pass@1.02: serial 98.7% · omp4 99.3%.**  3 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
 | **mtbmv** | 96 | 1.059 ob1 @LNU/x2/512 | 1.055 @LNU/x-1/128 | ⚠ |
 | **mtbsv** | 96 | 1.039 ob1 @UTU/x2/512 | 1.041 @UTU/x-1/512 | ⚠ |
 | **mgemv** | 24 | 1.001 | 1.026 @N/x2/128 | ⚠ |
-| msyr | 24 | 1.020 | 1.016 | ✅ |
 | msymv | 24 | 1.015 | 1.010 | ✅ |
 | mtpmv | 96 | 1.013 | 0.994 | ✅ |
 | mger | 12 | 1.013 | 1.008 | ✅ |
@@ -56,6 +55,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | whpr | 18 | 0.918 | 0.886 | ✅ |
 | wgeru | 9 | 0.878 | 0.882 | ✅ |
 | wgerc | 9 | 0.850 | 0.858 | ✅ |
+| msyr | 24 | 0.373 | 0.661 | ✅ |
 | msyr2k | 16 | 0.293 | 0.643 | ✅ |
 | mrotg | 1 | 0.623 | 0.626 | ✅ |
 | mspr | 24 | 0.361 | 0.609 | ✅ |
@@ -71,8 +71,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | waxpy | 3 | 0.184 | 0.448 | ✅ |
 | wrotg | 1 | 0.410 | 0.410 | ✅ |
 | mgemmtr | 32 | 0.380 | 0.251 | ✅ |
+| msyr2 | 24 | 0.301 | 0.347 | ✅ |
 | mtrsv | 96 | 0.267 | 0.344 | ✅ |
 | mtrsm | 64 | 0.337 | 0.341 | ✅ |
+| mspr2 | 24 | 0.298 | 0.339 | ✅ |
 | wsymm | 12 | 0.337 | 0.201 | ✅ |
 | wtrmm | 72 | 0.335 | 0.289 | ✅ |
 | whemm | 12 | 0.334 | 0.202 | ✅ |

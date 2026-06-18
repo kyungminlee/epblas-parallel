@@ -430,6 +430,39 @@ def build_syr_her(name, is_c, is_h):
     return is_c, 'void', sig, spec
 
 
+def build_syr2_her2(name, is_c):
+    """Dense symmetric/Hermitian rank-2 update (syr2/her2). alpha is the
+    element type (complex for her2). x and y share the stride `inc`."""
+    Ta = 'CT' if is_c else 'RT'
+    p7 = CL7 if is_c else RL7
+    sig = (f'const char *, const int *, const {Ta} *, const T *, const int *, '
+           'const T *, const int *, T *, const int *, size_t')
+    setup = f'''    {Ta} alpha = {p7};
+    int absi = inc < 0 ? -inc : inc, lda = N;
+    const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absi;
+    const size_t NNelt = (size_t)N * (size_t)N;
+    T *A = {_ALLOC}NNelt * sizeof(T));
+    T *Ai = {_ALLOC}NNelt * sizeof(T));
+    T *X = {_ALLOC}lenx * sizeof(T));
+    T *Y = {_ALLOC}lenx * sizeof(T));
+    {fill('Ai', 'NNelt', is_c, 2)}
+    {fill('X', 'lenx', is_c, 3)}
+    {fill('Y', 'lenx', is_c, 4)}
+    memcpy(A, Ai, NNelt * sizeof(T));
+{_kbuf_inc(['uplo'])}'''
+    sweep = f'''    const char uplos[] = {_chars(['U', 'L'])};
+{_strides_decl()}
+{_size_iters(_l2_sizes(is_c), 'l2')}
+    for (size_t u = 0; u < 2; ++u) for (int k = 0; k < ninc; ++k)
+        for (int i = 0; i < nsz; ++i)
+            run_one(uplos[u], sizes[i], incs[k], itersarr[i], reps);'''
+    spec = Spec(params='char uplo, int N, int inc', setup=setup,
+                call='&uplo, &N, &alpha, X, &inc, Y, &inc, A, &lda, 1',
+                reset='memcpy(A, Ai, NNelt * sizeof(T));', touch=_out_touch('A'),
+                free='    free(A); free(Ai); free(X); free(Y);', sweep=sweep)
+    return is_c, 'void', sig, spec
+
+
 def build_trmv_trsv(name, is_c):
     dom = 'MKC((double)(N + 4), 0.0)' if is_c else 'MKR((double)(N + 4))'
     sig = ('const char *, const char *, const char *, const int *, '
@@ -595,6 +628,39 @@ def build_spr_hpr(name, is_c, is_h):
                 call='&uplo, &N, &alpha, X, &inc, AP, 1',
                 reset='memcpy(AP, APi, APelt * sizeof(T));', touch=_out_touch('AP'),
                 free='    free(AP); free(APi); free(X);', sweep=sweep)
+    return is_c, 'void', sig, spec
+
+
+def build_spr2_hpr2(name, is_c):
+    """Packed symmetric/Hermitian rank-2 update (spr2/hpr2). alpha is the
+    element type (complex for hpr2). x and y share the stride `inc`."""
+    Ta = 'CT' if is_c else 'RT'
+    p7 = CL7 if is_c else RL7
+    sig = (f'const char *, const int *, const {Ta} *, const T *, const int *, '
+           'const T *, const int *, T *, size_t')
+    setup = f'''    {Ta} alpha = {p7};
+    int absi = inc < 0 ? -inc : inc;
+    const size_t lenx = (size_t)1 + (size_t)(N - 1) * (size_t)absi;
+    const size_t APelt = (size_t)N * (size_t)(N + 1) / 2;
+    T *AP = {_ALLOC}APelt * sizeof(T));
+    T *APi = {_ALLOC}APelt * sizeof(T));
+    T *X = {_ALLOC}lenx * sizeof(T));
+    T *Y = {_ALLOC}lenx * sizeof(T));
+    {fill('APi', 'APelt', is_c, 2)}
+    {fill('X', 'lenx', is_c, 3)}
+    {fill('Y', 'lenx', is_c, 4)}
+    memcpy(AP, APi, APelt * sizeof(T));
+{_kbuf_inc(['uplo'])}'''
+    sweep = f'''    const char uplos[] = {_chars(['U', 'L'])};
+{_strides_decl()}
+{_size_iters(_l2_sizes(is_c), 'l2')}
+    for (size_t u = 0; u < 2; ++u) for (int k = 0; k < ninc; ++k)
+        for (int i = 0; i < nsz; ++i)
+            run_one(uplos[u], sizes[i], incs[k], itersarr[i], reps);'''
+    spec = Spec(params='char uplo, int N, int inc', setup=setup,
+                call='&uplo, &N, &alpha, X, &inc, Y, &inc, AP, 1',
+                reset='memcpy(AP, APi, APelt * sizeof(T));', touch=_out_touch('AP'),
+                free='    free(AP); free(APi); free(X); free(Y);', sweep=sweep)
     return is_c, 'void', sig, spec
 
 
@@ -859,6 +925,7 @@ def build_rotmg(name):
 _L3 = {'gemm', 'symm', 'hemm', 'syrk', 'herk', 'syr2k', 'her2k',
        'trmm', 'trsm', 'gemmtr'}
 _L2 = {'gemv', 'ger', 'geru', 'gerc', 'symv', 'hemv', 'syr', 'her',
+       'syr2', 'her2', 'spr2', 'hpr2',
        'trmv', 'trsv', 'gbmv', 'sbmv', 'hbmv', 'tbmv', 'tbsv',
        'spr', 'hpr', 'spmv', 'hpmv', 'tpmv', 'tpsv'}
 _L1 = {'axpy', 'scal', 'cscal_r', 'copy', 'swap', 'dot', 'dotu', 'dotc',
@@ -892,6 +959,8 @@ def build_spec(name):
         return build_symv_hemv(name, is_c or suffix == 'hemv')
     if suffix in ('syr', 'her'):
         return build_syr_her(name, is_c or suffix == 'her', is_h=suffix == 'her')
+    if suffix in ('syr2', 'her2'):
+        return build_syr2_her2(name, is_c or suffix == 'her2')
     if suffix in ('trmv', 'trsv'):
         return build_trmv_trsv(name, is_c)
     # L2 banded
@@ -904,6 +973,8 @@ def build_spec(name):
     # L2 packed
     if suffix in ('spr', 'hpr'):
         return build_spr_hpr(name, is_c or suffix == 'hpr', is_h=suffix == 'hpr')
+    if suffix in ('spr2', 'hpr2'):
+        return build_spr2_hpr2(name, is_c or suffix == 'hpr2')
     if suffix in ('spmv', 'hpmv'):
         return build_spmv_hpmv(name, is_c or suffix == 'hpmv')
     if suffix in ('tpmv', 'tpsv'):

@@ -123,6 +123,34 @@ dd_axpy(int n, const double *xh, const double *xl,
     }
 }
 
+/* Fused rank-2: ap[i] := (ap[i] + {xh,xl}[i]*{th,tl}) + {yh,yl}[i]*{sh,sl},
+ * the left-associative order of the reference `ap + x*t1 + y*t2`. One ap
+ * read/write (vs two dd_axpy passes). */
+static inline void
+dd_axpy2(int n, const double *xh, const double *xl, double th, double tl,
+         const double *yh, const double *yl, double sh, double sl,
+         multifloats::float64x2 *ap)
+{
+    const __m256d thb = _mm256_set1_pd(th), tlb = _mm256_set1_pd(tl);
+    const __m256d shb = _mm256_set1_pd(sh), slb = _mm256_set1_pd(sl);
+    int i = 0;
+    for (; i + 4 <= n; i += 4) {
+        __m256d ahv, alv;
+        load_dd4(ap + i, ahv, alv);
+        __m256d ph, pl;
+        dd_mul(_mm256_loadu_pd(xh + i), _mm256_loadu_pd(xl + i), thb, tlb, ph, pl);
+        dd_add(ahv, alv, ph, pl, ahv, alv);          /* ap + x*t1 */
+        dd_mul(_mm256_loadu_pd(yh + i), _mm256_loadu_pd(yl + i), shb, slb, ph, pl);
+        dd_add(ahv, alv, ph, pl, ahv, alv);          /* + y*t2    */
+        store_dd4(ap + i, ahv, alv);
+    }
+    for (; i < n; ++i) {
+        const multifloats::float64x2 xv{xh[i], xl[i]}, tv{th, tl};
+        const multifloats::float64x2 yv{yh[i], yl[i]}, sv{sh, sl};
+        ap[i] = ap[i] + xv * tv + yv * sv;
+    }
+}
+
 #else  /* !MBLAS_SIMD_DD — scalar fallback */
 
 static inline void
@@ -133,6 +161,18 @@ dd_axpy(int n, const double *xh, const double *xl,
     for (int i = 0; i < n; ++i) {
         const multifloats::float64x2 xv{xh[i], xl[i]};
         ap[i] = ap[i] + xv * tv;
+    }
+}
+
+static inline void
+dd_axpy2(int n, const double *xh, const double *xl, double th, double tl,
+         const double *yh, const double *yl, double sh, double sl,
+         multifloats::float64x2 *ap)
+{
+    const multifloats::float64x2 tv{th, tl}, sv{sh, sl};
+    for (int i = 0; i < n; ++i) {
+        const multifloats::float64x2 xv{xh[i], xl[i]}, yv{yh[i], yl[i]};
+        ap[i] = ap[i] + xv * tv + yv * sv;
     }
 }
 
