@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
@@ -219,6 +220,66 @@ __attribute__((noinline)) static bool msymv_omp(
 }
 #endif
 
+/* Contiguous (unit-stride) symmetric matvec core: y += alpha*A*x, y pre-beta'd.
+ * SIMD build packs x/y to SoA and runs the threaded/serial msymv_col; the scalar
+ * fallback build runs the reference column loops. Strided callers gather x/y to
+ * contiguous scratch and scatter y back, so this single core serves every case. */
+static void msymv_contig(bool lower, int N, const T *a, std::size_t lda,
+                         const T *x, T *y, T alpha)
+{
+#ifdef MBLAS_SIMD_DD
+    const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
+    double *x_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *x_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *y_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *y_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    for (int i = 0; i < N; ++i) {
+        x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1];
+        y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1];
+    }
+    for (std::size_t i = static_cast<std::size_t>(N); i < N_pad; ++i) {
+        x_hi[i] = 0.0; x_lo[i] = 0.0; y_hi[i] = 0.0; y_lo[i] = 0.0;
+    }
+    bool done_omp = false;
+#if defined(_OPENMP)
+    if (N >= MSYMV_OMP_MIN && blas_omp_max_threads() > 1)
+        done_omp = msymv_omp(lower, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
+#endif
+    if (!done_omp)
+        for (int i = 0; i < N; ++i)
+            msymv_col(lower, i, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
+    for (int i = 0; i < N; ++i) {
+        y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i];
+    }
+    std::free(x_hi); std::free(x_lo); std::free(y_hi); std::free(y_lo);
+#else
+    if (lower) {
+        for (int i = 0; i < N; ++i) {
+            const T temp1 = alpha * x[i];
+            T temp2 = zero_dd;
+            const T *ai = &A_(0, i);
+            y[i] = y[i] + temp1 * ai[i];
+            for (int k = i + 1; k < N; ++k) {
+                y[k]  = y[k] + temp1 * ai[k];
+                temp2 = temp2 + ai[k] * x[k];
+            }
+            y[i] = y[i] + alpha * temp2;
+        }
+    } else {
+        for (int i = 0; i < N; ++i) {
+            const T temp1 = alpha * x[i];
+            T temp2 = zero_dd;
+            const T *ai = &A_(0, i);
+            for (int k = 0; k < i; ++k) {
+                y[k]  = y[k] + temp1 * ai[k];
+                temp2 = temp2 + ai[k] * x[k];
+            }
+            y[i] = y[i] + temp1 * ai[i] + alpha * temp2;
+        }
+    }
+#endif
+}
+
 extern "C" void msymv_(
     const char *uplo,
     const int *n_,
@@ -231,9 +292,10 @@ extern "C" void msymv_(
 {
     (void)uplo_len;
     const int N = *n_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const std::size_t lda = static_cast<std::size_t>(*lda_);
+    const int incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const bool lower = (up(uplo) == 'L');
 
     if (N == 0) return;
 
@@ -248,89 +310,19 @@ extern "C" void msymv_(
     if (dd_iszero(alpha)) return;
 
     if (incx == 1 && incy == 1) {
-#ifdef MBLAS_SIMD_DD
-        const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
-        double *x_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *x_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *y_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *y_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        for (int i = 0; i < N; ++i) {
-            x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1];
-            y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1];
-        }
-        for (std::size_t i = static_cast<std::size_t>(N); i < N_pad; ++i) {
-            x_hi[i] = 0.0; x_lo[i] = 0.0; y_hi[i] = 0.0; y_lo[i] = 0.0;
-        }
-        bool done_omp = false;
-#if defined(_OPENMP)
-        if (N >= MSYMV_OMP_MIN && blas_omp_max_threads() > 1)
-            done_omp = msymv_omp(UPLO == 'L', N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
-#endif
-        if (!done_omp) {
-            if (UPLO == 'L') {
-                for (int i = 0; i < N; ++i)
-                    msymv_col(true, i, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
-            } else {
-                for (int i = 0; i < N; ++i)
-                    msymv_col(false, i, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
-            }
-        }
-        for (int i = 0; i < N; ++i) {
-            y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i];
-        }
-        std::free(x_hi); std::free(x_lo); std::free(y_hi); std::free(y_lo);
-#else
-        if (UPLO == 'L') {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = alpha * x[i];
-                T temp2 = zero_dd;
-                const T *ai = &A_(0, i);
-                y[i] = y[i] + temp1 * ai[i];
-                for (int k = i + 1; k < N; ++k) {
-                    y[k]  = y[k] + temp1 * ai[k];
-                    temp2 = temp2 + ai[k] * x[k];
-                }
-                y[i] = y[i] + alpha * temp2;
-            }
-        } else {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = alpha * x[i];
-                T temp2 = zero_dd;
-                const T *ai = &A_(0, i);
-                for (int k = 0; k < i; ++k) {
-                    y[k]  = y[k] + temp1 * ai[k];
-                    temp2 = temp2 + ai[k] * x[k];
-                }
-                y[i] = y[i] + temp1 * ai[i] + alpha * temp2;
-            }
-        }
-#endif
-    } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        if (UPLO == 'L') {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = alpha * x[kx + i * incx];
-                T temp2 = zero_dd;
-                y[ky + i * incy] = y[ky + i * incy] + temp1 * A_(i, i);
-                for (int k = i + 1; k < N; ++k) {
-                    y[ky + k * incy] = y[ky + k * incy] + temp1 * A_(k, i);
-                    temp2 = temp2 + A_(k, i) * x[kx + k * incx];
-                }
-                y[ky + i * incy] = y[ky + i * incy] + alpha * temp2;
-            }
-        } else {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = alpha * x[kx + i * incx];
-                T temp2 = zero_dd;
-                for (int k = 0; k < i; ++k) {
-                    y[ky + k * incy] = y[ky + k * incy] + temp1 * A_(k, i);
-                    temp2 = temp2 + A_(k, i) * x[kx + k * incx];
-                }
-                y[ky + i * incy] = y[ky + i * incy] + temp1 * A_(i, i) + alpha * temp2;
-            }
-        }
+        msymv_contig(lower, N, a, lda, x, y, alpha);
+        return;
     }
+
+    /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
+     * core, scatter y back. Handles negative increments; O(N) gather vs O(N^2). */
+    const T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
+    T *ybase = (incy < 0) ? y - (std::ptrdiff_t)(N - 1) * incy : y;
+    std::vector<T> xs(static_cast<std::size_t>(N)), ys(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
+    for (int i = 0; i < N; ++i) ys[i] = ybase[(std::ptrdiff_t)i * incy];
+    msymv_contig(lower, N, a, lda, xs.data(), ys.data(), alpha);
+    for (int i = 0; i < N; ++i) ybase[(std::ptrdiff_t)i * incy] = ys[i];
 }
 
 #undef A_
