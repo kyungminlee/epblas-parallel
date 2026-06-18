@@ -6,10 +6,11 @@
  */
 
 #include <cstddef>
+#include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
 #ifdef _OPENMP
-#include <cstdlib>
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
@@ -29,6 +30,36 @@ inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
+
+namespace {
+/* Contiguous (incx==incy==1) cores. Each column's band segment A_(KU-j+i, j) is
+ * stride-1 in the row index. NoTrans scatters that segment into y via SoA AXPY
+ * (y[i] += tmp*col[i], distinct rows, ascending j -> bit-exact). Trans reduces it
+ * against x via a vector dot (within DD fuzz tol). The strided entries gather
+ * x/y to scratch and reuse these. */
+void mgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
+                    const T *a, std::size_t lda, const T *x, T *y)
+{
+    for (int j = 0; j < N; ++j) {
+        const T tmp = alpha * x[j];
+        const int i_lo = (j - KU > 0) ? (j - KU) : 0;
+        const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+        const int k = KU - j;
+        if (i_hi > i_lo) mf_tri::axpy_add(i_hi - i_lo, &y[i_lo], &A_(k + i_lo, j), tmp);
+    }
+}
+void mgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
+                    const T *a, std::size_t lda, const T *x, T *y)
+{
+    for (int j = 0; j < N; ++j) {
+        const int i_lo = (j - KU > 0) ? (j - KU) : 0;
+        const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+        const int k = KU - j;
+        const T s = (i_hi > i_lo) ? mf_tri::dot(i_hi - i_lo, &A_(k + i_lo, j), &x[i_lo]) : zero_dd;
+        y[j] = y[j] + alpha * s;
+    }
+}
+}
 
 #ifdef _OPENMP
 /* Threaded NoTrans DD band matvec via restricted column-scatter. Each thread
@@ -66,9 +97,13 @@ static bool mgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
             std::ptrdiff_t i_lo = (j - KU > lo) ? (j - KU) : lo;
             std::ptrdiff_t i_hi = (j + KL + 1 < hi) ? (j + KL + 1) : hi;
             const T *col = &A_(KU - j + i_lo, j);   /* contiguous in i */
-            for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                T *yi = &y[iy0 + i * incy];
-                *yi = *yi + tmp * (*col++);
+            if (incy == 1) {                        /* contiguous owned rows -> SoA AXPY */
+                mf_tri::axpy_add(i_hi - i_lo, &y[iy0 + i_lo], col, tmp);
+            } else {
+                for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
+                    T *yi = &y[iy0 + i * incy];
+                    *yi = *yi + tmp * (*col++);
+                }
             }
         }
     }
@@ -110,8 +145,7 @@ static bool mgbmv_t_omp(int M, int N, int KL, int KU, T alpha,
             std::ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
             std::ptrdiff_t k = KU - j;
             const T *col = &A_(k + i_lo, j);
-            T s = zero_dd;
-            for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) s = s + (*col++) * xptr[i];
+            T s = mf_tri::dot(i_hi - i_lo, col, &xptr[i_lo]);
             y[j * incy] = y[j * incy] + alpha * s;
         }
     }
@@ -163,14 +197,28 @@ extern "C" void mgbmv_(
             return;
 #endif
         if (incx == 1 && incy == 1) {
-            for (int j = 0; j < N; ++j) {
-                const T tmp = alpha * x[j];
-                const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-                const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-                const int k = KU - j;
-                for (int i = i_lo; i < i_hi; ++i) y[i] = y[i] + tmp * A_(k + i, j);
+            mgbmv_n_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, x, y);
+            return;
+        }
+        /* Strided: gather x (len N) and beta-scaled y (len M) to contiguous
+         * scratch, run the SIMD scatter core, scatter y back. O(M+N) gather vs
+         * O(M*band) work; the in-place strided walk is the alloc-fail fallback. */
+        {
+            const std::ptrdiff_t bx = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+            const std::ptrdiff_t by = (incy < 0) ? -(std::ptrdiff_t)(M - 1) * incy : 0;
+            T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+            T *ys = static_cast<T *>(std::malloc((std::size_t)M * sizeof(T)));
+            if (xs && ys) {
+                for (int i = 0; i < N; ++i) xs[i] = x[bx + (std::ptrdiff_t)i * incx];
+                for (int i = 0; i < M; ++i) ys[i] = y[by + (std::ptrdiff_t)i * incy];
+                mgbmv_n_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, xs, ys);
+                for (int i = 0; i < M; ++i) y[by + (std::ptrdiff_t)i * incy] = ys[i];
+                std::free(xs); std::free(ys);
+                return;
             }
-        } else {
+            std::free(xs); std::free(ys);
+        }
+        {
             int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
             int ky = (incy < 0) ? -(leny - 1) * incy : 0;
             int jx = kx;
@@ -188,42 +236,53 @@ extern "C" void mgbmv_(
                 if (j >= KU) ky += incy;
             }
         }
-    } else if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
-        const int use_omp = (N >= MGBMV_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (int j = 0; j < N; ++j) {
-            T s = zero_dd;
-            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-            const int k = KU - j;
-            for (int i = i_lo; i < i_hi; ++i) s = s + A_(k + i, j) * x[i];
-            y[j] = y[j] + alpha * s;
-        }
     } else {
-        /* Strided Trans gather (C already mapped to T above). */
 #ifdef _OPENMP
+        /* Trans threads for contiguous AND strided x/y (the helper gathers strided
+         * x and writes strided y). */
         if (N >= MGBMV_OMP_MIN && blas_omp_max_threads() > 1
             && mgbmv_t_omp(M, N, KL, KU, alpha, a, lda, x, incx, y, incy))
             return;
 #endif
-        int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
-        int ky = (incy < 0) ? -(leny - 1) * incy : 0;
-        int jy = ky;
-        for (int j = 0; j < N; ++j) {
-            T s = zero_dd;
-            int ix = kx;
-            const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-            const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
-            const int k = KU - j;
-            for (int i = i_lo; i < i_hi; ++i) {
-                s = s + A_(k + i, j) * x[ix];
-                ix += incx;
+        if (incx == 1 && incy == 1) {
+            mgbmv_t_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, x, y);
+            return;
+        }
+        /* Strided: gather x (len M) and beta-scaled y (len N), run the SIMD dot
+         * core, scatter y back; the in-place strided walk is the alloc-fail fallback. */
+        {
+            const std::ptrdiff_t bx = (incx < 0) ? -(std::ptrdiff_t)(M - 1) * incx : 0;
+            const std::ptrdiff_t by = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
+            T *xs = static_cast<T *>(std::malloc((std::size_t)M * sizeof(T)));
+            T *ys = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+            if (xs && ys) {
+                for (int i = 0; i < M; ++i) xs[i] = x[bx + (std::ptrdiff_t)i * incx];
+                for (int i = 0; i < N; ++i) ys[i] = y[by + (std::ptrdiff_t)i * incy];
+                mgbmv_t_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, xs, ys);
+                for (int i = 0; i < N; ++i) y[by + (std::ptrdiff_t)i * incy] = ys[i];
+                std::free(xs); std::free(ys);
+                return;
             }
-            y[jy] = y[jy] + alpha * s;
-            jy += incy;
-            if (j >= KU) kx += incx;
+            std::free(xs); std::free(ys);
+        }
+        {
+            int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
+            int ky = (incy < 0) ? -(leny - 1) * incy : 0;
+            int jy = ky;
+            for (int j = 0; j < N; ++j) {
+                T s = zero_dd;
+                int ix = kx;
+                const int i_lo = (j - KU > 0) ? (j - KU) : 0;
+                const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+                const int k = KU - j;
+                for (int i = i_lo; i < i_hi; ++i) {
+                    s = s + A_(k + i, j) * x[ix];
+                    ix += incx;
+                }
+                y[jy] = y[jy] + alpha * s;
+                jy += incy;
+                if (j >= KU) kx += incx;
+            }
         }
     }
 }
