@@ -5,16 +5,16 @@
  * static block hand one thread the heavy triangle end (par caps at ~2.3x on 4
  * cores); cyclic schedule(static,1) interleaves short and long columns across
  * the team, balancing the skew symmetrically for both UPLO (mirrors the proven
- * kind10 yher2/whpr2). The per-column body is carved into noinline helpers so
- * the inner loop keeps clean register allocation and the serial + threaded
- * paths share one tight loop (inlining into the omp region spills the
- * kept-resident column scalars and loses the UPPER triangle).
+ * kind10 yher2/whpr2). The off-diagonal column run is a SIMD rank-2 AXPY
+ * (mf_tri::caxpy2_add, two rank-1 passes -> within DD fuzz tol); the diagonal
+ * is forced real.
  */
 
 #include <cstddef>
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_tri_simd.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -38,23 +38,18 @@ inline T cmul(T const &a, T const &b) {
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 
-/* Per-column rank-2 update, carved out noinline so the inner loop compiles
- * with clean register allocation (see file header). aj = &A(0,j); the
- * Hermitian diagonal is forced real. */
-__attribute__((noinline))
-void wher2_col_upper(int j, T t1, T t2, const T *x, const T *y, T *aj) {
-    for (int i = 0; i < j; ++i)
-        aj[i] = cadd(aj[i], cadd(cmul(x[i], t1), cmul(y[i], t2)));
+/* Per-column rank-2 update. aj = &A(0,j); off-diagonal run is a SIMD rank-2
+ * AXPY (two rank-1 passes); the Hermitian diagonal is forced real. */
+inline void wher2_col_upper(int j, T t1, T t2, const T *x, const T *y, T *aj) {
+    mf_tri::caxpy2_add(j, aj, x, t1, y, t2);
     const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
     aj[j] = T{ aj[j].re + prod.re, rzero };
 }
 
-__attribute__((noinline))
-void wher2_col_lower(int j, int N, T t1, T t2, const T *x, const T *y, T *aj) {
+inline void wher2_col_lower(int j, int N, T t1, T t2, const T *x, const T *y, T *aj) {
     const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
     aj[j] = T{ aj[j].re + prod.re, rzero };
-    for (int i = j + 1; i < N; ++i)
-        aj[i] = cadd(aj[i], cadd(cmul(x[i], t1), cmul(y[i], t2)));
+    mf_tri::caxpy2_add(N - (j + 1), aj + j + 1, x + j + 1, t1, y + j + 1, t2);
 }
 }
 

@@ -174,4 +174,18 @@ static inline CT cdot(std::ptrdiff_t len, const CT *cp, const CT *xp, bool conj)
 
 #endif  /* MBLAS_SIMD_DD */
 
+/* xp[i] += t1*c1[i] + t2*c2[i] — complex rank-2 column AXPY run as two
+ * independent rank-1 caxpy_add passes. The fused single-pass form spilled (it
+ * must hold both broadcast scalars + both source vectors + the two products,
+ * exceeding the 16 ymm registers, ~3.4x slower per flop); two passes of the
+ * low-pressure kernel are ~3x faster. Reassociating the per-element sum
+ * ((xp+t1*c1)+t2*c2 vs xp+(t1*c1+t2*c2)) matches the scalar reference within DD
+ * fuzz tol, not bit-for-bit. */
+static inline void caxpy2_add(std::ptrdiff_t len, CT *xp,
+                              const CT *c1, const CT &t1,
+                              const CT *c2, const CT &t2) {
+    caxpy_add(len, xp, c1, t1);
+    caxpy_add(len, xp, c2, t2);
+}
+
 }  // namespace mf_tri

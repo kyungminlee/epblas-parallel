@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
 #ifdef MBLAS_SIMD_DD
 #include "mgemm_simd_kernel.h"
@@ -40,30 +41,6 @@ inline T cmul(T const &a, T const &b) {
 }
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
-
-/* Strided Hermitian inner sweep over k in [lo,hi): the temp1-axpy y[iy]+=temp1*A[k,i]
- * plus temp2 += conj(A[k,i])*x[ix], advancing the strided x/y by incx/incy. Carved
- * into a noinline helper so it compiles ONCE in a clean register context: inlined
- * into the large whemv_ body GCC spilled the loop to out-of-line cmul/cadd calls and
- * gave the LOWER copy a worse basic-block layout than UPPER (~9% slower). As one
- * shared helper both uplos get the same tight loop with cmul/cadd/cconj inlined.
- * y[iy] is written once per k and temp2 accumulates in ascending k — the exact
- * operation order of the prior inline bodies, so bit-identical. ai, x, y never alias
- * (distinct BLAS operands) → __restrict lets temp2 stay register-resident. */
-__attribute__((noinline)) static T
-whemv_strided_inner(T temp1, const T *__restrict ai, int lo, int hi,
-                    const T *__restrict x, T *__restrict y,
-                    int ix0, int iy0, int incx, int incy) {
-    T temp2 = zero_cdd;
-    int ix = ix0, iy = iy0;
-    for (int k = lo; k < hi; ++k) {
-        const T aik = ai[k];
-        y[iy] = cadd(y[iy], cmul(temp1, aik));
-        temp2 = cadd(temp2, cmul(cconj(aik), x[ix]));
-        ix += incx; iy += incy;
-    }
-    return temp2;
-}
 
 #ifdef MBLAS_SIMD_DD
 static inline __attribute__((always_inline)) void
@@ -275,6 +252,81 @@ __attribute__((noinline)) static bool whemv_omp(
 }
 #endif
 
+/* Contiguous (unit-stride x,y) core: Hermitian matvec y += alpha*A*x, with y
+ * already beta-applied. SIMD SoA path (+ threaded private-accumulator) when
+ * built with MBLAS_SIMD_DD; faithful scalar column sweep otherwise. Strided
+ * callers gather x,y to unit stride around this. */
+static void whemv_contig(bool lower, int N, const T *a, std::size_t lda, T alpha,
+                         const T *x, T *y)
+{
+#ifdef MBLAS_SIMD_DD
+    const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
+    double *x_rh = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *x_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *x_ih = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *x_il = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *y_rh = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *y_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *y_ih = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    double *y_il = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
+    for (int i = 0; i < N; ++i) {
+        x_rh[i] = x[i].re.limbs[0]; x_rl[i] = x[i].re.limbs[1];
+        x_ih[i] = x[i].im.limbs[0]; x_il[i] = x[i].im.limbs[1];
+        y_rh[i] = y[i].re.limbs[0]; y_rl[i] = y[i].re.limbs[1];
+        y_ih[i] = y[i].im.limbs[0]; y_il[i] = y[i].im.limbs[1];
+    }
+    for (std::size_t i = static_cast<std::size_t>(N); i < N_pad; ++i) {
+        x_rh[i] = 0.0; x_rl[i] = 0.0; x_ih[i] = 0.0; x_il[i] = 0.0;
+        y_rh[i] = 0.0; y_rl[i] = 0.0; y_ih[i] = 0.0; y_il[i] = 0.0;
+    }
+
+    bool done_omp = false;
+#if defined(_OPENMP)
+    if (N >= WHEMV_OMP_MIN && blas_omp_max_threads() > 1)
+        done_omp = whemv_omp(lower, N, a, lda, alpha,
+                             x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
+#endif
+    if (!done_omp)
+        for (int i = 0; i < N; ++i)
+            whemv_col(lower, i, N, a, lda, alpha,
+                      x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
+
+    for (int i = 0; i < N; ++i) {
+        y[i].re.limbs[0] = y_rh[i]; y[i].re.limbs[1] = y_rl[i];
+        y[i].im.limbs[0] = y_ih[i]; y[i].im.limbs[1] = y_il[i];
+    }
+    std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
+    std::free(y_rh); std::free(y_rl); std::free(y_ih); std::free(y_il);
+#else
+    if (lower) {
+        for (int i = 0; i < N; ++i) {
+            const T temp1 = cmul(alpha, x[i]);
+            T temp2 = zero_cdd;
+            const T *ai = &A_(0, i);
+            const T aii_re{ ai[i].re, rzero };
+            y[i] = cadd(y[i], cmul(temp1, aii_re));
+            for (int k = i + 1; k < N; ++k) {
+                y[k]  = cadd(y[k], cmul(temp1, ai[k]));
+                temp2 = cadd(temp2, cmul(cconj(ai[k]), x[k]));
+            }
+            y[i] = cadd(y[i], cmul(alpha, temp2));
+        }
+    } else {
+        for (int i = 0; i < N; ++i) {
+            const T temp1 = cmul(alpha, x[i]);
+            T temp2 = zero_cdd;
+            const T *ai = &A_(0, i);
+            for (int k = 0; k < i; ++k) {
+                y[k]  = cadd(y[k], cmul(temp1, ai[k]));
+                temp2 = cadd(temp2, cmul(cconj(ai[k]), x[k]));
+            }
+            const T aii_re{ ai[i].re, rzero };
+            y[i] = cadd(y[i], cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
+        }
+    }
+#endif
+}
+
 extern "C" void whemv_(
     const char *uplo,
     const int *n_,
@@ -304,109 +356,21 @@ extern "C" void whemv_(
     if (cdd_iszero(alpha)) return;
 
     if (incx == 1 && incy == 1) {
-#ifdef MBLAS_SIMD_DD
-        const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
-        double *x_rh = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *x_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *x_ih = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *x_il = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *y_rh = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *y_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *y_ih = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        double *y_il = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        for (int i = 0; i < N; ++i) {
-            x_rh[i] = x[i].re.limbs[0]; x_rl[i] = x[i].re.limbs[1];
-            x_ih[i] = x[i].im.limbs[0]; x_il[i] = x[i].im.limbs[1];
-            y_rh[i] = y[i].re.limbs[0]; y_rl[i] = y[i].re.limbs[1];
-            y_ih[i] = y[i].im.limbs[0]; y_il[i] = y[i].im.limbs[1];
-        }
-        for (std::size_t i = static_cast<std::size_t>(N); i < N_pad; ++i) {
-            x_rh[i] = 0.0; x_rl[i] = 0.0; x_ih[i] = 0.0; x_il[i] = 0.0;
-            y_rh[i] = 0.0; y_rl[i] = 0.0; y_ih[i] = 0.0; y_il[i] = 0.0;
-        }
-
-        bool done_omp = false;
-#if defined(_OPENMP)
-        if (N >= WHEMV_OMP_MIN && blas_omp_max_threads() > 1)
-            done_omp = whemv_omp(UPLO == 'L', N, a, lda, alpha,
-                                 x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
-#endif
-        if (!done_omp) {
-            if (UPLO == 'L') {
-                for (int i = 0; i < N; ++i)
-                    whemv_col(true, i, N, a, lda, alpha,
-                              x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
-            } else {
-                for (int i = 0; i < N; ++i)
-                    whemv_col(false, i, N, a, lda, alpha,
-                              x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
-            }
-        }
-        for (int i = 0; i < N; ++i) {
-            y[i].re.limbs[0] = y_rh[i]; y[i].re.limbs[1] = y_rl[i];
-            y[i].im.limbs[0] = y_ih[i]; y[i].im.limbs[1] = y_il[i];
-        }
-        std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
-        std::free(y_rh); std::free(y_rl); std::free(y_ih); std::free(y_il);
-#else
-        if (UPLO == 'L') {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = cmul(alpha, x[i]);
-                T temp2 = zero_cdd;
-                const T *ai = &A_(0, i);
-                const T aii_re{ ai[i].re, rzero };
-                y[i] = cadd(y[i], cmul(temp1, aii_re));
-                for (int k = i + 1; k < N; ++k) {
-                    y[k]  = cadd(y[k], cmul(temp1, ai[k]));
-                    temp2 = cadd(temp2, cmul(cconj(ai[k]), x[k]));
-                }
-                y[i] = cadd(y[i], cmul(alpha, temp2));
-            }
-        } else {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = cmul(alpha, x[i]);
-                T temp2 = zero_cdd;
-                const T *ai = &A_(0, i);
-                for (int k = 0; k < i; ++k) {
-                    y[k]  = cadd(y[k], cmul(temp1, ai[k]));
-                    temp2 = cadd(temp2, cmul(cconj(ai[k]), x[k]));
-                }
-                const T aii_re{ ai[i].re, rzero };
-                y[i] = cadd(y[i], cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
-            }
-        }
-#endif
-    } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        /* Hoist the column base ai=&A_(0,i) (A is unit-stride in the row index k,
-         * so A_(k,i)=ai[k]), load each ai[k] once for both the temp1-axpy and the
-         * conj-dot, and walk the strided x/y by incremental ix/iy (no k*inc
-         * multiply per element). Bit-identical to the macro form. */
-        if (UPLO == 'L') {
-            for (int i = 0; i < N; ++i) {
-                const int ii = ky + i * incy;
-                const T temp1 = cmul(alpha, x[kx + i * incx]);
-                const T *ai = &A_(0, i);
-                const T aii_re{ ai[i].re, rzero };
-                y[ii] = cadd(y[ii], cmul(temp1, aii_re));
-                const T temp2 = whemv_strided_inner(
-                    temp1, ai, i + 1, N, x, y,
-                    kx + (i + 1) * incx, ky + (i + 1) * incy, incx, incy);
-                y[ii] = cadd(y[ii], cmul(alpha, temp2));
-            }
-        } else {
-            for (int i = 0; i < N; ++i) {
-                const T temp1 = cmul(alpha, x[kx + i * incx]);
-                const T *ai = &A_(0, i);
-                const T temp2 = whemv_strided_inner(
-                    temp1, ai, 0, i, x, y, kx, ky, incx, incy);
-                const T aii_re{ ai[i].re, rzero };
-                const int ii = ky + i * incy;
-                y[ii] = cadd(y[ii], cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
-            }
-        }
+        whemv_contig(UPLO == 'L', N, a, lda, alpha, x, y);
+        return;
     }
+    /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
+     * core, scatter y back. Handles negative increments; O(N) gather vs the old
+     * O(N^2) strided sweep, and lets the strided case thread like contiguous. */
+    const T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
+    T *ybase = (incy < 0) ? y - (std::ptrdiff_t)(N - 1) * incy : y;
+    std::vector<T> xs(static_cast<std::size_t>(N)), ys(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i) {
+        xs[i] = xbase[(std::ptrdiff_t)i * incx];
+        ys[i] = ybase[(std::ptrdiff_t)i * incy];
+    }
+    whemv_contig(UPLO == 'L', N, a, lda, alpha, xs.data(), ys.data());
+    for (int i = 0; i < N; ++i) ybase[(std::ptrdiff_t)i * incy] = ys[i];
 }
 
 #undef A_

@@ -6,7 +6,9 @@
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
+#include "mf_tri_simd.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -32,6 +34,48 @@ inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }
 inline T scale_r(R const &alpha, T const &b) { return T{ alpha * b.re, alpha * b.im }; }
 }
 
+/* Contiguous (unit-stride x) core: packed Hermitian rank-1 A += alpha*x*x^H.
+ * Off-diagonal packed-column run is a SIMD column-AXPY (caxpy_add, bit-exact;
+ * cmul commutes so t=alpha*conj(x[j]) factors out); diagonal forced real. */
+static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
+{
+    if (UPLO == 'U') {
+#ifdef _OPENMP
+        const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_max_threads() > 1);
+        /* static,1: cyclic interleave balances the triangular packed-column skew;
+         * complex DD rank-1 work per element dominates any false sharing. */
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
+#endif
+        for (int j = 0; j < N; ++j) {
+            const int kk = (j * (j + 1)) / 2;
+            if (!cdd_iszero(x[j])) {
+                const T tmp = scale_r(alpha, cconj(x[j]));
+                mf_tri::caxpy_add(j, &ap[kk], &x[0], tmp);
+                const R new_re = ap[kk + j].re + cmul(x[j], tmp).re;
+                ap[kk + j] = T{ new_re, rzero };
+            } else {
+                ap[kk + j] = T{ ap[kk + j].re, rzero };
+            }
+        }
+    } else {
+#ifdef _OPENMP
+        const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_max_threads() > 1);
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
+#endif
+        for (int j = 0; j < N; ++j) {
+            const int kk = j * N - (j * (j - 1)) / 2;
+            if (!cdd_iszero(x[j])) {
+                const T tmp = scale_r(alpha, cconj(x[j]));
+                const R new_re = ap[kk].re + cmul(tmp, x[j]).re;
+                ap[kk] = T{ new_re, rzero };
+                mf_tri::caxpy_add(N - (j + 1), &ap[kk + 1], &x[j + 1], tmp);
+            } else {
+                ap[kk] = T{ ap[kk].re, rzero };
+            }
+        }
+    }
+}
+
 extern "C" void whpr_(
     const char *uplo,
     const int *n_,
@@ -49,88 +93,12 @@ extern "C" void whpr_(
     if (N == 0 || dd_iszero(alpha)) return;
 
     if (incx == 1) {
-        if (UPLO == 'U') {
-#ifdef _OPENMP
-            const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            /* static,1: cyclic interleave balances the triangular packed-column
-             * skew. Packed columns are contiguous (boundary elems can share a
-             * line), but the complex DD rank-1 work per element is heavy enough
-             * to dominate any false sharing — so chunk-1, matching the yhpr
-             * twin (real packed mspr stays static,8 because its write is light). */
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
-#endif
-            for (int j = 0; j < N; ++j) {
-                const int kk = (j * (j + 1)) / 2;
-                if (!cdd_iszero(x[j])) {
-                    const T tmp = scale_r(alpha, cconj(x[j]));
-                    for (int i = 0; i < j; ++i) ap[kk + i] = cadd(ap[kk + i], cmul(x[i], tmp));
-                    const R new_re = ap[kk + j].re + cmul(x[j], tmp).re;
-                    ap[kk + j] = T{ new_re, rzero };
-                } else {
-                    ap[kk + j] = T{ ap[kk + j].re, rzero };
-                }
-            }
-        } else {
-#ifdef _OPENMP
-            const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            /* static,1: cyclic interleave balances the triangular packed-column
-             * skew. Packed columns are contiguous (boundary elems can share a
-             * line), but the complex DD rank-1 work per element is heavy enough
-             * to dominate any false sharing — so chunk-1, matching the yhpr
-             * twin (real packed mspr stays static,8 because its write is light). */
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
-#endif
-            for (int j = 0; j < N; ++j) {
-                const int kk = j * N - (j * (j - 1)) / 2;
-                if (!cdd_iszero(x[j])) {
-                    const T tmp = scale_r(alpha, cconj(x[j]));
-                    const R new_re = ap[kk].re + cmul(tmp, x[j]).re;
-                    ap[kk] = T{ new_re, rzero };
-                    for (int i = j + 1; i < N; ++i) ap[kk + (i - j)] = cadd(ap[kk + (i - j)], cmul(x[i], tmp));
-                } else {
-                    ap[kk] = T{ ap[kk].re, rzero };
-                }
-            }
-        }
-    } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int kk = 0;
-        if (UPLO == 'U') {
-            int jx = kx;
-            for (int j = 0; j < N; ++j) {
-                if (!cdd_iszero(x[jx])) {
-                    const T tmp = scale_r(alpha, cconj(x[jx]));
-                    int ix = kx;
-                    for (int k = kk; k < kk + j; ++k) {
-                        ap[k] = cadd(ap[k], cmul(x[ix], tmp));
-                        ix += incx;
-                    }
-                    const R new_re = ap[kk + j].re + cmul(x[jx], tmp).re;
-                    ap[kk + j] = T{ new_re, rzero };
-                } else {
-                    ap[kk + j] = T{ ap[kk + j].re, rzero };
-                }
-                jx += incx;
-                kk += j + 1;
-            }
-        } else {
-            int jx = kx;
-            for (int j = 0; j < N; ++j) {
-                if (!cdd_iszero(x[jx])) {
-                    const T tmp = scale_r(alpha, cconj(x[jx]));
-                    const R new_re = ap[kk].re + cmul(tmp, x[jx]).re;
-                    ap[kk] = T{ new_re, rzero };
-                    int ix = jx;
-                    for (int k = kk + 1; k < kk + N - j; ++k) {
-                        ix += incx;
-                        ap[k] = cadd(ap[k], cmul(x[ix], tmp));
-                    }
-                } else {
-                    ap[kk] = T{ ap[kk].re, rzero };
-                }
-                jx += incx;
-                kk += N - j;
-            }
-        }
+        whpr_contig(UPLO, N, alpha, ap, x);
+        return;
     }
+    /* Strided x: gather to unit-stride scratch, run the SIMD core. */
+    const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(N - 1) * incx : x;
+    std::vector<T> xs(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
+    whpr_contig(UPLO, N, alpha, ap, xs.data());
 }

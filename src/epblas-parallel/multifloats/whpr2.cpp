@@ -5,16 +5,16 @@
  * contiguous static block hand one thread the heavy triangle end (par caps
  * at ~2.3x on 4 cores); cyclic schedule(static,1) interleaves short and long
  * columns across the team, balancing the skew symmetrically for both UPLO
- * (mirrors the proven kind10 yhpr2). The per-column body is carved into a
- * noinline helper so the inner loop keeps clean register allocation and the
- * serial + threaded paths share one tight loop (inlining into the omp region
- * spills the kept-resident column scalars and loses the UPPER triangle).
+ * (mirrors the proven kind10 yhpr2). The off-diagonal packed-column run is a
+ * SIMD rank-2 AXPY (mf_tri::caxpy2_add, two rank-1 passes -> within DD fuzz
+ * tol); the Hermitian diagonal is forced real.
  */
 
 #include <cstddef>
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_tri_simd.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -38,29 +38,18 @@ inline T cmul(T const &a, T const &b) {
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 
-/* Per-column rank-2 update, carved out noinline so the inner loop compiles
- * with clean register allocation (see file header). The Hermitian diagonal
- * is forced real: the off-diagonal run plus the single real diagonal write. */
-__attribute__((noinline))
-void whpr2_col_upper(int j, T t1, T t2, const T *x, const T *y, T *ap) {
+/* Per-column rank-2 update; off-diagonal packed run is a SIMD rank-2 AXPY (two
+ * rank-1 passes). The Hermitian diagonal is forced real. */
+inline void whpr2_col_upper(int j, T t1, T t2, const T *x, const T *y, T *ap) {
     T *c = ap + static_cast<std::size_t>(j) * (j + 1) / 2;
-    for (int i = 0; i < j; ++i)
-        c[i] = cadd(c[i], cadd(cmul(x[i], t1), cmul(y[i], t2)));
+    mf_tri::caxpy2_add(j, c, x, t1, y, t2);
     const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
     c[j] = T{ c[j].re + prod.re, rzero };
 }
 
-__attribute__((noinline))
-void whpr2_col_lower(int j, int N, T t1, T t2, const T *x, const T *y, T *ap) {
-    /* Pre-advance the off-diagonal bases so the loop runs 0-based over one
-     * induction variable indexing three pointers — the tight form gcc picks
-     * for the upper helper. Diagonal last, on a clean stack. */
-    const int mo = N - j - 1;
+inline void whpr2_col_lower(int j, int N, T t1, T t2, const T *x, const T *y, T *ap) {
     T *c0 = ap + (static_cast<std::size_t>(j) * N - static_cast<std::size_t>(j) * (j - 1) / 2);
-    T *c = c0 + 1;
-    const T *xc = x + j + 1, *yc = y + j + 1;
-    for (int i = 0; i < mo; ++i)
-        c[i] = cadd(c[i], cadd(cmul(xc[i], t1), cmul(yc[i], t2)));
+    mf_tri::caxpy2_add(N - j - 1, c0 + 1, x + j + 1, t1, y + j + 1, t2);
     const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
     c0[0] = T{ c0[0].re + prod.re, rzero };
 }
