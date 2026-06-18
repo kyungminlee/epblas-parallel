@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -82,77 +83,52 @@ extern "C" void whpr2_(
 
     if (N == 0 || cdd_iszero(alpha)) return;
 
-    if (incx == 1 && incy == 1) {
-        if (UPLO == 'U') {
+    /* Gather strided x,y into contiguous scratch once (O(N), handles negative
+     * incx/incy) so the column kernel is always unit-stride -- ap is already
+     * packed-contiguous, so only x,y need gathering. This unifies the strided
+     * and contiguous paths and lets the strided case thread like the
+     * contiguous one (mirrors the wher2 twin). */
+    std::vector<T> xg, yg;
+    const T *xp = x, *yp = y;
+    if (incx != 1 || incy != 1) {
+        xg.resize(N); yg.resize(N);
+        std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+        std::ptrdiff_t iy = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
+        for (int j = 0; j < N; ++j) {
+            xg[j] = x[ix]; ix += incx;
+            yg[j] = y[iy]; iy += incy;
+        }
+        xp = xg.data(); yp = yg.data();
+    }
+
 #ifdef _OPENMP
-            const int use_omp = (N >= WHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
+    const int use_omp = (N >= WHPR2_OMP_MIN && blas_omp_max_threads() > 1);
 #endif
-            for (int j = 0; j < N; ++j) {
-                if (!cdd_iszero(x[j]) || !cdd_iszero(y[j]))
-                    whpr2_col_upper(j, cmul(alpha, cconj(y[j])),
-                                    cconj(cmul(alpha, x[j])), x, y, ap);
-                else {
-                    const std::size_t kk = static_cast<std::size_t>(j) * (j + 1) / 2;
-                    ap[kk + j] = T{ ap[kk + j].re, rzero };
-                }
-            }
-        } else {
+    if (UPLO == 'U') {
 #ifdef _OPENMP
-            const int use_omp = (N >= WHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-            for (int j = 0; j < N; ++j) {
-                if (!cdd_iszero(x[j]) || !cdd_iszero(y[j]))
-                    whpr2_col_lower(j, N, cmul(alpha, cconj(y[j])),
-                                    cconj(cmul(alpha, x[j])), x, y, ap);
-                else {
-                    const std::size_t kk = static_cast<std::size_t>(j) * N
-                                         - static_cast<std::size_t>(j) * (j - 1) / 2;
-                    ap[kk] = T{ ap[kk].re, rzero };
-                }
+        for (int j = 0; j < N; ++j) {
+            if (!cdd_iszero(xp[j]) || !cdd_iszero(yp[j]))
+                whpr2_col_upper(j, cmul(alpha, cconj(yp[j])),
+                                cconj(cmul(alpha, xp[j])), xp, yp, ap);
+            else {
+                const std::size_t kk = static_cast<std::size_t>(j) * (j + 1) / 2;
+                ap[kk + j] = T{ ap[kk + j].re, rzero };
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        int kk = 0;
-        int jx = kx, jy = ky;
-        if (UPLO == 'U') {
-            for (int j = 0; j < N; ++j) {
-                if (!cdd_iszero(x[jx]) || !cdd_iszero(y[jy])) {
-                    const T t1 = cmul(alpha, cconj(y[jy]));
-                    const T t2 = cconj(cmul(alpha, x[jx]));
-                    int ix = kx, iy = ky;
-                    for (int k = kk; k < kk + j; ++k) {
-                        ap[k] = cadd(ap[k], cadd(cmul(x[ix], t1), cmul(y[iy], t2)));
-                        ix += incx; iy += incy;
-                    }
-                    const T prod = cadd(cmul(x[jx], t1), cmul(y[jy], t2));
-                    ap[kk + j] = T{ ap[kk + j].re + prod.re, rzero };
-                } else {
-                    ap[kk + j] = T{ ap[kk + j].re, rzero };
-                }
-                jx += incx; jy += incy;
-                kk += j + 1;
-            }
-        } else {
-            for (int j = 0; j < N; ++j) {
-                if (!cdd_iszero(x[jx]) || !cdd_iszero(y[jy])) {
-                    const T t1 = cmul(alpha, cconj(y[jy]));
-                    const T t2 = cconj(cmul(alpha, x[jx]));
-                    const T prod = cadd(cmul(x[jx], t1), cmul(y[jy], t2));
-                    ap[kk] = T{ ap[kk].re + prod.re, rzero };
-                    int ix = jx, iy = jy;
-                    for (int k = kk + 1; k < kk + N - j; ++k) {
-                        ix += incx; iy += incy;
-                        ap[k] = cadd(ap[k], cadd(cmul(x[ix], t1), cmul(y[iy], t2)));
-                    }
-                } else {
-                    ap[kk] = T{ ap[kk].re, rzero };
-                }
-                jx += incx; jy += incy;
-                kk += N - j;
+#ifdef _OPENMP
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
+#endif
+        for (int j = 0; j < N; ++j) {
+            if (!cdd_iszero(xp[j]) || !cdd_iszero(yp[j]))
+                whpr2_col_lower(j, N, cmul(alpha, cconj(yp[j])),
+                                cconj(cmul(alpha, xp[j])), xp, yp, ap);
+            else {
+                const std::size_t kk = static_cast<std::size_t>(j) * N
+                                     - static_cast<std::size_t>(j) * (j - 1) / 2;
+                ap[kk] = T{ ap[kk].re, rzero };
             }
         }
     }
