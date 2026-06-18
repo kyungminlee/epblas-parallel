@@ -107,6 +107,29 @@ store_dd4(multifloats::float64x2 *p, __m256d hi, __m256d lo)
     _mm256_storeu_pd(d + 4, a23);
 }
 
+/* Horizontal reduce of a 4-lane DD accumulator to a single float64x2, via a
+ * faithful dd_add tree (lane0+lane2, lane1+lane3, then the two survivors). The
+ * reduction reorders vs a scalar left-fold, so a dot built on a vector
+ * accumulator + this reduce matches its scalar reference only within the
+ * consistency tolerance (not bit-for-bit) — which is exactly what the band/tri
+ * dot reductions need. Mirrors the simd_dd hreduce in the trsv kernels but
+ * stays in the faithful (non-FMA-fused) vocabulary. */
+static inline __attribute__((always_inline)) multifloats::float64x2
+hreduce(__m256d sh, __m256d sl)
+{
+    __m256d sh_sw = _mm256_permute2f128_pd(sh, sh, 0x01);
+    __m256d sl_sw = _mm256_permute2f128_pd(sl, sl, 0x01);
+    __m256d ph, pl;
+    dd_add(sh, sl, sh_sw, sl_sw, ph, pl);
+    __m256d ph_sw = _mm256_shuffle_pd(ph, ph, 0x5);
+    __m256d pl_sw = _mm256_shuffle_pd(pl, pl, 0x5);
+    __m256d rh, rl;
+    dd_add(ph, pl, ph_sw, pl_sw, rh, rl);
+    double h[4], l[4];
+    _mm256_storeu_pd(h, rh); _mm256_storeu_pd(l, rl);
+    return multifloats::float64x2{h[0], l[0]};
+}
+
 /* Gather the hi/lo limbs of 4 DD values at p[0], p[s], p[2s], p[3s] into SoA
  * lanes (lane t <- p[t*s]). For a band matvec the 4 adjacent COLUMNS a Trans
  * row-group reads sit lda apart -> a strided gather; the source block (a few
