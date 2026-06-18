@@ -228,6 +228,106 @@ static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
     std::free(xh); std::free(xl);
     return true;
 }
+
+/* Gather the hi/lo limbs of 4 DD values at p[0], p[s], p[2s], p[3s] into SoA
+ * lanes (lane t <- p[t*s]). The matrix is band-stored column-major, so the 4
+ * adjacent COLUMNS a Trans row-group reads sit lda apart -> a strided gather.
+ * Assembled from scalar loads; the source block (4 thin columns, ~1 KB) is
+ * L1-resident, so this is latency- not bandwidth-bound, and the DD arithmetic
+ * it feeds — the actual bottleneck — drops to a quarter of the scalar op count. */
+static inline void gather_dd4(const T *p, std::ptrdiff_t s,
+                              __m256d &hi, __m256d &lo)
+{
+    hi = _mm256_set_pd(p[3 * s].limbs[0], p[2 * s].limbs[0], p[s].limbs[0], p[0].limbs[0]);
+    lo = _mm256_set_pd(p[3 * s].limbs[1], p[2 * s].limbs[1], p[s].limbs[1], p[0].limbs[1]);
+}
+
+/* 4-wide SoA twin of the Trans row-gather (x := A^T*x). Output rows are
+ * independent dots; here four ADJACENT rows run in the SIMD lanes, each lane
+ * accumulating its own dot over the shared reduction index d=1..k in the exact
+ * scalar order — so the result is bit-identical (no reductive reassociation,
+ * unlike a within-row 4-accumulator split). x stays AoS-split into xh/xl
+ * (read across [0,n) — a row reaches outside [lo,hi)); y is written SoA in
+ * [lo,hi). Only interior rows with a full k-wide band group; boundary/tail
+ * rows (and any group straddling [lo,hi)) fall to the scalar per-row path. */
+static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
+                                  int lo, int hi, const T *a, std::ptrdiff_t lda,
+                                  const double *xh, const double *xl,
+                                  double *yh, double *yl)
+{
+    int r = lo;
+    if (upper) {
+        while (r < hi) {
+            if (r >= k && r + 4 <= hi) {                 /* full band: llen == k */
+                __m256d sh, sl;
+                if (nounit) {
+                    __m256d dh, dl; gather_dd4(&A_(k, r), lda, dh, dl);
+                    mf_rank1::dd_mul(dh, dl, _mm256_loadu_pd(xh + r), _mm256_loadu_pd(xl + r), sh, sl);
+                } else { sh = _mm256_loadu_pd(xh + r); sl = _mm256_loadu_pd(xl + r); }
+                for (int d = 1; d <= k; ++d) {
+                    __m256d mh, ml; gather_dd4(&A_(k - d, r), lda, mh, ml);
+                    __m256d ph, pl;
+                    mf_rank1::dd_mul(mh, ml, _mm256_loadu_pd(xh + (r - d)), _mm256_loadu_pd(xl + (r - d)), ph, pl);
+                    mf_rank1::dd_add(sh, sl, ph, pl, sh, sl);
+                }
+                _mm256_storeu_pd(yh + r, sh); _mm256_storeu_pd(yl + r, sl);
+                r += 4;
+            } else {                                     /* scalar boundary/tail row */
+                const T *base = &A_(0, r);
+                const int llen = (r < k) ? r : k;
+                T s = nounit ? base[k] * T{xh[r], xl[r]} : T{xh[r], xl[r]};
+                for (int d = 1; d <= llen; ++d) { const T xv{xh[r - d], xl[r - d]}; s = s + base[k - d] * xv; }
+                yh[r] = s.limbs[0]; yl[r] = s.limbs[1];
+                ++r;
+            }
+        }
+    } else {
+        while (r < hi) {
+            if (r + 3 <= n - 1 - k && r + 4 <= hi) {     /* full band: rlen == k */
+                __m256d sh, sl;
+                if (nounit) {
+                    __m256d dh, dl; gather_dd4(&A_(0, r), lda, dh, dl);
+                    mf_rank1::dd_mul(dh, dl, _mm256_loadu_pd(xh + r), _mm256_loadu_pd(xl + r), sh, sl);
+                } else { sh = _mm256_loadu_pd(xh + r); sl = _mm256_loadu_pd(xl + r); }
+                for (int d = 1; d <= k; ++d) {
+                    __m256d mh, ml; gather_dd4(&A_(d, r), lda, mh, ml);
+                    __m256d ph, pl;
+                    mf_rank1::dd_mul(mh, ml, _mm256_loadu_pd(xh + (r + d)), _mm256_loadu_pd(xl + (r + d)), ph, pl);
+                    mf_rank1::dd_add(sh, sl, ph, pl, sh, sl);
+                }
+                _mm256_storeu_pd(yh + r, sh); _mm256_storeu_pd(yl + r, sl);
+                r += 4;
+            } else {
+                const T *base = &A_(0, r);
+                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+                T s = nounit ? base[0] * T{xh[r], xl[r]} : T{xh[r], xl[r]};
+                for (int d = 1; d <= rlen; ++d) { const T xv{xh[r + d], xl[r + d]}; s = s + base[d] * xv; }
+                yh[r] = s.limbs[0]; yl[r] = s.limbs[1];
+                ++r;
+            }
+        }
+    }
+}
+
+/* Serial Trans, unit-stride: SoA over the whole vector. Splits x to limb
+ * arrays, runs the row-gather across [0,n), merges back. Bit-identical to the
+ * scalar Trans cores (same per-row d-order). false on alloc failure. */
+static bool mtbmv_trans_soa(bool upper, bool nounit, int n, int k,
+                            const T *a, std::ptrdiff_t lda, T *x)
+{
+    const std::size_t np = ((std::size_t)n + 3) & ~(std::size_t)3;
+    double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+    double *xl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+    double *yh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+    double *yl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
+    if (!xh || !xl || !yh || !yl) { std::free(xh); std::free(xl); std::free(yh); std::free(yl); return false; }
+    for (int i = 0; i < n; ++i) { xh[i] = x[i].limbs[0]; xl[i] = x[i].limbs[1]; }
+    for (std::size_t i = n; i < np; ++i) { xh[i] = 0.0; xl[i] = 0.0; }
+    mtbmv_rowgather_t_soa(upper, nounit, n, k, 0, n, a, lda, xh, xl, yh, yl);
+    for (int i = 0; i < n; ++i) { x[i].limbs[0] = yh[i]; x[i].limbs[1] = yl[i]; }
+    std::free(xh); std::free(xl); std::free(yh); std::free(yl);
+    return true;
+}
 #endif
 
 #ifdef _OPENMP
@@ -376,11 +476,11 @@ __attribute__((noinline)) static bool mtbmv_omp(
     if (incx < 0) x -= (std::ptrdiff_t)(n - 1) * incx;   /* x at logical 0 */
 
 #ifdef MBLAS_SIMD_DD
-    /* NoTrans threads the 4-wide SoA column-scatter: split x to SoA limb arrays
-     * once, each thread scatters into its owned yh/yl rows, barrier, merge back.
-     * Same disjoint-row ownership and per-row column order as the scalar path
-     * (bit-exact). Trans falls through to the scalar row-gather below. */
-    if (!trans) {
+    /* Both triangles thread the 4-wide SoA kernels: split x to SoA limb arrays
+     * once, each thread fills its owned yh/yl rows (NoTrans column-scatter /
+     * Trans row-gather), barrier, merge back. Disjoint row ownership + scalar
+     * per-row column/d order keep it bit-exact. Alloc failure -> scalar below. */
+    {
         const std::size_t np = ((std::size_t)n + 3) & ~(std::size_t)3;
         double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
         double *xl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
@@ -397,7 +497,8 @@ __attribute__((noinline)) static bool mtbmv_omp(
                 int tid = omp_get_thread_num();
                 int lo = (int)((long long)n * tid / nthreads);
                 int hi = (int)((long long)n * (tid + 1) / nthreads);
-                mtbmv_colscatter_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
+                if (!trans) mtbmv_colscatter_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
+                else        mtbmv_rowgather_t_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
                 #pragma omp barrier          /* all reads of x done before write-back */
                 for (int i = lo; i < hi; ++i)
                     x[(std::ptrdiff_t)i * incx] = T{yh[i], yl[i]};
@@ -464,9 +565,12 @@ extern "C" void mtbmv_(
     if (incx < 0) xp -= (std::ptrdiff_t)(N - 1) * incx;   /* x at logical 0 */
 
 #ifdef MBLAS_SIMD_DD
-    /* Unit-stride NoTrans: 4-wide SoA axpy-per-column. */
+    /* Unit-stride: 4-wide SoA — NoTrans axpy-per-column, Trans row-gather. */
     if (incx == 1 && TR == 'N'
         && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp))
+        return;
+    if (incx == 1 && TR == 'T'
+        && mtbmv_trans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp))
         return;
 #endif
 
