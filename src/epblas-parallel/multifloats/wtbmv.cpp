@@ -222,15 +222,20 @@ static void wtbmv_rowgather_t_soa(bool upper, bool conj, bool nounit, int n, int
     }
 }
 
-/* Serial NoTrans, unit-stride: 4-wide SoA in-place column walk.  Per column j,
- * x := A*x is an axpy of the band segment scaled by broadcast x[j]; the matrix
- * column (read once) is deinterleaved inline with cload4, 4 rows updated at a
- * time.  Columns run in reference order and every write within a column lands on
- * a distinct row i != j -> order-free, bit-identical to the scalar reference.
- * Zero columns are skipped exactly as the reference does.  false on alloc fail. */
+/* Serial NoTrans: 4-wide SoA in-place column walk.  Per column j, x := A*x is an
+ * axpy of the band segment scaled by broadcast x[j]; the matrix column (read
+ * once) is deinterleaved inline with cload4, 4 rows updated at a time.  Columns
+ * run in reference order and every write within a column lands on a distinct row
+ * i != j -> order-free, bit-identical to the scalar reference.  Zero columns are
+ * skipped exactly as the reference does.  A strided x is gathered into the SoA
+ * limb arrays up front and scattered back at the end: the O(N) gather is repaid
+ * by the SoA core quartering the O(N*K) band work (the gather-only-helps-with-a
+ * -fast-core caveat — gather alone never closed the scalar strided gap). false
+ * on alloc fail. */
 static bool wtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
-                              const T *a, std::ptrdiff_t lda, T *x)
+                              const T *a, std::ptrdiff_t lda, T *x, int incx)
 {
+    T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
     const std::size_t np = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     double *reh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     double *rel = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
@@ -238,7 +243,7 @@ static bool wtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
     double *iml = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     if (!reh || !rel || !imh || !iml) { std::free(reh); std::free(rel); std::free(imh); std::free(iml); return false; }
     const cvec v{reh, rel, imh, iml};
-    for (int i = 0; i < n; ++i) vstore1(v, i, x[i]);
+    for (int i = 0; i < n; ++i) vstore1(v, i, xbase[(std::ptrdiff_t)i * incx]);
     for (std::size_t i = n; i < np; ++i) { reh[i] = rel[i] = imh[i] = iml[i] = 0.0; }
 
     if (upper) {
@@ -274,26 +279,28 @@ static bool wtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
         }
     }
 
-    for (int i = 0; i < n; ++i) x[i] = vload1(v, i);
+    for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = vload1(v, i);
     std::free(reh); std::free(rel); std::free(imh); std::free(iml);
     return true;
 }
 
-/* Serial Trans/ConjTrans, unit-stride: split x to SoA, run the row-gather over
- * [0,n), merge back.  Bit-identical to the scalar Trans cores. false on alloc. */
+/* Serial Trans/ConjTrans: split x to SoA, run the row-gather over [0,n), merge
+ * back.  Bit-identical to the scalar Trans cores.  A strided x is gathered into
+ * the SoA arrays and scattered back (see wtbmv_notrans_soa). false on alloc. */
 static bool wtbmv_trans_soa(bool upper, bool conj, bool nounit, int n, int k,
-                            const T *a, std::ptrdiff_t lda, T *x)
+                            const T *a, std::ptrdiff_t lda, T *x, int incx)
 {
+    T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
     const std::size_t np = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     double *xb = static_cast<double *>(std::aligned_alloc(32, 4 * np * sizeof(double)));
     double *yb = static_cast<double *>(std::aligned_alloc(32, 4 * np * sizeof(double)));
     if (!xb || !yb) { std::free(xb); std::free(yb); return false; }
     const cvec xv{xb, xb + np, xb + 2*np, xb + 3*np};
     const cvec yv{yb, yb + np, yb + 2*np, yb + 3*np};
-    for (int i = 0; i < n; ++i) vstore1(xv, i, x[i]);
+    for (int i = 0; i < n; ++i) vstore1(xv, i, xbase[(std::ptrdiff_t)i * incx]);
     for (std::size_t i = n; i < np; ++i) { xv.reh[i] = xv.rel[i] = xv.imh[i] = xv.iml[i] = 0.0; }
     wtbmv_rowgather_t_soa(upper, conj, nounit, n, k, 0, n, a, lda, xv, yv);
-    for (int i = 0; i < n; ++i) x[i] = vload1(yv, i);
+    for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = vload1(yv, i);
     std::free(xb); std::free(yb);
     return true;
 }
@@ -487,13 +494,15 @@ extern "C" void wtbmv_(
 #endif
 
 #ifdef MBLAS_SIMD_DD
-    /* Unit-stride serial: 4-wide SoA — NoTrans axpy-per-column, Trans/ConjTrans
-     * row-gather. Alloc failure falls through to the scalar cores below. */
-    if (incx == 1 && TR == 'N'
-        && wtbmv_notrans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, x))
+    /* Serial 4-wide SoA — NoTrans axpy-per-column, Trans/ConjTrans row-gather.
+     * Handles any stride (strided x is gathered to SoA up front; the SoA core's
+     * 4x band speedup repays the O(N) gather). Alloc failure falls through to
+     * the scalar cores below. */
+    if (TR == 'N'
+        && wtbmv_notrans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, x, incx))
         return;
-    if (incx == 1 && (TR == 'T' || TR == 'C')
-        && wtbmv_trans_soa(UPLO == 'U', TR == 'C', nounit != 0, N, K, a, lda, x))
+    if ((TR == 'T' || TR == 'C')
+        && wtbmv_trans_soa(UPLO == 'U', TR == 'C', nounit != 0, N, K, a, lda, x, incx))
         return;
 #endif
 
