@@ -116,7 +116,9 @@ static void wtrmv_partition(bool upper, std::ptrdiff_t n, int nthreads,
 /* NoTrans tiled column-AXPY kernel (OpenBLAS trmv_thread.c kernel_N). Reads only
  * the contiguous matrix column block [m_from,m_to); writes its own rows directly
  * plus the off-block "spill" rows into the thread's private y slot (merged by a
- * bounded reduction). DTB tiling keeps the active y-tile hot. */
+ * bounded reduction). DTB tiling keeps the active y-tile hot. Each contiguous
+ * column run is a SIMD AXPY (mf_tri::caxpy_add) so the threaded path stays
+ * vectorized like the serial one. */
 static void wtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
                            std::ptrdiff_t m_from, std::ptrdiff_t m_to,
                            const T *a, std::size_t lda, const T *x, T *y)
@@ -127,28 +129,26 @@ static void wtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
         if (upper && is > 0) {
             for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
                 const T xj = x[j];
-                const T *col = &A_(0, j);
-                for (std::ptrdiff_t i = 0; i < is; ++i) y[i] = cadd(y[i], cmul(col[i], xj));
+                if (!cdd_iszero(xj)) mf_tri::caxpy_add(is, &y[0], &A_(0, j), xj);
             }
         }
         for (std::ptrdiff_t i = is; i < is + min_i; ++i) {
             if (upper && i > is) {
                 const T xi = x[i];
-                const T *col = &A_(0, i);
-                for (std::ptrdiff_t k = is; k < i; ++k) y[k] = cadd(y[k], cmul(col[k], xi));
+                if (!cdd_iszero(xi)) mf_tri::caxpy_add(i - is, &y[is], &A_(is, i), xi);
             }
             y[i] = cadd(y[i], nounit ? cmul(A_(i, i), x[i]) : x[i]);
             if (!upper && i + 1 < is + min_i) {
                 const T xi = x[i];
-                const T *col = &A_(0, i);
-                for (std::ptrdiff_t k = i + 1; k < is + min_i; ++k) y[k] = cadd(y[k], cmul(col[k], xi));
+                if (!cdd_iszero(xi))
+                    mf_tri::caxpy_add(is + min_i - (i + 1), &y[i + 1], &A_(i + 1, i), xi);
             }
         }
         if (!upper && is + min_i < n) {
             for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
                 const T xj = x[j];
-                const T *col = &A_(0, j);
-                for (std::ptrdiff_t i = is + min_i; i < n; ++i) y[i] = cadd(y[i], cmul(col[i], xj));
+                if (!cdd_iszero(xj))
+                    mf_tri::caxpy_add(n - (is + min_i), &y[is + min_i], &A_(is + min_i, j), xj);
             }
         }
     }
@@ -178,17 +178,8 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
                 T diagc = A_(j, j); if (conj) diagc = cconj(diagc);
                 T s = nounit ? cmul(diagc, x[j]) : x[j];
                 const T *aj = &A_(0, j);
-                if (upper) {
-                    for (std::ptrdiff_t c = 0; c < j; ++c) {
-                        T e = aj[c]; if (conj) e = cconj(e);
-                        s = cadd(s, cmul(e, x[c]));
-                    }
-                } else {
-                    for (std::ptrdiff_t c = j + 1; c < n; ++c) {
-                        T e = aj[c]; if (conj) e = cconj(e);
-                        s = cadd(s, cmul(e, x[c]));
-                    }
-                }
+                if (upper) s = cadd(s, mf_tri::cdot(j, &aj[0], &x[0], conj));
+                else       s = cadd(s, mf_tri::cdot(n - j - 1, &aj[j + 1], &x[j + 1], conj));
                 y_buf[j] = s;
             }
             #pragma omp for schedule(static)

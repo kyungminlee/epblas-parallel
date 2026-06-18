@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-18 20:49 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-18 22:21 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -22,7 +22,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mtpmv | 96 | 0.368 | 1.012 | ✅ |
 | wswap | 3 | 1.004 | 1.006 | ✅ |
 | mswap | 3 | 1.003 | 0.999 | ✅ |
-| wher2 | 18 | 1.002 | 0.954 | ✅ |
 | wcopy | 3 | 0.998 | 1.000 | ✅ |
 | mcopy | 3 | 0.791 | 1.000 | ✅ |
 | mcabs1 | 1 | 1.000 | 1.000 | ✅ |
@@ -34,16 +33,9 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wmscal | 3 | 0.768 | 0.988 | ✅ |
 | mtrmv | 96 | 0.401 | 0.975 | ✅ |
 | mrotm | 3 | 0.964 | 0.963 | ✅ |
-| whpr2 | 18 | 0.960 | 0.911 | ✅ |
-| whpmv | 18 | 0.941 | 0.958 | ✅ |
-| whbmv | 18 | 0.954 | 0.941 | ✅ |
-| wher | 18 | 0.941 | 0.921 | ✅ |
-| whemv | 18 | 0.932 | 0.935 | ✅ |
 | wtrsm | 72 | 0.929 | 0.810 | ✅ |
-| wtrmv | 108 | 0.266 | 0.928 | ✅ |
 | maxpy | 3 | 0.376 | 0.923 | ✅ |
 | wgbmv | 27 | 0.922 | 0.773 | ✅ |
-| whpr | 18 | 0.918 | 0.886 | ✅ |
 | wtpmv | 108 | 0.253 | 0.912 | ✅ |
 | msbmv | 24 | 0.572 | 0.884 | ✅ |
 | mtpsv | 96 | 0.402 | 0.770 | ✅ |
@@ -66,8 +58,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mtbmv | 96 | 0.352 | 0.495 | ✅ |
 | waxpy | 3 | 0.184 | 0.448 | ✅ |
 | wrotg | 1 | 0.410 | 0.410 | ✅ |
+| whbmv | 18 | 0.313 | 0.406 | ✅ |
 | wtbsv | 108 | 0.385 | 0.383 | ✅ |
 | mgemmtr | 32 | 0.380 | 0.251 | ✅ |
+| wher | 18 | 0.274 | 0.361 | ✅ |
 | msyr2 | 24 | 0.301 | 0.347 | ✅ |
 | mtrsv | 96 | 0.267 | 0.344 | ✅ |
 | mtrsm | 64 | 0.337 | 0.341 | ✅ |
@@ -83,14 +77,20 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | msymm | 16 | 0.287 | 0.198 | ✅ |
 | wgerc | 9 | 0.162 | 0.283 | ✅ |
 | wgeru | 9 | 0.161 | 0.282 | ✅ |
+| whpr | 18 | 0.252 | 0.279 | ✅ |
+| wher2 | 18 | 0.251 | 0.278 | ✅ |
 | wdotu | 3 | 0.186 | 0.278 | ✅ |
 | wdotc | 3 | 0.179 | 0.267 | ✅ |
 | mtrmm | 64 | 0.266 | 0.235 | ✅ |
 | wsyrk | 12 | 0.265 | 0.122 | ✅ |
+| wtrmv | 108 | 0.265 | 0.250 | ✅ |
 | wtpsv | 108 | 0.262 | 0.261 | ✅ |
+| whpr2 | 18 | 0.256 | 0.252 | ✅ |
+| whpmv | 18 | 0.252 | 0.253 | ✅ |
 | wtrsv | 108 | 0.189 | 0.239 | ✅ |
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
+| whemv | 18 | 0.182 | 0.182 | ✅ |
 
 <details><summary>m: 1 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
