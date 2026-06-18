@@ -6,7 +6,7 @@
 #ifdef MBLAS_SIMD_DD
 #include <cstdlib>
 #include <immintrin.h>
-#include "mf_rank1_simd.h"   /* faithful SoA dd_mul/dd_add + transpose loads */
+#include "mf_simd_dd.h"   /* faithful real+complex SoA DD vocabulary */
 #endif
 #ifdef _OPENMP
 #include <cstdlib>
@@ -65,98 +65,10 @@ __attribute__((noinline)) static T cdot_rev(const T *a, const T *x, int len, boo
 /* 4-wide SoA AVX2 for complex double-double.  DD is arithmetic-bound (no native
  * SIMD for a scalar DD), so packing 4 INDEPENDENT complex64x2 values across the
  * ymm lanes — real/imag hi/lo each in its own register — quarters the op count.
- * The mf_rank1 dd_mul/dd_add primitives are bit-identical to the float64x2
- * multiply/add operators on every non-degenerate lane; dd_sub below is the
- * faithful twin of float64x2::operator- (operator+ with the rhs limbs negated). */
-
-/* a - b == a + (-b): flip the sign bits with xor so -0.0 is preserved (a plain
- * 0-b subtract would drop it), matching float64x2::operator- limb-for-limb. */
-static inline void dd_sub(__m256d ah, __m256d al, __m256d bh, __m256d bl,
-                          __m256d &rh, __m256d &rl) {
-    const __m256d sgn = _mm256_set1_pd(-0.0);
-    mf_rank1::dd_add(ah, al, _mm256_xor_pd(bh, sgn), _mm256_xor_pd(bl, sgn), rh, rl);
-}
-
-/* 4 complex64x2 values held in SoA lanes (real/imag, hi/lo limbs). */
-struct cx4 { __m256d reh, rel, imh, iml; };
-
-/* (a.re + i a.im)(b.re + i b.im) = (re·re − im·im) + i(re·im + im·re), each DD
- * product/sum via the faithful primitives — bit-identical to the scalar cmul.
- * cmul is commutative bit-exact in DD (two_prod/two_sum commute), so callers may
- * pass (x,matrix) or (matrix,x) interchangeably to match the reference order. */
-static inline cx4 cmul_soa(const cx4 &a, const cx4 &b) {
-    __m256d p1h, p1l, p2h, p2l, p3h, p3l, p4h, p4l;
-    mf_rank1::dd_mul(a.reh, a.rel, b.reh, b.rel, p1h, p1l);   /* re·re */
-    mf_rank1::dd_mul(a.imh, a.iml, b.imh, b.iml, p2h, p2l);   /* im·im */
-    mf_rank1::dd_mul(a.reh, a.rel, b.imh, b.iml, p3h, p3l);   /* re·im */
-    mf_rank1::dd_mul(a.imh, a.iml, b.reh, b.rel, p4h, p4l);   /* im·re */
-    cx4 r;
-    dd_sub(p1h, p1l, p2h, p2l, r.reh, r.rel);
-    mf_rank1::dd_add(p3h, p3l, p4h, p4l, r.imh, r.iml);
-    return r;
-}
-static inline cx4 cadd_soa(const cx4 &a, const cx4 &b) {
-    cx4 r;
-    mf_rank1::dd_add(a.reh, a.rel, b.reh, b.rel, r.reh, r.rel);
-    mf_rank1::dd_add(a.imh, a.iml, b.imh, b.iml, r.imh, r.iml);
-    return r;
-}
-static inline cx4 cconj_soa(const cx4 &a) {
-    const __m256d sgn = _mm256_set1_pd(-0.0);
-    return cx4{ a.reh, a.rel, _mm256_xor_pd(a.imh, sgn), _mm256_xor_pd(a.iml, sgn) };
-}
-
-/* A vector held as four parallel SoA limb arrays. */
-struct cvec { double *reh, *rel, *imh, *iml; };
-static inline cx4 vload(const cvec &v, int i) {
-    return cx4{ _mm256_loadu_pd(v.reh + i), _mm256_loadu_pd(v.rel + i),
-                _mm256_loadu_pd(v.imh + i), _mm256_loadu_pd(v.iml + i) };
-}
-static inline void vstore(const cvec &v, int i, const cx4 &c) {
-    _mm256_storeu_pd(v.reh + i, c.reh); _mm256_storeu_pd(v.rel + i, c.rel);
-    _mm256_storeu_pd(v.imh + i, c.imh); _mm256_storeu_pd(v.iml + i, c.iml);
-}
-static inline cx4 vbcast(const cvec &v, int j) {
-    return cx4{ _mm256_set1_pd(v.reh[j]), _mm256_set1_pd(v.rel[j]),
-                _mm256_set1_pd(v.imh[j]), _mm256_set1_pd(v.iml[j]) };
-}
-static inline T vload1(const cvec &v, int i) {
-    return T{ R{v.reh[i], v.rel[i]}, R{v.imh[i], v.iml[i]} };
-}
-static inline void vstore1(const cvec &v, int i, const T &c) {
-    v.reh[i] = c.re.limbs[0]; v.rel[i] = c.re.limbs[1];
-    v.imh[i] = c.im.limbs[0]; v.iml[i] = c.im.limbs[1];
-}
-
-/* Deinterleave 4 contiguous complex64x2 (16 contiguous doubles) into SoA lanes
- * via a 4×4 double transpose — the matrix band segment a NoTrans column reads. */
-static inline cx4 cload4(const T *p) {
-    __m256d c0 = _mm256_loadu_pd(reinterpret_cast<const double *>(&p[0]));
-    __m256d c1 = _mm256_loadu_pd(reinterpret_cast<const double *>(&p[1]));
-    __m256d c2 = _mm256_loadu_pd(reinterpret_cast<const double *>(&p[2]));
-    __m256d c3 = _mm256_loadu_pd(reinterpret_cast<const double *>(&p[3]));
-    __m256d t0 = _mm256_unpacklo_pd(c0, c1);   /* reh0 reh1 imh0 imh1 */
-    __m256d t1 = _mm256_unpackhi_pd(c0, c1);   /* rel0 rel1 iml0 iml1 */
-    __m256d t2 = _mm256_unpacklo_pd(c2, c3);   /* reh2 reh3 imh2 imh3 */
-    __m256d t3 = _mm256_unpackhi_pd(c2, c3);   /* rel2 rel3 iml2 iml3 */
-    cx4 r;
-    r.reh = _mm256_permute2f128_pd(t0, t2, 0x20);
-    r.imh = _mm256_permute2f128_pd(t0, t2, 0x31);
-    r.rel = _mm256_permute2f128_pd(t1, t3, 0x20);
-    r.iml = _mm256_permute2f128_pd(t1, t3, 0x31);
-    return r;
-}
-/* Gather 4 complex64x2 at p[0], p[s], p[2s], p[3s] into SoA lanes (lane t<-p[ts]).
- * The Trans row-group reads 4 adjacent COLUMNS, lda apart -> a strided gather;
- * the source block (a few thin columns) is L1-resident, latency- not bw-bound. */
-static inline cx4 cgather4(const T *p, std::ptrdiff_t s) {
-    cx4 r;
-    r.reh = _mm256_set_pd(p[3*s].re.limbs[0], p[2*s].re.limbs[0], p[s].re.limbs[0], p[0].re.limbs[0]);
-    r.rel = _mm256_set_pd(p[3*s].re.limbs[1], p[2*s].re.limbs[1], p[s].re.limbs[1], p[0].re.limbs[1]);
-    r.imh = _mm256_set_pd(p[3*s].im.limbs[0], p[2*s].im.limbs[0], p[s].im.limbs[0], p[0].im.limbs[0]);
-    r.iml = _mm256_set_pd(p[3*s].im.limbs[1], p[2*s].im.limbs[1], p[s].im.limbs[1], p[0].im.limbs[1]);
-    return r;
-}
+ * The faithful complex SoA vocabulary (cx4/cmul_soa/cadd_soa/cconj_soa, the cvec
+ * limb-array accessors, cload4/cgather4, all bit-identical to the scalar cmul/
+ * cadd/cconj) lives in mf_simd_dd.h, shared with the other band routines. */
+using namespace mf_simd;
 
 /* 4-wide SoA Trans/ConjTrans row-gather (x := A^T*x / A^H*x).  Output rows are
  * independent dots; four ADJACENT rows run in the lanes, each accumulating its
