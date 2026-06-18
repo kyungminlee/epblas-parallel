@@ -5,8 +5,10 @@
  */
 
 #include <cstddef>
+#include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
 #ifdef _OPENMP
 #include <cstdlib>
 #include <cmath>
@@ -29,6 +31,44 @@ inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.
 }
 
 #define AP_(idx) ap[static_cast<std::size_t>(idx)]
+
+namespace {
+/* Contiguous (incx==incy==1) symmetric packed matvec, y += alpha*A*x (beta
+ * already applied by the caller). Per column j the packed slice &aj[..] is a
+ * contiguous run shared by the reflected AXPY (y[i] += t1*col[i], order-free ->
+ * bit-exact) and the symmetric dot (t2 += col[i]*x[i], vector accumulate +
+ * hreduce -> within tolerance); y and x are distinct (spmv forbids aliasing).
+ * The strided entry gathers x/y to scratch and reuses this. */
+void mspmv_contig(bool upper, int n, const T *ap, const T *x, T alpha, T *y)
+{
+    std::size_t kk = 0;
+    if (upper) {
+        for (int j = 0; j < n; ++j) {
+            const T *aj = &AP_(kk);            /* column j: rows 0..j-1, diag at aj[j] */
+            const T t1 = alpha * x[j];
+            T t2 = zero_dd;
+            if (j > 0) {
+                mf_tri::axpy_add(j, &y[0], aj, t1);
+                t2 = mf_tri::dot(j, aj, &x[0]);
+            }
+            y[j] = y[j] + t1 * aj[j] + alpha * t2;
+            kk += static_cast<std::size_t>(j) + 1;
+        }
+    } else {
+        for (int j = 0; j < n; ++j) {
+            const T *aj = &AP_(kk);            /* column j: diag at aj[0], rows j+1.. at aj[1.. ] */
+            const T t1 = alpha * x[j];
+            y[j] = y[j] + t1 * aj[0];
+            const int len = n - 1 - j;
+            if (len > 0) {
+                mf_tri::axpy_add(len, &y[j + 1], &aj[1], t1);
+                y[j] = y[j] + alpha * mf_tri::dot(len, &aj[1], &x[j + 1]);
+            }
+            kk += static_cast<std::size_t>(n - j);
+        }
+    }
+}
+}
 
 #ifdef _OPENMP
 /* Sqrt-balanced contiguous column partition (port of ob spmv_thread.c
@@ -257,37 +297,34 @@ extern "C" void mspmv_(
         return;
 #endif
 
-    int kk = 0;
     if (incx == 1 && incy == 1) {
-        if (UPLO == 'U') {
-            for (int j = 0; j < N; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero_dd;
-                int k = kk;
-                for (int i = 0; i < j; ++i) {
-                    y[i] = y[i] + t1 * ap[k];
-                    t2 = t2 + ap[k] * x[i];
-                    ++k;
-                }
-                y[j] = y[j] + t1 * ap[kk + j] + alpha * t2;
-                kk += j + 1;
+        mspmv_contig(UPLO == 'U', N, ap, x, alpha, y);
+        return;
+    }
+
+    /* Strided: gather x and the beta-scaled y into contiguous scratch, run the
+     * SIMD contiguous core (y += alpha*A*x), scatter y back. O(N) gather/scatter
+     * vs O(N*N) packed work; the in-place strided walk is the alloc-fail fallback. */
+    {
+        const std::ptrdiff_t bx = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+        const std::ptrdiff_t by = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
+        T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+        T *ys = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+        if (xs && ys) {
+            for (int i = 0; i < N; ++i) {
+                xs[i] = x[bx + (std::ptrdiff_t)i * incx];
+                ys[i] = y[by + (std::ptrdiff_t)i * incy];
             }
-        } else {
-            for (int j = 0; j < N; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero_dd;
-                y[j] = y[j] + t1 * ap[kk];
-                int k = kk + 1;
-                for (int i = j + 1; i < N; ++i) {
-                    y[i] = y[i] + t1 * ap[k];
-                    t2 = t2 + ap[k] * x[i];
-                    ++k;
-                }
-                y[j] = y[j] + alpha * t2;
-                kk += N - j;
-            }
+            mspmv_contig(UPLO == 'U', N, ap, xs, alpha, ys);
+            for (int i = 0; i < N; ++i) y[by + (std::ptrdiff_t)i * incy] = ys[i];
+            std::free(xs); std::free(ys);
+            return;
         }
-    } else {
+        std::free(xs); std::free(ys);
+    }
+
+    {
+        int kk = 0;
         int kx = (incx < 0) ? -(N - 1) * incx : 0;
         int ky = (incy < 0) ? -(N - 1) * incy : 0;
         if (UPLO == 'U') {
