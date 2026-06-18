@@ -173,16 +173,20 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
  * (upper ascending / lower descending) and within a column every write lands on
  * a distinct row i != j, so 4-wide-over-i is order-free and the result is
  * bit-identical to the scalar reference on every non-degenerate lane (mf_rank1
- * dd_mul/dd_add mirror the float64x2 multiply/add operators op-for-op).  Returns
- * true if it ran; false (alloc failure) falls back to the scalar core. */
+ * dd_mul/dd_add mirror the float64x2 multiply/add operators op-for-op).  x is
+ * already at logical index 0 (caller shifted for incx<0); a strided x is gathered
+ * into the SoA limb arrays up front and scattered back at the end — the O(N)
+ * gather is repaid by the SoA core quartering the O(N*K) band work (gather alone,
+ * feeding a scalar core, never closes the strided gap on a thin band; feeding the
+ * SoA core it does).  Returns true if it ran; false (alloc) -> scalar core. */
 static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
-                              const T *a, std::ptrdiff_t lda, T *x)
+                              const T *a, std::ptrdiff_t lda, T *x, int incx)
 {
     const std::size_t np = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     double *xl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     if (!xh || !xl) { std::free(xh); std::free(xl); return false; }
-    for (int i = 0; i < n; ++i) { xh[i] = x[i].limbs[0]; xl[i] = x[i].limbs[1]; }
+    for (int i = 0; i < n; ++i) { const T v = x[(std::ptrdiff_t)i * incx]; xh[i] = v.limbs[0]; xl[i] = v.limbs[1]; }
     for (std::size_t i = n; i < np; ++i) { xh[i] = 0.0; xl[i] = 0.0; }
 
     if (upper) {
@@ -224,7 +228,7 @@ static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
         }
     }
 
-    for (int i = 0; i < n; ++i) { x[i].limbs[0] = xh[i]; x[i].limbs[1] = xl[i]; }
+    for (int i = 0; i < n; ++i) x[(std::ptrdiff_t)i * incx] = T{xh[i], xl[i]};
     std::free(xh); std::free(xl);
     return true;
 }
@@ -309,11 +313,15 @@ static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
     }
 }
 
-/* Serial Trans, unit-stride: SoA over the whole vector. Splits x to limb
- * arrays, runs the row-gather across [0,n), merges back. Bit-identical to the
- * scalar Trans cores (same per-row d-order). false on alloc failure. */
+/* Serial Trans: SoA over the whole vector. Splits x to limb arrays, runs the
+ * row-gather across [0,n), merges back. A strided x is gathered into the SoA
+ * limb arrays up front and scattered back at the end — like NoTrans, the O(N)
+ * gather is repaid by the SoA core quartering the band work (gather feeding a
+ * scalar core would not close the strided gap on a thin band; feeding the SoA
+ * core it does). Bit-identical to the scalar Trans cores (same per-row
+ * d-order). false on alloc failure. */
 static bool mtbmv_trans_soa(bool upper, bool nounit, int n, int k,
-                            const T *a, std::ptrdiff_t lda, T *x)
+                            const T *a, std::ptrdiff_t lda, T *x, int incx)
 {
     const std::size_t np = ((std::size_t)n + 3) & ~(std::size_t)3;
     double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
@@ -321,10 +329,10 @@ static bool mtbmv_trans_soa(bool upper, bool nounit, int n, int k,
     double *yh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     double *yl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     if (!xh || !xl || !yh || !yl) { std::free(xh); std::free(xl); std::free(yh); std::free(yl); return false; }
-    for (int i = 0; i < n; ++i) { xh[i] = x[i].limbs[0]; xl[i] = x[i].limbs[1]; }
+    for (int i = 0; i < n; ++i) { const T v = x[(std::ptrdiff_t)i * incx]; xh[i] = v.limbs[0]; xl[i] = v.limbs[1]; }
     for (std::size_t i = n; i < np; ++i) { xh[i] = 0.0; xl[i] = 0.0; }
     mtbmv_rowgather_t_soa(upper, nounit, n, k, 0, n, a, lda, xh, xl, yh, yl);
-    for (int i = 0; i < n; ++i) { x[i].limbs[0] = yh[i]; x[i].limbs[1] = yl[i]; }
+    for (int i = 0; i < n; ++i) x[(std::ptrdiff_t)i * incx] = T{yh[i], yl[i]};
     std::free(xh); std::free(xl); std::free(yh); std::free(yl);
     return true;
 }
@@ -565,12 +573,13 @@ extern "C" void mtbmv_(
     if (incx < 0) xp -= (std::ptrdiff_t)(N - 1) * incx;   /* x at logical 0 */
 
 #ifdef MBLAS_SIMD_DD
-    /* Unit-stride: 4-wide SoA — NoTrans axpy-per-column, Trans row-gather. */
-    if (incx == 1 && TR == 'N'
-        && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp))
+    /* 4-wide SoA — NoTrans axpy-per-column, Trans row-gather. A strided x is
+     * gathered into the SoA limb arrays and scattered back (xp is at logical 0). */
+    if (TR == 'N'
+        && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp, incx))
         return;
-    if (incx == 1 && TR == 'T'
-        && mtbmv_trans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp))
+    if (TR == 'T'
+        && mtbmv_trans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp, incx))
         return;
 #endif
 
