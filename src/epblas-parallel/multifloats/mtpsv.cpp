@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_tri_simd.h"   /* mf_tri::axpy_sub / dot — shared SoA loop kernels */
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -24,7 +25,6 @@ inline char up(const char *p) {
 inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 const T zero_dd{0.0, 0.0};
 
-#ifdef _OPENMP
 /* Column base offsets into the packed array (column-major triangle).
  *   Lower: column j starts at its diagonal (row j); element (i,j) i>=j at base+(i-j).
  *   Upper: column j starts at row 0;            element (i,j) i<=j at base+i.       */
@@ -35,61 +35,50 @@ inline std::size_t cbL(int j, int N) {
 inline std::size_t cbU(int j) {
     return static_cast<std::size_t>(j) * static_cast<std::size_t>(j + 1) / 2;
 }
-#endif
 }
 
-/* In-place contiguous (incx==1) packed triangular solve — the Fortran-reference
- * walk with ptrdiff_t indices throughout and `-=` RMW so the packed/x walks
- * strength-reduce to pure pointer increments (no per-element sign extension),
- * byte-for-byte the ob clone. The strided entry gathers into contiguous scratch
- * and reuses this, so a strided solve runs the fast stride-1 kernel. */
+/* In-place contiguous (incx==1) packed triangular solve. Per column j, &ap[cb*]
+ * is a contiguous run, so this is the packed twin of mtbsv_contig: NoTrans is a
+ * band AXPY of the solved x[j] into the trailing/leading rows (mf_tri::axpy_sub,
+ * order-free -> bit-exact); Trans is a column dot against the already-solved x
+ * (mf_tri::dot, vector accumulate + hreduce -> within tolerance). The diagonal
+ * divide and cross-column recurrence stay scalar/exact. The strided entry
+ * gathers into contiguous scratch and reuses this. */
 static void mtpsv_serial_contig(char UPLO, char TR, int nounit,
                                 std::ptrdiff_t n, const T *ap, T *x)
 {
     if (TR == 'N') {
         if (UPLO == 'U') {
-            std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 if (!dd_iszero(x[j])) {
-                    if (nounit) x[j] = x[j] / ap[kk];
-                    const T tmp = x[j];
-                    std::ptrdiff_t k = kk - 1;
-                    for (std::ptrdiff_t i = j - 1; i >= 0; --i) { x[i] -= tmp * ap[k]; --k; }
+                    const T *aj = &ap[cbU(j)];
+                    if (nounit) x[j] = x[j] / aj[j];
+                    mf_tri::axpy_sub(j, &x[0], &aj[0], x[j]);
                 }
-                kk -= j + 1;
             }
         } else {
-            std::ptrdiff_t kk = 0;
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 if (!dd_iszero(x[j])) {
-                    if (nounit) x[j] = x[j] / ap[kk];
-                    const T tmp = x[j];
-                    std::ptrdiff_t k = kk + 1;
-                    for (std::ptrdiff_t i = j + 1; i < n; ++i) { x[i] -= tmp * ap[k]; ++k; }
+                    const T *aj = &ap[cbL((int)j, (int)n)];
+                    if (nounit) x[j] = x[j] / aj[0];
+                    mf_tri::axpy_sub(n - 1 - j, &x[j + 1], &aj[1], x[j]);
                 }
-                kk += n - j;
             }
         }
     } else {
         if (UPLO == 'U') {
-            std::ptrdiff_t kk = 0;
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                T tmp = x[j];
-                std::ptrdiff_t k = kk;
-                for (std::ptrdiff_t i = 0; i < j; ++i) { tmp -= ap[k] * x[i]; ++k; }
-                if (nounit) tmp = tmp / ap[kk + j];
+                const T *aj = &ap[cbU(j)];
+                T tmp = x[j] - mf_tri::dot(j, &aj[0], &x[0]);
+                if (nounit) tmp = tmp / aj[j];
                 x[j] = tmp;
-                kk += j + 1;
             }
         } else {
-            std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                T tmp = x[j];
-                std::ptrdiff_t k = kk;
-                for (std::ptrdiff_t i = n - 1; i > j; --i) { tmp -= ap[k] * x[i]; --k; }
-                if (nounit) tmp = tmp / ap[kk - (n - 1 - j)];
+                const T *aj = &ap[cbL((int)j, (int)n)];
+                T tmp = x[j] - mf_tri::dot(n - 1 - j, &aj[1], &x[j + 1]);
+                if (nounit) tmp = tmp / aj[0];
                 x[j] = tmp;
-                kk -= (n - j);
             }
         }
     }
