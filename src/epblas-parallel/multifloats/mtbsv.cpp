@@ -22,7 +22,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <multifloats.h>
-#include "mf_simd_dd.h"   /* faithful SoA dd_mul/dd_sub/load_dd4/store_dd4 */
+#include "mf_tri_simd.h"   /* mf_tri::axpy_sub / dot — shared SoA loop kernels */
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -32,61 +32,10 @@ inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
 
-/* xp[t] -= t_scalar * cp[t], t = 0..len-1 — the NoTrans band update. Each row
- * is an independent write (temp is the finalized x[j]), so the run is a plain
- * DD axpy: 4-wide SoA (bit-identical to the scalar operators) with a scalar
- * tail. The Trans path is a per-column dot reduction, vectorized below in
- * band_dot (within tolerance, not bit-exact, since the reduce reorders). */
-#ifdef MBLAS_SIMD_DD
-inline void band_axpy_sub(std::ptrdiff_t len, T *xp, const T *cp, const T &t) {
-    const __m256d thb = _mm256_set1_pd(t.limbs[0]);
-    const __m256d tlb = _mm256_set1_pd(t.limbs[1]);
-    std::ptrdiff_t i = 0;
-    for (; i + 4 <= len; i += 4) {
-        __m256d mh, ml; mf_simd::load_dd4(cp + i, mh, ml);
-        __m256d ph, pl; mf_simd::dd_mul(mh, ml, thb, tlb, ph, pl);   /* t*cp */
-        __m256d xh, xl; mf_simd::load_dd4(xp + i, xh, xl);
-        __m256d rh, rl; mf_simd::dd_sub(xh, xl, ph, pl, rh, rl);     /* x - t*cp */
-        mf_simd::store_dd4(xp + i, rh, rl);
-    }
-    for (; i < len; ++i) xp[i] -= t * cp[i];
-}
-#else
-inline void band_axpy_sub(std::ptrdiff_t len, T *xp, const T *cp, const T &t) {
-    for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] -= t * cp[i];
-}
-#endif
-
-/* sum_{t=0}^{len-1} cp[t]*xp[t] — the band dot the Trans solve subtracts from
- * x[j]. The reduction is loop-carried within a column but every column's dot
- * reads only already-solved x (rows below j for upper, above j for lower), so
- * the dot itself is a plain reduction: 4-wide vector accumulator + one faithful
- * hreduce, with a scalar tail. The earlier attempt buffered the 4 products and
- * reduced them in scalar (keeping the full scalar fold + paying store/reload) —
- * that regressed; accumulating into the vector and reducing once does not. The
- * reduce reorders vs the scalar left-fold, so this matches the reference within
- * the consistency tolerance (the cross-column recurrence stays scalar/exact). */
-#ifdef MBLAS_SIMD_DD
-inline T band_dot(std::ptrdiff_t len, const T *cp, const T *xp) {
-    __m256d sh = _mm256_setzero_pd(), sl = _mm256_setzero_pd();
-    std::ptrdiff_t i = 0;
-    for (; i + 4 <= len; i += 4) {
-        __m256d mh, ml; mf_simd::load_dd4(cp + i, mh, ml);
-        __m256d xh, xl; mf_simd::load_dd4(xp + i, xh, xl);
-        __m256d ph, pl; mf_simd::dd_mul(mh, ml, xh, xl, ph, pl);
-        mf_simd::dd_add(sh, sl, ph, pl, sh, sl);
-    }
-    T s = (i >= 4) ? mf_simd::hreduce(sh, sl) : T{0.0, 0.0};
-    for (; i < len; ++i) s = s + cp[i] * xp[i];
-    return s;
-}
-#else
-inline T band_dot(std::ptrdiff_t len, const T *cp, const T *xp) {
-    T s{0.0, 0.0};
-    for (std::ptrdiff_t i = 0; i < len; ++i) s = s + cp[i] * xp[i];
-    return s;
-}
-#endif
+/* NoTrans band update is mf_tri::axpy_sub (xp -= temp*cp), an order-free DD
+ * axpy -> bit-exact. The Trans per-column band dot is mf_tri::dot (vector
+ * accumulate + hreduce) -> within tolerance, since the reduce reorders; the
+ * cross-column recurrence stays scalar/exact in the caller below. */
 
 /* Contiguous (unit-stride) triangular band solve, x[0..n-1] in logical order. */
 void mtbsv_contig(int upper, int trans_, int nounit,
@@ -102,7 +51,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
                     if (nounit) x[j] /= col[k];
                     const T temp = x[j];
                     const std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
-                    band_axpy_sub(j - i_lo, &x[i_lo], &col[off + i_lo], temp);
+                    mf_tri::axpy_sub(j - i_lo, &x[i_lo], &col[off + i_lo], temp);
                 }
             }
         } else {
@@ -113,7 +62,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
                     if (nounit) x[j] /= col[0];
                     const T temp = x[j];
                     const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
-                    band_axpy_sub(i_hi - j, &x[j + 1], &col[off + j + 1], temp);
+                    mf_tri::axpy_sub(i_hi - j, &x[j + 1], &col[off + j + 1], temp);
                 }
             }
         }
@@ -123,7 +72,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
                 const T *col = &a[static_cast<std::size_t>(j) * lda];
                 const std::ptrdiff_t off = k - j;
                 const std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
-                T temp = x[j] - band_dot(j - i_lo, &col[off + i_lo], &x[i_lo]);
+                T temp = x[j] - mf_tri::dot(j - i_lo, &col[off + i_lo], &x[i_lo]);
                 if (nounit) temp /= col[k];
                 x[j] = temp;
             }
@@ -132,7 +81,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
                 const T *col = &a[static_cast<std::size_t>(j) * lda];
                 const std::ptrdiff_t off = -j;
                 const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
-                T temp = x[j] - band_dot(i_hi - j, &col[off + j + 1], &x[j + 1]);
+                T temp = x[j] - mf_tri::dot(i_hi - j, &col[off + j + 1], &x[j + 1]);
                 if (nounit) temp /= col[0];
                 x[j] = temp;
             }

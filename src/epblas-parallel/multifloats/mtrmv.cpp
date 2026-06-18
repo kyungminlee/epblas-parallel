@@ -1,10 +1,11 @@
 /* mtrmv — multifloats real DD triangular matrix-vector. */
 
 #include <cstddef>
+#include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
 #ifdef _OPENMP
-#include <cstdlib>
 #include <omp.h>
 #include "../common/blas_omp.h"
 #define MTRMV_OMP_MIN 128
@@ -23,6 +24,54 @@ inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
+
+/* Contiguous (unit-stride) dense triangular matvec, x[0..n-1] in logical order.
+ * Per column j this is the full-triangle twin of the band cores: NoTrans is an
+ * axpy of column j (scaled by x[j]) into the off-diagonal rows -> mf_tri::axpy_add
+ * (order-free, bit-exact); Trans is a dot of column j with the off-diagonal x
+ * rows -> mf_tri::dot (vector accumulate + hreduce, within tolerance). The
+ * diagonal scaling matches the scalar reference: applied after the axpy for
+ * NoTrans, folded into the dot seed for Trans. A strided x is gathered to a
+ * contiguous scratch by the caller and scattered back. */
+static void mtrmv_contig(bool upper, bool trans, bool nounit,
+                         std::ptrdiff_t n, const T *a, std::size_t lda, T *x)
+{
+    if (!trans) {
+        if (!upper) {
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                const T *aj = &A_(0, j);
+                const T temp = x[j];
+                if (!dd_iszero(temp))
+                    mf_tri::axpy_add(n - 1 - j, &x[j + 1], &aj[j + 1], temp);
+                if (nounit) x[j] = x[j] * aj[j];
+            }
+        } else {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T *aj = &A_(0, j);
+                const T temp = x[j];
+                if (!dd_iszero(temp))
+                    mf_tri::axpy_add(j, &x[0], &aj[0], temp);
+                if (nounit) x[j] = x[j] * aj[j];
+            }
+        }
+    } else {
+        if (!upper) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const T *aj = &A_(0, j);
+                T temp = nounit ? (x[j] * aj[j]) : x[j];
+                temp = temp + mf_tri::dot(n - 1 - j, &aj[j + 1], &x[j + 1]);
+                x[j] = temp;
+            }
+        } else {
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                const T *aj = &A_(0, j);
+                T temp = nounit ? (x[j] * aj[j]) : x[j];
+                temp = temp + mf_tri::dot(j, &aj[0], &x[0]);
+                x[j] = temp;
+            }
+        }
+    }
+}
 
 #ifdef _OPENMP
 /* Threaded contiguous-x core, mirroring kind10 etrmv_omp_contig. The earlier
@@ -177,78 +226,54 @@ extern "C" void mtrmv_(
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                for (int j = N - 1; j >= 0; --j) {
-                    const T temp = x[j];
-                    if (!dd_iszero(temp)) {
-                        const T *aj = &A_(0, j);
-                        for (int i = j + 1; i < N; ++i) x[i] = x[i] + temp * aj[i];
-                    }
-                    if (nounit) x[j] = x[j] * A_(j, j);
-                }
-            } else {
-                for (int j = 0; j < N; ++j) {
-                    const T temp = x[j];
-                    if (!dd_iszero(temp)) {
-                        const T *aj = &A_(0, j);
-                        for (int i = 0; i < j; ++i) x[i] = x[i] + temp * aj[i];
-                    }
-                    if (nounit) x[j] = x[j] * A_(j, j);
-                }
+        mtrmv_contig(UPLO == 'U', TR != 'N', nounit, N, a, (std::size_t)lda, x);
+        return;
+    }
+
+    /* Strided x: linearize to a contiguous scratch in logical order, run the
+     * SIMD contiguous core, scatter back (2N copies vs O(N^2) band work). The
+     * in-place strided walk is kept only as the scratch-alloc-failure fallback. */
+    const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+    T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+    if (xs) {
+        for (int i = 0; i < N; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
+        mtrmv_contig(UPLO == 'U', TR != 'N', nounit, N, a, (std::size_t)lda, xs);
+        for (int i = 0; i < N; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
+        std::free(xs);
+        return;
+    }
+
+    int kx = (incx < 0) ? -(N - 1) * incx : 0;
+    if (TR == 'N') {
+        if (UPLO == 'L') {
+            for (int j = N - 1; j >= 0; --j) {
+                const T temp = x[kx + j * incx];
+                if (!dd_iszero(temp))
+                    for (int i = j + 1; i < N; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
+                if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
             }
         } else {
-            if (UPLO == 'L') {
-                for (int j = 0; j < N; ++j) {
-                    T temp = x[j];
-                    if (nounit) temp = temp * A_(j, j);
-                    const T *aj = &A_(0, j);
-                    for (int i = j + 1; i < N; ++i) temp = temp + aj[i] * x[i];
-                    x[j] = temp;
-                }
-            } else {
-                for (int j = N - 1; j >= 0; --j) {
-                    T temp = x[j];
-                    if (nounit) temp = temp * A_(j, j);
-                    const T *aj = &A_(0, j);
-                    for (int i = 0; i < j; ++i) temp = temp + aj[i] * x[i];
-                    x[j] = temp;
-                }
+            for (int j = 0; j < N; ++j) {
+                const T temp = x[kx + j * incx];
+                if (!dd_iszero(temp))
+                    for (int i = 0; i < j; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
+                if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        if (TR == 'N') {
-            if (UPLO == 'L') {
-                for (int j = N - 1; j >= 0; --j) {
-                    const T temp = x[kx + j * incx];
-                    if (!dd_iszero(temp))
-                        for (int i = j + 1; i < N; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
-                    if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
-                }
-            } else {
-                for (int j = 0; j < N; ++j) {
-                    const T temp = x[kx + j * incx];
-                    if (!dd_iszero(temp))
-                        for (int i = 0; i < j; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
-                    if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
-                }
+        if (UPLO == 'L') {
+            for (int j = 0; j < N; ++j) {
+                T temp = x[kx + j * incx];
+                if (nounit) temp = temp * A_(j, j);
+                for (int i = j + 1; i < N; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
+                x[kx + j * incx] = temp;
             }
         } else {
-            if (UPLO == 'L') {
-                for (int j = 0; j < N; ++j) {
-                    T temp = x[kx + j * incx];
-                    if (nounit) temp = temp * A_(j, j);
-                    for (int i = j + 1; i < N; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
-                    x[kx + j * incx] = temp;
-                }
-            } else {
-                for (int j = N - 1; j >= 0; --j) {
-                    T temp = x[kx + j * incx];
-                    if (nounit) temp = temp * A_(j, j);
-                    for (int i = 0; i < j; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
-                    x[kx + j * incx] = temp;
-                }
+            for (int j = N - 1; j >= 0; --j) {
+                T temp = x[kx + j * incx];
+                if (nounit) temp = temp * A_(j, j);
+                for (int i = 0; i < j; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
+                x[kx + j * incx] = temp;
             }
         }
     }
