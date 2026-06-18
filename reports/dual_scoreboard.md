@@ -1,22 +1,21 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-18 15:45 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-18 16:05 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
-| m | 2229 | 99.8% | 99.5% |
+| m | 2229 | 100.0% | 100.0% |
 | e | 2145 | 92.1% | 98.6% |
 | q | 2145 | 97.9% | 98.3% |
 
 ## m — multifloats (double-double)
 
-2229 cells, 75 routines.  **Pass@1.02: serial 99.8% · omp4 99.5%.**  2 routine(s) with ≥1 flagged cell.
+2229 cells, 75 routines.  **Pass@1.02: serial 100.0% · omp4 100.0%.**  1 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| **mtbsv** | 96 | 1.039 ob1 @UTU/x2/512 | 1.041 @UTU/x-1/512 | ⚠ |
 | **mgemv** | 24 | 1.001 | 1.026 @N/x2/128 | ⚠ |
 | msymv | 24 | 1.015 | 1.010 | ✅ |
 | mtpmv | 96 | 1.013 | 0.994 | ✅ |
@@ -25,6 +24,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wtbsv | 108 | 1.003 | 1.011 | ✅ |
 | mspmv | 24 | 1.009 | 1.011 | ✅ |
 | mgbmv | 24 | 1.011 | 0.765 | ✅ |
+| mtbsv | 96 | 1.010 | 1.009 | ✅ |
 | mtpsv | 96 | 1.008 | 1.007 | ✅ |
 | msbmv | 24 | 1.007 | 1.002 | ✅ |
 | wswap | 3 | 1.004 | 1.006 | ✅ |
@@ -92,24 +92,11 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
 
-<details><summary>m: 14 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>m: 1 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| mtbsv | UTU/x-1 | 512 | 69,376 | 68,287 | 150,358 | 69,463 | 66,758 | 1.016 | 1.041 | ob1 |
-| mtbsv | UTU/x-1 | 1024 | 139,243 | 137,605 | 302,942 | 139,773 | 134,375 | 1.012 | 1.040 | ob1 |
-| mtbsv | UTU/x-1 | 256 | 34,078 | 33,569 | 74,024 | 34,101 | 32,802 | 1.015 | 1.040 | ob1 |
-| mtbsv | UTU/x2 | 1024 | 139,660 | 137,500 | 302,981 | 139,628 | 134,355 | 1.016 | 1.039 | ob1 |
-| mtbsv | UTU/x2 | 512 | 69,419 | 66,833 | 150,456 | 67,851 | 66,830 | 1.039 | 1.015 | ob1 |
-| mtbsv | UTU/x-1 | 128 | 16,454 | 15,849 | 35,882 | 16,461 | 15,848 | 1.038 | 1.039 | ob1 |
-| mtbsv | LNN/x-1 | 1024 | 96,267 | 97,256 | 312,265 | 98,532 | 94,914 | 0.990 | 1.038 | ob1 |
-| mtbsv | LNN/x-1 | 512 | 48,824 | 48,869 | 155,090 | 48,880 | 47,100 | 0.999 | 1.038 | ob1 |
-| mtbsv | LNN/x-1 | 256 | 24,109 | 24,078 | 76,416 | 24,120 | 23,259 | 1.001 | 1.037 | ob1 |
-| mtbsv | UTU/x2 | 256 | 34,105 | 33,566 | 74,054 | 34,058 | 32,846 | 1.016 | 1.037 | ob1 |
-| mtbsv | UTU/x2 | 128 | 16,426 | 16,208 | 35,893 | 16,445 | 15,860 | 1.013 | 1.037 | ob1 |
 | mgemv | N/x2 | 128 | 79,864 | 83,136 | 299,595 | 29,062 | 28,317 | 0.961 | 1.026 | ob1 |
-| mtbsv | UNN/x-1 | 512 | 47,597 | 46,457 | 154,892 | 47,650 | 47,650 | 1.025 | 1.000 | ob1 |
-| mtbsv | UNN/x2 | 256 | 23,546 | 23,011 | 76,304 | 23,578 | 23,568 | 1.023 | 1.000 | ob1 |
 
 </details>
 
