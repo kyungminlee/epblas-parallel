@@ -1,7 +1,13 @@
 /* mtbmv — multifloats real DD triangular band matrix-vector.
  *   x := A*x or A^T*x, A triangular band with K+1 diagonals.
  *
- * Serial — data dependencies in x.
+ * Serial — data dependencies in x force the Fortran reference order.  The eight
+ * UPLO×TRANS×stride cores are a faithful port of the OpenBLAS clone's serial
+ * paths: each column hoists its base pointer (col = &A_(0,j), off) so the inner
+ * loop carries no j*lda recompute, and a strided x is walked IN PLACE through a
+ * small K-wide window (which stays in cache) rather than gathered to scratch —
+ * an O(N) gather pass costs more than the band work for a thin band, which is
+ * why the gather variant trailed ob ~5% on the strided NoTrans-lower leaves.
  */
 
 #include <cstddef>
@@ -26,6 +32,132 @@ inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
+
+/* Serial path — faithful port of the OpenBLAS clone's dtbmv reference cores.
+ * Eight branches: UPLO × TRANS × (unit-stride / strided), each hoisting the
+ * column base pointer so the inner loop has no j*lda recompute. Strided walks
+ * x in place (caller has already shifted x to logical index 0 for incx<0). */
+static void mtbmv_serial(bool upper, bool trans, bool nounit,
+                         std::ptrdiff_t n, std::ptrdiff_t k,
+                         const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
+{
+    std::ptrdiff_t kx = 0;
+    if (!trans) {
+        if (upper) {
+            if (incx == 1) {
+                for (std::ptrdiff_t j = 0; j < n; ++j) {
+                    if (!dd_iszero(x[j])) {
+                        const T temp = x[j];
+                        std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
+                        const T *col = &A_(0, j);
+                        std::ptrdiff_t off = k - j;
+                        for (std::ptrdiff_t i = i_lo; i < j; ++i) x[i] = x[i] + temp * col[off + i];
+                        if (nounit) x[j] = x[j] * col[k];
+                    }
+                }
+            } else {
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = 0; j < n; ++j) {
+                    if (!dd_iszero(x[jx])) {
+                        const T temp = x[jx];
+                        std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
+                        std::ptrdiff_t ix = kx;
+                        const T *col = &A_(0, j);
+                        std::ptrdiff_t off = k - j;
+                        for (std::ptrdiff_t i = i_lo; i < j; ++i) { x[ix] = x[ix] + temp * col[off + i]; ix += incx; }
+                        if (nounit) x[jx] = x[jx] * col[k];
+                    }
+                    jx += incx;
+                    if (j >= k) kx += incx;
+                }
+            }
+        } else {
+            if (incx == 1) {
+                for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                    if (!dd_iszero(x[j])) {
+                        const T temp = x[j];
+                        std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
+                        const T *col = &A_(0, j);
+                        std::ptrdiff_t off = -j;
+                        for (std::ptrdiff_t i = i_hi; i > j; --i) x[i] = x[i] + temp * col[off + i];
+                        if (nounit) x[j] = x[j] * col[0];
+                    }
+                }
+            } else {
+                kx += (n - 1) * incx;
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                    if (!dd_iszero(x[jx])) {
+                        const T temp = x[jx];
+                        std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
+                        std::ptrdiff_t ix = kx;
+                        const T *col = &A_(0, j);
+                        std::ptrdiff_t off = -j;
+                        for (std::ptrdiff_t i = i_hi; i > j; --i) { x[ix] = x[ix] + temp * col[off + i]; ix -= incx; }
+                        if (nounit) x[jx] = x[jx] * col[0];
+                    }
+                    jx -= incx;
+                    if (n - 1 - j >= k) kx -= incx;
+                }
+            }
+        }
+    } else {
+        if (upper) {
+            if (incx == 1) {
+                for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                    T temp = x[j];
+                    const T *col = &A_(0, j);
+                    std::ptrdiff_t off = k - j;
+                    if (nounit) temp = temp * col[k];
+                    std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
+                    for (std::ptrdiff_t i = j - 1; i >= i_lo; --i) temp = temp + col[off + i] * x[i];
+                    x[j] = temp;
+                }
+            } else {
+                kx += (n - 1) * incx;
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                    T temp = x[jx];
+                    kx -= incx;
+                    std::ptrdiff_t ix = kx;
+                    const T *col = &A_(0, j);
+                    std::ptrdiff_t off = k - j;
+                    if (nounit) temp = temp * col[k];
+                    std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
+                    for (std::ptrdiff_t i = j - 1; i >= i_lo; --i) { temp = temp + col[off + i] * x[ix]; ix -= incx; }
+                    x[jx] = temp;
+                    jx -= incx;
+                }
+            }
+        } else {
+            if (incx == 1) {
+                for (std::ptrdiff_t j = 0; j < n; ++j) {
+                    T temp = x[j];
+                    const T *col = &A_(0, j);
+                    std::ptrdiff_t off = -j;
+                    if (nounit) temp = temp * col[0];
+                    std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
+                    for (std::ptrdiff_t i = j + 1; i <= i_hi; ++i) temp = temp + col[off + i] * x[i];
+                    x[j] = temp;
+                }
+            } else {
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = 0; j < n; ++j) {
+                    T temp = x[jx];
+                    kx += incx;
+                    std::ptrdiff_t ix = kx;
+                    const T *col = &A_(0, j);
+                    std::ptrdiff_t off = -j;
+                    if (nounit) temp = temp * col[0];
+                    std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
+                    for (std::ptrdiff_t i = j + 1; i <= i_hi; ++i) { temp = temp + col[off + i] * x[ix]; ix += incx; }
+                    x[jx] = temp;
+                    jx += incx;
+                }
+            }
+        }
+    }
+}
 
 #ifdef _OPENMP
 /* Row-gather for the Trans triangle: x := A^T*x is an in-place band matvec, so
@@ -161,122 +293,10 @@ extern "C" void mtbmv_(
         return;
 #endif
 
-    if (incx == 1) {
-        if (TR == 'N') {
-            if (UPLO == 'U') {
-                for (int j = 0; j < N; ++j) {
-                    if (!dd_iszero(x[j])) {
-                        const T tmp = x[j];
-                        const int L = K - j;
-                        const int i_lo = (j - K > 0) ? (j - K) : 0;
-                        for (int i = i_lo; i < j; ++i) x[i] = x[i] + tmp * A_(L + i, j);
-                        if (nounit) x[j] = x[j] * A_(K, j);
-                    }
-                }
-            } else {
-                for (int j = N - 1; j >= 0; --j) {
-                    if (!dd_iszero(x[j])) {
-                        const T tmp = x[j];
-                        const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (int i = i_hi - 1; i > j; --i) x[i] = x[i] + tmp * A_(i - j, j);
-                        if (nounit) x[j] = x[j] * A_(0, j);
-                    }
-                }
-            }
-        } else {
-            if (UPLO == 'U') {
-                for (int j = N - 1; j >= 0; --j) {
-                    T tmp = x[j];
-                    const int L = K - j;
-                    if (nounit) tmp = tmp * A_(K, j);
-                    const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    for (int i = j - 1; i >= i_lo; --i) tmp = tmp + A_(L + i, j) * x[i];
-                    x[j] = tmp;
-                }
-            } else {
-                for (int j = 0; j < N; ++j) {
-                    T tmp = x[j];
-                    if (nounit) tmp = tmp * A_(0, j);
-                    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    for (int i = j + 1; i < i_hi; ++i) tmp = tmp + A_(i - j, j) * x[i];
-                    x[j] = tmp;
-                }
-            }
-        }
-    } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        if (TR == 'N') {
-            if (UPLO == 'U') {
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
-                    if (!dd_iszero(x[jx])) {
-                        const T tmp = x[jx];
-                        int ix = kx;
-                        const int L = K - j;
-                        const int i_lo = (j - K > 0) ? (j - K) : 0;
-                        for (int i = i_lo; i < j; ++i) {
-                            x[ix] = x[ix] + tmp * A_(L + i, j);
-                            ix += incx;
-                        }
-                        if (nounit) x[jx] = x[jx] * A_(K, j);
-                    }
-                    jx += incx;
-                    if (j >= K) kx += incx;
-                }
-            } else {
-                kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
-                    if (!dd_iszero(x[jx])) {
-                        const T tmp = x[jx];
-                        int ix = kx;
-                        const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (int i = i_hi - 1; i > j; --i) {
-                            x[ix] = x[ix] + tmp * A_(i - j, j);
-                            ix -= incx;
-                        }
-                        if (nounit) x[jx] = x[jx] * A_(0, j);
-                    }
-                    jx -= incx;
-                    if ((N - 1 - j) >= K) kx -= incx;
-                }
-            }
-        } else {
-            if (UPLO == 'U') {
-                kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
-                    T tmp = x[jx];
-                    kx -= incx;
-                    int ix = kx;
-                    const int L = K - j;
-                    if (nounit) tmp = tmp * A_(K, j);
-                    const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    for (int i = j - 1; i >= i_lo; --i) {
-                        tmp = tmp + A_(L + i, j) * x[ix];
-                        ix -= incx;
-                    }
-                    x[jx] = tmp;
-                    jx -= incx;
-                }
-            } else {
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
-                    T tmp = x[jx];
-                    kx += incx;
-                    int ix = kx;
-                    if (nounit) tmp = tmp * A_(0, j);
-                    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    for (int i = j + 1; i < i_hi; ++i) {
-                        tmp = tmp + A_(i - j, j) * x[ix];
-                        ix += incx;
-                    }
-                    x[jx] = tmp;
-                    jx += incx;
-                }
-            }
-        }
-    }
+    T *xp = x;
+    if (incx < 0) xp -= (std::ptrdiff_t)(N - 1) * incx;   /* x at logical 0 */
+    mtbmv_serial(UPLO == 'U', TR != 'N', nounit != 0,
+                 N, K, a, lda, xp, incx);
 }
 
 #undef A_

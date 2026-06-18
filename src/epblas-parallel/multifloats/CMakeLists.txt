@@ -160,6 +160,12 @@ endif()
 # diagnostic family as kind10 enrm2/ieamax.
 set_source_files_properties(mtbsv.cpp PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
 
+# mtbmv: same faithful-ob-port family as mtbsv. After the serial port the only
+# residual is the strided Trans-upper unit-diag leaf (UTU/x* ~1.02 at every N) —
+# the consistent-across-N loop-placement signature. Pin loop alignment to a 32B
+# fetch boundary, matching ob's landing.
+set_source_files_properties(mtbmv.cpp PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
+
 # multifloats C library provides adddd / muldd / fmadd / cmuldd / ...
 target_link_libraries(${LIB_PREFIX}blas_parallel PUBLIC multifloats)
 
