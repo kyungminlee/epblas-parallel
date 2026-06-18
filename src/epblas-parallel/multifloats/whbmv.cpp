@@ -4,9 +4,12 @@
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
+#include "mf_tri_simd.h"
 #ifdef _OPENMP
 #include <cstdlib>
+#include <cstring>
 #include <omp.h>
 #include "../common/blas_omp.h"
 #define WHBMV_OMP_MIN 256
@@ -32,85 +35,90 @@ inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 inline T cmul_r(T const &a, R const &r) { return T{ a.re * r, a.im * r }; }
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
-#ifdef _OPENMP
-/* Row-gather: y[i] (i in [lo,hi)) is an independent Hermitian-band dot. Each row
- * reconstructs A[i][·]: the stored-triangle neighbours are used directly, the
- * reflected neighbours conjugated (Hermitian), and the diagonal takes only the
- * real part (matching the serial). x and y are distinct (hbmv forbids aliasing)
- * → output rows partition with no cross-thread dependence. Reorders the per-row
- * summation vs the serial column scatter → within DD fuzz tol; serial bit-exact. */
-static void whbmv_rowgather(bool upper, int n, int k, int lo, int hi,
-                            const T *a, std::size_t lda,
-                            const T *x, T alpha, T *y, int incy)
-{
-    const std::ptrdiff_t s1 = static_cast<std::ptrdiff_t>(lda) - 1;
-    if (upper) {
-        for (int i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = cmul_r(x[i], base[k].re);                  /* real diagonal */
-            const int rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
-            for (int d = 1; d <= rlen; ++d)                  /* right: upper elem direct */
-                s = cadd(s, cmul(base[k + (std::ptrdiff_t)d * s1], x[i + d]));
-            const int llen = (i < k) ? i : k;
-            for (int d = 1; d <= llen; ++d)                  /* left: conj of upper */
-                s = cadd(s, cmul(cconj(base[k - d]), x[i - d]));
-            y[(std::ptrdiff_t)i * incy] = cadd(y[(std::ptrdiff_t)i * incy], cmul(alpha, s));
-        }
-    } else {
-        for (int i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = cmul_r(x[i], base[0].re);                  /* real diagonal */
-            const int llen = (i < k) ? i : k;
-            for (int d = 1; d <= llen; ++d)                  /* left: lower elem direct */
-                s = cadd(s, cmul(base[-(std::ptrdiff_t)d * s1], x[i - d]));
-            const int rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
-            for (int d = 1; d <= rlen; ++d)                  /* right: conj of lower */
-                s = cadd(s, cmul(cconj(base[d]), x[i + d]));
-            y[(std::ptrdiff_t)i * incy] = cadd(y[(std::ptrdiff_t)i * incy], cmul(alpha, s));
-        }
-    }
+/* One Hermitian-band column j's contribution ADDED into accumulator yacc: the
+ * off-diagonal SIMD AXPY (caxpy_add over the contiguous band run) + the real
+ * diagonal + the SIMD conj-dot reflected term (cdot). Additive throughout, so
+ * the same kernel serves the serial sweep (yacc = y, sequential j -> AXPY half
+ * bit-exact) and the threaded path (yacc = a private zero buffer, disjoint
+ * cyclic columns -> within DD fuzz tol). The conj-dot reorders its reduction
+ * either way. */
+static inline void whbmv_col_upper(int j, int K, const T *a, std::size_t lda,
+                                   const T *x, T alpha, T *yacc) {
+    const T t1 = cmul(alpha, x[j]);
+    const int L = K - j;
+    const int i_lo = (j - K > 0) ? (j - K) : 0;
+    const int len = j - i_lo;
+    mf_tri::caxpy_add(len, &yacc[i_lo], &A_(L + i_lo, j), t1);
+    const T t2 = mf_tri::cdot(len, &A_(L + i_lo, j), &x[i_lo], true);
+    yacc[j] = cadd(yacc[j], cadd(cmul_r(t1, A_(K, j).re), cmul(alpha, t2)));
 }
 
-/* Threaded Hermitian band matvec. Disjoint output-row ranges; x gathered to
- * contiguous when strided. Returns true if handled. Beta already applied. */
+static inline void whbmv_col_lower(int j, int N, int K, const T *a, std::size_t lda,
+                                   const T *x, T alpha, T *yacc) {
+    const T t1 = cmul(alpha, x[j]);
+    yacc[j] = cadd(yacc[j], cmul_r(t1, A_(0, j).re));
+    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+    const int len = i_hi - (j + 1);
+    mf_tri::caxpy_add(len, &yacc[j + 1], &A_(1, j), t1);
+    const T t2 = mf_tri::cdot(len, &A_(1, j), &x[j + 1], true);
+    yacc[j] = cadd(yacc[j], cmul(alpha, t2));
+}
+
+#ifdef _OPENMP
+/* Threaded Hermitian band matvec (contiguous x,y; y already beta-applied).
+ * Private-accumulator column sweep mirroring whemv/whpmv: each thread folds a
+ * cyclic subset of columns into its own zero buffer via the shared column
+ * kernel, then the partials reduce onto y. Reusing the fully-SIMD column kernel
+ * keeps both halves vectorized (the old row-gather left the reflected band
+ * neighbours scalar -> omp4 near parity). Returns true if handled. */
 __attribute__((noinline)) static bool whbmv_omp(
-    bool upper, int n, int k, const T *a, std::size_t lda,
-    const T *x, int incx, T alpha, T *y, int incy)
+    bool upper, int N, int K, const T *a, std::size_t lda, const T *x, T alpha, T *y)
 {
-    if (n < WHBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
-        return false;
     int nthreads = blas_omp_max_threads();
+    if (nthreads <= 1 || omp_in_parallel()) return false;
     if (nthreads > WHBMV_MAX_CPUS) nthreads = WHBMV_MAX_CPUS;
 
-    if (incx < 0) x -= (std::ptrdiff_t)(n - 1) * incx;
-    if (incy < 0) y -= (std::ptrdiff_t)(n - 1) * incy;
-
-    const T *xptr = x;
-    T *xbuf = nullptr;
-    if (incx != 1) {
-        xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
-        if (!xbuf) return false;
-        for (int i = 0; i < n; ++i) xbuf[i] = x[(std::ptrdiff_t)i * incx];
-        xptr = xbuf;
-    }
+    T *pool = static_cast<T *>(
+        std::malloc(static_cast<std::size_t>(nthreads) * N * sizeof(T)));
+    if (!pool) return false;
+    std::memset(pool, 0, static_cast<std::size_t>(nthreads) * N * sizeof(T));
 
     #pragma omp parallel num_threads(nthreads)
     {
         int tid = omp_get_thread_num();
-        int lo = (int)((long long)n * tid / nthreads);
-        int hi = (int)((long long)n * (tid + 1) / nthreads);
-        whbmv_rowgather(upper, n, k, lo, hi, a, lda, xptr, alpha, y, incy);
+        T *yp = pool + static_cast<std::size_t>(tid) * N;
+        if (upper) for (int j = tid; j < N; j += nthreads) whbmv_col_upper(j, K, a, lda, x, alpha, yp);
+        else       for (int j = tid; j < N; j += nthreads) whbmv_col_lower(j, N, K, a, lda, x, alpha, yp);
     }
-    std::free(xbuf);
+
+    for (int t = 0; t < nthreads; ++t) {
+        const T *yp = pool + static_cast<std::size_t>(t) * N;
+        for (int k = 0; k < N; ++k) y[k] = cadd(y[k], yp[k]);
+    }
+    std::free(pool);
     return true;
 }
 #endif
+
+/* Contiguous (unit-stride x,y) core: Hermitian band matvec y += alpha*A*x, with
+ * y already beta-applied. Threaded private-accumulator sweep when enabled, else
+ * a serial SIMD column sweep. Strided callers gather x,y around this. */
+static void whbmv_contig(bool upper, int N, int K, const T *a, std::size_t lda,
+                         const T *x, T alpha, T *y)
+{
+#ifdef _OPENMP
+    if (N >= WHBMV_OMP_MIN && blas_omp_max_threads() > 1
+        && whbmv_omp(upper, N, K, a, lda, x, alpha, y))
+        return;
+#endif
+    if (upper) for (int j = 0; j < N; ++j) whbmv_col_upper(j, K, a, lda, x, alpha, y);
+    else       for (int j = 0; j < N; ++j) whbmv_col_lower(j, N, K, a, lda, x, alpha, y);
+}
 
 extern "C" void whbmv_(
     const char *uplo,
@@ -137,76 +145,22 @@ extern "C" void whbmv_(
     }
     if (cdd_iszero(alpha)) return;
 
-#ifdef _OPENMP
-    if (N >= WHBMV_OMP_MIN && blas_omp_max_threads() > 1
-        && whbmv_omp(UPLO == 'U', N, K, a, lda, x, incx, alpha, y, incy))
-        return;
-#endif
-
     if (incx == 1 && incy == 1) {
-        if (UPLO == 'U') {
-            for (int j = 0; j < N; ++j) {
-                const T t1 = cmul(alpha, x[j]);
-                T t2 = czero;
-                const int L = K - j;
-                const int i_lo = (j - K > 0) ? (j - K) : 0;
-                for (int i = i_lo; i < j; ++i) {
-                    y[i] = cadd(y[i], cmul(t1, A_(L + i, j)));
-                    t2 = cadd(t2, cmul(cconj(A_(L + i, j)), x[i]));
-                }
-                y[j] = cadd(y[j], cadd(cmul_r(t1, A_(K, j).re), cmul(alpha, t2)));
-            }
-        } else {
-            for (int j = 0; j < N; ++j) {
-                const T t1 = cmul(alpha, x[j]);
-                T t2 = czero;
-                y[j] = cadd(y[j], cmul_r(t1, A_(0, j).re));
-                const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                for (int i = j + 1; i < i_hi; ++i) {
-                    y[i] = cadd(y[i], cmul(t1, A_(i - j, j)));
-                    t2 = cadd(t2, cmul(cconj(A_(i - j, j)), x[i]));
-                }
-                y[j] = cadd(y[j], cmul(alpha, t2));
-            }
-        }
-    } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        if (UPLO == 'U') {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
-                const T t1 = cmul(alpha, x[jx]);
-                T t2 = czero;
-                int ix = kx, iy = ky;
-                const int L = K - j;
-                const int i_lo = (j - K > 0) ? (j - K) : 0;
-                for (int i = i_lo; i < j; ++i) {
-                    y[iy] = cadd(y[iy], cmul(t1, A_(L + i, j)));
-                    t2 = cadd(t2, cmul(cconj(A_(L + i, j)), x[ix]));
-                    ix += incx; iy += incy;
-                }
-                y[jy] = cadd(y[jy], cadd(cmul_r(t1, A_(K, j).re), cmul(alpha, t2)));
-                jx += incx; jy += incy;
-                if (j >= K) { kx += incx; ky += incy; }
-            }
-        } else {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
-                const T t1 = cmul(alpha, x[jx]);
-                T t2 = czero;
-                y[jy] = cadd(y[jy], cmul_r(t1, A_(0, j).re));
-                int ix = jx, iy = jy;
-                const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                for (int i = j + 1; i < i_hi; ++i) {
-                    ix += incx; iy += incy;
-                    y[iy] = cadd(y[iy], cmul(t1, A_(i - j, j)));
-                    t2 = cadd(t2, cmul(cconj(A_(i - j, j)), x[ix]));
-                }
-                y[jy] = cadd(y[jy], cmul(alpha, t2));
-                jx += incx; jy += incy;
-            }
-        }
+        whbmv_contig(UPLO == 'U', N, K, a, lda, x, alpha, y);
+        return;
     }
+    /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
+     * core, scatter y back. Handles negative increments; O(N) gather vs the old
+     * O(N*K) strided sweep, and unifies the strided and contiguous paths. */
+    const T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
+    T *ybase = (incy < 0) ? y - (std::ptrdiff_t)(N - 1) * incy : y;
+    std::vector<T> xs(static_cast<std::size_t>(N)), ys(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i) {
+        xs[i] = xbase[(std::ptrdiff_t)i * incx];
+        ys[i] = ybase[(std::ptrdiff_t)i * incy];
+    }
+    whbmv_contig(UPLO == 'U', N, K, a, lda, xs.data(), alpha, ys.data());
+    for (int i = 0; i < N; ++i) ybase[(std::ptrdiff_t)i * incy] = ys[i];
 }
 
 #undef A_
