@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -24,59 +25,55 @@ inline char up(const char *p) {
 }
 inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 
-/* In-place contiguous (incx==1) triangular packed matvec — the Fortran
- * reference walk, ptrdiff_t indices throughout and `+=`/`*=` RMW so the
- * inner packed/x walks strength-reduce to pure pointer increments (no
- * per-element sign extension), byte-for-byte the ob clone. The strided
- * entry gathers into contiguous scratch and reuses this, so a strided
- * matvec runs the fast stride-1 kernel instead of a slower indexed walk. */
+/* Base index of packed column j (its first stored element). Upper: kk=j(j+1)/2,
+ * rows 0..j-1 at kk+0..j-1, diag at kk+j. Lower: kk=j*N-j(j-1)/2, diag at kk+0,
+ * rows j+1..N-1 at kk+1..N-1-j. So &ap[kk] is column j stored contiguously —
+ * identical to the dense (mtrmv) per-column kernel, just with packed offsets. */
+inline std::size_t kk_upper(std::ptrdiff_t j) {
+    return static_cast<std::size_t>(j) * (j + 1) / 2;
+}
+inline std::size_t kk_lower(std::ptrdiff_t j, std::ptrdiff_t n) {
+    return static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2;
+}
+
+/* In-place contiguous (incx==1) triangular packed matvec. Per column j, &ap[kk]
+ * is a contiguous run, so this is the packed twin of mtrmv_contig: NoTrans is a
+ * column AXPY scaled by x[j] (mf_tri::axpy_add, order-free -> bit-exact); Trans
+ * is a column dot against the off-diagonal x (mf_tri::dot, vector accumulate +
+ * hreduce -> within tolerance). The diagonal scaling matches the reference:
+ * after the axpy for NoTrans, folded into the dot seed for Trans. The strided
+ * entry gathers into contiguous scratch and reuses this. */
 void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
                          std::ptrdiff_t n, const T *ap, T *x)
 {
     if (!trans) {
         if (upper) {
-            std::ptrdiff_t kk = 0;
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                if (!dd_iszero(x[j])) {
-                    const T tmp = x[j];
-                    std::ptrdiff_t k = kk;
-                    for (std::ptrdiff_t i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
-                    if (nounit) x[j] *= ap[kk + j];
-                }
-                kk += j + 1;
+                const T *aj = &ap[kk_upper(j)];
+                const T tmp = x[j];
+                if (!dd_iszero(tmp)) mf_tri::axpy_add(j, &x[0], &aj[0], tmp);
+                if (nounit) x[j] = x[j] * aj[j];
             }
         } else {
-            std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                if (!dd_iszero(x[j])) {
-                    const T tmp = x[j];
-                    std::ptrdiff_t k = kk;
-                    for (std::ptrdiff_t i = n - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
-                    if (nounit) x[j] *= ap[kk - (n - 1 - j)];
-                }
-                kk -= (n - j);
+                const T *aj = &ap[kk_lower(j, n)];
+                const T tmp = x[j];
+                if (!dd_iszero(tmp)) mf_tri::axpy_add(n - 1 - j, &x[j + 1], &aj[1], tmp);
+                if (nounit) x[j] = x[j] * aj[0];
             }
         }
     } else {
         if (upper) {
-            std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                T tmp = x[j];
-                if (nounit) tmp *= ap[kk];
-                std::ptrdiff_t k = kk - 1;
-                for (std::ptrdiff_t i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
-                x[j] = tmp;
-                kk -= j + 1;
+                const T *aj = &ap[kk_upper(j)];
+                T tmp = nounit ? (aj[j] * x[j]) : x[j];
+                x[j] = tmp + mf_tri::dot(j, &aj[0], &x[0]);
             }
         } else {
-            std::ptrdiff_t kk = 0;
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                T tmp = x[j];
-                if (nounit) tmp *= ap[kk];
-                std::ptrdiff_t k = kk + 1;
-                for (std::ptrdiff_t i = j + 1; i < n; ++i) { tmp += ap[k] * x[i]; ++k; }
-                x[j] = tmp;
-                kk += n - j;
+                const T *aj = &ap[kk_lower(j, n)];
+                T tmp = nounit ? (aj[0] * x[j]) : x[j];
+                x[j] = tmp + mf_tri::dot(n - 1 - j, &aj[1], &x[j + 1]);
             }
         }
     }
@@ -86,17 +83,6 @@ void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
 #ifdef _OPENMP
 namespace {
 const T zero_dd{0.0, 0.0};
-/* Base index of packed column j (its first stored element). Upper: kk=j(j+1)/2,
- * diag at kk+j, off-diag rows 0..j-1 at kk+0..j-1. Lower: kk=j*N-j(j-1)/2, diag
- * at kk+0, rows j+1..N-1 at kk+1..N-1-j. So &ap[kk] is column j contiguous —
- * identical access to the dense (mtrmv) per-column kernel, just with packed
- * offsets, so the threading matches mtrmv's contiguous-column scheme. */
-inline std::size_t kk_upper(std::ptrdiff_t j) {
-    return static_cast<std::size_t>(j) * (j + 1) / 2;
-}
-inline std::size_t kk_lower(std::ptrdiff_t j, std::ptrdiff_t n) {
-    return static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2;
-}
 }
 
 /* Threaded contiguous-x core, mirroring mtrmv_omp_contig but with packed column
