@@ -1,12 +1,18 @@
 /* mspr — multifloats real DD symmetric packed rank-1 update.
  *   A := alpha*x*x^T + A
  *
- * OMP over j (columns are independent in packed storage when accessed via kk(j)).
+ * x is gathered+split once into SoA limb arrays (xh/xl); this both makes
+ * the strided (incx != 1) case unit-stride from then on — killing the old
+ * strided-lower gap to the reference — and feeds the 4-wide AVX2 SoA
+ * double-double axpy kernel (mf_rank1::dd_axpy) that is bit-identical to
+ * the scalar operators. OMP over columns j (independent in packed storage).
  */
 
 #include <cstddef>
 #include <cctype>
+#include <vector>
 #include <multifloats.h>
+#include "mf_rank1_simd.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -20,7 +26,7 @@ namespace {
 inline char up(const char *p) {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
 }
-inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
+inline bool dd_iszero(double h, double l) { return h == 0.0 && l == 0.0; }
 }
 
 extern "C" void mspr_(
@@ -37,77 +43,50 @@ extern "C" void mspr_(
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
-    if (N == 0 || dd_iszero(alpha)) return;
+    if (N == 0 || dd_iszero(alpha.limbs[0], alpha.limbs[1])) return;
 
-    if (incx == 1) {
-        if (UPLO == 'U') {
+    /* Gather x in logical order 0..N-1 and split into SoA limbs. O(N); also
+     * the strided->contiguous fix (only x is strided — ap is always packed
+     * contiguous). */
+    std::vector<double> xh(N), xl(N);
+    {
+        std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+        for (int j = 0; j < N; ++j) {
+            xh[j] = x[ix].limbs[0];
+            xl[j] = x[ix].limbs[1];
+            ix += incx;
+        }
+    }
+    const double *xhp = xh.data();
+    const double *xlp = xl.data();
+
 #ifdef _OPENMP
-            const int use_omp = (N >= MSPR_OMP_MIN && blas_omp_max_threads() > 1);
-            /* static,8: column j writes j+1 (U) / N-j (L) packed elems — a
-             * triangular skew that plain static dumps the heavy end onto one
-             * thread. Packed columns are contiguous in ap, so cyclic static,1
-             * would false-share cache lines on this light real rank-1 write.
-             * Chunk-8 balances the skew while keeping each thread's run local
-             * (mirrors the espr twin). */
-            #pragma omp parallel for if(use_omp) schedule(static, 8)
+    const int use_omp = (N >= MSPR_OMP_MIN && blas_omp_max_threads() > 1);
+    /* static,8: column j writes j+1 (U) / N-j (L) packed elems — a triangular
+     * skew that plain static dumps onto one thread. Packed columns are
+     * contiguous in ap, so cyclic static,1 would false-share cache lines on
+     * this light real rank-1 write. Chunk-8 balances the skew while keeping
+     * each thread's run local (mirrors the espr twin). */
 #endif
-            for (int j = 0; j < N; ++j) {
-                if (!dd_iszero(x[j])) {
-                    const T tmp = alpha * x[j];
-                    const int kk = (j * (j + 1)) / 2;
-                    for (int i = 0; i <= j; ++i) ap[kk + i] = ap[kk + i] + x[i] * tmp;
-                }
-            }
-        } else {
+    if (UPLO == 'U') {
 #ifdef _OPENMP
-            const int use_omp = (N >= MSPR_OMP_MIN && blas_omp_max_threads() > 1);
-            /* static,8: column j writes j+1 (U) / N-j (L) packed elems — a
-             * triangular skew that plain static dumps the heavy end onto one
-             * thread. Packed columns are contiguous in ap, so cyclic static,1
-             * would false-share cache lines on this light real rank-1 write.
-             * Chunk-8 balances the skew while keeping each thread's run local
-             * (mirrors the espr twin). */
-            #pragma omp parallel for if(use_omp) schedule(static, 8)
+        #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
-            for (int j = 0; j < N; ++j) {
-                if (!dd_iszero(x[j])) {
-                    const T tmp = alpha * x[j];
-                    const int kk = j * N - (j * (j - 1)) / 2;
-                    for (int i = j; i < N; ++i) ap[kk + (i - j)] = ap[kk + (i - j)] + x[i] * tmp;
-                }
-            }
+        for (int j = 0; j < N; ++j) {
+            if (dd_iszero(xhp[j], xlp[j])) continue;
+            const T tmp = alpha * T{xhp[j], xlp[j]};
+            const int kk = (j * (j + 1)) / 2;
+            mf_rank1::dd_axpy(j + 1, xhp, xlp, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int kk = 0;
-        if (UPLO == 'U') {
-            int jx = kx;
-            for (int j = 0; j < N; ++j) {
-                if (!dd_iszero(x[jx])) {
-                    const T tmp = alpha * x[jx];
-                    int ix = kx;
-                    for (int k = kk; k < kk + j + 1; ++k) {
-                        ap[k] = ap[k] + x[ix] * tmp;
-                        ix += incx;
-                    }
-                }
-                jx += incx;
-                kk += j + 1;
-            }
-        } else {
-            int jx = kx;
-            for (int j = 0; j < N; ++j) {
-                if (!dd_iszero(x[jx])) {
-                    const T tmp = alpha * x[jx];
-                    int ix = jx;
-                    for (int k = kk; k < kk + N - j; ++k) {
-                        ap[k] = ap[k] + x[ix] * tmp;
-                        ix += incx;
-                    }
-                }
-                jx += incx;
-                kk += N - j;
-            }
+#ifdef _OPENMP
+        #pragma omp parallel for if(use_omp) schedule(static, 8)
+#endif
+        for (int j = 0; j < N; ++j) {
+            if (dd_iszero(xhp[j], xlp[j])) continue;
+            const T tmp = alpha * T{xhp[j], xlp[j]};
+            const int kk = j * N - (j * (j - 1)) / 2;
+            mf_rank1::dd_axpy(N - j, xhp + j, xlp + j, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
     }
 }
