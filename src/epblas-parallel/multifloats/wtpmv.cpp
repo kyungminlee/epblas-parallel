@@ -159,18 +159,12 @@ static bool wtpmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
                 const T *aj = upper ? &ap[kk_upper(j)] : &ap[kk_lower(j, n)];
                 T diagc = upper ? aj[j] : aj[0]; if (conj) diagc = cconj(diagc);
                 T s = nounit ? cmul(diagc, x[j]) : x[j];
-                if (upper) {
-                    for (std::ptrdiff_t c = 0; c < j; ++c) {
-                        T e = aj[c]; if (conj) e = cconj(e);
-                        s = cadd(s, cmul(e, x[c]));
-                    }
-                } else {
-                    for (std::ptrdiff_t c = j + 1; c < n; ++c) {
-                        T e = aj[c - j]; if (conj) e = cconj(e);
-                        s = cadd(s, cmul(e, x[c]));
-                    }
-                }
-                y_buf[j] = s;
+                T dot = upper
+                    ? (conj ? mfdot::wdotc_unit(j, &aj[0], &x[0])
+                            : mfdot::wdotu_unit(j, &aj[0], &x[0]))
+                    : (conj ? mfdot::wdotc_unit(n - j - 1, &aj[1], &x[j + 1])
+                            : mfdot::wdotu_unit(n - j - 1, &aj[1], &x[j + 1]));
+                y_buf[j] = cadd(s, dot);
             }
             #pragma omp for schedule(static)
             for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = y_buf[i];
@@ -191,14 +185,12 @@ static bool wtpmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
                 const T xj = x[j];
                 if (upper) {
                     const T *aj = &ap[kk_upper(j)];
-                    for (std::ptrdiff_t i = 0; i < j; ++i)
-                        y_priv[i] = cadd(y_priv[i], cmul(xj, aj[i]));
+                    if (!cdd_iszero(xj)) mf_tri::caxpy_add(j, &y_priv[0], &aj[0], xj);
                     y_priv[j] = cadd(y_priv[j], cmul(xj, nounit ? aj[j] : one_cdd));
                 } else {
                     const T *aj = &ap[kk_lower(j, n)];
                     y_priv[j] = cadd(y_priv[j], cmul(xj, nounit ? aj[0] : one_cdd));
-                    for (std::ptrdiff_t i = j + 1; i < n; ++i)
-                        y_priv[i] = cadd(y_priv[i], cmul(xj, aj[i - j]));
+                    if (!cdd_iszero(xj)) mf_tri::caxpy_add(n - j - 1, &y_priv[j + 1], &aj[1], xj);
                 }
             }
             #pragma omp for schedule(static)
