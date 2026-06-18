@@ -5,6 +5,7 @@
 #include <vector>
 #include <multifloats.h>
 #include "mf_dotkernel.h"
+#include "mf_tri_simd.h"
 #ifdef _OPENMP
 #include <cstdlib>
 #include <omp.h>
@@ -52,16 +53,72 @@ static void wtpmv_serial_N_upper(bool nounit, int n, const T *ap, T *x) {
             const T xj = x[j];
             if (cdd_iszero(xj)) continue;
             const T *col = &ap[wtpmv_kk_upper(j)];
-            for (int i = ib; i < j; ++i) y[i] = cadd(y[i], cmul(xj, col[i]));
+            mf_tri::caxpy_add(j - ib, &y[ib], &col[ib], xj);
         }
         for (int j = ie; j < n; ++j) {                  /* above-tile columns, ascending j */
             const T xj = x[j];
             if (cdd_iszero(xj)) continue;
             const T *col = &ap[wtpmv_kk_upper(j)];
-            for (int i = ib; i < ie; ++i) y[i] = cadd(y[i], cmul(xj, col[i]));
+            mf_tri::caxpy_add(ie - ib, &y[ib], &col[ib], xj);
         }
     }
     for (int i = 0; i < n; ++i) x[i] = y[i];
+}
+
+/* Contiguous (incx==1) serial core. NoTrans is a column AXPY (caxpy_add, bit-
+ * exact); Trans/ConjTrans is a packed-column complex dot via the AVX2 wide
+ * wdotu/wdotc kernel (reorders → within fuzz tol). Strided callers gather x to
+ * a contiguous scratch, run this, and scatter back. */
+static void wtpmv_serial_contig(bool upper, bool trans, bool noconj,
+                                bool nounit, int N, const T *ap, T *x) {
+    if (!trans) {
+        if (upper) {
+            if (N >= 128) {
+                wtpmv_serial_N_upper(nounit, N, ap, x);
+            } else {
+                int kk = 0;
+                for (int j = 0; j < N; ++j) {
+                    if (!cdd_iszero(x[j])) {
+                        const T tmp = x[j];
+                        mf_tri::caxpy_add(j, &x[0], &ap[kk], tmp);
+                        if (nounit) x[j] = cmul(x[j], ap[kk + j]);
+                    }
+                    kk += j + 1;
+                }
+            }
+        } else {
+            int kk = (N * (N + 1)) / 2 - 1;
+            for (int j = N - 1; j >= 0; --j) {
+                if (!cdd_iszero(x[j])) {
+                    const T tmp = x[j];
+                    mf_tri::caxpy_add(N - 1 - j, &x[j + 1], &ap[kk - (N - 2 - j)], tmp);
+                    if (nounit) x[j] = cmul(x[j], ap[kk - (N - 1 - j)]);
+                }
+                kk -= (N - j);
+            }
+        }
+    } else {
+        if (upper) {
+            int kk = (N * (N + 1)) / 2 - 1;              /* diag of column j */
+            for (int j = N - 1; j >= 0; --j) {
+                T dot = noconj ? mfdot::wdotu_unit(j, &ap[kk - j], x)
+                               : mfdot::wdotc_unit(j, &ap[kk - j], x);
+                T r = nounit ? cmul(x[j], (noconj ? ap[kk] : cconj(ap[kk]))) : x[j];
+                x[j] = cadd(r, dot);
+                kk -= j + 1;
+            }
+        } else {
+            int kk = 0;                                  /* diag of column j */
+            for (int j = 0; j < N; ++j) {
+                const int len = N - 1 - j;
+                T dot = noconj ? mfdot::wdotu_unit(len, &ap[kk + 1], &x[j + 1])
+                               : mfdot::wdotc_unit(len, &ap[kk + 1], &x[j + 1]);
+                T r = nounit ? cmul(x[j], (noconj ? ap[kk] : cconj(ap[kk]))) : x[j];
+                x[j] = cadd(r, dot);
+                kk += N - j;
+            }
+        }
+    }
 }
 }
 
@@ -207,131 +264,15 @@ extern "C" void wtpmv_(
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
-            if (UPLO == 'U') {
-                if (N >= 128) {
-                    wtpmv_serial_N_upper(nounit, N, ap, x);
-                } else {
-                    int kk = 0;
-                    for (int j = 0; j < N; ++j) {
-                        if (!cdd_iszero(x[j])) {
-                            const T tmp = x[j];
-                            int k = kk;
-                            for (int i = 0; i < j; ++i) { x[i] = cadd(x[i], cmul(tmp, ap[k])); ++k; }
-                            if (nounit) x[j] = cmul(x[j], ap[kk + j]);
-                        }
-                        kk += j + 1;
-                    }
-                }
-            } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
-                    if (!cdd_iszero(x[j])) {
-                        const T tmp = x[j];
-                        int k = kk;
-                        for (int i = N - 1; i > j; --i) { x[i] = cadd(x[i], cmul(tmp, ap[k])); --k; }
-                        if (nounit) x[j] = cmul(x[j], ap[kk - (N - 1 - j)]);
-                    }
-                    kk -= (N - j);
-                }
-            }
-        } else {
-            /* Contiguous Trans/ConjTrans: each output is a unit-stride complex-DD
-             * dot of a packed column against x. Route it through the AVX2
-             * Bailey-wide wdotu/wdotc kernel (4 cells/iter) rather than a scalar
-             * cmul loop — faster and free of the scalar loop's codegen/alignment
-             * lottery. The kernel reorders summation → within fuzz tol, not
-             * bit-exact (matches the threaded path's tolerance). */
-            if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;          /* diag of column j */
-                for (int j = N - 1; j >= 0; --j) {
-                    T dot = noconj ? mfdot::wdotu_unit(j, &ap[kk - j], x)
-                                   : mfdot::wdotc_unit(j, &ap[kk - j], x);
-                    T r = nounit ? cmul(x[j], (noconj ? ap[kk] : cconj(ap[kk]))) : x[j];
-                    x[j] = cadd(r, dot);
-                    kk -= j + 1;
-                }
-            } else {
-                int kk = 0;                              /* diag of column j */
-                for (int j = 0; j < N; ++j) {
-                    const int len = N - 1 - j;
-                    T dot = noconj ? mfdot::wdotu_unit(len, &ap[kk + 1], &x[j + 1])
-                                   : mfdot::wdotc_unit(len, &ap[kk + 1], &x[j + 1]);
-                    T r = nounit ? cmul(x[j], (noconj ? ap[kk] : cconj(ap[kk]))) : x[j];
-                    x[j] = cadd(r, dot);
-                    kk += N - j;
-                }
-            }
-        }
-    } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        if (TR == 'N') {
-            if (UPLO == 'U') {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
-                    if (!cdd_iszero(x[jx])) {
-                        const T tmp = x[jx];
-                        int ix = kx;
-                        for (int k = kk; k < kk + j; ++k) {
-                            x[ix] = cadd(x[ix], cmul(tmp, ap[k]));
-                            ix += incx;
-                        }
-                        if (nounit) x[jx] = cmul(x[jx], ap[kk + j]);
-                    }
-                    jx += incx;
-                    kk += j + 1;
-                }
-            } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
-                    if (!cdd_iszero(x[jx])) {
-                        const T tmp = x[jx];
-                        int ix = kx;
-                        for (int k = kk; k > kk - (N - 1 - j); --k) {
-                            x[ix] = cadd(x[ix], cmul(tmp, ap[k]));
-                            ix -= incx;
-                        }
-                        if (nounit) x[jx] = cmul(x[jx], ap[kk - (N - 1 - j)]);
-                    }
-                    jx -= incx;
-                    kk -= (N - j);
-                }
-            }
-        } else {
-            if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                int jx = kx + (N - 1) * incx;
-                for (int j = N - 1; j >= 0; --j) {
-                    T tmp = x[jx];
-                    int ix = jx;
-                    if (nounit) tmp = cmul(tmp, (noconj ? ap[kk] : cconj(ap[kk])));
-                    for (int k = kk - 1; k >= kk - j; --k) {
-                        ix -= incx;
-                        tmp = cadd(tmp, cmul((noconj ? ap[k] : cconj(ap[k])), x[ix]));
-                    }
-                    x[jx] = tmp;
-                    jx -= incx;
-                    kk -= j + 1;
-                }
-            } else {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
-                    T tmp = x[jx];
-                    int ix = jx;
-                    if (nounit) tmp = cmul(tmp, (noconj ? ap[kk] : cconj(ap[kk])));
-                    for (int k = kk + 1; k < kk + N - j; ++k) {
-                        ix += incx;
-                        tmp = cadd(tmp, cmul((noconj ? ap[k] : cconj(ap[k])), x[ix]));
-                    }
-                    x[jx] = tmp;
-                    jx += incx;
-                    kk += N - j;
-                }
-            }
-        }
+        wtpmv_serial_contig(UPLO == 'U', TR != 'N', noconj != 0, nounit != 0, N, ap, x);
+        return;
     }
+
+    /* Strided: gather x to a contiguous scratch, run the (SIMD) contiguous core,
+     * scatter back. O(N) gather/scatter vs the O(N^2) packed sweep. */
+    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
+    std::vector<T> xs(static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
+    wtpmv_serial_contig(UPLO == 'U', TR != 'N', noconj != 0, nounit != 0, N, ap, xs.data());
+    for (int i = 0; i < N; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
 }
