@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-18 23:12 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-18 23:17 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -12,11 +12,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## m — multifloats (double-double)
 
-2229 cells, 75 routines.  **Pass@1.02: serial 100.0% · omp4 100.0%.**  1 routine(s) with ≥1 flagged cell.
+2229 cells, 75 routines.  **Pass@1.02: serial 100.0% · omp4 100.0%.**  0 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| **mgemv** | 24 | 1.001 | 1.026 @N/x2/128 | ⚠ |
 | wswap | 3 | 1.004 | 1.006 | ✅ |
 | mswap | 3 | 1.003 | 0.999 | ✅ |
 | wcopy | 3 | 0.998 | 1.000 | ✅ |
@@ -43,6 +42,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wgemm | 18 | 0.152 | 0.597 | ✅ |
 | mgemm | 16 | 0.145 | 0.595 | ✅ |
 | wsyr2k | 12 | 0.253 | 0.589 | ✅ |
+| mgemv | 24 | 0.348 | 0.588 | ✅ |
 | wher2k | 12 | 0.241 | 0.565 | ✅ |
 | wmrot | 3 | 0.212 | 0.550 | ✅ |
 | mrot | 3 | 0.217 | 0.549 | ✅ |
@@ -91,14 +91,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
 | whemv | 18 | 0.182 | 0.182 | ✅ |
-
-<details><summary>m: 1 flagged cells (par/ref > 1.02, smaller=faster)</summary>
-
-| routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
-|---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| mgemv | N/x2 | 128 | 79,864 | 83,136 | 299,595 | 29,062 | 28,317 | 0.961 | 1.026 | ob1 |
-
-</details>
 
 ## e — kind10 (fp80)
 
