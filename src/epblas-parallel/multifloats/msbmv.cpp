@@ -6,10 +6,11 @@
  */
 
 #include <cstddef>
+#include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
 #ifdef _OPENMP
-#include <cstdlib>
 #include <omp.h>
 #include "../common/blas_omp.h"
 #define MSBMV_OMP_MIN 256
@@ -29,6 +30,46 @@ inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
+
+namespace {
+/* Contiguous (incx==incy==1) symmetric band matvec, y += alpha*A*x (beta already
+ * applied by the caller). Per column j the band slice &aj[..] is a contiguous run
+ * shared by the reflected AXPY (y[i] += t1*col[i], order-free -> bit-exact) and
+ * the dot (t2 += col[i]*x[i], vector accumulate + hreduce -> within tolerance);
+ * y and x are distinct (sbmv forbids aliasing) so the two passes are independent.
+ * The strided entry gathers x/y to scratch and reuses this. */
+void msbmv_contig(bool upper, int n, int k, const T *a, std::size_t lda,
+                  const T *x, T alpha, T *y)
+{
+    if (upper) {
+        for (int j = 0; j < n; ++j) {
+            const T *aj = &A_(0, j);
+            const T t1 = alpha * x[j];
+            const int i_lo = (j - k > 0) ? (j - k) : 0;
+            const int len = j - i_lo;
+            const T *col = &aj[k - j + i_lo];   /* A_(K-j+i_lo, j), contiguous */
+            T t2 = zero_dd;
+            if (len > 0) {
+                mf_tri::axpy_add(len, &y[i_lo], col, t1);
+                t2 = mf_tri::dot(len, col, &x[i_lo]);
+            }
+            y[j] = y[j] + t1 * aj[k] + alpha * t2;
+        }
+    } else {
+        for (int j = 0; j < n; ++j) {
+            const T *aj = &A_(0, j);
+            const T t1 = alpha * x[j];
+            y[j] = y[j] + t1 * aj[0];
+            const int i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
+            const int len = i_hi - (j + 1);
+            if (len > 0) {
+                mf_tri::axpy_add(len, &y[j + 1], &aj[1], t1);
+                y[j] = y[j] + alpha * mf_tri::dot(len, &aj[1], &x[j + 1]);
+            }
+        }
+    }
+}
+}
 
 #ifdef _OPENMP
 /* Row-gather: y[i] (i in [lo,hi)) is an independent dot over the full 2K+1
@@ -137,67 +178,63 @@ extern "C" void msbmv_(
 #endif
 
     if (incx == 1 && incy == 1) {
-        if (UPLO == 'U') {
-            for (int j = 0; j < N; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero_dd;
-                const int L = K - j;
-                const int i_lo = (j - K > 0) ? (j - K) : 0;
-                for (int i = i_lo; i < j; ++i) {
-                    y[i] = y[i] + t1 * A_(L + i, j);
-                    t2 = t2 + A_(L + i, j) * x[i];
-                }
-                y[j] = y[j] + t1 * A_(K, j) + alpha * t2;
+        msbmv_contig(UPLO == 'U', N, K, a, (std::size_t)lda, x, alpha, y);
+        return;
+    }
+
+    /* Strided: gather x and the beta-scaled y into contiguous scratch, run the
+     * SIMD contiguous core (y += alpha*A*x), scatter y back. O(N) gather/scatter
+     * vs O(N*K) band work; the in-place strided walk is the alloc-fail fallback. */
+    const std::ptrdiff_t bx = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
+    const std::ptrdiff_t by = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
+    T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+    T *ys = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+    if (xs && ys) {
+        for (int i = 0; i < N; ++i) {
+            xs[i] = x[bx + (std::ptrdiff_t)i * incx];
+            ys[i] = y[by + (std::ptrdiff_t)i * incy];
+        }
+        msbmv_contig(UPLO == 'U', N, K, a, (std::size_t)lda, xs, alpha, ys);
+        for (int i = 0; i < N; ++i) y[by + (std::ptrdiff_t)i * incy] = ys[i];
+        std::free(xs); std::free(ys);
+        return;
+    }
+    std::free(xs); std::free(ys);
+
+    int kx = (incx < 0) ? -(N - 1) * incx : 0;
+    int ky = (incy < 0) ? -(N - 1) * incy : 0;
+    if (UPLO == 'U') {
+        int jx = kx, jy = ky;
+        for (int j = 0; j < N; ++j) {
+            const T t1 = alpha * x[jx];
+            T t2 = zero_dd;
+            int ix = kx, iy = ky;
+            const int L = K - j;
+            const int i_lo = (j - K > 0) ? (j - K) : 0;
+            for (int i = i_lo; i < j; ++i) {
+                y[iy] = y[iy] + t1 * A_(L + i, j);
+                t2 = t2 + A_(L + i, j) * x[ix];
+                ix += incx; iy += incy;
             }
-        } else {
-            for (int j = 0; j < N; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero_dd;
-                y[j] = y[j] + t1 * A_(0, j);
-                const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                for (int i = j + 1; i < i_hi; ++i) {
-                    y[i] = y[i] + t1 * A_(i - j, j);
-                    t2 = t2 + A_(i - j, j) * x[i];
-                }
-                y[j] = y[j] + alpha * t2;
-            }
+            y[jy] = y[jy] + t1 * A_(K, j) + alpha * t2;
+            jx += incx; jy += incy;
+            if (j >= K) { kx += incx; ky += incy; }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        if (UPLO == 'U') {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
-                const T t1 = alpha * x[jx];
-                T t2 = zero_dd;
-                int ix = kx, iy = ky;
-                const int L = K - j;
-                const int i_lo = (j - K > 0) ? (j - K) : 0;
-                for (int i = i_lo; i < j; ++i) {
-                    y[iy] = y[iy] + t1 * A_(L + i, j);
-                    t2 = t2 + A_(L + i, j) * x[ix];
-                    ix += incx; iy += incy;
-                }
-                y[jy] = y[jy] + t1 * A_(K, j) + alpha * t2;
-                jx += incx; jy += incy;
-                if (j >= K) { kx += incx; ky += incy; }
+        int jx = kx, jy = ky;
+        for (int j = 0; j < N; ++j) {
+            const T t1 = alpha * x[jx];
+            T t2 = zero_dd;
+            y[jy] = y[jy] + t1 * A_(0, j);
+            int ix = jx, iy = jy;
+            const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+            for (int i = j + 1; i < i_hi; ++i) {
+                ix += incx; iy += incy;
+                y[iy] = y[iy] + t1 * A_(i - j, j);
+                t2 = t2 + A_(i - j, j) * x[ix];
             }
-        } else {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
-                const T t1 = alpha * x[jx];
-                T t2 = zero_dd;
-                y[jy] = y[jy] + t1 * A_(0, j);
-                int ix = jx, iy = jy;
-                const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                for (int i = j + 1; i < i_hi; ++i) {
-                    ix += incx; iy += incy;
-                    y[iy] = y[iy] + t1 * A_(i - j, j);
-                    t2 = t2 + A_(i - j, j) * x[ix];
-                }
-                y[jy] = y[jy] + alpha * t2;
-                jx += incx; jy += incy;
-            }
+            y[jy] = y[jy] + alpha * t2;
+            jx += incx; jy += incy;
         }
     }
 }
