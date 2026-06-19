@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-19 09:41 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-19 12:45 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -57,7 +57,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mtpmv | 96 | 0.370 | 0.395 | ✅ |
 | wtbsv | 108 | 0.385 | 0.383 | ✅ |
 | mgemmtr | 32 | 0.380 | 0.251 | ✅ |
-| wher | 18 | 0.274 | 0.361 | ✅ |
 | mtrsv | 96 | 0.267 | 0.344 | ✅ |
 | mtrsm | 64 | 0.337 | 0.341 | ✅ |
 | wsymm | 12 | 0.337 | 0.201 | ✅ |
@@ -67,6 +66,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mspr2 | 24 | 0.260 | 0.324 | ✅ |
 | msyr2 | 24 | 0.262 | 0.323 | ✅ |
 | wgemmtr | 54 | 0.319 | 0.190 | ✅ |
+| wher | 18 | 0.242 | 0.319 | ✅ |
 | wtbmv | 108 | 0.260 | 0.318 | ✅ |
 | mwasum | 3 | 0.228 | 0.315 | ✅ |
 | wgbmv | 27 | 0.306 | 0.287 | ✅ |
@@ -74,19 +74,19 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | msymm | 16 | 0.287 | 0.198 | ✅ |
 | wgerc | 9 | 0.162 | 0.283 | ✅ |
 | wgeru | 9 | 0.161 | 0.282 | ✅ |
-| whpr | 18 | 0.252 | 0.279 | ✅ |
-| wher2 | 18 | 0.251 | 0.278 | ✅ |
 | wdotu | 3 | 0.186 | 0.278 | ✅ |
 | wdotc | 3 | 0.179 | 0.267 | ✅ |
 | mtrmm | 64 | 0.266 | 0.235 | ✅ |
 | wsyrk | 12 | 0.265 | 0.122 | ✅ |
 | wtrmv | 108 | 0.265 | 0.250 | ✅ |
 | wtpsv | 108 | 0.262 | 0.261 | ✅ |
-| whpr2 | 18 | 0.256 | 0.252 | ✅ |
 | whpmv | 18 | 0.252 | 0.253 | ✅ |
+| whpr | 18 | 0.223 | 0.250 | ✅ |
 | wtpmv | 108 | 0.250 | 0.234 | ✅ |
+| wher2 | 18 | 0.226 | 0.245 | ✅ |
 | msymv | 24 | 0.239 | 0.244 | ✅ |
 | wtrsv | 108 | 0.189 | 0.239 | ✅ |
+| whpr2 | 18 | 0.225 | 0.221 | ✅ |
 | wtrsm | 72 | 0.220 | 0.221 | ✅ |
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |

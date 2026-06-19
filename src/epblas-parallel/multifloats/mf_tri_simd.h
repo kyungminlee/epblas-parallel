@@ -101,6 +101,23 @@ static inline mf_simd::cx4 cbcast(const CT &t) {
 static inline void caxpy_add(std::ptrdiff_t len, CT *xp, const CT *cp, const CT &t) {
     const mf_simd::cx4 tt = cbcast(t);
     std::ptrdiff_t i = 0;
+    /* 8-wide head: two INDEPENDENT 4-lane complex chains. A complex MAC
+     * (cmul_soa = 4 dd_mul + sub + add) is a long latency chain with no native
+     * scalar-DD SIMD; one chain leaves it exposed while the column streams from
+     * cache -> ~12-15% cache-resident & serial. Unlike the FUSED rank-2 form
+     * (caxpy2_add note: held both scalars + both source vecs + two products ->
+     * spilled), this holds one broadcast scalar + two independent groups, so
+     * peak ymm pressure stays under 16 (verified: no spill). Bit-identical. */
+    for (; i + 8 <= len; i += 8) {
+        mf_simd::cx4 c0 = mf_simd::cload4(cp + i);
+        mf_simd::cx4 c1 = mf_simd::cload4(cp + i + 4);
+        mf_simd::cx4 p0 = mf_simd::cmul_soa(tt, c0);
+        mf_simd::cx4 p1 = mf_simd::cmul_soa(tt, c1);
+        mf_simd::cx4 y0 = mf_simd::cload4(xp + i);
+        mf_simd::cx4 y1 = mf_simd::cload4(xp + i + 4);
+        mf_simd::cstore4(xp + i,     mf_simd::cadd_soa(y0, p0));
+        mf_simd::cstore4(xp + i + 4, mf_simd::cadd_soa(y1, p1));
+    }
     for (; i + 4 <= len; i += 4) {
         mf_simd::cx4 c = mf_simd::cload4(cp + i);
         mf_simd::cx4 p = mf_simd::cmul_soa(tt, c);
