@@ -36,6 +36,25 @@ dd_axpy(int n, const double *xh, const double *xl,
     const __m256d thb = _mm256_set1_pd(th);
     const __m256d tlb = _mm256_set1_pd(tl);
     int i = 0;
+    /* 8-wide head: two INDEPENDENT 4-lane DD chains. The dd_mul->dd_add EFT chain
+     * is long-latency with no native SIMD; a single chain leaves that latency
+     * exposed even when the column streams from cache (matrix ~16 MB at N=1024 is
+     * only partly L3-resident -> not yet pure-bandwidth-bound). A second chain
+     * fills the pipeline -> ~7% at N=1024, ~11% cache-resident. Bit-identical:
+     * each 4-lane group is computed exactly as the 4-wide loop would. */
+    for (; i + 8 <= n; i += 8) {
+        __m256d p0h, p0l, p1h, p1l;
+        dd_mul(_mm256_loadu_pd(xh + i),     _mm256_loadu_pd(xl + i),     thb, tlb, p0h, p0l);
+        dd_mul(_mm256_loadu_pd(xh + i + 4), _mm256_loadu_pd(xl + i + 4), thb, tlb, p1h, p1l);
+        __m256d a0h, a0l, a1h, a1l;
+        load_dd4(ap + i,     a0h, a0l);
+        load_dd4(ap + i + 4, a1h, a1l);
+        __m256d r0h, r0l, r1h, r1l;
+        dd_add(a0h, a0l, p0h, p0l, r0h, r0l);
+        dd_add(a1h, a1l, p1h, p1l, r1h, r1l);
+        store_dd4(ap + i,     r0h, r0l);
+        store_dd4(ap + i + 4, r1h, r1l);
+    }
     for (; i + 4 <= n; i += 4) {
         __m256d xhv = _mm256_loadu_pd(xh + i);
         __m256d xlv = _mm256_loadu_pd(xl + i);

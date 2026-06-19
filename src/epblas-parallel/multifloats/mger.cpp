@@ -60,6 +60,23 @@ mger_col(int M, const double *x_hi, const double *x_lo, T t, T *ajT)
     const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
     double *aj = reinterpret_cast<double *>(ajT);
     int i = 0;
+    /* 8-wide head: two INDEPENDENT 4-lane DD chains hide the long dd_mul->dd_add
+     * EFT latency (no native SIMD for one scalar DD) that a single chain leaves
+     * exposed while the column streams from cache. ~7% at N=1024, ~11% cache-
+     * resident. Bit-identical — each 4-lane group matches the 4-wide loop. */
+    for (; i + 8 <= M; i += 8) {
+        __m256d a0h, a0l, a1h, a1l;
+        soa_load4(aj + 2 * i,       a0h, a0l);
+        soa_load4(aj + 2 * (i + 4), a1h, a1l);
+        __m256d p0h, p0l, p1h, p1l;
+        simd_dd::dd_mul(thi, tlo, _mm256_loadu_pd(x_hi + i),     _mm256_loadu_pd(x_lo + i),     p0h, p0l);
+        simd_dd::dd_mul(thi, tlo, _mm256_loadu_pd(x_hi + i + 4), _mm256_loadu_pd(x_lo + i + 4), p1h, p1l);
+        __m256d n0h, n0l, n1h, n1l;
+        simd_dd::dd_add(a0h, a0l, p0h, p0l, n0h, n0l);
+        simd_dd::dd_add(a1h, a1l, p1h, p1l, n1h, n1l);
+        soa_store4(aj + 2 * i,       n0h, n0l);
+        soa_store4(aj + 2 * (i + 4), n1h, n1l);
+    }
     for (; i + 3 < M; i += 4) {
         __m256d a_h, a_l;
         soa_load4(aj + 2 * i, a_h, a_l);
