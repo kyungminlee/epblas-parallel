@@ -84,6 +84,28 @@ dd_axpy2(int n, const double *xh, const double *xl, double th, double tl,
     const __m256d thb = _mm256_set1_pd(th), tlb = _mm256_set1_pd(tl);
     const __m256d shb = _mm256_set1_pd(sh), slb = _mm256_set1_pd(sl);
     int i = 0;
+    /* 8-wide head: two INDEPENDENT 4-lane chains. The fused rank-2 element chain
+     * (load -> +x*t1 -> +y*t2 -> store) is twice as long as the rank-1 one and
+     * stays compute/latency-bound even at N=1024 omp4 (the bandwidth wall that
+     * caps the rank-1 worst cell does not bind here), so a second chain wins ~9-10%
+     * across all sizes incl. N=1024. Bit-identical — each group matches the 4-wide
+     * loop op-for-op; no register spill (verified, AVX2 16 ymm). */
+    for (; i + 8 <= n; i += 8) {
+        __m256d a0h, a0l, a1h, a1l;
+        load_dd4(ap + i,     a0h, a0l);
+        load_dd4(ap + i + 4, a1h, a1l);
+        __m256d p0h, p0l, p1h, p1l;
+        dd_mul(_mm256_loadu_pd(xh + i),     _mm256_loadu_pd(xl + i),     thb, tlb, p0h, p0l);
+        dd_mul(_mm256_loadu_pd(xh + i + 4), _mm256_loadu_pd(xl + i + 4), thb, tlb, p1h, p1l);
+        dd_add(a0h, a0l, p0h, p0l, a0h, a0l);        /* ap + x*t1 */
+        dd_add(a1h, a1l, p1h, p1l, a1h, a1l);
+        dd_mul(_mm256_loadu_pd(yh + i),     _mm256_loadu_pd(yl + i),     shb, slb, p0h, p0l);
+        dd_mul(_mm256_loadu_pd(yh + i + 4), _mm256_loadu_pd(yl + i + 4), shb, slb, p1h, p1l);
+        dd_add(a0h, a0l, p0h, p0l, a0h, a0l);        /* + y*t2    */
+        dd_add(a1h, a1l, p1h, p1l, a1h, a1l);
+        store_dd4(ap + i,     a0h, a0l);
+        store_dd4(ap + i + 4, a1h, a1l);
+    }
     for (; i + 4 <= n; i += 4) {
         __m256d ahv, alv;
         load_dd4(ap + i, ahv, alv);
