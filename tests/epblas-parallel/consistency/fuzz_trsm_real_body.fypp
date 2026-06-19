@@ -130,8 +130,8 @@ program fuzz_${routine}$
         block
             real(rk) :: op_norm
             op_norm = abs(alpha) * real(na, rk) &
-                    * maxval(abs(A(1 : lda * na)), mask = A(1 : lda * na) /= sentinel_re) &
-                    * maxval(abs(B0(1 : ldb * n)))
+                    * max_abs_real(A(1 : lda * na)) &
+                    * max_abs_real(B0(1 : ldb * n))
             err = max_rel_err_real(B_ov, B_mig, m, n, ldb, op_norm)
         end block
         bad_ov  = check_sentinels_real(B_ov,  m, n, ldb)

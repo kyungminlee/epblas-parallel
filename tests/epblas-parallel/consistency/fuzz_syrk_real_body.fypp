@@ -100,8 +100,8 @@ program fuzz_${routine}$
             integer :: i, j, idx
             real(rk) :: ref_max, diff_max, a_abs, d_abs
             real(rk) :: a_max, c0_max, op_norm
-            a_max  = maxval(abs(A(1 : lda * cols_a)))
-            c0_max = maxval(abs(C0(1 : ldc * n)))
+            a_max  = max_abs_real(A(1 : lda * cols_a))
+            c0_max = max_abs_real(C0(1 : ldc * n))
             op_norm = abs(alpha) * real(k, rk) * a_max * a_max &
                     + abs(beta)  * c0_max
             ref_max  = 0.0_rk

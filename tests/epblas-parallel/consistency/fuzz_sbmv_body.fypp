@@ -59,9 +59,9 @@ program fuzz_${routine}$
             integer :: i
             real(rk) :: ref_max, diff_max, a_abs, d_abs
             real(rk) :: a_max, x_max, y0_max, op_norm
-            a_max  = maxval(abs(A(1 : lda * n)))
-            x_max  = maxval(abs(X(1 : lenx)))
-            y0_max = maxval(abs(Y0(1 : leny)))
+            a_max  = max_abs_real(A(1 : lda * n))
+            x_max  = max_abs_real(X(1 : lenx))
+            y0_max = max_abs_real(Y0(1 : leny))
             op_norm = abs(alpha) * real(n, rk) * a_max * x_max &
                     + abs(beta)  * y0_max
             ref_max = 0.0_rk; diff_max = 0.0_rk

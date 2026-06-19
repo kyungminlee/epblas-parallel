@@ -92,9 +92,9 @@ program fuzz_${routine}$
         block
             real(rk) :: op_norm
             op_norm = abs(alpha) * real(k, rk) &
-                    * maxval(abs(A(1 : lda * cols_a))) &
-                    * maxval(abs(B(1 : ldb * cols_b))) &
-                    + abs(beta) * maxval(abs(C0(1 : ldc * n)))
+                    * max_abs_real(A(1 : lda * cols_a)) &
+                    * max_abs_real(B(1 : ldb * cols_b)) &
+                    + abs(beta) * max_abs_real(C0(1 : ldc * n))
             err = max_rel_err_real(C_ov, C_mig, m, n, ldc, op_norm)
         end block
         bad_ov  = check_sentinels_real(C_ov,  m, n, ldc)

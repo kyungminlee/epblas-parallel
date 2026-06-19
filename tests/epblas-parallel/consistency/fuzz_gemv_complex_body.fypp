@@ -84,9 +84,9 @@ program fuzz_${routine}$
             real(rk) :: a_max, x_max, y0_max, op_norm
             complex(rk) :: dz
             if (trans == 'N') then; k_eff = n; else; k_eff = m; end if
-            a_max  = maxval(abs(A(1 : lda * n)))
-            x_max  = maxval(abs(X(1 : lenx_alloc)))
-            y0_max = maxval(abs(Y0(1 : leny_alloc)))
+            a_max  = max_abs_complex(A(1 : lda * n))
+            x_max  = max_abs_complex(X(1 : lenx_alloc))
+            y0_max = max_abs_complex(Y0(1 : leny_alloc))
             op_norm = abs(alpha) * real(k_eff, rk) * a_max * x_max &
                     + abs(beta)  * y0_max
             ref_max = 0.0_rk; diff_max = 0.0_rk

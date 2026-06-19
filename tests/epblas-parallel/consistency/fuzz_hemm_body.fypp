@@ -101,9 +101,9 @@ program fuzz_${routine}$
         block
             real(rk) :: op_norm
             op_norm = abs(alpha) * real(na, rk) &
-                    * maxval(abs(A(1 : lda * na)), mask = real(A(1 : lda * na)) /= sentinel_re) &
-                    * maxval(abs(B(1 : ldb * n))) &
-                    + abs(beta) * maxval(abs(C0(1 : ldc * n)))
+                    * max_abs_complex(A(1 : lda * na)) &
+                    * max_abs_complex(B(1 : ldb * n)) &
+                    + abs(beta) * max_abs_complex(C0(1 : ldc * n))
             err = max_rel_err_complex(C_ov, C_mig, m, n, ldc, op_norm)
         end block
 

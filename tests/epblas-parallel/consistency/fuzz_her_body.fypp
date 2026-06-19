@@ -65,8 +65,8 @@ program fuzz_${routine}$
             real(rk) :: ref_max, diff_max, a_abs, d_abs
             real(rk) :: a0_max, x_max, op_norm
             complex(rk) :: dz
-            a0_max = maxval(abs(A0(1 : lda * n)))
-            x_max  = maxval(abs(X(1 : lenx)))
+            a0_max = max_abs_complex(A0(1 : lda * n))
+            x_max  = max_abs_complex(X(1 : lenx))
             op_norm = abs(alpha) * x_max * x_max + a0_max
             ref_max = 0.0_rk; diff_max = 0.0_rk
             do j = 1, n

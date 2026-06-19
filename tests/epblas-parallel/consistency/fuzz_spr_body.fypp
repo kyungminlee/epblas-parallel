@@ -56,8 +56,8 @@ program fuzz_${routine}$
             integer :: i
             real(rk) :: ref_max, diff_max, a_abs, d_abs
             real(rk) :: a0_max, x_max, op_norm
-            a0_max = maxval(abs(AP0(1 : np)))
-            x_max  = maxval(abs(X(1 : lenx)))
+            a0_max = max_abs_real(AP0(1 : np))
+            x_max  = max_abs_real(X(1 : lenx))
             op_norm = abs(alpha) * x_max * x_max + a0_max
             ref_max = 0.0_rk; diff_max = 0.0_rk
             do i = 1, np

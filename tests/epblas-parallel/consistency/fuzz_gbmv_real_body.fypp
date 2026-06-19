@@ -67,9 +67,9 @@ program fuzz_${routine}$
             real(rk) :: ref_max, diff_max, a_abs, d_abs
             real(rk) :: a_max, x_max, y0_max, op_norm
             k_eff = kl + ku + 1
-            a_max  = maxval(abs(A(1 : lda * n)))
-            x_max  = maxval(abs(X(1 : lenx_alloc)))
-            y0_max = maxval(abs(Y0(1 : leny_alloc)))
+            a_max  = max_abs_real(A(1 : lda * n))
+            x_max  = max_abs_real(X(1 : lenx_alloc))
+            y0_max = max_abs_real(Y0(1 : leny_alloc))
             op_norm = abs(alpha) * real(k_eff, rk) * a_max * x_max &
                     + abs(beta)  * y0_max
             ref_max = 0.0_rk; diff_max = 0.0_rk
