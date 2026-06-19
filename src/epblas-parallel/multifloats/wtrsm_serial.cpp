@@ -996,6 +996,25 @@ void wtrsm_L_slice(char UPLO, char TR, int use_blocked,
         blocked_chunk(V, j_start, j_end, M, nb, alpha, a, lda, b, ldb, nounit);
         return;
     }
+#ifdef WBLAS_SIMD_DD
+    /* Unblocked but still SIMD: the 4-column packed-SoA diagonal kernels handle
+     * any M <= kMaxBlockM, so the small-M path (below 2*nb, where blocking would
+     * not pay) runs vectorized instead of the scalar cores. Same kernels the
+     * blocked path already drives -> bitwise-identical to the serial sweep. */
+    if (M <= kMaxBlockM) {
+        trsm_simd_cop cop;
+        switch (V) {
+        case WLLN: cop = CSLLN; break;
+        case WLUN: cop = CSLUN; break;
+        case WLLT: cop = CSLLT; break;
+        case WLUT: cop = CSLUT; break;
+        case WLLC: cop = CSLLC; break;
+        default:   cop = CSLUC; break;  /* WLUC */
+        }
+        wtrsm_simd_diag(cop, j_start, j_end, M, alpha, a, lda, b, ldb, nounit);
+        return;
+    }
+#endif
     switch (V) {
     case WLLN: wtrsm_lln_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
     case WLUN: wtrsm_lun_core(j_start, j_end, M, alpha, a, lda, b, ldb, nounit); break;
