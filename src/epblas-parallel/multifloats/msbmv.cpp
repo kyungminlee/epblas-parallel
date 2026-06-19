@@ -72,44 +72,108 @@ void msbmv_contig(bool upper, int n, int k, const T *a, std::size_t lda,
 }
 
 #ifdef _OPENMP
-/* Row-gather: y[i] (i in [lo,hi)) is an independent dot over the full 2K+1
- * symmetric band. A = upperTri + (strictUpper)^T, so each row reconstructs its
- * band as a same-triangle anti-diagonal walk (stride lda-1) plus the reflected
- * neighbours read contiguously in column i. x and y are distinct (sbmv forbids
- * aliasing) → output rows partition with no cross-thread dependence: no scratch,
- * no reduction, no barrier. Reorders the per-row summation vs the serial column
- * scatter → matches within DD fuzz tol; the serial path stays bit-exact. */
-static void msbmv_rowgather(bool upper, int n, int k, int lo, int hi,
-                            const T *a, std::size_t lda,
-                            const T *x, T alpha, T *y, int incy)
+/* Equal-width contiguous column partition. Unlike the packed/triangular case,
+ * band work per column is uniform (~2K entries) so columns split evenly; mask=3
+ * rounds widths to multiples of 4 (min_width 4) to keep per-thread slot writes
+ * off shared cache lines. */
+static int msbmv_partition(std::ptrdiff_t n, int nthreads, int mask,
+                           std::ptrdiff_t min_width, std::ptrdiff_t *range)
 {
-    const std::ptrdiff_t s1 = static_cast<std::ptrdiff_t>(lda) - 1;
-    if (upper) {
-        for (int i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = base[k] * x[i];
-            const int rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
-            for (int d = 1; d <= rlen; ++d) s = s + base[k + (std::ptrdiff_t)d * s1] * x[i + d];
-            const int llen = (i < k) ? i : k;
-            for (int d = 1; d <= llen; ++d) s = s + base[k - d] * x[i - d];
-            y[(std::ptrdiff_t)i * incy] = y[(std::ptrdiff_t)i * incy] + alpha * s;
+    int num_cpu = 0;
+    std::ptrdiff_t base = (n + nthreads - 1) / nthreads;
+    range[0] = 0;
+    std::ptrdiff_t i = 0;
+    while (i < n) {
+        std::ptrdiff_t width;
+        if (nthreads - num_cpu > 1) {
+            width = (base + mask) & ~(std::ptrdiff_t)mask;
+            if (width < min_width) width = min_width;
+            if (width > n - i)     width = n - i;
+        } else {
+            width = n - i;
         }
-    } else {
-        for (int i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = base[0] * x[i];
-            const int llen = (i < k) ? i : k;
-            for (int d = 1; d <= llen; ++d) s = s + base[-(std::ptrdiff_t)d * s1] * x[i - d];
-            const int rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
-            for (int d = 1; d <= rlen; ++d) s = s + base[d] * x[i + d];
-            y[(std::ptrdiff_t)i * incy] = y[(std::ptrdiff_t)i * incy] + alpha * s;
-        }
+        range[num_cpu + 1] = range[num_cpu] + width;
+        num_cpu++;
+        i += width;
+        if (num_cpu >= MSBMV_MAX_CPUS) break;
     }
+    return num_cpu;
 }
 
-/* Threaded symmetric band matvec. Each thread owns a disjoint output-row range
- * and writes y in place while reading x globally (gathered to contiguous when
- * strided). Returns true if handled. Beta-scaling already applied by caller. */
+/* Unit-stride threaded path. Threads own disjoint COLUMN ranges and accumulate
+ * into a private slot[n]; one contiguous pass over each band column j does both
+ * the reflected scatter (slot[i]+=x[j]*col[i]) and the symmetric dot
+ * (t2+=col[i]*x[i]) via the same SIMD SoA kernels as the serial msbmv_contig.
+ * The scalar per-row row-gather this replaces left the threaded path un-SIMD'd
+ * while serial was SIMD, so 4 scalar threads barely beat 1 SIMD thread
+ * (par4/par1 ~0.83). Each slot is only touched over a band-width window around
+ * its column range, so the fold sums just those windows into y (alpha applied at
+ * the fold); adjacent windows overlap by K and each column's contribution lives
+ * in exactly one slot, so summing the overlaps is correct. Reorders the per-row
+ * sum vs serial -> within DD fuzz tol; serial stays bit-exact. */
+static bool msbmv_axpydot(bool upper, int n, int k, const T *a, std::size_t lda,
+                          const T *x, T alpha, T *y, int nthreads)
+{
+    std::ptrdiff_t range[MSBMV_MAX_CPUS + 1];
+    int num_cpu = msbmv_partition(n, nthreads, 3, 4, range);
+    if (num_cpu <= 1) return false;
+
+    T *buf = static_cast<T *>(std::calloc((std::size_t)num_cpu * n, sizeof(T)));
+    if (!buf) return false;
+
+    #pragma omp parallel num_threads(num_cpu)
+    {
+        int t = omp_get_thread_num();
+        std::ptrdiff_t m_from = range[t];
+        std::ptrdiff_t m_to   = range[t + 1];
+        T *slot = buf + (std::size_t)t * n;
+        if (upper) {
+            for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
+                const T *aj = &A_(0, j);
+                const T t1 = x[j];
+                const std::ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
+                const std::ptrdiff_t len = j - i_lo;
+                const T *col = &aj[k - j + i_lo];   /* A_(K-j+i_lo, j), contiguous */
+                T t2 = zero_dd;
+                if (len > 0) {
+                    mf_tri::axpy_add(len, &slot[i_lo], col, t1);
+                    t2 = mf_tri::dot(len, col, &x[i_lo]);
+                }
+                slot[j] = slot[j] + (t1 * aj[k] + t2);
+            }
+        } else {
+            for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
+                const T *aj = &A_(0, j);
+                const T t1 = x[j];
+                slot[j] = slot[j] + t1 * aj[0];
+                const std::ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
+                const std::ptrdiff_t len = i_hi - (j + 1);
+                if (len > 0) {
+                    mf_tri::axpy_add(len, &slot[j + 1], &aj[1], t1);
+                    slot[j] = slot[j] + mf_tri::dot(len, &aj[1], &x[j + 1]);
+                }
+            }
+        }
+    }
+
+    for (int t = 0; t < num_cpu; ++t) {
+        const T *slot = buf + (std::size_t)t * n;
+        std::ptrdiff_t lo, hi;
+        if (upper) {
+            lo = range[t] - k; if (lo < 0) lo = 0;
+            hi = range[t + 1];
+        } else {
+            lo = range[t];
+            hi = range[t + 1] + k; if (hi > n) hi = n;
+        }
+        for (std::ptrdiff_t i = lo; i < hi; ++i) y[i] = y[i] + alpha * slot[i];
+    }
+    std::free(buf);
+    return true;
+}
+
+/* Threaded symmetric band matvec. Returns true if handled. Beta-scaling already
+ * applied by caller. */
 __attribute__((noinline)) static bool msbmv_omp(
     bool upper, int n, int k, const T *a, std::size_t lda,
     const T *x, int incx, T alpha, T *y, int incy)
@@ -122,24 +186,25 @@ __attribute__((noinline)) static bool msbmv_omp(
     if (incx < 0) x -= (std::ptrdiff_t)(n - 1) * incx;
     if (incy < 0) y -= (std::ptrdiff_t)(n - 1) * incy;
 
-    const T *xptr = x;
-    T *xbuf = nullptr;
-    if (incx != 1) {
-        xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
-        if (!xbuf) return false;
-        for (int i = 0; i < n; ++i) xbuf[i] = x[(std::ptrdiff_t)i * incx];
-        xptr = xbuf;
-    }
+    if (incx == 1 && incy == 1)
+        return msbmv_axpydot(upper, n, k, a, lda, x, alpha, y, nthreads);
 
-    #pragma omp parallel num_threads(nthreads)
-    {
-        int tid = omp_get_thread_num();
-        int lo = (int)((long long)n * tid / nthreads);
-        int hi = (int)((long long)n * (tid + 1) / nthreads);
-        msbmv_rowgather(upper, n, k, lo, hi, a, lda, xptr, alpha, y, incy);
+    /* Strided: gather x AND y to contiguous scratch, run the SIMD'd threaded
+     * core, scatter y back — O(N) gather vs the scalar per-row row-gather, and
+     * the core is SIMD. Mirrors the serial strided path but threaded. */
+    T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    T *ys = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    if (!xs || !ys) { std::free(xs); std::free(ys); return false; }
+    for (int i = 0; i < n; ++i) {
+        xs[i] = x[(std::ptrdiff_t)i * incx];
+        ys[i] = y[(std::ptrdiff_t)i * incy];
     }
-    std::free(xbuf);
-    return true;
+    bool ok = msbmv_axpydot(upper, n, k, a, lda, xs, alpha, ys, nthreads);
+    if (ok)
+        for (int i = 0; i < n; ++i) y[(std::ptrdiff_t)i * incy] = ys[i];
+    std::free(xs);
+    std::free(ys);
+    return ok;
 }
 #endif
 
