@@ -62,7 +62,9 @@ program fuzz_mgemv
         call err_stats_record(err%limbs(1))
         if (err > tol) then
             fails = fails + 1
-            print '(a,i0,a,a1,a,2i6,a,i6,a,i3,a,i3)', 'FAIL ', ic, ' T=', trans, ' mn=', m, n, ' lda=', lda, ' incx=', incx, ' incy=', incy
+            print '(a,i0,a,a1,a,2i6,a,i6,a,i3,a,i3)', &
+                'FAIL ', ic, ' T=', trans, ' mn=', m, n, &
+                ' lda=', lda, ' incx=', incx, ' incy=', incy
         end if
         deallocate(A, X, Y0, Y_ov, Y_mig)
     end do
