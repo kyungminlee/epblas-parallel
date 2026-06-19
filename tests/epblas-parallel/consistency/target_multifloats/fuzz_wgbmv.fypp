@@ -57,13 +57,17 @@ program fuzz_wgbmv
         call wgbmv(trans, m, n, kl, ku, alpha, A, lda, X, incx, beta, Y_ov, incy)
         call wgbmv_migrated(trans, m, n, kl, ku, alpha, A, lda, X, incx, beta, Y_mig, incy)
         block
-            integer :: i
-            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            integer :: i, keff
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val, op_norm, mA, mX, mY0
             ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
             do i = 1, leny_alloc
                 a_abs = abs(Y_mig(i)); if (a_abs > ref_max) ref_max = a_abs
                 d_abs = abs(Y_ov(i) - Y_mig(i)); if (d_abs > diff_max) diff_max = d_abs
             end do
+            keff = kl + ku + 1
+            mA = max_abs_complex(A); mX = max_abs_complex(X); mY0 = max_abs_complex(Y0)
+            op_norm = abs(alpha) * real64x2(real(keff,8)) * mA * mX + abs(beta) * mY0
+            if (op_norm > ref_max) ref_max = op_norm
             tiny_val = real64x2(tiny(1.0_8))
             if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
         end block

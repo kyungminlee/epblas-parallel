@@ -31,7 +31,7 @@ program fuzz_mtrmm
     integer :: m, n, lda, ldb, na
     integer :: fails, sentinel_fails, bad_ov, bad_mig
     character :: side, uplo, transa, diag
-    type(real64x2) :: alpha, err, tol, a_scale
+    type(real64x2) :: alpha, err, tol, a_scale, op_norm
     type(real64x2), allocatable :: A(:), B0(:), B_ov(:), B_mig(:)
     real(8) :: u
 
@@ -105,7 +105,8 @@ program fuzz_mtrmm
         call mtrmm(side, uplo, transa, diag, m, n, alpha, A, lda, B_ov, ldb)
         call mtrmm_migrated(side, uplo, transa, diag, m, n, alpha, &
                             A, lda, B_mig, ldb)
-        err = max_rel_err_real(B_ov, B_mig, m, n, ldb)
+        op_norm = abs(alpha) * real64x2(real(na, 8)) * max_abs_real(A) * max_abs_real(B0)
+        err = max_rel_err_real(B_ov, B_mig, m, n, ldb, op_norm)
         bad_ov  = check_sentinels_real(B_ov,  m, n, ldb)
         bad_mig = check_sentinels_real(B_mig, m, n, ldb)
 

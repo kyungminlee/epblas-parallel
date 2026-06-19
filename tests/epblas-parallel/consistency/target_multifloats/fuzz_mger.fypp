@@ -43,13 +43,16 @@ program fuzz_mger
         call mger_migrated(m, n, alpha, X, incx, Y, incy, A_mig, lda)
         block
             integer :: i, j, idx
-            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val, op_norm, mX, mY, mA0
             ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
             do j = 1, n; do i = 1, m
                 idx = (j - 1) * lda + i
                 a_abs = abs(A_mig(idx)); if (a_abs > ref_max) ref_max = a_abs
                 d_abs = abs(A_ov(idx) - A_mig(idx)); if (d_abs > diff_max) diff_max = d_abs
             end do; end do
+            mX = max_abs_real(X); mY = max_abs_real(Y); mA0 = max_abs_real(A0)
+            op_norm = abs(alpha) * mX * mY + mA0
+            if (op_norm > ref_max) ref_max = op_norm
             tiny_val = real64x2(tiny(1.0_8))
             if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
         end block

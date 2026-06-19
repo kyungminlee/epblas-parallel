@@ -29,7 +29,7 @@ program fuzz_wsymm
     integer :: fails, sentinel_fails, bad_a_ov
     character :: side, uplo
     type(cmplx64x2) :: alpha, beta, c_sentinel
-    type(real64x2)  :: err, tol
+    type(real64x2)  :: err, tol, op_norm
     type(cmplx64x2), allocatable :: A(:), Aref(:), B(:), C0(:), C_ov(:), C_mig(:)
     real(8) :: u
 
@@ -94,7 +94,9 @@ program fuzz_wsymm
             end do
         end block
         call wsymm_migrated(side, uplo, m, n, alpha, A, lda, B, ldb, beta, C_mig, ldc)
-        err = max_rel_err_complex(C_ov, C_mig, m, n, ldc)
+        op_norm = abs(alpha) * real64x2(real(na, 8)) * max_abs_complex(A) * max_abs_complex(B) &
+                + abs(beta) * max_abs_complex(C0)
+        err = max_rel_err_complex(C_ov, C_mig, m, n, ldc, op_norm)
 
         tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(max(m, n), 8))) * eps
 

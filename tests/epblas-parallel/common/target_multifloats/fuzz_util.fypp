@@ -20,6 +20,7 @@ module fuzz_util
     public :: rand_alpha_beta, rand_alpha_beta_complex
     public :: fill_matrix_real, max_rel_err_real, check_sentinels_real
     public :: fill_matrix_complex, max_rel_err_complex, check_sentinels_complex
+    public :: max_abs_real, max_abs_complex
     public :: rand_pad, rand_incx, rand_incx_pos
     public :: rk, eps, sentinel_re, sentinel_im
     public :: err_stats_init, err_stats_record, err_stats_print
@@ -245,6 +246,35 @@ contains
             err = diff_max / denom
         end if
     end function max_rel_err_real
+
+    ! Max |A| over the supplied array, SKIPPING sentinel-filled padding
+    ! (and any off-UPLO sentinels). Sentinel magnitude (~7e18) is far
+    ! outside the random [-1,1] fill, so the equality test never collides
+    ! with a real entry. On a clean vector (no sentinels) this is a plain
+    ! max-abs. Used to build operand-norm tolerance floors for op_norm.
+    function max_abs_real(A) result(m_abs)
+        type(real64x2), intent(in) :: A(:)
+        type(real64x2) :: m_abs, a_abs
+        integer :: i
+        m_abs = real64x2(0.0_8)
+        do i = 1, size(A)
+            if (A(i) == sentinel_re) cycle
+            a_abs = abs(A(i))
+            if (a_abs > m_abs) m_abs = a_abs
+        end do
+    end function max_abs_real
+
+    function max_abs_complex(A) result(m_abs)
+        type(cmplx64x2), intent(in) :: A(:)
+        type(real64x2) :: m_abs, a_abs
+        integer :: i
+        m_abs = real64x2(0.0_8)
+        do i = 1, size(A)
+            if (A(i)%re == sentinel_re) cycle
+            a_abs = abs(A(i))
+            if (a_abs > m_abs) m_abs = a_abs
+        end do
+    end function max_abs_complex
 
     subroutine fill_matrix_complex(A, m, n, lda)
         type(cmplx64x2), intent(out) :: A(:)

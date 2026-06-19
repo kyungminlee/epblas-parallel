@@ -33,6 +33,7 @@ program fuzz_mgemm
     integer :: fails, sentinel_fails, bad_ov, bad_mig
     character :: ta, tb
     type(real64x2) :: alpha, beta, err, tol
+    type(real64x2) :: op_norm
     type(real64x2), allocatable :: A(:), B(:), C0(:), C_ov(:), C_mig(:)
 
     seed = read_seed()
@@ -84,7 +85,9 @@ program fuzz_mgemm
 
         call mgemm(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_ov,  ldc)
         call mgemm_migrated(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_mig, ldc)
-        err = max_rel_err_real(C_ov, C_mig, m, n, ldc)
+        op_norm = abs(alpha) * real64x2(real(k, 8)) * max_abs_real(A) * max_abs_real(B) &
+                  + abs(beta) * max_abs_real(C0)
+        err = max_rel_err_real(C_ov, C_mig, m, n, ldc, op_norm)
         bad_ov  = check_sentinels_real(C_ov,  m, n, ldc)
         bad_mig = check_sentinels_real(C_mig, m, n, ldc)
 

@@ -48,6 +48,7 @@ program fuzz_wgemmtr
         call wgemmtr_migrated(uplo, ta, tb, n, kk, alpha, A, lda, B, ldb, beta, C_mig, ldc)
         block
             type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tv
+            type(real64x2) :: op_norm, mA, mB, mC0
             integer :: ix
             ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
             do i = 1, n
@@ -58,6 +59,12 @@ program fuzz_wgemmtr
                     if (d_abs > diff_max) diff_max = d_abs
                 end do
             end do
+            mA  = max_abs_complex(A)
+            mB  = max_abs_complex(B)
+            mC0 = max_abs_complex(C0)
+            op_norm = abs(alpha) * real64x2(real(kk, 8)) * mA * mB &
+                      + abs(beta) * mC0
+            if (op_norm > ref_max) ref_max = op_norm
             tv = real64x2(tiny(1.0_8))
             if (ref_max < tv) then; err = diff_max; else; err = diff_max / ref_max; end if
         end block

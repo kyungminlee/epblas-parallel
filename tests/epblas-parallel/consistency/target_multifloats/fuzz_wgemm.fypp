@@ -32,6 +32,7 @@ program fuzz_wgemm
     character :: ta, tb
     type(cmplx64x2) :: alpha, beta
     type(real64x2) :: err, tol
+    type(real64x2) :: op_norm
     type(cmplx64x2), allocatable :: A(:), B(:), C0(:), C_ov(:), C_mig(:)
 
     seed = read_seed()
@@ -82,7 +83,9 @@ program fuzz_wgemm
 
         call wgemm(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_ov,  ldc)
         call wgemm_migrated(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_mig, ldc)
-        err = max_rel_err_complex(C_ov, C_mig, m, n, ldc)
+        op_norm = abs(alpha) * real64x2(real(k, 8)) * max_abs_complex(A) * max_abs_complex(B) &
+                  + abs(beta) * max_abs_complex(C0)
+        err = max_rel_err_complex(C_ov, C_mig, m, n, ldc, op_norm)
         bad_ov  = check_sentinels_complex(C_ov,  m, n, ldc)
         bad_mig = check_sentinels_complex(C_mig, m, n, ldc)
 

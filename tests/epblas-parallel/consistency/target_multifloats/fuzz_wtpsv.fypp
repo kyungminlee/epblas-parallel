@@ -61,12 +61,15 @@ program fuzz_wtpsv
         call wtpsv_migrated(uplo, trans, diag, n, AP, X_mig, incx)
         block
             integer :: ii
-            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val
+            type(real64x2) :: ref_max, diff_max, a_abs, d_abs, tiny_val, op_norm, mA, mX0
             ref_max = real64x2(0.0_8); diff_max = real64x2(0.0_8)
             do ii = 1, lenx_alloc
                 a_abs = abs(X_mig(ii)); if (a_abs > ref_max) ref_max = a_abs
                 d_abs = abs(X_ov(ii) - X_mig(ii)); if (d_abs > diff_max) diff_max = d_abs
             end do
+            mA = max_abs_complex(AP); mX0 = max_abs_complex(X0)
+            op_norm = mA * mX0 * real64x2(real(n,8))
+            if (op_norm > ref_max) ref_max = op_norm
             tiny_val = real64x2(tiny(1.0_8))
             if (ref_max < tiny_val) then; err = diff_max; else; err = diff_max / ref_max; end if
         end block

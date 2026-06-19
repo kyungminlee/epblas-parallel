@@ -31,7 +31,7 @@ program fuzz_wtrmm
     integer :: fails, sentinel_fails, bad_ov, bad_mig
     character :: side, uplo, transa, diag
     type(cmplx64x2) :: alpha
-    type(real64x2) :: err, tol, a_scale
+    type(real64x2) :: err, tol, a_scale, op_norm
     type(cmplx64x2), allocatable :: A(:), B0(:), B_ov(:), B_mig(:)
     real(8) :: u, ur, ui
 
@@ -112,7 +112,8 @@ program fuzz_wtrmm
         call wtrmm(side, uplo, transa, diag, m, n, alpha, A, lda, B_ov, ldb)
         call wtrmm_migrated(side, uplo, transa, diag, m, n, alpha, &
                             A, lda, B_mig, ldb)
-        err = max_rel_err_complex(B_ov, B_mig, m, n, ldb)
+        op_norm = abs(alpha) * real64x2(real(na, 8)) * max_abs_complex(A) * max_abs_complex(B0)
+        err = max_rel_err_complex(B_ov, B_mig, m, n, ldb, op_norm)
         bad_ov  = check_sentinels_complex(B_ov,  m, n, ldb)
         bad_mig = check_sentinels_complex(B_mig, m, n, ldb)
 

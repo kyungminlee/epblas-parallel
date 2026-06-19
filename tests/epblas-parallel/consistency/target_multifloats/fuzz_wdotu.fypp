@@ -32,8 +32,10 @@ program fuzz_wdotu
         d_ov  = wdotu(n, X, incx, Y, incy)
         d_mig = wdotu_migrated(n, X, incx, Y, incy)
         block
-            type(real64x2) :: am, dm, tv
+            type(real64x2) :: am, dm, tv, op_norm
             am = abs(d_mig); dm = abs(d_ov - d_mig); tv = real64x2(tiny(1.0_8))
+            op_norm = real64x2(real(n, 8)) * max_abs_complex(X) * max_abs_complex(Y)
+            if (op_norm > am) am = op_norm
             if (am < tv) then; err = dm; else; err = dm / am; end if
         end block
         tol = max(real64x2(10.0_8), real64x2(4.0_8 * real(n, 8))) * eps
