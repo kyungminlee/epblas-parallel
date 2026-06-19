@@ -6,6 +6,9 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#ifdef MBLAS_SIMD_DD
+#include <immintrin.h>
+#endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -22,6 +25,91 @@ inline bool dd_gt(T a, T b) {
         || (a.limbs[0] == b.limbs[0] && a.limbs[1] > b.limbs[1]);
 }
 
+#ifdef MBLAS_SIMD_DD
+/* SoA argmax over a contiguous DD range. ob (and the scalar fallback below) walk
+ * one element/iter; this processes 4 lanes/iter on the deinterleaved hi/lo
+ * limbs, so par genuinely beats the scalar reference instead of tying it.
+ *
+ * t_abs(x) is exactly (|hi|, sign(hi)*lo): |hi| = andnot(signbit,hi); the lo
+ * part flips iff hi<0, i.e. lo ^ (hi & signbit). The lexicographic compare on
+ * (|hi|, adj_lo) reproduces the scalar DD '>' bit-for-bit. Per-lane strict-'>'
+ * keeps the lowest index within a lane; the 4-lane horizontal merge and scalar
+ * tail keep the lowest index on exact ties — identical result to the left-to-
+ * right scan. (Normalised DDs never have hi==0 with lo!=0, the one input where
+ * the branchless sign-of-value would diverge from the scalar a<0 test.) */
+inline void deint4(const T *p, __m256d &hi, __m256d &lo) {
+    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double *>(p));
+    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double *>(p + 2));
+    __m256d a = _mm256_unpacklo_pd(v0, v1);
+    __m256d b = _mm256_unpackhi_pd(v0, v1);
+    hi = _mm256_permute4x64_pd(a, 0xD8);
+    lo = _mm256_permute4x64_pd(b, 0xD8);
+}
+
+__attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_out)
+{
+    if (n < 8) {            /* SIMD setup not worth it for tiny ranges */
+        ptrdiff_t best = 0;
+        T bv = t_abs(x[0]);
+        for (ptrdiff_t i = 1; i < n; ++i) {
+            T v = t_abs(x[i]);
+            if (v > bv) { bv = v; best = i; }
+        }
+        *bv_out = bv;
+        return best;
+    }
+
+    const __m256d sgn = _mm256_set1_pd(-0.0);   /* 0x8000…0 sign bit */
+    __m256d h0, l0;
+    deint4(x, h0, l0);
+    __m256d vmh = _mm256_andnot_pd(sgn, h0);                /* |hi|     */
+    __m256d vml = _mm256_xor_pd(l0, _mm256_and_pd(h0, sgn)); /* adj_lo  */
+    __m256i vidx = _mm256_set_epi64x(3, 2, 1, 0);
+    __m256i cur  = vidx;
+    const __m256i four = _mm256_set1_epi64x(4);
+
+    ptrdiff_t i = 4;
+    for (; i + 4 <= n; i += 4) {
+        cur = _mm256_add_epi64(cur, four);
+        __m256d h, l;
+        deint4(x + i, h, l);
+        __m256d ah = _mm256_andnot_pd(sgn, h);
+        __m256d al = _mm256_xor_pd(l, _mm256_and_pd(h, sgn));
+        __m256d gt  = _mm256_cmp_pd(ah, vmh, _CMP_GT_OQ);
+        __m256d eq  = _mm256_cmp_pd(ah, vmh, _CMP_EQ_OQ);
+        __m256d glo = _mm256_cmp_pd(al, vml, _CMP_GT_OQ);
+        __m256d upd = _mm256_or_pd(gt, _mm256_and_pd(eq, glo));
+        vmh  = _mm256_blendv_pd(vmh, ah, upd);
+        vml  = _mm256_blendv_pd(vml, al, upd);
+        vidx = _mm256_castpd_si256(
+                   _mm256_blendv_pd(_mm256_castsi256_pd(vidx),
+                                    _mm256_castsi256_pd(cur), upd));
+    }
+
+    /* Horizontal merge of the 4 lanes — lexicographic max, lowest index on tie. */
+    alignas(32) double mh[4], ml[4];
+    alignas(32) long long li[4];
+    _mm256_store_pd(mh, vmh);
+    _mm256_store_pd(ml, vml);
+    _mm256_store_si256(reinterpret_cast<__m256i *>(li), vidx);
+    ptrdiff_t best = (ptrdiff_t)li[0];
+    T bv{mh[0], ml[0]};
+    for (int k = 1; k < 4; ++k) {
+        T cv{mh[k], ml[k]};
+        if (dd_gt(cv, bv) || (cv.limbs[0] == bv.limbs[0] &&
+                              cv.limbs[1] == bv.limbs[1] && li[k] < best)) {
+            bv = cv; best = (ptrdiff_t)li[k];
+        }
+    }
+    /* Scalar tail (< 4 leftover); strict '>' preserves the lower held index. */
+    for (; i < n; ++i) {
+        T v = t_abs(x[i]);
+        if (v > bv) { bv = v; best = i; }
+    }
+    *bv_out = bv;
+    return best;
+}
+#else
 /* Scan a contiguous unit-stride range [0,n); return the 0-based index of the
  * first element with maximal |x| and store that magnitude in *bv_out.
  * Strictly-greater update keeps the lowest index on ties. */
@@ -36,6 +124,7 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
     *bv_out = bv;
     return best;
 }
+#endif
 }
 
 #ifdef _OPENMP

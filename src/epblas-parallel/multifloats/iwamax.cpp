@@ -6,6 +6,9 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#ifdef WBLAS_SIMD_DD
+#include <immintrin.h>
+#endif
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -22,6 +25,126 @@ inline bool dd_gt(R a, R b) {
 }
 inline R cabs1(T const &z) { return t_abs(z.re) + t_abs(z.im); }
 
+#ifdef WBLAS_SIMD_DD
+/* SoA argmax over a contiguous complex-DD range, 4 lanes/iter, so par beats the
+ * scalar reference instead of tying it (see imamax.cpp for the real twin).
+ *
+ * The magnitude is cabs1 = t_abs(re) + t_abs(im), a DD add. Bit-exactness with
+ * the scalar argmax therefore demands the *same* error-free transform the scalar
+ * float64x2::operator+ uses (two_sum on BOTH limbs, then fast_two_sum) — NOT the
+ * cheaper simd_dd::dd_add, whose lo limb differs by ~1 ulp and would flip
+ * near-ties. The non-finite / both-hi-zero short-circuits of operator+ are
+ * skipped: inputs here are abs values, finite for finite x, and a zero element
+ * yields a zero magnitude on the main path too (sign of zero is irrelevant to
+ * the comparison). */
+inline void s_two_sum(__m256d a, __m256d b, __m256d &s, __m256d &e) {
+    s = _mm256_add_pd(a, b);
+    __m256d ap = _mm256_sub_pd(s, b);
+    __m256d bp = _mm256_sub_pd(s, ap);
+    e = _mm256_add_pd(_mm256_sub_pd(a, ap), _mm256_sub_pd(b, bp));
+}
+inline void s_fast_two_sum(__m256d a, __m256d b, __m256d &s, __m256d &e) {
+    s = _mm256_add_pd(a, b);
+    __m256d bp = _mm256_sub_pd(s, a);
+    e = _mm256_sub_pd(b, bp);
+}
+inline void dd_add_exact(__m256d ah, __m256d al, __m256d bh, __m256d bl,
+                         __m256d &rh, __m256d &rl) {
+    __m256d a, b, c, d;
+    s_two_sum(ah, bh, a, b);
+    s_two_sum(al, bl, c, d);
+    s_fast_two_sum(a, c, a, c);
+    b = _mm256_add_pd(b, d);
+    b = _mm256_add_pd(b, c);
+    s_fast_two_sum(a, b, rh, rl);
+}
+/* Deinterleave 4 complex-DD elements (re.hi,re.lo,im.hi,im.lo each) via a 4x4
+ * transpose into SoA limb vectors. */
+inline void deint4c(const T *p, __m256d &reh, __m256d &rel,
+                    __m256d &imh, __m256d &iml) {
+    const double *d = reinterpret_cast<const double *>(p);
+    __m256d r0 = _mm256_loadu_pd(d);
+    __m256d r1 = _mm256_loadu_pd(d + 4);
+    __m256d r2 = _mm256_loadu_pd(d + 8);
+    __m256d r3 = _mm256_loadu_pd(d + 12);
+    __m256d t0 = _mm256_unpacklo_pd(r0, r1);
+    __m256d t1 = _mm256_unpackhi_pd(r0, r1);
+    __m256d t2 = _mm256_unpacklo_pd(r2, r3);
+    __m256d t3 = _mm256_unpackhi_pd(r2, r3);
+    reh = _mm256_permute2f128_pd(t0, t2, 0x20);
+    rel = _mm256_permute2f128_pd(t1, t3, 0x20);
+    imh = _mm256_permute2f128_pd(t0, t2, 0x31);
+    iml = _mm256_permute2f128_pd(t1, t3, 0x31);
+}
+/* |re|+|im| for 4 lanes: t_abs(x) = (|hi|, sign(hi)*lo) branchlessly, summed
+ * with the exact EFT add. */
+inline void cabs1_4(const T *p, __m256d &mh, __m256d &ml) {
+    const __m256d sgn = _mm256_set1_pd(-0.0);
+    __m256d reh, rel, imh, iml;
+    deint4c(p, reh, rel, imh, iml);
+    __m256d arh = _mm256_andnot_pd(sgn, reh);
+    __m256d arl = _mm256_xor_pd(rel, _mm256_and_pd(reh, sgn));
+    __m256d aih = _mm256_andnot_pd(sgn, imh);
+    __m256d ail = _mm256_xor_pd(iml, _mm256_and_pd(imh, sgn));
+    dd_add_exact(arh, arl, aih, ail, mh, ml);
+}
+
+inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
+{
+    if (n < 8) {
+        ptrdiff_t best = 0;
+        R bv = cabs1(x[0]);
+        for (ptrdiff_t i = 1; i < n; ++i) {
+            R v = cabs1(x[i]);
+            if (v > bv) { bv = v; best = i; }
+        }
+        *bv_out = bv;
+        return best;
+    }
+    __m256d vmh, vml;
+    cabs1_4(x, vmh, vml);
+    __m256i vidx = _mm256_set_epi64x(3, 2, 1, 0);
+    __m256i cur  = vidx;
+    const __m256i four = _mm256_set1_epi64x(4);
+
+    ptrdiff_t i = 4;
+    for (; i + 4 <= n; i += 4) {
+        cur = _mm256_add_epi64(cur, four);
+        __m256d mh, ml;
+        cabs1_4(x + i, mh, ml);
+        __m256d gt  = _mm256_cmp_pd(mh, vmh, _CMP_GT_OQ);
+        __m256d eq  = _mm256_cmp_pd(mh, vmh, _CMP_EQ_OQ);
+        __m256d glo = _mm256_cmp_pd(ml, vml, _CMP_GT_OQ);
+        __m256d upd = _mm256_or_pd(gt, _mm256_and_pd(eq, glo));
+        vmh  = _mm256_blendv_pd(vmh, mh, upd);
+        vml  = _mm256_blendv_pd(vml, ml, upd);
+        vidx = _mm256_castpd_si256(
+                   _mm256_blendv_pd(_mm256_castsi256_pd(vidx),
+                                    _mm256_castsi256_pd(cur), upd));
+    }
+
+    alignas(32) double mh[4], ml[4];
+    alignas(32) long long li[4];
+    _mm256_store_pd(mh, vmh);
+    _mm256_store_pd(ml, vml);
+    _mm256_store_si256(reinterpret_cast<__m256i *>(li), vidx);
+    ptrdiff_t best = (ptrdiff_t)li[0];
+    R bv{mh[0], ml[0]};
+    for (int k = 1; k < 4; ++k) {
+        R cv{mh[k], ml[k]};
+        if (dd_gt(cv, bv) || (cv.limbs[0] == bv.limbs[0] &&
+                              cv.limbs[1] == bv.limbs[1] && li[k] < best)) {
+            bv = cv; best = (ptrdiff_t)li[k];
+        }
+    }
+    for (; i < n; ++i) {
+        R v = cabs1(x[i]);
+        if (v > bv) { bv = v; best = i; }
+    }
+    *bv_out = bv;
+    return best;
+}
+#else
 /* Contiguous unit-stride scan: 0-based index of first max-|re|+|im| element. */
 inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
 {
@@ -34,6 +157,7 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
     *bv_out = bv;
     return best;
 }
+#endif
 }
 
 #ifdef _OPENMP
