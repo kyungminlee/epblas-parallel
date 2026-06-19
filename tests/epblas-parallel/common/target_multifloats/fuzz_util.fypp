@@ -212,11 +212,12 @@ contains
         end do
     end function check_sentinels_real
 
-    function max_rel_err_real(C_out, C_ref, m, n, ldc) result(err)
+    function max_rel_err_real(C_out, C_ref, m, n, ldc, op_norm) result(err)
         type(real64x2), intent(in) :: C_out(:), C_ref(:)
         integer, intent(in) :: m, n, ldc
+        type(real64x2), intent(in), optional :: op_norm
         type(real64x2) :: err
-        type(real64x2) :: a, ref_max, diff_max, tiny_val
+        type(real64x2) :: a, ref_max, diff_max, denom, tiny_val
         integer :: i, j, idx
         diff_max = real64x2(0.0_8)
         ref_max  = real64x2(0.0_8)
@@ -229,11 +230,19 @@ contains
                 if (a > diff_max) diff_max = a
             end do
         end do
+        ! op_norm (when supplied) is the Wilkinson-style upper bound on the
+        ! output magnitude; flooring the denominator with it keeps the
+        ! relative error meaningful when the result cancels below operand
+        ! scale and ref_max collapses. Without it this is the plain form.
+        denom = ref_max
+        if (present(op_norm)) then
+            if (op_norm > denom) denom = op_norm
+        end if
         tiny_val = real64x2(tiny(1.0_8))
-        if (ref_max < tiny_val) then
+        if (denom < tiny_val) then
             err = diff_max
         else
-            err = diff_max / ref_max
+            err = diff_max / denom
         end if
     end function max_rel_err_real
 
@@ -276,11 +285,12 @@ contains
         end do
     end function check_sentinels_complex
 
-    function max_rel_err_complex(C_out, C_ref, m, n, ldc) result(err)
+    function max_rel_err_complex(C_out, C_ref, m, n, ldc, op_norm) result(err)
         type(cmplx64x2), intent(in) :: C_out(:), C_ref(:)
         integer, intent(in) :: m, n, ldc
+        type(real64x2), intent(in), optional :: op_norm
         type(real64x2) :: err
-        type(real64x2) :: a, ref_max, diff_max, tiny_val
+        type(real64x2) :: a, ref_max, diff_max, denom, tiny_val
         type(cmplx64x2) :: diff
         integer :: i, j, idx
         diff_max = real64x2(0.0_8)
@@ -295,11 +305,19 @@ contains
                 if (a > diff_max) diff_max = a
             end do
         end do
+        ! op_norm (when supplied) is the Wilkinson-style upper bound on the
+        ! output magnitude; flooring the denominator with it keeps the
+        ! relative error meaningful when the result cancels below operand
+        ! scale and ref_max collapses. Without it this is the plain form.
+        denom = ref_max
+        if (present(op_norm)) then
+            if (op_norm > denom) denom = op_norm
+        end if
         tiny_val = real64x2(tiny(1.0_8))
-        if (ref_max < tiny_val) then
+        if (denom < tiny_val) then
             err = diff_max
         else
-            err = diff_max / ref_max
+            err = diff_max / denom
         end if
     end function max_rel_err_complex
 

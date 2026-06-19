@@ -95,7 +95,17 @@ program fuzz_${routine}$
             end do
         end block
         call ${routine}$_migrated(side, uplo, m, n, alpha, A, lda, B, ldb, beta, C_mig, ldc)
-        err = max_rel_err_complex(C_ov, C_mig, m, n, ldc)
+        ! Floor the denominator with the Wilkinson op_norm bound on |C_new|
+        ! so cancellation between α·A·B and β·C₀ stays meaningful. A's
+        ! off-UPLO triangle and padding hold sentinels — mask them out.
+        block
+            real(rk) :: op_norm
+            op_norm = abs(alpha) * real(na, rk) &
+                    * maxval(abs(A(1 : lda * na)), mask = real(A(1 : lda * na)) /= sentinel_re) &
+                    * maxval(abs(B(1 : ldb * n))) &
+                    + abs(beta) * maxval(abs(C0(1 : ldc * n)))
+            err = max_rel_err_complex(C_ov, C_mig, m, n, ldc, op_norm)
+        end block
 
         call err_stats_record(err)
 

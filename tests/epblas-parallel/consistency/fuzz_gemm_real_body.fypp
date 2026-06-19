@@ -87,7 +87,16 @@ program fuzz_${routine}$
 
         call ${routine}$(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_ov,  ldc)
         call ${routine}$_migrated(ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C_mig, ldc)
-        err = max_rel_err_real(C_ov, C_mig, m, n, ldc)
+        ! Floor the denominator with the Wilkinson op_norm bound on |C_new|
+        ! so cancellation between α·op(A)·op(B) and β·C₀ stays meaningful.
+        block
+            real(rk) :: op_norm
+            op_norm = abs(alpha) * real(k, rk) &
+                    * maxval(abs(A(1 : lda * cols_a))) &
+                    * maxval(abs(B(1 : ldb * cols_b))) &
+                    + abs(beta) * maxval(abs(C0(1 : ldc * n)))
+            err = max_rel_err_real(C_ov, C_mig, m, n, ldc, op_norm)
+        end block
         bad_ov  = check_sentinels_real(C_ov,  m, n, ldc)
         bad_mig = check_sentinels_real(C_mig, m, n, ldc)
 

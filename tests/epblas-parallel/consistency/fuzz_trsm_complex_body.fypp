@@ -110,7 +110,17 @@ program fuzz_${routine}$
                          A, lda, B_ov, ldb)
         call ${routine}$_migrated(side, uplo, transa, diag, m, n, alpha, &
                                   A, lda, B_mig, ldb)
-        err = max_rel_err_complex(B_ov, B_mig, m, n, ldb)
+        ! Floor the denominator with the Wilkinson op_norm bound on |B_new|
+        ! (B := α·op(A)⁻¹·B₀, A its own scale factor — mirrors TRSV) so
+        ! cancellation in the solve stays meaningful. A's off-UPLO triangle
+        ! and padding hold sentinels — mask them out.
+        block
+            real(rk) :: op_norm
+            op_norm = abs(alpha) * real(na, rk) &
+                    * maxval(abs(A(1 : lda * na)), mask = real(A(1 : lda * na)) /= sentinel_re) &
+                    * maxval(abs(B0(1 : ldb * n)))
+            err = max_rel_err_complex(B_ov, B_mig, m, n, ldb, op_norm)
+        end block
         bad_ov  = check_sentinels_complex(B_ov,  m, n, ldb)
         bad_mig = check_sentinels_complex(B_mig, m, n, ldb)
 
