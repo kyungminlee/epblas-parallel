@@ -1,0 +1,152 @@
+name: CI (fuzz)
+
+# Per-push / per-PR correctness gate. The release workflow only runs the
+# fuzz suite at tag time with a single time-based random seed, so harness
+# and kernel regressions stay latent between releases (e.g. the edot
+# operand-norm-floor regression that slipped in at the rename/split and
+# only surfaced, probabilistically, at a release). This workflow closes
+# that gap: it runs `ctest -L fuzz` on every push to main/develop and on
+# every PR, across BOTH compilers and a fixed rotating set of seeds so any
+# failure is deterministically reproducible from its logged seed.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      eplinalg_tag:
+        description: 'eplinalg release tag for the reference archives (overrides the pinned default)'
+        required: false
+      seeds:
+        description: 'Space-separated fuzz seeds to run (overrides the pinned rotation)'
+        required: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    env:
+      # Fixed, reproducible seed rotation. Each value runs the whole fuzz
+      # suite; on failure the driver prints `seed=<N>` so you reproduce it
+      # locally with `BLAS_FUZZ_SEED=<N> ctest -L fuzz`. Add seeds here to
+      # widen deterministic coverage; the release workflow's random seed
+      # adds breadth on top of this fixed floor. (Case count per driver is
+      # pinned at 200 by each test's ctest ENVIRONMENT property, which
+      # overrides any inherited BLAS_FUZZ_CASES — so it isn't set here.)
+      FUZZ_SEEDS: ${{ inputs.seeds || '1 7 42 1234 20240617' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - { name: gfortran-12, fc: gfortran-12, cc: gcc-12, cxx: g++-12, pkg: gcc-12 g++-12 gfortran-12 }
+          - { name: gfortran-15, fc: gfortran-15, cc: gcc-15, cxx: g++-15, pkg: gcc-15 g++-15 gfortran-15 }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install GCC (gfortran)
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.compiler.pkg }}
+
+      - name: Install fypp
+        run: pipx install fypp
+
+      # The fuzz drivers compare the overlay against the migrated netlib
+      # reference, which ships in eplinalg's intelmpi archives — so the
+      # reference setup mirrors the release workflow's test slot.
+      - name: Install Intel MPI
+        run: |
+          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+          sudo apt-get install -y intel-oneapi-mpi-devel
+
+      - name: Setup Intel oneAPI environment
+        run: |
+          env | sort > /tmp/env.before
+          source /opt/intel/oneapi/setvars.sh > /dev/null
+          env | sort > /tmp/env.after
+          comm -13 /tmp/env.before /tmp/env.after >> "$GITHUB_ENV"
+
+      - name: Setup Intel MPI compiler shims
+        run: |
+          {
+            echo "I_MPI_F90=${{ matrix.compiler.fc }}"
+            echo "I_MPI_CC=${{ matrix.compiler.cc }}"
+            echo "I_MPI_CXX=${{ matrix.compiler.cxx }}"
+          } >> "$GITHUB_ENV"
+
+      - name: Download eplinalg reference archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Keep in sync with the release workflow's pinned eplinalg tag.
+          TAG="${{ inputs.eplinalg_tag || 'v0.4.1' }}"
+          echo "eplinalg tag: $TAG"
+
+          mkdir -p ${{ github.workspace }}/eplinalg-install
+          for target in kind10 kind16 multifloats; do
+            ARCH="${target}-${{ matrix.compiler.name }}-intelmpi-linux-x86_64.tar.gz"
+            # Retry: the release-asset CDN occasionally resets the
+            # connection mid-download (seen as `connection reset by peer`).
+            for attempt in 1 2 3 4 5; do
+              if gh release download --repo kyungminlee/eplinalg "$TAG" \
+                  --pattern "$ARCH" --dir . --clobber; then
+                break
+              fi
+              echo "download of $ARCH failed (attempt $attempt); retrying in $((attempt * 5))s"
+              sleep $((attempt * 5))
+              [ "$attempt" -eq 5 ] && { echo "::error::eplinalg download failed after 5 attempts: $ARCH"; exit 1; }
+            done
+            tar xzf "$ARCH" -C ${{ github.workspace }}/eplinalg-install
+            rm "$ARCH"
+          done
+          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/eplinalg-install${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" \
+            >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_Fortran_COMPILER=${{ matrix.compiler.fc }} \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler.cxx }} \
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run ctest (fuzz) across the seed rotation
+        run: |
+          rc=0
+          for seed in $FUZZ_SEEDS; do
+            echo "::group::fuzz seed=$seed (${{ matrix.compiler.name }})"
+            if ! BLAS_FUZZ_SEED="$seed" \
+                ctest --test-dir build -j$(nproc) --output-on-failure -L fuzz; then
+              echo "::error::fuzz failed at seed=$seed (${{ matrix.compiler.name }}); reproduce with BLAS_FUZZ_SEED=$seed ctest -L fuzz"
+              rc=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $rc
+
+      - name: Upload ctest log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ctest-${{ matrix.compiler.name }}-LastTest
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
+          retention-days: 7
