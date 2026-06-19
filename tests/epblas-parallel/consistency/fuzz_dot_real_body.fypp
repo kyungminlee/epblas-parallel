@@ -30,8 +30,22 @@ program fuzz_${routine}$
         call fill_matrix_real(X, lenx, 1, lenx); call fill_matrix_real(Y, leny, 1, leny)
         d_ov  = ${routine}$(n, X, incx, Y, incy)
         d_mig = ${routine}$_migrated(n, X, incx, Y, incy)
-        if (abs(d_mig) < tiny(1.0_rk)) then; err = abs(d_ov - d_mig)
-        else; err = abs(d_ov - d_mig) / abs(d_mig); end if
+        ! Denominator floored by op_norm = Σ|xᵢ·yᵢ| (Wilkinson bound on the
+        ! dot magnitude), paired exactly as the kernel sums them, so the
+        ! relative error stays meaningful when the dot cancels and |d_mig|
+        ! collapses below operand scale.
+        block
+            integer :: k, ix, iy
+            real(rk) :: op_norm
+            ix = 1; if (incx < 0) ix = 1 + (n - 1) * abs(incx)
+            iy = 1; if (incy < 0) iy = 1 + (n - 1) * abs(incy)
+            op_norm = 0.0_rk
+            do k = 1, n
+                op_norm = op_norm + abs(X(ix)) * abs(Y(iy))
+                ix = ix + incx; iy = iy + incy
+            end do
+            err = abs(d_ov - d_mig) / max(abs(d_mig), op_norm, tiny(1.0_rk))
+        end block
         call err_stats_record(err)
         if (err > tol .or. err /= err) then
             fails = fails + 1
