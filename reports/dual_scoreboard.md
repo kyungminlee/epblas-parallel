@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-19 01:46 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-19 04:33 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -12,13 +12,13 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## m — multifloats (double-double)
 
-2229 cells, 75 routines.  **Pass@1.02: serial 100.0% · omp4 100.0%.**  0 routine(s) with ≥1 flagged cell.
+2229 cells, 75 routines.  **Pass@1.02: serial 100.0% · omp4 100.0%.**  1 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| wswap | 3 | 1.004 | 1.006 | ✅ |
-| mswap | 3 | 1.003 | 0.999 | ✅ |
-| wcopy | 3 | 0.998 | 1.000 | ✅ |
+| **wswap** | 3 | 1.041 ob1 @-/65536 | 1.001 | ⚠ |
+| wcopy | 3 | 1.002 | 0.995 | ✅ |
+| mswap | 3 | 0.979 | 1.002 | ✅ |
 | mcopy | 3 | 0.791 | 1.000 | ✅ |
 | mcabs1 | 1 | 1.000 | 1.000 | ✅ |
 | mspmv | 24 | 0.462 | 0.999 | ✅ |
@@ -27,10 +27,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wmscal | 3 | 0.768 | 0.988 | ✅ |
 | maxpy | 3 | 0.376 | 0.923 | ✅ |
 | msbmv | 24 | 0.572 | 0.884 | ✅ |
-| imamax | 3 | 0.798 | 0.813 | ✅ |
 | mtpsv | 96 | 0.402 | 0.770 | ✅ |
-| iwamax | 3 | 0.550 | 0.696 | ✅ |
 | mgbmv | 24 | 0.412 | 0.683 | ✅ |
+| iwamax | 3 | 0.530 | 0.681 | ✅ |
+| imamax | 3 | 0.625 | 0.681 | ✅ |
 | msyr | 24 | 0.373 | 0.661 | ✅ |
 | mtbsv | 96 | 0.651 | 0.651 | ✅ |
 | mger | 12 | 0.269 | 0.651 | ✅ |
@@ -91,6 +91,14 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mwnrm2 | 3 | 0.208 | 0.139 | ✅ |
 | mnrm2 | 3 | 0.182 | 0.137 | ✅ |
 | whemv | 18 | 0.182 | 0.182 | ✅ |
+
+<details><summary>m: 1 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+
+| routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| wswap | - | 65536 | 87,550 | 84,112 | 101,062 | 98,129 | 99,454 | 1.041 | 0.987 | ob1 |
+
+</details>
 
 ## e — kind10 (fp80)
 
