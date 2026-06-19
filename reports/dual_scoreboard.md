@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-19 04:33 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-19 05:31 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -21,7 +21,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mswap | 3 | 0.979 | 1.002 | ✅ |
 | mcopy | 3 | 0.791 | 1.000 | ✅ |
 | mcabs1 | 1 | 1.000 | 1.000 | ✅ |
-| mspmv | 24 | 0.462 | 0.999 | ✅ |
 | mrotmg | 1 | 0.998 | 0.996 | ✅ |
 | mscal | 3 | 0.765 | 0.988 | ✅ |
 | wmscal | 3 | 0.768 | 0.988 | ✅ |
@@ -29,7 +28,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | msbmv | 24 | 0.572 | 0.884 | ✅ |
 | mtpsv | 96 | 0.402 | 0.770 | ✅ |
 | mgbmv | 24 | 0.412 | 0.683 | ✅ |
-| iwamax | 3 | 0.530 | 0.681 | ✅ |
 | imamax | 3 | 0.625 | 0.681 | ✅ |
 | msyr | 24 | 0.373 | 0.661 | ✅ |
 | mtbsv | 96 | 0.651 | 0.651 | ✅ |
@@ -42,6 +40,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wsyr2k | 12 | 0.253 | 0.589 | ✅ |
 | mgemv | 24 | 0.348 | 0.588 | ✅ |
 | wher2k | 12 | 0.241 | 0.565 | ✅ |
+| iwamax | 3 | 0.551 | 0.000 | ✅ |
 | wmrot | 3 | 0.212 | 0.550 | ✅ |
 | mrot | 3 | 0.217 | 0.549 | ✅ |
 | mrotm | 3 | 0.213 | 0.542 | ✅ |
@@ -50,6 +49,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | wgemv | 27 | 0.140 | 0.508 | ✅ |
 | wscal | 3 | 0.224 | 0.498 | ✅ |
 | mtbmv | 96 | 0.352 | 0.495 | ✅ |
+| mspmv | 24 | 0.459 | 0.467 | ✅ |
 | waxpy | 3 | 0.184 | 0.448 | ✅ |
 | mtrmv | 96 | 0.405 | 0.438 | ✅ |
 | wrotg | 1 | 0.410 | 0.410 | ✅ |

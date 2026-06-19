@@ -133,28 +133,32 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
         std::ptrdiff_t m_from = range[t];
         std::ptrdiff_t m_to   = range[t + 1];
         T *slot = buf + (std::size_t)t * n;
+        /* SIMD per-column slot scatter + symmetric dot, reusing the same SoA DD
+         * kernels as the serial mspmv_contig (two contiguous passes over column
+         * j) — writing into the per-thread slot instead of y. The scalar fused
+         * loop this replaces left the threaded path un-vectorized while the
+         * serial path was SIMD, capping par4/par1 at ~0.68. */
         if (upper) {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
-                T temp1 = x[j];
-                T temp2 = zero_dd;
+                const T temp1 = x[j];
                 const T *aj = &AP_((std::size_t)j * (j + 1) / 2);
-                for (std::ptrdiff_t i = 0; i < j; ++i) {
-                    slot[i] = slot[i] + temp1 * aj[i];
-                    temp2   = temp2   + aj[i] * x[i];
+                T temp2 = zero_dd;
+                if (j > 0) {
+                    mf_tri::axpy_add(j, &slot[0], aj, temp1);   /* slot[i] += temp1*aj[i] */
+                    temp2 = mf_tri::dot(j, aj, &x[0]);          /* sum aj[i]*x[i] */
                 }
                 slot[j] = slot[j] + (temp1 * aj[j] + temp2);
             }
         } else {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
-                T temp1 = x[j];
-                T temp2 = zero_dd;
+                const T temp1 = x[j];
                 const T *aj = &AP_((std::size_t)j * (2 * (std::size_t)n - j - 1) / 2);
                 slot[j] = slot[j] + temp1 * aj[j];
-                for (std::ptrdiff_t i = j + 1; i < n; ++i) {
-                    slot[i] = slot[i] + temp1 * aj[i];
-                    temp2   = temp2   + aj[i] * x[i];
+                const std::ptrdiff_t len = n - 1 - j;
+                if (len > 0) {
+                    mf_tri::axpy_add(len, &slot[j + 1], &aj[1], temp1);
+                    slot[j] = slot[j] + mf_tri::dot(len, &aj[1], &x[j + 1]);
                 }
-                slot[j] = slot[j] + temp2;
             }
         }
     }
@@ -183,45 +187,6 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
     return true;
 }
 
-/* Row-gather: y[i] (i in [lo,hi)) is an independent dot over the full symmetric
- * row, reconstructed from the packed triangle. For UPLO='U' the diagonal of
- * column j sits at ap[j(j+1)/2 + j]; for UPLO='L' at ap[j*N - j(j-1)/2]. Each
- * row walks one contiguous run inside its own column plus a column-jumping run
- * (offset incremented in O(1) per step). x and y are distinct (spmv forbids
- * aliasing) → output rows partition with no cross-thread dependence. Reorders
- * the per-row summation vs the serial column scatter → within DD fuzz tol; the
- * serial path stays bit-exact. */
-static void mspmv_rowgather(bool upper, int n, int lo, int hi,
-                            const T *ap, const T *x, T alpha, T *y, int incy)
-{
-    if (upper) {
-        for (int i = lo; i < hi; ++i) {
-            const std::size_t kk_i = static_cast<std::size_t>(i) * (i + 1) / 2;
-            T s = ap[kk_i + i] * x[i];                       /* diagonal */
-            for (int j = 0; j < i; ++j) s = s + ap[kk_i + j] * x[j];   /* left (col i) */
-            std::size_t kk_j = kk_i + (i + 1);               /* start of column i+1 */
-            for (int j = i + 1; j < n; ++j) {                /* right (col-jump) */
-                s = s + ap[kk_j + i] * x[j];
-                kk_j += static_cast<std::size_t>(j + 1);
-            }
-            y[(std::ptrdiff_t)i * incy] = y[(std::ptrdiff_t)i * incy] + alpha * s;
-        }
-    } else {
-        for (int i = lo; i < hi; ++i) {
-            const std::size_t kk_i =
-                static_cast<std::size_t>(i) * n - static_cast<std::size_t>(i) * (i - 1) / 2;
-            T s = ap[kk_i] * x[i];                           /* diagonal */
-            for (int j = i + 1; j < n; ++j) s = s + ap[kk_i + (j - i)] * x[j]; /* right (col i) */
-            std::size_t kk_j = 0;                            /* start of column 0 */
-            for (int j = 0; j < i; ++j) {                    /* left (col-jump) */
-                s = s + ap[kk_j + (i - j)] * x[j];
-                kk_j += static_cast<std::size_t>(n - j);
-            }
-            y[(std::ptrdiff_t)i * incy] = y[(std::ptrdiff_t)i * incy] + alpha * s;
-        }
-    }
-}
-
 /* Threaded symmetric packed matvec. Disjoint output-row ranges; x gathered to
  * contiguous when strided. Returns true if handled. Beta already applied. */
 __attribute__((noinline)) static bool mspmv_omp(
@@ -237,29 +202,28 @@ __attribute__((noinline)) static bool mspmv_omp(
     if (incy < 0) y -= (std::ptrdiff_t)(n - 1) * incy;
 
     /* Unit-stride: ob-style column-partition axpydot (contiguous column read,
-     * ~3.3x). Strided: row-gather below (ob serializes strided; par's
-     * disjoint-output-row gather already wins there, so keep it). */
+     * ~3.3x). */
     if (incx == 1 && incy == 1)
         return mspmv_axpydot(upper, n, ap, x, alpha, y, nthreads);
 
-    const T *xptr = x;
-    T *xbuf = nullptr;
-    if (incx != 1) {
-        xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
-        if (!xbuf) return false;
-        for (int i = 0; i < n; ++i) xbuf[i] = x[(std::ptrdiff_t)i * incx];
-        xptr = xbuf;
+    /* Strided: gather x AND y to contiguous scratch, run the SIMD'd threaded
+     * axpydot core (already the unit-stride winner), then scatter y back —
+     * O(N) gather vs the O(N^2) anti-diagonal column-jumping rowgather, and the
+     * contiguous core is SIMD where rowgather is scalar. Mirrors the serial
+     * strided path but threaded. */
+    T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    T *ys = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    if (!xs || !ys) { std::free(xs); std::free(ys); return false; }
+    for (int i = 0; i < n; ++i) {
+        xs[i] = x[(std::ptrdiff_t)i * incx];
+        ys[i] = y[(std::ptrdiff_t)i * incy];
     }
-
-    #pragma omp parallel num_threads(nthreads)
-    {
-        int tid = omp_get_thread_num();
-        int lo = (int)((long long)n * tid / nthreads);
-        int hi = (int)((long long)n * (tid + 1) / nthreads);
-        mspmv_rowgather(upper, n, lo, hi, ap, xptr, alpha, y, incy);
-    }
-    std::free(xbuf);
-    return true;
+    bool ok = mspmv_axpydot(upper, n, ap, xs, alpha, ys, nthreads);
+    if (ok)
+        for (int i = 0; i < n; ++i) y[(std::ptrdiff_t)i * incy] = ys[i];
+    std::free(xs);
+    std::free(ys);
+    return ok;
 }
 #endif
 
