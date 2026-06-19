@@ -205,32 +205,28 @@ static void mtpsv_block(char UPLO, char TR, int nounit,
                 if (dd_iszero(x[j])) continue;
                 const std::size_t b = cbU(j);
                 if (nounit) x[j] = x[j] / ap[b + j];
-                const T tmp = x[j];
-                for (int i = j0; i < j; ++i) x[i] = x[i] - tmp * ap[b + i];
+                mf_tri::axpy_sub(j - j0, &x[j0], &ap[b + j0], x[j]);
             }
         } else {                                        /* Lower: forward */
             for (int j = j0; j < j1; ++j) {
                 if (dd_iszero(x[j])) continue;
                 const std::size_t b = cbL(j, N);
                 if (nounit) x[j] = x[j] / ap[b];
-                const T tmp = x[j];
-                for (int i = j + 1; i < j1; ++i) x[i] = x[i] - tmp * ap[b + (i - j)];
+                mf_tri::axpy_sub(j1 - (j + 1), &x[j + 1], &ap[b + 1], x[j]);
             }
         }
     } else {
         if (!lower) {                                   /* Upper^T: forward, k<j */
             for (int j = j0; j < j1; ++j) {
                 const std::size_t b = cbU(j);
-                T tmp = x[j];
-                for (int i = j0; i < j; ++i) tmp = tmp - ap[b + i] * x[i];
+                T tmp = x[j] - mf_tri::dot(j - j0, &ap[b + j0], &x[j0]);
                 if (nounit) tmp = tmp / ap[b + j];
                 x[j] = tmp;
             }
         } else {                                        /* Lower^T: backward, k>j */
             for (int j = j1 - 1; j >= j0; --j) {
                 const std::size_t b = cbL(j, N);
-                T tmp = x[j];
-                for (int i = j + 1; i < j1; ++i) tmp = tmp - ap[b + (i - j)] * x[i];
+                T tmp = x[j] - mf_tri::dot(j1 - (j + 1), &ap[b + 1], &x[j + 1]);
                 if (nounit) tmp = tmp / ap[b];
                 x[j] = tmp;
             }
@@ -269,7 +265,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         const T xi = x[i];
                         if (dd_iszero(xi)) continue;
                         const T *col = &ap[cbL(i, N)];      /* col[k-i] = A(k,i) */
-                        for (int k = rlo; k < rhi; ++k) x[k] = x[k] - xi * col[k - i];
+                        mf_tri::axpy_sub(rhi - rlo, &x[rlo], &col[rlo - i], xi);
                     }
                 }
             }
@@ -287,7 +283,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         const T xi = x[i];
                         if (dd_iszero(xi)) continue;
                         const T *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
-                        for (int k = rlo; k < rhi; ++k) x[k] = x[k] - xi * col[k];
+                        mf_tri::axpy_sub(rhi - rlo, &x[rlo], &col[rlo], xi);
                     }
                 }
             }
@@ -307,9 +303,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbL(i, N)];
-                            T s = zero_dd;
-                            for (int k = j1; k < N; ++k) s = s + col[k - i] * x[k];
-                            x[i] = x[i] - s;
+                            x[i] = x[i] - mf_tri::dot(N - j1, &col[j1 - i], &x[j1]);
                         }
                     }
                 }
@@ -326,9 +320,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbU(i)];
-                            T s = zero_dd;
-                            for (int k = 0; k < j0; ++k) s = s + col[k] * x[k];
-                            x[i] = x[i] - s;
+                            x[i] = x[i] - mf_tri::dot(j0, &col[0], &x[0]);
                         }
                     }
                 }
