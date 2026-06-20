@@ -164,34 +164,36 @@ inline void simd_herk_diag_n(int jc, int jb, int K, R alpha,
     }
 }
 
-/* TR='C' dot product: pre-packed Aj columns. Inner loop reads Ai
- * scalar with conjugate, multiplies by Aj 4-wide, accumulates. */
-inline void simd_herk_diag_c(int jc, int jb, int K, R alpha,
-                             const T *a, int lda,
-                             const double *ajrh, const double *ajrl,
-                             const double *ajih, const double *ajil,
-                             double *crh, double *crl,
-                             double *cih, double *cil)
+/* TR='C' dot product SIMD, KC-tiled: accumulate the conjugated complex DD dot
+ * Σ conj(Ai[l])·Aj over l ∈ [l0, l0+kc) into the per-row 4-wide accumulator acc.
+ * ajrh/.../ajil hold this chunk's 4 packed Aj columns (un-conjugated) at
+ * chunk-local rows 0..kc-1. acc is loaded/stored each call, so accumulation
+ * continues across chunks in the same order as a single l=0..K-1 loop →
+ * bit-identical to the untiled path. Alpha is applied once after all chunks. */
+inline void simd_herk_diag_c_chunk(int jc, int jb, int kc,
+                                   const T *a, int lda, int l0,
+                                   const double *ajrh, const double *ajrl,
+                                   const double *ajih, const double *ajil,
+                                   double *acc_rh, double *acc_rl,
+                                   double *acc_ih, double *acc_il)
 {
-    const __m256d a_h = _mm256_set1_pd(alpha.limbs[0]);
-    const __m256d a_l = _mm256_set1_pd(alpha.limbs[1]);
     for (int i = jc; i < jc + jb; ++i) {
         const int ir = i - jc;
         const T *Ai = a + static_cast<std::size_t>(i) * lda;
-        __m256d srh = _mm256_setzero_pd();
-        __m256d srl = _mm256_setzero_pd();
-        __m256d sih = _mm256_setzero_pd();
-        __m256d sil = _mm256_setzero_pd();
-        for (int l = 0; l < K; ++l) {
-            /* conj(Ai[l]) broadcast */
-            __m256d aih = _mm256_set1_pd(Ai[l].re.limbs[0]);
-            __m256d ail_ = _mm256_set1_pd(Ai[l].re.limbs[1]);
-            __m256d aiih = _mm256_set1_pd(-Ai[l].im.limbs[0]);
-            __m256d aiil = _mm256_set1_pd(-Ai[l].im.limbs[1]);
-            __m256d ajh = _mm256_load_pd(&ajrh[l * kSimdLane]);
-            __m256d ajl = _mm256_load_pd(&ajrl[l * kSimdLane]);
-            __m256d aji = _mm256_load_pd(&ajih[l * kSimdLane]);
-            __m256d ajli = _mm256_load_pd(&ajil[l * kSimdLane]);
+        __m256d srh = _mm256_load_pd(&acc_rh[ir * kSimdLane]);
+        __m256d srl = _mm256_load_pd(&acc_rl[ir * kSimdLane]);
+        __m256d sih = _mm256_load_pd(&acc_ih[ir * kSimdLane]);
+        __m256d sil = _mm256_load_pd(&acc_il[ir * kSimdLane]);
+        for (int ll = 0; ll < kc; ++ll) {
+            /* conj(Ai[l0+ll]) broadcast */
+            __m256d aih = _mm256_set1_pd(Ai[l0 + ll].re.limbs[0]);
+            __m256d ail_ = _mm256_set1_pd(Ai[l0 + ll].re.limbs[1]);
+            __m256d aiih = _mm256_set1_pd(-Ai[l0 + ll].im.limbs[0]);
+            __m256d aiil = _mm256_set1_pd(-Ai[l0 + ll].im.limbs[1]);
+            __m256d ajh = _mm256_load_pd(&ajrh[ll * kSimdLane]);
+            __m256d ajl = _mm256_load_pd(&ajrl[ll * kSimdLane]);
+            __m256d aji = _mm256_load_pd(&ajih[ll * kSimdLane]);
+            __m256d ajli = _mm256_load_pd(&ajil[ll * kSimdLane]);
             __m256d prh, prl, pih, pil;
             simd_dd::cdd_mul(aih, ail_, aiih, aiil,
                              ajh, ajl, aji, ajli,
@@ -202,22 +204,10 @@ inline void simd_herk_diag_c(int jc, int jb, int K, R alpha,
                              nrh, nrl, nih, nil_);
             srh = nrh; srl = nrl; sih = nih; sil = nil_;
         }
-        /* C[i, panel] += alpha · s — alpha real, scale each limb */
-        __m256d prh, prl, pih, pil;
-        simd_dd::dd_mul(a_h, a_l, srh, srl, prh, prl);
-        simd_dd::dd_mul(a_h, a_l, sih, sil, pih, pil);
-        __m256d ck_rh = _mm256_load_pd(&crh[ir * kSimdLane]);
-        __m256d ck_rl = _mm256_load_pd(&crl[ir * kSimdLane]);
-        __m256d ck_ih = _mm256_load_pd(&cih[ir * kSimdLane]);
-        __m256d ck_il = _mm256_load_pd(&cil[ir * kSimdLane]);
-        __m256d nrh, nrl, nih, nil_;
-        simd_dd::cdd_add(ck_rh, ck_rl, ck_ih, ck_il,
-                         prh, prl, pih, pil,
-                         nrh, nrl, nih, nil_);
-        _mm256_store_pd(&crh[ir * kSimdLane], nrh);
-        _mm256_store_pd(&crl[ir * kSimdLane], nrl);
-        _mm256_store_pd(&cih[ir * kSimdLane], nih);
-        _mm256_store_pd(&cil[ir * kSimdLane], nil_);
+        _mm256_store_pd(&acc_rh[ir * kSimdLane], srh);
+        _mm256_store_pd(&acc_rl[ir * kSimdLane], srl);
+        _mm256_store_pd(&acc_ih[ir * kSimdLane], sih);
+        _mm256_store_pd(&acc_il[ir * kSimdLane], sil);
     }
 }
 
@@ -230,35 +220,78 @@ inline void simd_herk_diag_panels(int jc, int jb, int K, R alpha,
     alignas(32) double crl[kMaxBlockM * kSimdLane];
     alignas(32) double cih[kMaxBlockM * kSimdLane];
     alignas(32) double cil[kMaxBlockM * kSimdLane];
+    /* TR='C' scratch: one K-chunk of 4 packed Aj columns (bounded by kMaxK)
+     * plus a per-row complex-DD accumulator carried across chunks. */
     alignas(32) static thread_local double ajrh[kMaxK * kSimdLane];
     alignas(32) static thread_local double ajrl[kMaxK * kSimdLane];
     alignas(32) static thread_local double ajih[kMaxK * kSimdLane];
     alignas(32) static thread_local double ajil[kMaxK * kSimdLane];
+    alignas(32) double acc_rh[kMaxBlockM * kSimdLane];
+    alignas(32) double acc_rl[kMaxBlockM * kSimdLane];
+    alignas(32) double acc_ih[kMaxBlockM * kSimdLane];
+    alignas(32) double acc_il[kMaxBlockM * kSimdLane];
 
     for (int j = jc; j < jc + jb; j += kSimdLane) {
         const int jcount = (jc + jb - j < kSimdLane) ? (jc + jb - j) : kSimdLane;
         pack_4col_cdd(jb, jc, c, ldc, j, jcount, crh, crl, cih, cil);
         if (TR_c == 'N') {
+            /* TR='N' reads A directly per l — K-independent, no scratch cap. */
             simd_herk_diag_n(jc, jb, K, alpha, a, lda, j, jcount,
                              crh, crl, cih, cil);
         } else {
-            for (int jj = 0; jj < jcount; ++jj) {
-                const T *col = a + static_cast<std::size_t>(j + jj) * lda;
-                for (int l = 0; l < K; ++l) {
-                    ajrh[l * kSimdLane + jj] = col[l].re.limbs[0];
-                    ajrl[l * kSimdLane + jj] = col[l].re.limbs[1];
-                    ajih[l * kSimdLane + jj] = col[l].im.limbs[0];
-                    ajil[l * kSimdLane + jj] = col[l].im.limbs[1];
-                }
+            const __m256d zv = _mm256_setzero_pd();
+            for (int ir = 0; ir < jb; ++ir) {
+                _mm256_store_pd(&acc_rh[ir * kSimdLane], zv);
+                _mm256_store_pd(&acc_rl[ir * kSimdLane], zv);
+                _mm256_store_pd(&acc_ih[ir * kSimdLane], zv);
+                _mm256_store_pd(&acc_il[ir * kSimdLane], zv);
             }
-            for (int jj = jcount; jj < kSimdLane; ++jj)
-                for (int l = 0; l < K; ++l) {
-                    ajrh[l * kSimdLane + jj] = 0.0; ajrl[l * kSimdLane + jj] = 0.0;
-                    ajih[l * kSimdLane + jj] = 0.0; ajil[l * kSimdLane + jj] = 0.0;
+            /* KC-tile over K so any K fits the bounded pre-pack scratch. */
+            for (int l0 = 0; l0 < K; l0 += kMaxK) {
+                const int kc = (K - l0 < kMaxK) ? (K - l0) : kMaxK;
+                for (int jj = 0; jj < jcount; ++jj) {
+                    const T *col = a + static_cast<std::size_t>(j + jj) * lda;
+                    for (int ll = 0; ll < kc; ++ll) {
+                        ajrh[ll * kSimdLane + jj] = col[l0 + ll].re.limbs[0];
+                        ajrl[ll * kSimdLane + jj] = col[l0 + ll].re.limbs[1];
+                        ajih[ll * kSimdLane + jj] = col[l0 + ll].im.limbs[0];
+                        ajil[ll * kSimdLane + jj] = col[l0 + ll].im.limbs[1];
+                    }
                 }
-            simd_herk_diag_c(jc, jb, K, alpha, a, lda,
-                             ajrh, ajrl, ajih, ajil,
-                             crh, crl, cih, cil);
+                for (int jj = jcount; jj < kSimdLane; ++jj)
+                    for (int ll = 0; ll < kc; ++ll) {
+                        ajrh[ll * kSimdLane + jj] = 0.0; ajrl[ll * kSimdLane + jj] = 0.0;
+                        ajih[ll * kSimdLane + jj] = 0.0; ajil[ll * kSimdLane + jj] = 0.0;
+                    }
+                simd_herk_diag_c_chunk(jc, jb, kc, a, lda, l0,
+                                       ajrh, ajrl, ajih, ajil,
+                                       acc_rh, acc_rl, acc_ih, acc_il);
+            }
+            /* Finalize: C[panel] += alpha · acc (alpha real, scale each limb). */
+            const __m256d a_h = _mm256_set1_pd(alpha.limbs[0]);
+            const __m256d a_l = _mm256_set1_pd(alpha.limbs[1]);
+            for (int i = jc; i < jc + jb; ++i) {
+                const int ir = i - jc;
+                __m256d srh = _mm256_load_pd(&acc_rh[ir * kSimdLane]);
+                __m256d srl = _mm256_load_pd(&acc_rl[ir * kSimdLane]);
+                __m256d sih = _mm256_load_pd(&acc_ih[ir * kSimdLane]);
+                __m256d sil = _mm256_load_pd(&acc_il[ir * kSimdLane]);
+                __m256d prh, prl, pih, pil;
+                simd_dd::dd_mul(a_h, a_l, srh, srl, prh, prl);
+                simd_dd::dd_mul(a_h, a_l, sih, sil, pih, pil);
+                __m256d ck_rh = _mm256_load_pd(&crh[ir * kSimdLane]);
+                __m256d ck_rl = _mm256_load_pd(&crl[ir * kSimdLane]);
+                __m256d ck_ih = _mm256_load_pd(&cih[ir * kSimdLane]);
+                __m256d ck_il = _mm256_load_pd(&cil[ir * kSimdLane]);
+                __m256d nrh, nrl, nih, nil_;
+                simd_dd::cdd_add(ck_rh, ck_rl, ck_ih, ck_il,
+                                 prh, prl, pih, pil,
+                                 nrh, nrl, nih, nil_);
+                _mm256_store_pd(&crh[ir * kSimdLane], nrh);
+                _mm256_store_pd(&crl[ir * kSimdLane], nrl);
+                _mm256_store_pd(&cih[ir * kSimdLane], nih);
+                _mm256_store_pd(&cil[ir * kSimdLane], nil_);
+            }
         }
         unpack_4col_herk_triangle(jc, jb, j, jcount, UPLO, c, ldc,
                                   crh, crl, cih, cil);
@@ -311,7 +344,7 @@ inline void diag_dispatch(int jc, int jb, int K, R alpha,
                           char UPLO, char TR_c)
 {
 #ifdef MBLAS_SIMD_DD
-    if (jb <= kMaxBlockM && K <= kMaxK) {
+    if (jb <= kMaxBlockM) {
         simd_herk_diag_panels(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
         return;
     }
