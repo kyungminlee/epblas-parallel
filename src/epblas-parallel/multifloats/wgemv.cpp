@@ -82,23 +82,16 @@ soa_load4_cdd(const double *p,
 /* Contiguous (unit-stride) NoTrans core: y += alpha * A * x, with x length N and
  * y length M (beta already applied by the caller). SIMD-serial when MBLAS_SIMD_DD
  * (already beats ob's threaded path); scalar fallback threads over output rows. */
-static void wgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
-                           const T *x, T *y)
-{
 #ifdef MBLAS_SIMD_DD
-    /* Pack y to SoA (4 buffers: re_hi, re_lo, im_hi, im_lo). */
-    const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
-    double *y_rh = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    double *y_rl = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    double *y_ih = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    double *y_il = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    for (int i = 0; i < M; ++i) {
-        y_rh[i] = y[i].re.limbs[0];  y_rl[i] = y[i].re.limbs[1];
-        y_ih[i] = y[i].im.limbs[0];  y_il[i] = y[i].im.limbs[1];
-    }
-    for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) {
-        y_rh[i] = 0.0; y_rl[i] = 0.0; y_ih[i] = 0.0; y_il[i] = 0.0;
-    }
+/* NoTrans SIMD core over the output-row slice [i_lo, i_hi): accumulates
+ * alpha*A*x into the SoA y buffers for rows in the slice only. i_lo (and i_hi
+ * for interior threads) are multiples of 4 so the 4-wide vector blocks never
+ * straddle a slice boundary; only the final slice (i_hi == M) runs a tail. */
+static inline void wgemv_n_simd_rows(int i_lo, int i_hi, int N, T alpha,
+                                     const T *a, std::size_t lda, const T *x,
+                                     double *y_rh, double *y_rl,
+                                     double *y_ih, double *y_il)
+{
     for (int j = 0; j < N; ++j) {
         const T xj = x[j];
         if (cdd_iszero(xj)) continue;
@@ -108,8 +101,8 @@ static void wgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         const __m256d tih = _mm256_set1_pd(t.im.limbs[0]);
         const __m256d til = _mm256_set1_pd(t.im.limbs[1]);
         const double *aj = reinterpret_cast<const double *>(&A_(0, j));
-        int i = 0;
-        for (; i + 3 < M; i += 4) {
+        int i = i_lo;
+        for (; i + 3 < i_hi; i += 4) {
             __m256d a_rh, a_rl, a_ih, a_il;
             soa_load4_cdd(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
             __m256d p_rh, p_rl, p_ih, p_il;
@@ -128,13 +121,51 @@ static void wgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
             _mm256_storeu_pd(y_il + i, nil);
         }
         const T *ajs = &A_(0, j);
-        for (; i < M; ++i) {
+        for (; i < i_hi; ++i) {
             T yi = T{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
             yi = cadd(yi, cmul(t, ajs[i]));
             y_rh[i] = yi.re.limbs[0]; y_rl[i] = yi.re.limbs[1];
             y_ih[i] = yi.im.limbs[0]; y_il[i] = yi.im.limbs[1];
         }
     }
+}
+#endif
+
+static void wgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
+                           const T *x, T *y)
+{
+#ifdef MBLAS_SIMD_DD
+    /* Pack y to SoA (4 buffers: re_hi, re_lo, im_hi, im_lo). */
+    const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
+    double *y_rh = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
+    double *y_rl = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
+    double *y_ih = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
+    double *y_il = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
+    for (int i = 0; i < M; ++i) {
+        y_rh[i] = y[i].re.limbs[0];  y_rl[i] = y[i].re.limbs[1];
+        y_ih[i] = y[i].im.limbs[0];  y_il[i] = y[i].im.limbs[1];
+    }
+    for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) {
+        y_rh[i] = 0.0; y_rl[i] = 0.0; y_ih[i] = 0.0; y_il[i] = 0.0;
+    }
+#ifdef _OPENMP
+    const int use_omp = (M >= WGEMV_OMP_MIN && blas_omp_max_threads() > 1);
+    #pragma omp parallel if(use_omp)
+    {
+        int tid = 0, nt = 1;
+        if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
+        /* Disjoint row slices, boundaries floored to a multiple of 4 so the
+         * vector blocks stay within one thread; the last thread owns the tail. */
+        const int i_lo = static_cast<int>((static_cast<long long>(M) * tid) / nt) & ~3;
+        const int i_hi = (tid == nt - 1)
+            ? M
+            : (static_cast<int>((static_cast<long long>(M) * (tid + 1)) / nt) & ~3);
+        wgemv_n_simd_rows(i_lo, i_hi, N, alpha, a, lda, x,
+                          y_rh, y_rl, y_ih, y_il);
+    }
+#else
+    wgemv_n_simd_rows(0, M, N, alpha, a, lda, x, y_rh, y_rl, y_ih, y_il);
+#endif
     for (int i = 0; i < M; ++i) {
         y[i].re.limbs[0] = y_rh[i]; y[i].re.limbs[1] = y_rl[i];
         y[i].im.limbs[0] = y_ih[i]; y[i].im.limbs[1] = y_il[i];
@@ -193,6 +224,11 @@ static void wgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         x_rh[i] = 0.0; x_rl[i] = 0.0; x_ih[i] = 0.0; x_il[i] = 0.0;
     }
     const __m256d zerov = _mm256_setzero_pd();
+    /* Each output column j is independent (reads shared x SoA, writes y[j]). */
+#ifdef _OPENMP
+    const int use_omp = (N >= WGEMV_OMP_MIN && blas_omp_max_threads() > 1);
+    #pragma omp parallel for if(use_omp) schedule(static)
+#endif
     for (int j = 0; j < N; ++j) {
         const double *aj = reinterpret_cast<const double *>(&A_(0, j));
         __m256d s_rh = zerov, s_rl = zerov, s_ih = zerov, s_il = zerov;
