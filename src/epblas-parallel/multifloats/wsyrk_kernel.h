@@ -6,7 +6,7 @@
  *   wsyrk_serial.cpp    The pure single-thread complex symmetric rank-k update
  *                       (no OpenMP). Owns ALL the numerics: the AVX2 SIMD
  *                       diagonal kernels (TR='N' rank-1 and TR='T' dot forms,
- *                       cdd_mul/cdd_add over 4 SoA arrays), the scalar diagonal
+ *                       cmul/cadd over 4 SoA arrays), the scalar diagonal
  *                       fallback, the block-size policy, the per-block worker
  *                       `wsyrk_block` (beta-scale + diagonal update + trailing
  *                       gemm via wgemm_serial — no nested OpenMP), the

@@ -3,8 +3,8 @@
  *
  * Both N and T/C contiguous paths use AVX2 SoA SIMD when MBLAS_SIMD_DD is on:
  * 4 SoA scratch buffers per vector (re_hi, re_lo, im_hi, im_lo);
- * inline 4-way 4×4 transpose to deinterleave A columns; SIMD cdd_mul
- * + cdd_add primitives from mgemm_simd_kernel.h. Strided callers gather x/y to
+ * inline 4-way 4×4 transpose to deinterleave A columns; SIMD cmul
+ * + cadd primitives from mf_simd_fast.h. Strided callers gather x/y to
  * contiguous scratch, run the SIMD core, scatter back (O(N) gather vs the old
  * O(N·M) scalar strided loop).
  */
@@ -14,8 +14,10 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_util.h"
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -27,24 +29,19 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+using mf_pred::ceq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
 #define WGEMV_OMP_MIN 64
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
-inline bool cdd_isone(const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
@@ -94,7 +91,7 @@ static inline void wgemv_n_simd_rows(int i_lo, int i_hi, int N, T alpha,
 {
     for (int j = 0; j < N; ++j) {
         const T xj = x[j];
-        if (cdd_iszero(xj)) continue;
+        if (ceq0(xj)) continue;
         const T t = cmul(alpha, xj);
         const __m256d trh = _mm256_set1_pd(t.re.limbs[0]);
         const __m256d trl = _mm256_set1_pd(t.re.limbs[1]);
@@ -106,14 +103,14 @@ static inline void wgemv_n_simd_rows(int i_lo, int i_hi, int N, T alpha,
             __m256d a_rh, a_rl, a_ih, a_il;
             soa_load4_cdd(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
             __m256d p_rh, p_rl, p_ih, p_il;
-            simd_dd::cdd_mul(trh, trl, tih, til, a_rh, a_rl, a_ih, a_il,
+            simd_fast::cmul(trh, trl, tih, til, a_rh, a_rl, a_ih, a_il,
                              p_rh, p_rl, p_ih, p_il);
             __m256d yrh = _mm256_loadu_pd(y_rh + i);
             __m256d yrl = _mm256_loadu_pd(y_rl + i);
             __m256d yih = _mm256_loadu_pd(y_ih + i);
             __m256d yil = _mm256_loadu_pd(y_il + i);
             __m256d nrh, nrl, nih, nil;
-            simd_dd::cdd_add(yrh, yrl, yih, yil, p_rh, p_rl, p_ih, p_il,
+            simd_fast::cadd(yrh, yrl, yih, yil, p_rh, p_rl, p_ih, p_il,
                              nrh, nrl, nih, nil);
             _mm256_storeu_pd(y_rh + i, nrh);
             _mm256_storeu_pd(y_rl + i, nrl);
@@ -182,7 +179,7 @@ static void wgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         const int i_hi = (static_cast<long long>(M) * (tid + 1)) / nt;
         for (int j = 0; j < N; ++j) {
             const T xj = x[j];
-            if (!cdd_iszero(xj)) {
+            if (!ceq0(xj)) {
                 const T t = cmul(alpha, xj);
                 const T *aj = &A_(0, j);
                 for (int i = i_lo; i < i_hi; ++i) y[i] = cadd(y[i], cmul(t, aj[i]));
@@ -192,7 +189,7 @@ static void wgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
 #else
     for (int j = 0; j < N; ++j) {
         const T xj = x[j];
-        if (!cdd_iszero(xj)) {
+        if (!ceq0(xj)) {
             const T t = cmul(alpha, xj);
             const T *aj = &A_(0, j);
             for (int i = 0; i < M; ++i) y[i] = cadd(y[i], cmul(t, aj[i]));
@@ -209,7 +206,7 @@ static void wgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
                            const T *x, T *y, int conj_a)
 {
 #ifdef MBLAS_SIMD_DD
-    /* Pre-pack x to SoA; 4-lane cdd_mul/cdd_add accumulator over i for each j;
+    /* Pre-pack x to SoA; 4-lane cmul/cadd accumulator over i for each j;
      * horizontal-reduce. */
     const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
     double *x_rh = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
@@ -236,27 +233,27 @@ static void wgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         for (; i + 3 < M; i += 4) {
             __m256d a_rh, a_rl, a_ih, a_il;
             soa_load4_cdd(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
-            if (conj_a) simd_dd::dd_neg(a_ih, a_il);
+            if (conj_a) simd_fast::neg(a_ih, a_il);
             __m256d xrh = _mm256_loadu_pd(x_rh + i);
             __m256d xrl = _mm256_loadu_pd(x_rl + i);
             __m256d xih = _mm256_loadu_pd(x_ih + i);
             __m256d xil = _mm256_loadu_pd(x_il + i);
             __m256d p_rh, p_rl, p_ih, p_il;
-            simd_dd::cdd_mul(a_rh, a_rl, a_ih, a_il, xrh, xrl, xih, xil,
+            simd_fast::cmul(a_rh, a_rl, a_ih, a_il, xrh, xrl, xih, xil,
                              p_rh, p_rl, p_ih, p_il);
             __m256d nrh, nrl, nih, nil;
-            simd_dd::cdd_add(s_rh, s_rl, s_ih, s_il, p_rh, p_rl, p_ih, p_il,
+            simd_fast::cadd(s_rh, s_rl, s_ih, s_il, p_rh, p_rl, p_ih, p_il,
                              nrh, nrl, nih, nil);
             s_rh = nrh; s_rl = nrl; s_ih = nih; s_il = nil;
         }
         /* Horizontal reduce 4-lane complex DD to scalar.
-         * Stage 1: swap 128-bit halves and cdd_add. */
+         * Stage 1: swap 128-bit halves and cadd. */
         __m256d srh_sw = _mm256_permute2f128_pd(s_rh, s_rh, 0x01);
         __m256d srl_sw = _mm256_permute2f128_pd(s_rl, s_rl, 0x01);
         __m256d sih_sw = _mm256_permute2f128_pd(s_ih, s_ih, 0x01);
         __m256d sil_sw = _mm256_permute2f128_pd(s_il, s_il, 0x01);
         __m256d p_rh, p_rl, p_ih, p_il;
-        simd_dd::cdd_add(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
+        simd_fast::cadd(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
                          p_rh, p_rl, p_ih, p_il);
         /* Stage 2: shuffle within 128-bit lanes. */
         __m256d prh_sw = _mm256_shuffle_pd(p_rh, p_rh, 0x5);
@@ -264,7 +261,7 @@ static void wgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         __m256d pih_sw = _mm256_shuffle_pd(p_ih, p_ih, 0x5);
         __m256d pil_sw = _mm256_shuffle_pd(p_il, p_il, 0x5);
         __m256d r_rh, r_rl, r_ih, r_il;
-        simd_dd::cdd_add(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
+        simd_fast::cadd(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
                          r_rh, r_rl, r_ih, r_il);
         double red_rh[4], red_rl[4], red_ih[4], red_il[4];
         _mm256_storeu_pd(red_rh, r_rh); _mm256_storeu_pd(red_rl, r_rl);
@@ -316,15 +313,15 @@ extern "C" void wgemv_(
 
     const int leny = (TR == 'N') ? M : N;
 
-    if (!cdd_isone(beta)) {
+    if (!ceq1(beta)) {
         int iy = (incy < 0) ? -(leny - 1) * incy : 0;
         for (int i = 0; i < leny; ++i) {
-            if (cdd_iszero(beta)) y[iy] = zero_cdd;
+            if (ceq0(beta)) y[iy] = zero_cdd;
             else                  y[iy] = cmul(y[iy], beta);
             iy += incy;
         }
     }
-    if (cdd_iszero(alpha)) return;
+    if (ceq0(alpha)) return;
 
     const int conj_a = (TR == 'C');
 

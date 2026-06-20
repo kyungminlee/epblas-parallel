@@ -3,10 +3,12 @@
 #include <cstddef>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_util.h"
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include <cstdlib>
 #include <immintrin.h>
-#include "mf_simd_dd.h"   /* faithful real+complex SoA DD vocabulary */
+#include "mf_simd_exact.h"   /* faithful real+complex SoA DD vocabulary */
 #endif
 #ifdef _OPENMP
 #include <cstdlib>
@@ -20,12 +22,12 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(const R &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
@@ -67,8 +69,12 @@ __attribute__((noinline)) static T cdot_rev(const T *a, const T *x, int len, boo
  * ymm lanes — real/imag hi/lo each in its own register — quarters the op count.
  * The faithful complex SoA vocabulary (cx4/cmul_soa/cadd_soa/cconj_soa, the cvec
  * limb-array accessors, cload4/cgather4, all bit-identical to the scalar cmul/
- * cadd/cconj) lives in mf_simd_dd.h, shared with the other band routines. */
-using namespace mf_simd;
+ * cadd/cconj) lives in mf_simd_exact.h, shared with the other band routines. */
+using simd_exact::cx4;          using simd_exact::cvec;
+using simd_exact::cmul_soa;     using simd_exact::cadd_soa;     using simd_exact::cconj_soa;
+using simd_exact::vload;        using simd_exact::vstore;       using simd_exact::vbcast;
+using simd_exact::vload1;       using simd_exact::vstore1;
+using simd_exact::cload4;       using simd_exact::cgather4;
 
 /* 4-wide SoA Trans/ConjTrans row-gather (x := A^T*x / A^H*x).  Output rows are
  * independent dots; four ADJACENT rows run in the lanes, each accumulating its
@@ -422,7 +428,7 @@ extern "C" void wtbmv_(
         if (TR == 'N') {
             if (UPLO == 'U') {
                 for (int j = 0; j < N; ++j) {
-                    if (!cdd_iszero(x[j])) {
+                    if (!ceq0(x[j])) {
                         const T tmp = x[j];
                         const int L = K - j;
                         const int i_lo = (j - K > 0) ? (j - K) : 0;
@@ -432,7 +438,7 @@ extern "C" void wtbmv_(
                 }
             } else {
                 for (int j = N - 1; j >= 0; --j) {
-                    if (!cdd_iszero(x[j])) {
+                    if (!ceq0(x[j])) {
                         const T tmp = x[j];
                         const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
                         if (i_hi - 1 > j) caxpy_run(&x[j + 1], &A_(1, j), tmp, i_hi - j - 1);
@@ -466,7 +472,7 @@ extern "C" void wtbmv_(
             if (UPLO == 'U') {
                 int jx = kx;
                 for (int j = 0; j < N; ++j) {
-                    if (!cdd_iszero(x[jx])) {
+                    if (!ceq0(x[jx])) {
                         const T tmp = x[jx];
                         int ix = kx;
                         const int L = K - j;
@@ -484,7 +490,7 @@ extern "C" void wtbmv_(
                 kx += (N - 1) * incx;
                 int jx = kx;
                 for (int j = N - 1; j >= 0; --j) {
-                    if (!cdd_iszero(x[jx])) {
+                    if (!ceq0(x[jx])) {
                         const T tmp = x[jx];
                         int ix = kx;
                         const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;

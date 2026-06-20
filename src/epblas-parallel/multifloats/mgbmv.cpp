@@ -9,7 +9,9 @@
 #include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
-#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -18,15 +20,16 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 #define MGBMV_OMP_MIN 64
 #define MGBMV_MAX_CPUS 256
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const T zero_dd{0.0, 0.0};
-inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -45,7 +48,7 @@ void mgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
         const int i_lo = (j - KU > 0) ? (j - KU) : 0;
         const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
         const int k = KU - j;
-        if (i_hi > i_lo) mf_tri::axpy_add(i_hi - i_lo, &y[i_lo], &A_(k + i_lo, j), tmp);
+        if (i_hi > i_lo) mf_kernels::axpy_add(i_hi - i_lo, &y[i_lo], &A_(k + i_lo, j), tmp);
     }
 }
 void mgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
@@ -55,7 +58,7 @@ void mgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
         const int i_lo = (j - KU > 0) ? (j - KU) : 0;
         const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
         const int k = KU - j;
-        const T s = (i_hi > i_lo) ? mf_tri::dot(i_hi - i_lo, &A_(k + i_lo, j), &x[i_lo]) : zero_dd;
+        const T s = (i_hi > i_lo) ? mf_kernels::dot(i_hi - i_lo, &A_(k + i_lo, j), &x[i_lo]) : zero_dd;
         y[j] = y[j] + alpha * s;
     }
 }
@@ -98,7 +101,7 @@ static bool mgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
             std::ptrdiff_t i_hi = (j + KL + 1 < hi) ? (j + KL + 1) : hi;
             const T *col = &A_(KU - j + i_lo, j);   /* contiguous in i */
             if (incy == 1) {                        /* contiguous owned rows -> SoA AXPY */
-                mf_tri::axpy_add(i_hi - i_lo, &y[iy0 + i_lo], col, tmp);
+                mf_kernels::axpy_add(i_hi - i_lo, &y[iy0 + i_lo], col, tmp);
             } else {
                 for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
                     T *yi = &y[iy0 + i * incy];
@@ -145,7 +148,7 @@ static bool mgbmv_t_omp(int M, int N, int KL, int KU, T alpha,
             std::ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
             std::ptrdiff_t k = KU - j;
             const T *col = &A_(k + i_lo, j);
-            T s = mf_tri::dot(i_hi - i_lo, col, &xptr[i_lo]);
+            T s = mf_kernels::dot(i_hi - i_lo, col, &xptr[i_lo]);
             y[j * incy] = y[j * incy] + alpha * s;
         }
     }
@@ -173,20 +176,20 @@ extern "C" void mgbmv_(
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
 
-    if (M == 0 || N == 0 || (dd_iszero(alpha) && dd_isone(beta))) return;
+    if (M == 0 || N == 0 || (eq0(alpha) && eq1(beta))) return;
 
     const int leny = (TR == 'N') ? M : N;
     const int lenx = (TR == 'N') ? N : M;
 
-    if (!dd_isone(beta)) {
+    if (!eq1(beta)) {
         int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-        if (dd_iszero(beta)) {
+        if (eq0(beta)) {
             for (int i = 0; i < leny; ++i) { y[iy] = zero_dd; iy += incy; }
         } else {
             for (int i = 0; i < leny; ++i) { y[iy] = beta * y[iy]; iy += incy; }
         }
     }
-    if (dd_iszero(alpha)) return;
+    if (eq0(alpha)) return;
 
     if (TR == 'N') {
 #ifdef _OPENMP

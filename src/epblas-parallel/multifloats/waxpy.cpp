@@ -3,12 +3,13 @@
  */
 #include <cstddef>
 #include <multifloats.h>
+#include "mf_pred.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -16,11 +17,10 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
 namespace {
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
@@ -68,10 +68,10 @@ static void waxpy_unit(int n, T alpha, const T *x, T *y)
         load_4cell_csoa(&x[i], xrh, xrl, xih, xil);
         load_4cell_csoa(&y[i], yrh, yrl, yih, yil);
         __m256d prh, prl, pih, pil;
-        simd_dd::cdd_mul(arh, arl, aih, ail, xrh, xrl, xih, xil,
+        simd_fast::cmul(arh, arl, aih, ail, xrh, xrl, xih, xil,
                          prh, prl, pih, pil);
         __m256d nrh, nrl, nih, nil_;
-        simd_dd::cdd_add(yrh, yrl, yih, yil, prh, prl, pih, pil,
+        simd_fast::cadd(yrh, yrl, yih, yil, prh, prl, pih, pil,
                          nrh, nrl, nih, nil_);
         store_4cell_csoa(&y[i], nrh, nrl, nih, nil_);
     }
@@ -106,7 +106,7 @@ extern "C" void waxpy_(const int *n_, const T *alpha_,
 {
     const int n = *n_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
-    if (n <= 0 || cdd_iszero(alpha)) return;
+    if (n <= 0 || ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP

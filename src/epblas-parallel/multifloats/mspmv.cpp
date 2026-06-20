@@ -8,7 +8,9 @@
 #include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
-#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <cstdlib>
 #include <cmath>
@@ -21,13 +23,14 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const T zero_dd{0.0, 0.0};
-inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 }
 
 #define AP_(idx) ap[static_cast<std::size_t>(idx)]
@@ -48,8 +51,8 @@ void mspmv_contig(bool upper, int n, const T *ap, const T *x, T alpha, T *y)
             const T t1 = alpha * x[j];
             T t2 = zero_dd;
             if (j > 0) {
-                mf_tri::axpy_add(j, &y[0], aj, t1);
-                t2 = mf_tri::dot(j, aj, &x[0]);
+                mf_kernels::axpy_add(j, &y[0], aj, t1);
+                t2 = mf_kernels::dot(j, aj, &x[0]);
             }
             y[j] = y[j] + t1 * aj[j] + alpha * t2;
             kk += static_cast<std::size_t>(j) + 1;
@@ -61,8 +64,8 @@ void mspmv_contig(bool upper, int n, const T *ap, const T *x, T alpha, T *y)
             y[j] = y[j] + t1 * aj[0];
             const int len = n - 1 - j;
             if (len > 0) {
-                mf_tri::axpy_add(len, &y[j + 1], &aj[1], t1);
-                y[j] = y[j] + alpha * mf_tri::dot(len, &aj[1], &x[j + 1]);
+                mf_kernels::axpy_add(len, &y[j + 1], &aj[1], t1);
+                y[j] = y[j] + alpha * mf_kernels::dot(len, &aj[1], &x[j + 1]);
             }
             kk += static_cast<std::size_t>(n - j);
         }
@@ -144,8 +147,8 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
                 const T *aj = &AP_((std::size_t)j * (j + 1) / 2);
                 T temp2 = zero_dd;
                 if (j > 0) {
-                    mf_tri::axpy_add(j, &slot[0], aj, temp1);   /* slot[i] += temp1*aj[i] */
-                    temp2 = mf_tri::dot(j, aj, &x[0]);          /* sum aj[i]*x[i] */
+                    mf_kernels::axpy_add(j, &slot[0], aj, temp1);   /* slot[i] += temp1*aj[i] */
+                    temp2 = mf_kernels::dot(j, aj, &x[0]);          /* sum aj[i]*x[i] */
                 }
                 slot[j] = slot[j] + (temp1 * aj[j] + temp2);
             }
@@ -156,8 +159,8 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
                 slot[j] = slot[j] + temp1 * aj[j];
                 const std::ptrdiff_t len = n - 1 - j;
                 if (len > 0) {
-                    mf_tri::axpy_add(len, &slot[j + 1], &aj[1], temp1);
-                    slot[j] = slot[j] + mf_tri::dot(len, &aj[1], &x[j + 1]);
+                    mf_kernels::axpy_add(len, &slot[j + 1], &aj[1], temp1);
+                    slot[j] = slot[j] + mf_kernels::dot(len, &aj[1], &x[j + 1]);
                 }
             }
         }
@@ -243,17 +246,17 @@ extern "C" void mspmv_(
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 
-    if (N == 0 || (dd_iszero(alpha) && dd_isone(beta))) return;
+    if (N == 0 || (eq0(alpha) && eq1(beta))) return;
 
-    if (!dd_isone(beta)) {
+    if (!eq1(beta)) {
         int iy = (incy < 0) ? -(N - 1) * incy : 0;
-        if (dd_iszero(beta)) {
+        if (eq0(beta)) {
             for (int i = 0; i < N; ++i) { y[iy] = zero_dd; iy += incy; }
         } else {
             for (int i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
         }
     }
-    if (dd_iszero(alpha)) return;
+    if (eq0(alpha)) return;
 
 #ifdef _OPENMP
     if (N >= MSPMV_OMP_MIN && blas_omp_max_threads() > 1

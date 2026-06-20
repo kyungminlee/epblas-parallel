@@ -15,29 +15,32 @@
  * own omp region.
  */
 #include "msymm_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include "mgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
 const T zero_dd{0.0, 0.0};
 const T one_dd {1.0, 0.0};
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -45,7 +48,7 @@ inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_dd::NR;   /* 4 */
+constexpr int kSimdLane = simd_fast::NR;   /* 4 */
 constexpr int kMaxBlockM = 256;
 
 /* Pack `count` cells from B[ic..ic+count, j_start..j_start+j_count)
@@ -108,7 +111,7 @@ inline void simd_symm_diag_L(int ic, int ib, T alpha,
         __m256d bi_h = _mm256_load_pd(&bh[ir * kSimdLane]);
         __m256d bi_l = _mm256_load_pd(&bl[ir * kSimdLane]);
         __m256d t1h, t1l;
-        simd_dd::dd_mul(alpha_h, alpha_l, bi_h, bi_l, t1h, t1l);
+        simd_fast::mul(alpha_h, alpha_l, bi_h, bi_l, t1h, t1l);
         __m256d t2h = _mm256_setzero_pd();
         __m256d t2l = _mm256_setzero_pd();
 
@@ -123,18 +126,18 @@ inline void simd_symm_diag_L(int ic, int ib, T alpha,
             __m256d ck_h = _mm256_load_pd(&ch[kr * kSimdLane]);
             __m256d ck_l = _mm256_load_pd(&cl[kr * kSimdLane]);
             __m256d ph, pl;
-            simd_dd::dd_mul(t1h, t1l, aih, ail, ph, pl);
+            simd_fast::mul(t1h, t1l, aih, ail, ph, pl);
             __m256d new_ckh, new_ckl;
-            simd_dd::dd_add(ck_h, ck_l, ph, pl, new_ckh, new_ckl);
+            simd_fast::add(ck_h, ck_l, ph, pl, new_ckh, new_ckl);
             _mm256_store_pd(&ch[kr * kSimdLane], new_ckh);
             _mm256_store_pd(&cl[kr * kSimdLane], new_ckl);
             /* temp2 += B[k,j] · A(i,k) */
             __m256d bk_h = _mm256_load_pd(&bh[kr * kSimdLane]);
             __m256d bk_l = _mm256_load_pd(&bl[kr * kSimdLane]);
             __m256d qh, ql;
-            simd_dd::dd_mul(bk_h, bk_l, aih, ail, qh, ql);
+            simd_fast::mul(bk_h, bk_l, aih, ail, qh, ql);
             __m256d new_t2h, new_t2l;
-            simd_dd::dd_add(t2h, t2l, qh, ql, new_t2h, new_t2l);
+            simd_fast::add(t2h, t2l, qh, ql, new_t2h, new_t2l);
             t2h = new_t2h; t2l = new_t2l;
         }
         /* Diagonal cell: C[i,j] += temp1·A(i,i) + alpha·temp2 */
@@ -142,15 +145,15 @@ inline void simd_symm_diag_L(int ic, int ib, T alpha,
         __m256d aii_h = _mm256_set1_pd(aii.limbs[0]);
         __m256d aii_l = _mm256_set1_pd(aii.limbs[1]);
         __m256d diag_h, diag_l;
-        simd_dd::dd_mul(t1h, t1l, aii_h, aii_l, diag_h, diag_l);
+        simd_fast::mul(t1h, t1l, aii_h, aii_l, diag_h, diag_l);
         __m256d at2h, at2l;
-        simd_dd::dd_mul(alpha_h, alpha_l, t2h, t2l, at2h, at2l);
+        simd_fast::mul(alpha_h, alpha_l, t2h, t2l, at2h, at2l);
         __m256d sum_h, sum_l;
-        simd_dd::dd_add(diag_h, diag_l, at2h, at2l, sum_h, sum_l);
+        simd_fast::add(diag_h, diag_l, at2h, at2l, sum_h, sum_l);
         __m256d ci_h = _mm256_load_pd(&ch[ir * kSimdLane]);
         __m256d ci_l = _mm256_load_pd(&cl[ir * kSimdLane]);
         __m256d new_cih, new_cil;
-        simd_dd::dd_add(ci_h, ci_l, sum_h, sum_l, new_cih, new_cil);
+        simd_fast::add(ci_h, ci_l, sum_h, sum_l, new_cih, new_cil);
         _mm256_store_pd(&ch[ir * kSimdLane], new_cih);
         _mm256_store_pd(&cl[ir * kSimdLane], new_cil);
     };
@@ -263,16 +266,16 @@ inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
                                                             : (alpha * A_(k, j));
                 else /* UPLO == 'U' */       tval = (k < j) ? (alpha * A_(k, j))
                                                             : (alpha * A_(j, k));
-                if (dd_iszero(tval)) continue;
+                if (eq0(tval)) continue;
                 const __m256d th = _mm256_set1_pd(tval.limbs[0]);
                 const __m256d tl = _mm256_set1_pd(tval.limbs[1]);
                 const T *bk = b + static_cast<std::size_t>(k) * ldb;
                 __m256d bh, bl;
                 load_4cell_soa(bk, ib, bh, bl);
                 __m256d ph, pl;
-                simd_dd::dd_mul(th, tl, bh, bl, ph, pl);
+                simd_fast::mul(th, tl, bh, bl, ph, pl);
                 __m256d nh, nl;
-                simd_dd::dd_add(ch, cl, ph, pl, nh, nl);
+                simd_fast::add(ch, cl, ph, pl, nh, nl);
                 ch = nh; cl = nl;
             }
 
@@ -291,20 +294,20 @@ inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
             if (UPLO == 'L') {
                 for (int k = jc; k < j; ++k) {
                     const T t = alpha * A_(j, k);
-                    if (!dd_iszero(t)) for (int i = M4; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
+                    if (!eq0(t)) for (int i = M4; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
                 }
                 for (int k = j + 1; k < jc + jb; ++k) {
                     const T t = alpha * A_(k, j);
-                    if (!dd_iszero(t)) for (int i = M4; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
+                    if (!eq0(t)) for (int i = M4; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
                 }
             } else {
                 for (int k = jc; k < j; ++k) {
                     const T t = alpha * A_(k, j);
-                    if (!dd_iszero(t)) for (int i = M4; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
+                    if (!eq0(t)) for (int i = M4; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
                 }
                 for (int k = j + 1; k < jc + jb; ++k) {
                     const T t = alpha * A_(j, k);
-                    if (!dd_iszero(t)) for (int i = M4; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
+                    if (!eq0(t)) for (int i = M4; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
                 }
             }
         }
@@ -326,20 +329,20 @@ void symm_diag_add_R(int jc, int jb, int M, T alpha,
         if (UPLO == 'L') {
             for (int k = jc; k < j; ++k) {
                 const T t = alpha * A_(j, k);
-                if (!dd_iszero(t)) for (int i = 0; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
+                if (!eq0(t)) for (int i = 0; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
             }
             for (int k = j + 1; k < jc + jb; ++k) {
                 const T t = alpha * A_(k, j);
-                if (!dd_iszero(t)) for (int i = 0; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
+                if (!eq0(t)) for (int i = 0; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
             }
         } else {
             for (int k = jc; k < j; ++k) {
                 const T t = alpha * A_(k, j);
-                if (!dd_iszero(t)) for (int i = 0; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
+                if (!eq0(t)) for (int i = 0; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
             }
             for (int k = j + 1; k < jc + jb; ++k) {
                 const T t = alpha * A_(j, k);
-                if (!dd_iszero(t)) for (int i = 0; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
+                if (!eq0(t)) for (int i = 0; i < M; ++i) cj[i] = cj[i] + t * B_(i, k);
             }
         }
     }
@@ -380,7 +383,7 @@ int msymm_block_nb(void) {
 
 void msymm_scale_col(int j, int M, T beta, T *c, int ldc) {
     T *cj = c + static_cast<std::size_t>(j) * ldc;
-    if (dd_iszero(beta)) for (int i = 0; i < M; ++i) cj[i] = zero_dd;
+    if (eq0(beta)) for (int i = 0; i < M; ++i) cj[i] = zero_dd;
     else                 for (int i = 0; i < M; ++i) cj[i] = cj[i] * beta;
 }
 
@@ -394,8 +397,8 @@ void msymm_block_L(int ic, int ib, int M, int N, char UPLO,
     /* beta-scale this block's rows across all columns */
     for (int j = 0; j < N; ++j) {
         T *cj = c + static_cast<std::size_t>(j) * ldc;
-        if (dd_iszero(beta))      for (int i = ic; i < ic + ib; ++i) cj[i] = zero_dd;
-        else if (!dd_isone(beta)) for (int i = ic; i < ic + ib; ++i) cj[i] = cj[i] * beta;
+        if (eq0(beta))      for (int i = ic; i < ic + ib; ++i) cj[i] = zero_dd;
+        else if (!eq1(beta)) for (int i = ic; i < ic + ib; ++i) cj[i] = cj[i] * beta;
     }
     if (UPLO == 'L') {
         if (ic > 0) {
@@ -436,8 +439,8 @@ void msymm_block_R(int jc, int jb, int M, int N, char UPLO,
     /* beta-scale this block's columns over all rows */
     for (int j = jc; j < jc + jb; ++j) {
         T *cj = c + static_cast<std::size_t>(j) * ldc;
-        if (dd_iszero(beta))      for (int i = 0; i < M; ++i) cj[i] = zero_dd;
-        else if (!dd_isone(beta)) for (int i = 0; i < M; ++i) cj[i] = cj[i] * beta;
+        if (eq0(beta))      for (int i = 0; i < M; ++i) cj[i] = zero_dd;
+        else if (!eq1(beta)) for (int i = 0; i < M; ++i) cj[i] = cj[i] * beta;
     }
     if (UPLO == 'L') {
         if (jc > 0) {
@@ -487,8 +490,8 @@ extern "C" void msymm_serial(
 
     if (M == 0 || N == 0) return;
 
-    if (dd_iszero(alpha)) {
-        if (dd_isone(beta)) return;
+    if (eq0(alpha)) {
+        if (eq1(beta)) return;
         for (int j = 0; j < N; ++j) msymm_scale_col(j, M, beta, c, ldc);
         return;
     }

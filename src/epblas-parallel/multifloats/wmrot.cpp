@@ -11,7 +11,7 @@
 #include "../common/blas_omp.h"
 #endif
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -66,13 +66,13 @@ static void wmrot_unit(int n, const R c, const R s, T *x, T *y)
              * are independent in real-c × complex-X). */
             auto apply = [&](__m256d xh, __m256d xl, __m256d yh, __m256d yl,
                              __m256d &nxh, __m256d &nxl, __m256d &nyh, __m256d &nyl) {
-                __m256d cxh, cxl; simd_dd::dd_mul(ch, cl, xh, xl, cxh, cxl);
-                __m256d syh, syl; simd_dd::dd_mul(sh, sl, yh, yl, syh, syl);
-                simd_dd::dd_add(cxh, cxl, syh, syl, nxh, nxl);
-                __m256d cyh, cyl; simd_dd::dd_mul(ch, cl, yh, yl, cyh, cyl);
-                __m256d sxh, sxl; simd_dd::dd_mul(sh, sl, xh, xl, sxh, sxl);
-                simd_dd::dd_neg(sxh, sxl);
-                simd_dd::dd_add(cyh, cyl, sxh, sxl, nyh, nyl);
+                __m256d cxh, cxl; simd_fast::mul(ch, cl, xh, xl, cxh, cxl);
+                __m256d syh, syl; simd_fast::mul(sh, sl, yh, yl, syh, syl);
+                simd_fast::add(cxh, cxl, syh, syl, nxh, nxl);
+                __m256d cyh, cyl; simd_fast::mul(ch, cl, yh, yl, cyh, cyl);
+                __m256d sxh, sxl; simd_fast::mul(sh, sl, xh, xl, sxh, sxl);
+                simd_fast::neg(sxh, sxl);
+                simd_fast::add(cyh, cyl, sxh, sxl, nyh, nyl);
             };
             __m256d nxrh, nxrl, nyrh, nyrl;
             apply(xrh, xrl, yrh, yrl, nxrh, nxrl, nyrh, nyrl);

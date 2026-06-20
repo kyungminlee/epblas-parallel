@@ -5,20 +5,23 @@
  */
 #include <cstddef>
 #include <multifloats.h>
+#include "mf_pred.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq1;
 namespace {
-inline bool dd_isone(T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 inline void load_4cell_soa(const T *p, __m256d &h, __m256d &l) {
@@ -51,7 +54,7 @@ static void mscal_unit(int n, T alpha, T *x)
         __m256d xh, xl;
         load_4cell_soa(&x[i], xh, xl);
         __m256d nh, nl;
-        simd_dd::dd_mul(xh, xl, ah, al, nh, nl);
+        simd_fast::mul(xh, xl, ah, al, nh, nl);
         store_4cell_soa(&x[i], nh, nl);
     }
     for (int i = n4; i < n; ++i) x[i] = x[i] * alpha;
@@ -84,7 +87,7 @@ extern "C" void mscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
 {
     const int n = *n_, incx = *incx_;
     const T alpha = *alpha_;
-    if (n <= 0 || dd_isone(alpha)) return;
+    if (n <= 0 || eq1(alpha)) return;
 
     if (incx == 1) {
 #ifdef _OPENMP

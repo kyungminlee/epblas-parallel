@@ -4,7 +4,7 @@
  * x is gathered+split once into SoA limb arrays (xh/xl); this both makes
  * the strided (incx != 1) case unit-stride from then on — killing the old
  * strided-lower gap to the reference — and feeds the 4-wide AVX2 SoA
- * double-double axpy kernel (mf_rank1::dd_axpy) that is bit-identical to
+ * double-double axpy kernel (mf_kernels::dd_axpy) that is bit-identical to
  * the scalar operators. OMP over columns j (independent in packed storage).
  */
 
@@ -12,7 +12,9 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_rank1_simd.h"
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -21,12 +23,13 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 #define MSPR_OMP_MIN 64
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(double h, double l) { return h == 0.0 && l == 0.0; }
 }
 
 extern "C" void mspr_(
@@ -43,7 +46,7 @@ extern "C" void mspr_(
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
-    if (N == 0 || dd_iszero(alpha.limbs[0], alpha.limbs[1])) return;
+    if (N == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
 
     /* Gather x in logical order 0..N-1 and split into SoA limbs. O(N); also
      * the strided->contiguous fix (only x is strided — ap is always packed
@@ -73,20 +76,20 @@ extern "C" void mspr_(
         #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
         for (int j = 0; j < N; ++j) {
-            if (dd_iszero(xhp[j], xlp[j])) continue;
+            if (eq0(xhp[j], xlp[j])) continue;
             const T tmp = alpha * T{xhp[j], xlp[j]};
             const int kk = (j * (j + 1)) / 2;
-            mf_rank1::dd_axpy(j + 1, xhp, xlp, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
+            mf_kernels::dd_axpy(j + 1, xhp, xlp, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
     } else {
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
         for (int j = 0; j < N; ++j) {
-            if (dd_iszero(xhp[j], xlp[j])) continue;
+            if (eq0(xhp[j], xlp[j])) continue;
             const T tmp = alpha * T{xhp[j], xlp[j]};
             const int kk = j * N - (j * (j - 1)) / 2;
-            mf_rank1::dd_axpy(N - j, xhp + j, xlp + j, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
+            mf_kernels::dd_axpy(N - j, xhp + j, xlp + j, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
     }
 }

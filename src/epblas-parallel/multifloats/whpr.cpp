@@ -8,7 +8,9 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_tri_simd.h"
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -18,19 +20,18 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 #define WHPR_OMP_MIN 64
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const R rzero{0.0, 0.0};
-inline bool dd_iszero(const R &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 inline T scale_r(R const &alpha, T const &b) { return T{ alpha * b.re, alpha * b.im }; }
 }
 
@@ -48,9 +49,9 @@ static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
 #endif
         for (int j = 0; j < N; ++j) {
             const int kk = (j * (j + 1)) / 2;
-            if (!cdd_iszero(x[j])) {
+            if (!ceq0(x[j])) {
                 const T tmp = scale_r(alpha, cconj(x[j]));
-                mf_tri::caxpy_add(j, &ap[kk], &x[0], tmp);
+                mf_kernels::caxpy_add(j, &ap[kk], &x[0], tmp);
                 const R new_re = ap[kk + j].re + cmul(x[j], tmp).re;
                 ap[kk + j] = T{ new_re, rzero };
             } else {
@@ -64,11 +65,11 @@ static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
 #endif
         for (int j = 0; j < N; ++j) {
             const int kk = j * N - (j * (j - 1)) / 2;
-            if (!cdd_iszero(x[j])) {
+            if (!ceq0(x[j])) {
                 const T tmp = scale_r(alpha, cconj(x[j]));
                 const R new_re = ap[kk].re + cmul(tmp, x[j]).re;
                 ap[kk] = T{ new_re, rzero };
-                mf_tri::caxpy_add(N - (j + 1), &ap[kk + 1], &x[j + 1], tmp);
+                mf_kernels::caxpy_add(N - (j + 1), &ap[kk + 1], &x[j + 1], tmp);
             } else {
                 ap[kk] = T{ ap[kk].re, rzero };
             }
@@ -90,7 +91,7 @@ extern "C" void whpr_(
     const R alpha = *alpha_;
     const char UPLO = up(uplo);
 
-    if (N == 0 || dd_iszero(alpha)) return;
+    if (N == 0 || eq0(alpha)) return;
 
     if (incx == 1) {
         whpr_contig(UPLO, N, alpha, ap, x);

@@ -3,7 +3,7 @@
  *
  * Both NoTrans and Trans run an AVX2 SoA-DD core on contiguous data:
  *   - NoTrans packs y to SoA scratch and threads over disjoint output-row
- *     bands, each band running the column scatter (SIMD dd_mul + dd_add).
+ *     bands, each band running the column scatter (SIMD mul + add).
  *   - Trans packs x to SoA scratch and threads over columns, each an
  *     independent SIMD dot reduced (hi/lo horizontal) into y[j].
  * Strided x/y are gathered to unit stride, run through the same cores, and
@@ -16,8 +16,10 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_util.h"
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -28,6 +30,12 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
 #define MGEMV_OMP_MIN 64
@@ -35,13 +43,8 @@ namespace {
 #define MGEMV_MAX_CPUS 256
 #endif
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
 const T zero_dd{0.0, 0.0};
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 /* Deinterleave 4 contiguous AoS DD elements at *p (8 doubles) into
@@ -95,7 +98,7 @@ static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         const int hi = (int)((std::ptrdiff_t)M * (tid + 1) / nt);
         for (int j = 0; j < N; ++j) {
             const T xj = x[j];
-            if (dd_iszero(xj)) continue;
+            if (eq0(xj)) continue;
             const T t = alpha * xj;
             const __m256d thi = _mm256_set1_pd(t.limbs[0]);
             const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
@@ -106,11 +109,11 @@ static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
                 __m256d a_hi, a_lo;
                 soa_load4(aj + 2 * i, a_hi, a_lo);
                 __m256d p_hi, p_lo;
-                simd_dd::dd_mul(thi, tlo, a_hi, a_lo, p_hi, p_lo);
+                simd_fast::mul(thi, tlo, a_hi, a_lo, p_hi, p_lo);
                 __m256d yh = _mm256_loadu_pd(y_hi + i);
                 __m256d yl = _mm256_loadu_pd(y_lo + i);
                 __m256d nyh, nyl;
-                simd_dd::dd_add(yh, yl, p_hi, p_lo, nyh, nyl);
+                simd_fast::add(yh, yl, p_hi, p_lo, nyh, nyl);
                 _mm256_storeu_pd(y_hi + i, nyh);
                 _mm256_storeu_pd(y_lo + i, nyl);
             }
@@ -135,7 +138,7 @@ static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         const int hi = (int)((std::ptrdiff_t)M * (tid + 1) / nt);
         for (int j = 0; j < N; ++j) {
             const T xj = x[j];
-            if (dd_iszero(xj)) continue;
+            if (eq0(xj)) continue;
             const T t = alpha * xj;
             const T *aj = &A_(0, j);
             for (int i = lo; i < hi; ++i) y[i] = y[i] + t * aj[i];
@@ -175,20 +178,20 @@ static void mgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
             __m256d xh = _mm256_loadu_pd(x_hi + i);
             __m256d xl = _mm256_loadu_pd(x_lo + i);
             __m256d p_h, p_l;
-            simd_dd::dd_mul(a_h, a_l, xh, xl, p_h, p_l);
+            simd_fast::mul(a_h, a_l, xh, xl, p_h, p_l);
             __m256d nh, nl;
-            simd_dd::dd_add(s_h, s_l, p_h, p_l, nh, nl);
+            simd_fast::add(s_h, s_l, p_h, p_l, nh, nl);
             s_h = nh; s_l = nl;
         }
         /* Horizontal-reduce the 4-lane DD accumulator to scalar DD. */
         __m256d sh_sw = _mm256_permute2f128_pd(s_h, s_h, 0x01);
         __m256d sl_sw = _mm256_permute2f128_pd(s_l, s_l, 0x01);
         __m256d p_h, p_l;
-        simd_dd::dd_add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
+        simd_fast::add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
         __m256d ph_sw = _mm256_shuffle_pd(p_h, p_h, 0x5);
         __m256d pl_sw = _mm256_shuffle_pd(p_l, p_l, 0x5);
         __m256d r_h, r_l;
-        simd_dd::dd_add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
+        simd_fast::add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
         double red_h[4], red_l[4];
         _mm256_storeu_pd(red_h, r_h);
         _mm256_storeu_pd(red_l, r_l);
@@ -235,15 +238,15 @@ extern "C" void mgemv_(
     const int leny = notrans ? M : N;
     const int lenx = notrans ? N : M;
 
-    if (!dd_isone(beta)) {
+    if (!eq1(beta)) {
         int iy = (incy < 0) ? -(leny - 1) * incy : 0;
         for (int i = 0; i < leny; ++i) {
-            if (dd_iszero(beta)) y[iy] = zero_dd;
+            if (eq0(beta)) y[iy] = zero_dd;
             else                 y[iy] = y[iy] * beta;
             iy += incy;
         }
     }
-    if (dd_iszero(alpha)) return;
+    if (eq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
         if (notrans) mgemv_n_contig(M, N, alpha, a, lda, x, y);

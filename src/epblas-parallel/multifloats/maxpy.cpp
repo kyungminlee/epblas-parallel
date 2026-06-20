@@ -5,20 +5,23 @@
  */
 #include <cstddef>
 #include <multifloats.h>
+#include "mf_pred.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
 namespace {
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 inline void load_4cell_soa(const T *p, __m256d &h, __m256d &l) {
@@ -53,9 +56,9 @@ static void maxpy_unit(int n, T alpha, const T *x, T *y)
         load_4cell_soa(&x[i], xh, xl);
         load_4cell_soa(&y[i], yh, yl);
         __m256d ph, pl;
-        simd_dd::dd_mul(ah, al, xh, xl, ph, pl);
+        simd_fast::mul(ah, al, xh, xl, ph, pl);
         __m256d nh, nl;
-        simd_dd::dd_add(yh, yl, ph, pl, nh, nl);
+        simd_fast::add(yh, yl, ph, pl, nh, nl);
         store_4cell_soa(&y[i], nh, nl);
     }
     for (int i = n4; i < n; ++i) y[i] = y[i] + alpha * x[i];
@@ -92,7 +95,7 @@ extern "C" void maxpy_(const int *n_, const T *alpha_,
 {
     const int n = *n_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
-    if (n <= 0 || dd_iszero(alpha)) return;
+    if (n <= 0 || eq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP

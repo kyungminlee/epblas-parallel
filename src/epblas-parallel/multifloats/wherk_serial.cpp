@@ -11,13 +11,15 @@
  * wherk_parallel.cpp can call wherk_block from inside its own omp region.
  */
 #include "wherk_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -25,18 +27,19 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
 const R rzero{0.0, 0.0};
 const T czero{ rzero, rzero };
 
-inline bool dd_iszero(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (R x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
 
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
@@ -50,7 +53,7 @@ inline T rcmul(R const &r, T const &z) { return T{ r * z.re, r * z.im }; }
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_dd::NR;
+constexpr int kSimdLane = simd_fast::NR;
 constexpr int kMaxBlockM = 128;
 constexpr int kMaxK      = 512;
 
@@ -138,14 +141,14 @@ inline void simd_herk_diag_n(int jc, int jb, int K, R alpha,
         __m256d ajli = _mm256_load_pd(aj_il);
         /* t = alpha · conj(A_jpanel,l) — alpha is real DD: scale each limb */
         __m256d trh, trl, tih, til;
-        simd_dd::dd_mul(a_h, a_l, ajh, ajl, trh, trl);
-        simd_dd::dd_mul(a_h, a_l, aji, ajli, tih, til);
+        simd_fast::mul(a_h, a_l, ajh, ajl, trh, trl);
+        simd_fast::mul(a_h, a_l, aji, ajli, tih, til);
         for (int i = jc; i < jc + jb; ++i) {
             const int ir = i - jc;
             __m256d aih, ail, aiih, aiil;
             broadcast_cdd(A_(i, l), aih, ail, aiih, aiil);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(trh, trl, tih, til,
+            simd_fast::cmul(trh, trl, tih, til,
                              aih, ail, aiih, aiil,
                              prh, prl, pih, pil);
             __m256d ck_rh = _mm256_load_pd(&crh[ir * kSimdLane]);
@@ -153,7 +156,7 @@ inline void simd_herk_diag_n(int jc, int jb, int K, R alpha,
             __m256d ck_ih = _mm256_load_pd(&cih[ir * kSimdLane]);
             __m256d ck_il = _mm256_load_pd(&cil[ir * kSimdLane]);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(ck_rh, ck_rl, ck_ih, ck_il,
+            simd_fast::cadd(ck_rh, ck_rl, ck_ih, ck_il,
                              prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             _mm256_store_pd(&crh[ir * kSimdLane], nrh);
@@ -195,11 +198,11 @@ inline void simd_herk_diag_c_chunk(int jc, int jb, int kc,
             __m256d aji = _mm256_load_pd(&ajih[ll * kSimdLane]);
             __m256d ajli = _mm256_load_pd(&ajil[ll * kSimdLane]);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(aih, ail_, aiih, aiil,
+            simd_fast::cmul(aih, ail_, aiih, aiil,
                              ajh, ajl, aji, ajli,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(srh, srl, sih, sil,
+            simd_fast::cadd(srh, srl, sih, sil,
                              prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             srh = nrh; srl = nrl; sih = nih; sil = nil_;
@@ -277,14 +280,14 @@ inline void simd_herk_diag_panels(int jc, int jb, int K, R alpha,
                 __m256d sih = _mm256_load_pd(&acc_ih[ir * kSimdLane]);
                 __m256d sil = _mm256_load_pd(&acc_il[ir * kSimdLane]);
                 __m256d prh, prl, pih, pil;
-                simd_dd::dd_mul(a_h, a_l, srh, srl, prh, prl);
-                simd_dd::dd_mul(a_h, a_l, sih, sil, pih, pil);
+                simd_fast::mul(a_h, a_l, srh, srl, prh, prl);
+                simd_fast::mul(a_h, a_l, sih, sil, pih, pil);
                 __m256d ck_rh = _mm256_load_pd(&crh[ir * kSimdLane]);
                 __m256d ck_rl = _mm256_load_pd(&crl[ir * kSimdLane]);
                 __m256d ck_ih = _mm256_load_pd(&cih[ir * kSimdLane]);
                 __m256d ck_il = _mm256_load_pd(&cil[ir * kSimdLane]);
                 __m256d nrh, nrl, nih, nil_;
-                simd_dd::cdd_add(ck_rh, ck_rl, ck_ih, ck_il,
+                simd_fast::cadd(ck_rh, ck_rl, ck_ih, ck_il,
                                  prh, prl, pih, pil,
                                  nrh, nrl, nih, nil_);
                 _mm256_store_pd(&crh[ir * kSimdLane], nrh);
@@ -311,7 +314,7 @@ void herk_diag_add(int jc, int jb, int K, R alpha,
             T *cj = c + static_cast<std::size_t>(j) * ldc;
             for (int l = 0; l < K; ++l) {
                 const T ajl = A_(j, l);
-                if (!cdd_iszero(ajl)) {
+                if (!ceq0(ajl)) {
                     const T t = rcmul(alpha, cconj(ajl));
                     for (int i = i_lo; i < i_hi; ++i) {
                         T prod = cmul(t, A_(i, l));
@@ -368,7 +371,7 @@ void wherk_scale_col(int j, int N, char UPLO, R beta, T *c, int ldc) {
     const int i_lo = (UPLO == 'L') ? j : 0;
     const int i_hi = (UPLO == 'L') ? N : j + 1;
     T *cj = c + static_cast<std::size_t>(j) * ldc;
-    if (dd_iszero(beta)) {
+    if (eq0(beta)) {
         for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
     } else {
         for (int i = i_lo; i < i_hi; ++i) {
@@ -386,9 +389,9 @@ void wherk_block(int jc, int jb, int N, int K, char UPLO, char TR,
         const int i_lo = (UPLO == 'L') ? j : 0;
         const int i_hi = (UPLO == 'L') ? N : j + 1;
         T *cj = c + static_cast<std::size_t>(j) * ldc;
-        if (dd_iszero(beta)) {
+        if (eq0(beta)) {
             for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-        } else if (!dd_isone(beta)) {
+        } else if (!eq1(beta)) {
             for (int i = i_lo; i < i_hi; ++i) {
                 if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
                 else        cj[i] = rcmul(beta, cj[i]);
@@ -452,8 +455,8 @@ extern "C" void wherk_serial(
 
     if (N == 0) return;
 
-    if (dd_iszero(alpha) || K == 0) {
-        if (dd_isone(beta)) {
+    if (eq0(alpha) || K == 0) {
+        if (eq1(beta)) {
             for (int j = 0; j < N; ++j) wherk_zero_diag_im(j, c, ldc);
             return;
         }

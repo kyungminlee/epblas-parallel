@@ -1,6 +1,7 @@
 /* imamax — multifloats real DD: 1-based argmax(|X|). */
 #include <stddef.h>
 #include <multifloats.h>
+#include "mf_pred.h"
 #include <multifloats/float64x2.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -14,23 +15,18 @@ namespace mf = multifloats;
 using T = mf::float64x2;
 
 namespace {
-/* Inline magnitude — the public fabsdd() is an out-of-line library call, so
- * using it per element emits a PLT call in the hot loop (~2x slower than ob's
- * inlined abs). a < 0 ? -a : a uses only header-inline constexpr ops and yields
- * the identical canonical magnitude for the comparison below. */
-inline T t_abs(T a) { return a < 0 ? -a : a; }
-
-inline bool dd_gt(T a, T b) {
-    return a.limbs[0] > b.limbs[0]
-        || (a.limbs[0] == b.limbs[0] && a.limbs[1] > b.limbs[1]);
-}
+/* Inline magnitude/compare from mf_pred — mf_pred::mag stays header-inline (the
+ * public fabsdd() is out-of-line; per-element use would emit a PLT call in the
+ * hot loop, ~2x slower than ob's inlined abs). */
+using mf_pred::mag;
+using mf_pred::gt;
 
 #ifdef MBLAS_SIMD_DD
 /* SoA argmax over a contiguous DD range. ob (and the scalar fallback below) walk
  * one element/iter; this processes 4 lanes/iter on the deinterleaved hi/lo
  * limbs, so par genuinely beats the scalar reference instead of tying it.
  *
- * t_abs(x) is exactly (|hi|, sign(hi)*lo): |hi| = andnot(signbit,hi); the lo
+ * mag(x) is exactly (|hi|, sign(hi)*lo): |hi| = andnot(signbit,hi); the lo
  * part flips iff hi<0, i.e. lo ^ (hi & signbit). The lexicographic compare on
  * (|hi|, adj_lo) reproduces the scalar DD '>' bit-for-bit. Per-lane strict-'>'
  * keeps the lowest index within a lane; the 4-lane horizontal merge and scalar
@@ -73,9 +69,9 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
 {
     if (n < 8) {            /* SIMD setup not worth it for tiny ranges */
         ptrdiff_t best = 0;
-        T bv = t_abs(x[0]);
+        T bv = mag(x[0]);
         for (ptrdiff_t i = 1; i < n; ++i) {
-            T v = t_abs(x[i]);
+            T v = mag(x[i]);
             if (v > bv) { bv = v; best = i; }
         }
         *bv_out = bv;
@@ -115,14 +111,14 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
     T bv{mh[0], ml[0]};
     for (int k = 1; k < 8; ++k) {
         T cv{mh[k], ml[k]};
-        if (dd_gt(cv, bv) || (cv.limbs[0] == bv.limbs[0] &&
+        if (gt(cv, bv) || (cv.limbs[0] == bv.limbs[0] &&
                               cv.limbs[1] == bv.limbs[1] && li[k] < best)) {
             bv = cv; best = (ptrdiff_t)li[k];
         }
     }
     /* Scalar tail (< 4 leftover); strict '>' preserves the lower held index. */
     for (; i < n; ++i) {
-        T v = t_abs(x[i]);
+        T v = mag(x[i]);
         if (v > bv) { bv = v; best = i; }
     }
     *bv_out = bv;
@@ -135,9 +131,9 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
 __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_out)
 {
     ptrdiff_t best = 0;
-    T bv = t_abs(x[0]);
+    T bv = mag(x[0]);
     for (ptrdiff_t i = 1; i < n; ++i) {
-        T v = t_abs(x[i]);
+        T v = mag(x[i]);
         if (v > bv) { bv = v; best = i; }   /* lexicographic >, matches ob clone */
     }
     *bv_out = bv;
@@ -181,7 +177,7 @@ __attribute__((noinline)) static int imamax_omp(int n, const T *x, int *out)
     T bestv{0.0, 0.0};
     for (int t = 0; t < nthreads; ++t) {
         if (idx[t] == 0) continue;
-        if (best == 0 || dd_gt(val[t], bestv)) { best = idx[t]; bestv = val[t]; }
+        if (best == 0 || gt(val[t], bestv)) { best = idx[t]; bestv = val[t]; }
     }
     *out = best;
     return 1;
@@ -204,11 +200,11 @@ extern "C" int imamax_(const int *n_, const T *x, const int *incx_)
         return (int)imamax_scan(n, x, &bv) + 1;
     }
     int best = 1;
-    T bestv = t_abs(x[0]);
+    T bestv = mag(x[0]);
     int ix = incx;
     for (int i = 2; i <= n; ++i) {
-        T av = t_abs(x[ix]);
-        if (dd_gt(av, bestv)) { bestv = av; best = i; }
+        T av = mag(x[ix]);
+        if (gt(av, bestv)) { bestv = av; best = i; }
         ix += incx;
     }
     return best;

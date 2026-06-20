@@ -12,13 +12,15 @@
  * the block worker from inside its own omp region.
  */
 #include "wher2k_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -26,19 +28,20 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
 const R rzero{0.0, 0.0};
 const R rone {1.0, 0.0};
 const T czero{ rzero, rzero };
 const T cone { rone,  rzero };
 
-inline bool dd_iszero(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (R x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
@@ -53,7 +56,7 @@ inline T rcmul(R const &r, T const &z) { return T{ r * z.re, r * z.im }; }
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_dd::NR;
+constexpr int kSimdLane = simd_fast::NR;
 constexpr int kMaxBlockM = 128;
 constexpr int kMaxK      = 512;
 
@@ -128,7 +131,7 @@ inline void simd_her2k_diag_tn(int jc, int jb, int K, T alpha,
         for (int j = 0; j < j_count; ++j) {
             const T av = A_(j_panel + j, ll);
             const T bv = B_(j_panel + j, ll);
-            /* Pre-conjugate during pack: store -im so cdd_mul receives conj(A), conj(B) directly. */
+            /* Pre-conjugate during pack: store -im so cmul receives conj(A), conj(B) directly. */
             aj_rh[j] = av.re.limbs[0]; aj_rl[j] = av.re.limbs[1];
             aj_ih[j] = -av.im.limbs[0]; aj_il[j] = -av.im.limbs[1];
             bj_rh[j] = bv.re.limbs[0]; bj_rl[j] = bv.re.limbs[1];
@@ -144,10 +147,10 @@ inline void simd_her2k_diag_tn(int jc, int jb, int K, T alpha,
         __m256d bjih = _mm256_load_pd(bj_ih), bjil = _mm256_load_pd(bj_il);
         __m256d t1rh, t1rl, t1ih, t1il, t2rh, t2rl, t2ih, t2il;
         /* t1 = α · conj(B) */
-        simd_dd::cdd_mul(a_rh, a_rl, a_ih, a_il, bjrh, bjrl, bjih, bjil,
+        simd_fast::cmul(a_rh, a_rl, a_ih, a_il, bjrh, bjrl, bjih, bjil,
                          t1rh, t1rl, t1ih, t1il);
         /* t2 = conj(α) · conj(A) */
-        simd_dd::cdd_mul(a_rh, a_rl, ac_ih, ac_il, ajrh, ajrl, ajih, ajil,
+        simd_fast::cmul(a_rh, a_rl, ac_ih, ac_il, ajrh, ajrl, ajih, ajil,
                          t2rh, t2rl, t2ih, t2il);
         for (int i = jc; i < jc + jb; ++i) {
             const int ir = i - jc;
@@ -156,19 +159,19 @@ inline void simd_her2k_diag_tn(int jc, int jb, int K, T alpha,
             broadcast_cdd(A_(i, ll), aih, ail_, aiih, aiil);
             broadcast_cdd(B_(i, ll), bih, bil_, biih, biil);
             __m256d p1rh, p1rl, p1ih, p1il, p2rh, p2rl, p2ih, p2il;
-            simd_dd::cdd_mul(aih, ail_, aiih, aiil, t1rh, t1rl, t1ih, t1il,
+            simd_fast::cmul(aih, ail_, aiih, aiil, t1rh, t1rl, t1ih, t1il,
                              p1rh, p1rl, p1ih, p1il);
-            simd_dd::cdd_mul(bih, bil_, biih, biil, t2rh, t2rl, t2ih, t2il,
+            simd_fast::cmul(bih, bil_, biih, biil, t2rh, t2rl, t2ih, t2il,
                              p2rh, p2rl, p2ih, p2il);
             __m256d srh, srl, sih, sil;
-            simd_dd::cdd_add(p1rh, p1rl, p1ih, p1il, p2rh, p2rl, p2ih, p2il,
+            simd_fast::cadd(p1rh, p1rl, p1ih, p1il, p2rh, p2rl, p2ih, p2il,
                              srh, srl, sih, sil);
             __m256d ckrh = _mm256_load_pd(&crh[ir * kSimdLane]);
             __m256d ckrl = _mm256_load_pd(&crl[ir * kSimdLane]);
             __m256d ckih = _mm256_load_pd(&cih[ir * kSimdLane]);
             __m256d ckil = _mm256_load_pd(&cil[ir * kSimdLane]);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(ckrh, ckrl, ckih, ckil, srh, srl, sih, sil,
+            simd_fast::cadd(ckrh, ckrl, ckih, ckil, srh, srl, sih, sil,
                              nrh, nrl, nih, nil_);
             _mm256_store_pd(&crh[ir * kSimdLane], nrh);
             _mm256_store_pd(&crl[ir * kSimdLane], nrl);
@@ -229,17 +232,17 @@ inline void simd_her2k_diag_tc_chunk(int jc, int jb, int kc,
             __m256d bjilv = _mm256_load_pd(&bjil[ll * kSimdLane]);
             /* p1 = conj(Ai[l]) · Bj_4 */
             __m256d p1rh, p1rl, p1ih, p1il;
-            simd_dd::cdd_mul(aih, ail_, aiih, aiil, bjrv, bjrlv, bjiv, bjilv,
+            simd_fast::cmul(aih, ail_, aiih, aiil, bjrv, bjrlv, bjiv, bjilv,
                              p1rh, p1rl, p1ih, p1il);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(s1rh, s1rl, s1ih, s1il, p1rh, p1rl, p1ih, p1il,
+            simd_fast::cadd(s1rh, s1rl, s1ih, s1il, p1rh, p1rl, p1ih, p1il,
                              nrh, nrl, nih, nil_);
             s1rh = nrh; s1rl = nrl; s1ih = nih; s1il = nil_;
             /* p2 = conj(Bi[l]) · Aj_4 */
             __m256d p2rh, p2rl, p2ih, p2il;
-            simd_dd::cdd_mul(bih, bil_, biih, biil, ajrv, ajrlv, ajiv, ajilv,
+            simd_fast::cmul(bih, bil_, biih, biil, ajrv, ajrlv, ajiv, ajilv,
                              p2rh, p2rl, p2ih, p2il);
-            simd_dd::cdd_add(s2rh, s2rl, s2ih, s2il, p2rh, p2rl, p2ih, p2il,
+            simd_fast::cadd(s2rh, s2rl, s2ih, s2il, p2rh, p2rl, p2ih, p2il,
                              nrh, nrl, nih, nil_);
             s2rh = nrh; s2rl = nrl; s2ih = nih; s2il = nil_;
         }
@@ -337,19 +340,19 @@ inline void simd_her2k_diag_panels(int jc, int jb, int K, T alpha,
                 __m256d s2ih = _mm256_load_pd(&acc2_ih[ir * kSimdLane]);
                 __m256d s2il = _mm256_load_pd(&acc2_il[ir * kSimdLane]);
                 __m256d a1rh, a1rl, a1ih, a1il, a2rh, a2rl, a2ih, a2il;
-                simd_dd::cdd_mul(a_rh, a_rl, a_ih, a_il, s1rh, s1rl, s1ih, s1il,
+                simd_fast::cmul(a_rh, a_rl, a_ih, a_il, s1rh, s1rl, s1ih, s1il,
                                  a1rh, a1rl, a1ih, a1il);
-                simd_dd::cdd_mul(a_rh, a_rl, ac_ih, ac_il, s2rh, s2rl, s2ih, s2il,
+                simd_fast::cmul(a_rh, a_rl, ac_ih, ac_il, s2rh, s2rl, s2ih, s2il,
                                  a2rh, a2rl, a2ih, a2il);
                 __m256d sumrh, sumrl, sumih, sumil;
-                simd_dd::cdd_add(a1rh, a1rl, a1ih, a1il, a2rh, a2rl, a2ih, a2il,
+                simd_fast::cadd(a1rh, a1rl, a1ih, a1il, a2rh, a2rl, a2ih, a2il,
                                  sumrh, sumrl, sumih, sumil);
                 __m256d ckrh = _mm256_load_pd(&crh[ir * kSimdLane]);
                 __m256d ckrl = _mm256_load_pd(&crl[ir * kSimdLane]);
                 __m256d ckih = _mm256_load_pd(&cih[ir * kSimdLane]);
                 __m256d ckil = _mm256_load_pd(&cil[ir * kSimdLane]);
                 __m256d nrh, nrl, nih, nil_;
-                simd_dd::cdd_add(ckrh, ckrl, ckih, ckil, sumrh, sumrl, sumih, sumil,
+                simd_fast::cadd(ckrh, ckrl, ckih, ckil, sumrh, sumrl, sumih, sumil,
                                  nrh, nrl, nih, nil_);
                 _mm256_store_pd(&crh[ir * kSimdLane], nrh);
                 _mm256_store_pd(&crl[ir * kSimdLane], nrl);
@@ -439,7 +442,7 @@ void wher2k_scale_col(int j, int N, char UPLO, R beta, T *c, int ldc) {
     const int i_lo = (UPLO == 'L') ? j : 0;
     const int i_hi = (UPLO == 'L') ? N : j + 1;
     T *cj = c + static_cast<std::size_t>(j) * ldc;
-    if (dd_iszero(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
+    if (eq0(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
     else {
         for (int i = i_lo; i < i_hi; ++i) {
             if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
@@ -457,9 +460,9 @@ void wher2k_block(int jc, int jb, int N, int K, char UPLO, char TR,
         const int i_lo = (UPLO == 'L') ? j : 0;
         const int i_hi = (UPLO == 'L') ? N : j + 1;
         T *cj = c + static_cast<std::size_t>(j) * ldc;
-        if (dd_iszero(beta)) {
+        if (eq0(beta)) {
             for (int i = i_lo; i < i_hi; ++i) cj[i] = czero;
-        } else if (!dd_isone(beta)) {
+        } else if (!eq1(beta)) {
             for (int i = i_lo; i < i_hi; ++i) {
                 if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
                 else        cj[i] = rcmul(beta, cj[i]);
@@ -536,8 +539,8 @@ extern "C" void wher2k_serial(
 
     if (N == 0) return;
 
-    if ((dd_iszero(alpha.re) && dd_iszero(alpha.im)) || K == 0) {
-        if (dd_isone(beta)) {
+    if ((eq0(alpha.re) && eq0(alpha.im)) || K == 0) {
+        if (eq1(beta)) {
             for (int j = 0; j < N; ++j) wher2k_zero_diag_im(j, c, ldc);
             return;
         }

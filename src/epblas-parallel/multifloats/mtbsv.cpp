@@ -22,18 +22,18 @@
 #include <cctype>
 #include <cstdlib>
 #include <multifloats.h>
-#include "mf_tri_simd.h"   /* mf_tri::axpy_sub / dot — shared SoA loop kernels */
+#include "mf_util.h"
+#include "mf_kernels.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
-namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
-/* NoTrans band update is mf_tri::axpy_sub (xp -= temp*cp), an order-free DD
- * axpy -> bit-exact. The Trans per-column band dot is mf_tri::dot (vector
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+namespace {
+
+/* NoTrans band update is mf_kernels::axpy_sub (xp -= temp*cp), an order-free DD
+ * axpy -> bit-exact. The Trans per-column band dot is mf_kernels::dot (vector
  * accumulate + hreduce) -> within tolerance, since the reduce reorders; the
  * cross-column recurrence stays scalar/exact in the caller below. */
 
@@ -51,7 +51,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
                     if (nounit) x[j] /= col[k];
                     const T temp = x[j];
                     const std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
-                    mf_tri::axpy_sub(j - i_lo, &x[i_lo], &col[off + i_lo], temp);
+                    mf_kernels::axpy_sub(j - i_lo, &x[i_lo], &col[off + i_lo], temp);
                 }
             }
         } else {
@@ -62,7 +62,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
                     if (nounit) x[j] /= col[0];
                     const T temp = x[j];
                     const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
-                    mf_tri::axpy_sub(i_hi - j, &x[j + 1], &col[off + j + 1], temp);
+                    mf_kernels::axpy_sub(i_hi - j, &x[j + 1], &col[off + j + 1], temp);
                 }
             }
         }
@@ -72,7 +72,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
                 const T *col = &a[static_cast<std::size_t>(j) * lda];
                 const std::ptrdiff_t off = k - j;
                 const std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
-                T temp = x[j] - mf_tri::dot(j - i_lo, &col[off + i_lo], &x[i_lo]);
+                T temp = x[j] - mf_kernels::dot(j - i_lo, &col[off + i_lo], &x[i_lo]);
                 if (nounit) temp /= col[k];
                 x[j] = temp;
             }
@@ -81,7 +81,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
                 const T *col = &a[static_cast<std::size_t>(j) * lda];
                 const std::ptrdiff_t off = -j;
                 const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
-                T temp = x[j] - mf_tri::dot(i_hi - j, &col[off + j + 1], &x[j + 1]);
+                T temp = x[j] - mf_kernels::dot(i_hi - j, &col[off + j + 1], &x[j + 1]);
                 if (nounit) temp /= col[0];
                 x[j] = temp;
             }

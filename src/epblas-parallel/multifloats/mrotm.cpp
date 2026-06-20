@@ -7,20 +7,21 @@
  * unswitch and emits ~3x the stores (the prior lambda-per-element form cost
  * ~7-10% serially vs ob).
  *
- * Each kernel runs an AVX2 SoA-DD body (4 cells/iter, simd_dd::dd_mul/dd_add)
+ * Each kernel runs an AVX2 SoA-DD body (4 cells/iter, simd_fast::mul/add)
  * with a scalar tail; the serial, threaded, and gathered-strided paths all drive
  * the same kernels, so every increment combination is vectorized + threadable.
  */
 #include <cstddef>
 #include <vector>
 #include <multifloats.h>
+#include "mf_pred.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #define MROTM_OMP_MIN 1024
 #endif
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -28,8 +29,8 @@ namespace mf = multifloats;
 using T = mf::float64x2;
 
 namespace {
-inline bool dd_lt0(T x) { return x.limbs[0] < 0.0 || (x.limbs[0] == 0.0 && x.limbs[1] < 0.0); }
-inline bool dd_eq0(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
+using mf_pred::lt0;
+using mf_pred::eq0;
 
 #ifdef MBLAS_SIMD_DD
 inline void load4(const T *p, __m256d &h, __m256d &l) {
@@ -61,13 +62,13 @@ void rotm_neg(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y,
         __m256d wh, wl, zh, zl;
         load4(&x[i], wh, wl); load4(&y[i], zh, zl);
         __m256d a_h, a_l, b_h, b_l, nh, nl;
-        simd_dd::dd_mul(wh, wl, b11.h, b11.l, a_h, a_l);
-        simd_dd::dd_mul(zh, zl, b12.h, b12.l, b_h, b_l);
-        simd_dd::dd_add(a_h, a_l, b_h, b_l, nh, nl);
+        simd_fast::mul(wh, wl, b11.h, b11.l, a_h, a_l);
+        simd_fast::mul(zh, zl, b12.h, b12.l, b_h, b_l);
+        simd_fast::add(a_h, a_l, b_h, b_l, nh, nl);
         store4(&x[i], nh, nl);
-        simd_dd::dd_mul(wh, wl, b21.h, b21.l, a_h, a_l);
-        simd_dd::dd_mul(zh, zl, b22.h, b22.l, b_h, b_l);
-        simd_dd::dd_add(a_h, a_l, b_h, b_l, nh, nl);
+        simd_fast::mul(wh, wl, b21.h, b21.l, a_h, a_l);
+        simd_fast::mul(zh, zl, b22.h, b22.l, b_h, b_l);
+        simd_fast::add(a_h, a_l, b_h, b_l, nh, nl);
         store4(&y[i], nh, nl);
     }
 #endif
@@ -85,11 +86,11 @@ void rotm_zero(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y, T h12, T h21) {
         __m256d wh, wl, zh, zl;
         load4(&x[i], wh, wl); load4(&y[i], zh, zl);
         __m256d p_h, p_l, nh, nl;
-        simd_dd::dd_mul(zh, zl, b12.h, b12.l, p_h, p_l);
-        simd_dd::dd_add(wh, wl, p_h, p_l, nh, nl);
+        simd_fast::mul(zh, zl, b12.h, b12.l, p_h, p_l);
+        simd_fast::add(wh, wl, p_h, p_l, nh, nl);
         store4(&x[i], nh, nl);
-        simd_dd::dd_mul(wh, wl, b21.h, b21.l, p_h, p_l);
-        simd_dd::dd_add(p_h, p_l, zh, zl, nh, nl);
+        simd_fast::mul(wh, wl, b21.h, b21.l, p_h, p_l);
+        simd_fast::add(p_h, p_l, zh, zl, nh, nl);
         store4(&y[i], nh, nl);
     }
 #endif
@@ -108,11 +109,11 @@ void rotm_pos(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y, T h11, T h22) {
         __m256d wh, wl, zh, zl;
         load4(&x[i], wh, wl); load4(&y[i], zh, zl);
         __m256d p_h, p_l, nh, nl;
-        simd_dd::dd_mul(wh, wl, b11.h, b11.l, p_h, p_l);
-        simd_dd::dd_add(p_h, p_l, zh, zl, nh, nl);
+        simd_fast::mul(wh, wl, b11.h, b11.l, p_h, p_l);
+        simd_fast::add(p_h, p_l, zh, zl, nh, nl);
         store4(&x[i], nh, nl);
-        simd_dd::dd_mul(b22.h, b22.l, zh, zl, p_h, p_l);
-        simd_dd::dd_add(_mm256_sub_pd(zerov, wh), _mm256_sub_pd(zerov, wl), p_h, p_l, nh, nl);
+        simd_fast::mul(b22.h, b22.l, zh, zl, p_h, p_l);
+        simd_fast::add(_mm256_sub_pd(zerov, wh), _mm256_sub_pd(zerov, wl), p_h, p_l, nh, nl);
         store4(&y[i], nh, nl);
     }
 #endif
@@ -161,9 +162,9 @@ extern "C" void mrotm_(const int *n_,
     const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T flag = dparam[0];
     /* flag == -2: identity, do nothing */
-    if (n <= 0 || dd_eq0(flag + T{2.0, 0.0})) return;
+    if (n <= 0 || eq0(flag + T{2.0, 0.0})) return;
 
-    const bool neg = dd_lt0(flag), zero = dd_eq0(flag);
+    const bool neg = lt0(flag), zero = eq0(flag);
     const T h11 = dparam[1], h21 = dparam[2], h12 = dparam[3], h22 = dparam[4];
 
     if (incx == 1 && incy == 1) {

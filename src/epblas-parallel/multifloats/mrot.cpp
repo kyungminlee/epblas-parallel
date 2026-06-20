@@ -10,7 +10,7 @@
 #include "../common/blas_omp.h"
 #endif
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -52,13 +52,13 @@ static void mrot_unit(int n, const T c, const T s, T *x, T *y)
         __m256d xh, xl, yh, yl;
         load_4cell_soa(&x[i], xh, xl);
         load_4cell_soa(&y[i], yh, yl);
-        __m256d cxh, cxl; simd_dd::dd_mul(ch, cl, xh, xl, cxh, cxl);
-        __m256d syh, syl; simd_dd::dd_mul(sh, sl, yh, yl, syh, syl);
-        __m256d nxh, nxl; simd_dd::dd_add(cxh, cxl, syh, syl, nxh, nxl);
-        __m256d cyh, cyl; simd_dd::dd_mul(ch, cl, yh, yl, cyh, cyl);
-        __m256d sxh, sxl; simd_dd::dd_mul(sh, sl, xh, xl, sxh, sxl);
-        simd_dd::dd_neg(sxh, sxl);
-        __m256d nyh, nyl; simd_dd::dd_add(cyh, cyl, sxh, sxl, nyh, nyl);
+        __m256d cxh, cxl; simd_fast::mul(ch, cl, xh, xl, cxh, cxl);
+        __m256d syh, syl; simd_fast::mul(sh, sl, yh, yl, syh, syl);
+        __m256d nxh, nxl; simd_fast::add(cxh, cxl, syh, syl, nxh, nxl);
+        __m256d cyh, cyl; simd_fast::mul(ch, cl, yh, yl, cyh, cyl);
+        __m256d sxh, sxl; simd_fast::mul(sh, sl, xh, xl, sxh, sxl);
+        simd_fast::neg(sxh, sxl);
+        __m256d nyh, nyl; simd_fast::add(cyh, cyl, sxh, sxl, nyh, nyl);
         store_4cell_soa(&x[i], nxh, nxl);
         store_4cell_soa(&y[i], nyh, nyl);
     }

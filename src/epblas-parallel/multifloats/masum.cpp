@@ -16,8 +16,12 @@ using T = mf::float64x2;
 
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
+#include "mf_simd_fast.h"
 
 namespace {
+/* canonical EFTs — mf_simd_fast.h (2a-5) */
+using simd_fast::fast2sum;
+using simd_fast::twosum;
 inline void load_4cell_soa(const T *p, __m256d &h, __m256d &l) {
     __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(p));
     __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(p + 2));
@@ -25,16 +29,6 @@ inline void load_4cell_soa(const T *p, __m256d &h, __m256d &l) {
     __m256d hi = _mm256_unpackhi_pd(v0, v1);
     h = _mm256_permute4x64_pd(lo, 0xD8);
     l = _mm256_permute4x64_pd(hi, 0xD8);
-}
-inline void simd_twosum(__m256d a, __m256d b, __m256d &s, __m256d &e) {
-    s = _mm256_add_pd(a, b);
-    __m256d bb = _mm256_sub_pd(s, a);
-    __m256d aa = _mm256_sub_pd(s, bb);
-    e = _mm256_add_pd(_mm256_sub_pd(a, aa), _mm256_sub_pd(b, bb));
-}
-inline void simd_fast_twosum(__m256d a, __m256d b, __m256d &s, __m256d &e) {
-    s = _mm256_add_pd(a, b);
-    e = _mm256_sub_pd(b, _mm256_sub_pd(s, a));
 }
 inline T horizontal_dd(__m256d h, __m256d l) {
     alignas(32) double ha[4], la[4];
@@ -67,17 +61,17 @@ static T masum_unit(int n, const T *x)
         __m256d ph = _mm256_andnot_pd(signbit, xh);
         __m256d pl = _mm256_xor_pd(xl, sg);
         __m256d e0, e1, e2;
-        simd_twosum(a0, ph, a0, e0);
-        simd_twosum(a1, pl, a1, e1);
-        simd_twosum(a1, e0, a1, e2);
+        twosum(a0, ph, a0, e0);
+        twosum(a1, pl, a1, e1);
+        twosum(a1, e0, a1, e2);
         a2 = _mm256_add_pd(a2, _mm256_add_pd(e1, e2));
         if (--counter == 0) {
             __m256d t, e;
-            simd_fast_twosum(a1, a2, t, e);
+            fast2sum(a1, a2, t, e);
             a1 = t; a2 = e;
-            simd_fast_twosum(a0, a1, a0, a1);
+            fast2sum(a0, a1, a0, a1);
             a1 = _mm256_add_pd(a1, a2);
-            simd_fast_twosum(a0, a1, a0, a1);
+            fast2sum(a0, a1, a0, a1);
             a2 = _mm256_setzero_pd();
             counter = K;
         }

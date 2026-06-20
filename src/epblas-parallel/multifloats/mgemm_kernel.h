@@ -51,7 +51,7 @@ void mgemm_inner_kernel(int ib, int jb, int pb, mgemm_T alpha,
                         mgemm_T *C, int ldc);
 
 #ifdef MBLAS_SIMD_DD
-/* SIMD panel width W = simd_dd::NR * MGEMM_SIMD_NR_PAN (runtime accessor so
+/* SIMD panel width W = simd_fast::NR * MGEMM_SIMD_NR_PAN (runtime accessor so
  * the parallel driver can size the SoA Bp pad without pulling in the SIMD
  * headers). */
 int mgemm_simd_pack_W(void);

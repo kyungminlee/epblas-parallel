@@ -20,19 +20,25 @@
  */
 
 #include "mtrmm_kernel.h"
+#include "mf_pred.h"
 #include "mgemm_kernel.h"   /* mgemm_serial for the trailing update */
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
+#include "mf_util.h"
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"   /* dd_mul, dd_add primitives */
+#include "mf_simd_fast.h"   /* mul, add primitives */
 #include <immintrin.h>
 #endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
 namespace {
 
 int g_nb_trmm = 0;
@@ -44,8 +50,6 @@ int trmm_nb(void) {
 const T zero_dd{0.0, 0.0};
 const T one_dd {1.0, 0.0};
 
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -54,7 +58,7 @@ inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_dd::NR;
+constexpr int kSimdLane = simd_fast::NR;
 constexpr int kMaxBlockM = 256;
 
 inline void pack_B_4col(int M, const T *b, int ldb, int j_start, int j_count,
@@ -97,17 +101,17 @@ inline void simd_trmm_lln(int M, const T *a, int lda, T alpha, int nounit,
         __m256d bkh = _mm256_load_pd(&bh[k * kSimdLane]);
         __m256d bkl = _mm256_load_pd(&bl[k * kSimdLane]);
         __m256d th, tl;
-        simd_dd::dd_mul(ah, al, bkh, bkl, th, tl);
+        simd_fast::mul(ah, al, bkh, bkl, th, tl);
         for (int i = M - 1; i > k; --i) {
             const T aik = A_(i, k);
             __m256d aih = _mm256_set1_pd(aik.limbs[0]);
             __m256d ail = _mm256_set1_pd(aik.limbs[1]);
             __m256d ph, pl;
-            simd_dd::dd_mul(th, tl, aih, ail, ph, pl);
+            simd_fast::mul(th, tl, aih, ail, ph, pl);
             __m256d bih = _mm256_load_pd(&bh[i * kSimdLane]);
             __m256d bil = _mm256_load_pd(&bl[i * kSimdLane]);
             __m256d nh, nl;
-            simd_dd::dd_add(bih, bil, ph, pl, nh, nl);
+            simd_fast::add(bih, bil, ph, pl, nh, nl);
             _mm256_store_pd(&bh[i * kSimdLane], nh);
             _mm256_store_pd(&bl[i * kSimdLane], nl);
         }
@@ -116,7 +120,7 @@ inline void simd_trmm_lln(int M, const T *a, int lda, T alpha, int nounit,
             __m256d akh = _mm256_set1_pd(akk.limbs[0]);
             __m256d akl = _mm256_set1_pd(akk.limbs[1]);
             __m256d nh, nl;
-            simd_dd::dd_mul(th, tl, akh, akl, nh, nl);
+            simd_fast::mul(th, tl, akh, akl, nh, nl);
             th = nh; tl = nl;
         }
         _mm256_store_pd(&bh[k * kSimdLane], th);
@@ -135,17 +139,17 @@ inline void simd_trmm_lun(int M, const T *a, int lda, T alpha, int nounit,
         __m256d bkh = _mm256_load_pd(&bh[k * kSimdLane]);
         __m256d bkl = _mm256_load_pd(&bl[k * kSimdLane]);
         __m256d th, tl;
-        simd_dd::dd_mul(ah, al, bkh, bkl, th, tl);
+        simd_fast::mul(ah, al, bkh, bkl, th, tl);
         for (int i = 0; i < k; ++i) {
             const T aik = A_(i, k);
             __m256d aih = _mm256_set1_pd(aik.limbs[0]);
             __m256d ail = _mm256_set1_pd(aik.limbs[1]);
             __m256d ph, pl;
-            simd_dd::dd_mul(th, tl, aih, ail, ph, pl);
+            simd_fast::mul(th, tl, aih, ail, ph, pl);
             __m256d bih = _mm256_load_pd(&bh[i * kSimdLane]);
             __m256d bil = _mm256_load_pd(&bl[i * kSimdLane]);
             __m256d nh, nl;
-            simd_dd::dd_add(bih, bil, ph, pl, nh, nl);
+            simd_fast::add(bih, bil, ph, pl, nh, nl);
             _mm256_store_pd(&bh[i * kSimdLane], nh);
             _mm256_store_pd(&bl[i * kSimdLane], nl);
         }
@@ -154,7 +158,7 @@ inline void simd_trmm_lun(int M, const T *a, int lda, T alpha, int nounit,
             __m256d akh = _mm256_set1_pd(akk.limbs[0]);
             __m256d akl = _mm256_set1_pd(akk.limbs[1]);
             __m256d nh, nl;
-            simd_dd::dd_mul(th, tl, akh, akl, nh, nl);
+            simd_fast::mul(th, tl, akh, akl, nh, nl);
             th = nh; tl = nl;
         }
         _mm256_store_pd(&bh[k * kSimdLane], th);
@@ -177,7 +181,7 @@ inline void simd_trmm_llt(int M, const T *a, int lda, T alpha, int nounit,
             __m256d aih = _mm256_set1_pd(aii.limbs[0]);
             __m256d ail = _mm256_set1_pd(aii.limbs[1]);
             __m256d nh, nl;
-            simd_dd::dd_mul(th, tl, aih, ail, nh, nl);
+            simd_fast::mul(th, tl, aih, ail, nh, nl);
             th = nh; tl = nl;
         }
         for (int k = i + 1; k < M; ++k) {
@@ -187,13 +191,13 @@ inline void simd_trmm_llt(int M, const T *a, int lda, T alpha, int nounit,
             __m256d bkh = _mm256_load_pd(&bh[k * kSimdLane]);
             __m256d bkl = _mm256_load_pd(&bl[k * kSimdLane]);
             __m256d ph, pl;
-            simd_dd::dd_mul(akh, akl, bkh, bkl, ph, pl);
+            simd_fast::mul(akh, akl, bkh, bkl, ph, pl);
             __m256d nh, nl;
-            simd_dd::dd_add(th, tl, ph, pl, nh, nl);
+            simd_fast::add(th, tl, ph, pl, nh, nl);
             th = nh; tl = nl;
         }
         __m256d nh, nl;
-        simd_dd::dd_mul(ah, al, th, tl, nh, nl);
+        simd_fast::mul(ah, al, th, tl, nh, nl);
         _mm256_store_pd(&bh[i * kSimdLane], nh);
         _mm256_store_pd(&bl[i * kSimdLane], nl);
     }
@@ -214,7 +218,7 @@ inline void simd_trmm_lut(int M, const T *a, int lda, T alpha, int nounit,
             __m256d aih = _mm256_set1_pd(aii.limbs[0]);
             __m256d ail = _mm256_set1_pd(aii.limbs[1]);
             __m256d nh, nl;
-            simd_dd::dd_mul(th, tl, aih, ail, nh, nl);
+            simd_fast::mul(th, tl, aih, ail, nh, nl);
             th = nh; tl = nl;
         }
         for (int k = 0; k < i; ++k) {
@@ -224,13 +228,13 @@ inline void simd_trmm_lut(int M, const T *a, int lda, T alpha, int nounit,
             __m256d bkh = _mm256_load_pd(&bh[k * kSimdLane]);
             __m256d bkl = _mm256_load_pd(&bl[k * kSimdLane]);
             __m256d ph, pl;
-            simd_dd::dd_mul(akh, akl, bkh, bkl, ph, pl);
+            simd_fast::mul(akh, akl, bkh, bkl, ph, pl);
             __m256d nh, nl;
-            simd_dd::dd_add(th, tl, ph, pl, nh, nl);
+            simd_fast::add(th, tl, ph, pl, nh, nl);
             th = nh; tl = nl;
         }
         __m256d nh, nl;
-        simd_dd::dd_mul(ah, al, th, tl, nh, nl);
+        simd_fast::mul(ah, al, th, tl, nh, nl);
         _mm256_store_pd(&bh[i * kSimdLane], nh);
         _mm256_store_pd(&bl[i * kSimdLane], nl);
     }
@@ -264,7 +268,7 @@ inline void mtrmm_lln_core(int j_start, int j_end, int M, T alpha,
 {
     for (int j = j_start; j < j_end; ++j) {
         for (int k = M - 1; k >= 0; --k) {
-            if (!dd_iszero(B_(k, j))) {
+            if (!eq0(B_(k, j))) {
                 T temp = alpha * B_(k, j);
                 for (int i = M - 1; i > k; --i)
                     B_(i, j) = B_(i, j) + temp * A_(i, k);
@@ -280,7 +284,7 @@ inline void mtrmm_lun_core(int j_start, int j_end, int M, T alpha,
 {
     for (int j = j_start; j < j_end; ++j) {
         for (int k = 0; k < M; ++k) {
-            if (!dd_iszero(B_(k, j))) {
+            if (!eq0(B_(k, j))) {
                 T temp = alpha * B_(k, j);
                 for (int i = 0; i < k; ++i)
                     B_(i, j) = B_(i, j) + temp * A_(i, k);
@@ -358,16 +362,16 @@ inline void simd_trmm_r4_rln(int ib, int N, T alpha, const T *a, int lda,
         if (nounit) t = t * A_(j, j);
         __m256d bjh, bjl;
         load_4cell_soa(bj, ib, bjh, bjl);
-        if (!dd_isone(t)) {
+        if (!eq1(t)) {
             __m256d th = _mm256_set1_pd(t.limbs[0]);
             __m256d tl = _mm256_set1_pd(t.limbs[1]);
             __m256d nh, nl;
-            simd_dd::dd_mul(bjh, bjl, th, tl, nh, nl);
+            simd_fast::mul(bjh, bjl, th, tl, nh, nl);
             bjh = nh; bjl = nl;
         }
         for (int k = j + 1; k < N; ++k) {
             const T akj_v = A_(k, j);
-            if (dd_iszero(akj_v)) continue;
+            if (eq0(akj_v)) continue;
             const T akj = alpha * akj_v;
             __m256d akh = _mm256_set1_pd(akj.limbs[0]);
             __m256d akl = _mm256_set1_pd(akj.limbs[1]);
@@ -375,9 +379,9 @@ inline void simd_trmm_r4_rln(int ib, int N, T alpha, const T *a, int lda,
             __m256d bkh, bkl;
             load_4cell_soa(bk, ib, bkh, bkl);
             __m256d ph, pl;
-            simd_dd::dd_mul(akh, akl, bkh, bkl, ph, pl);
+            simd_fast::mul(akh, akl, bkh, bkl, ph, pl);
             __m256d nh, nl;
-            simd_dd::dd_add(bjh, bjl, ph, pl, nh, nl);
+            simd_fast::add(bjh, bjl, ph, pl, nh, nl);
             bjh = nh; bjl = nl;
         }
         store_4cell_soa(bj, ib, bjh, bjl);
@@ -393,16 +397,16 @@ inline void simd_trmm_r4_run(int ib, int N, T alpha, const T *a, int lda,
         if (nounit) t = t * A_(j, j);
         __m256d bjh, bjl;
         load_4cell_soa(bj, ib, bjh, bjl);
-        if (!dd_isone(t)) {
+        if (!eq1(t)) {
             __m256d th = _mm256_set1_pd(t.limbs[0]);
             __m256d tl = _mm256_set1_pd(t.limbs[1]);
             __m256d nh, nl;
-            simd_dd::dd_mul(bjh, bjl, th, tl, nh, nl);
+            simd_fast::mul(bjh, bjl, th, tl, nh, nl);
             bjh = nh; bjl = nl;
         }
         for (int k = 0; k < j; ++k) {
             const T akj_v = A_(k, j);
-            if (dd_iszero(akj_v)) continue;
+            if (eq0(akj_v)) continue;
             const T akj = alpha * akj_v;
             __m256d akh = _mm256_set1_pd(akj.limbs[0]);
             __m256d akl = _mm256_set1_pd(akj.limbs[1]);
@@ -410,9 +414,9 @@ inline void simd_trmm_r4_run(int ib, int N, T alpha, const T *a, int lda,
             __m256d bkh, bkl;
             load_4cell_soa(bk, ib, bkh, bkl);
             __m256d ph, pl;
-            simd_dd::dd_mul(akh, akl, bkh, bkl, ph, pl);
+            simd_fast::mul(akh, akl, bkh, bkl, ph, pl);
             __m256d nh, nl;
-            simd_dd::dd_add(bjh, bjl, ph, pl, nh, nl);
+            simd_fast::add(bjh, bjl, ph, pl, nh, nl);
             bjh = nh; bjl = nl;
         }
         store_4cell_soa(bj, ib, bjh, bjl);
@@ -431,7 +435,7 @@ inline void simd_trmm_r4_rlt(int ib, int N, T alpha, const T *a, int lda,
         load_4cell_soa(bk, ib, bkh, bkl);  /* original B(:,k) before scaling */
         for (int j = k + 1; j < N; ++j) {
             const T ajk_v = A_(j, k);
-            if (dd_iszero(ajk_v)) continue;
+            if (eq0(ajk_v)) continue;
             const T ajk = alpha * ajk_v;
             __m256d ah = _mm256_set1_pd(ajk.limbs[0]);
             __m256d al = _mm256_set1_pd(ajk.limbs[1]);
@@ -439,18 +443,18 @@ inline void simd_trmm_r4_rlt(int ib, int N, T alpha, const T *a, int lda,
             __m256d bjh, bjl;
             load_4cell_soa(bj, ib, bjh, bjl);
             __m256d ph, pl;
-            simd_dd::dd_mul(ah, al, bkh, bkl, ph, pl);
+            simd_fast::mul(ah, al, bkh, bkl, ph, pl);
             __m256d nh, nl;
-            simd_dd::dd_add(bjh, bjl, ph, pl, nh, nl);
+            simd_fast::add(bjh, bjl, ph, pl, nh, nl);
             store_4cell_soa(bj, ib, nh, nl);
         }
         T t = alpha;
         if (nounit) t = t * A_(k, k);
-        if (!dd_isone(t)) {
+        if (!eq1(t)) {
             __m256d th = _mm256_set1_pd(t.limbs[0]);
             __m256d tl = _mm256_set1_pd(t.limbs[1]);
             __m256d nh, nl;
-            simd_dd::dd_mul(bkh, bkl, th, tl, nh, nl);
+            simd_fast::mul(bkh, bkl, th, tl, nh, nl);
             store_4cell_soa(const_cast<T*>(bk), ib, nh, nl);
         }
     }
@@ -465,7 +469,7 @@ inline void simd_trmm_r4_rut(int ib, int N, T alpha, const T *a, int lda,
         load_4cell_soa(bk, ib, bkh, bkl);
         for (int j = 0; j < k; ++j) {
             const T ajk_v = A_(j, k);
-            if (dd_iszero(ajk_v)) continue;
+            if (eq0(ajk_v)) continue;
             const T ajk = alpha * ajk_v;
             __m256d ah = _mm256_set1_pd(ajk.limbs[0]);
             __m256d al = _mm256_set1_pd(ajk.limbs[1]);
@@ -473,18 +477,18 @@ inline void simd_trmm_r4_rut(int ib, int N, T alpha, const T *a, int lda,
             __m256d bjh, bjl;
             load_4cell_soa(bj, ib, bjh, bjl);
             __m256d ph, pl;
-            simd_dd::dd_mul(ah, al, bkh, bkl, ph, pl);
+            simd_fast::mul(ah, al, bkh, bkl, ph, pl);
             __m256d nh, nl;
-            simd_dd::dd_add(bjh, bjl, ph, pl, nh, nl);
+            simd_fast::add(bjh, bjl, ph, pl, nh, nl);
             store_4cell_soa(bj, ib, nh, nl);
         }
         T t = alpha;
         if (nounit) t = t * A_(k, k);
-        if (!dd_isone(t)) {
+        if (!eq1(t)) {
             __m256d th = _mm256_set1_pd(t.limbs[0]);
             __m256d tl = _mm256_set1_pd(t.limbs[1]);
             __m256d nh, nl;
-            simd_dd::dd_mul(bkh, bkl, th, tl, nh, nl);
+            simd_fast::mul(bkh, bkl, th, tl, nh, nl);
             store_4cell_soa(const_cast<T*>(bk), ib, nh, nl);
         }
     }
@@ -523,10 +527,10 @@ inline void mtrmm_rln_core(int i_start, int i_end, int N, T alpha,
     for (int j = 0; j < N; ++j) {
         T t = alpha;
         if (nounit) t = t * A_(j, j);
-        if (!dd_isone(t))
+        if (!eq1(t))
             for (int i = i_start; i < i_end; ++i) B_(i, j) = B_(i, j) * t;
         for (int k = j + 1; k < N; ++k) {
-            if (!dd_iszero(A_(k, j))) {
+            if (!eq0(A_(k, j))) {
                 const T akj = alpha * A_(k, j);
                 for (int i = i_start; i < i_end; ++i)
                     B_(i, j) = B_(i, j) + akj * B_(i, k);
@@ -541,10 +545,10 @@ inline void mtrmm_run_core(int i_start, int i_end, int N, T alpha,
     for (int j = N - 1; j >= 0; --j) {
         T t = alpha;
         if (nounit) t = t * A_(j, j);
-        if (!dd_isone(t))
+        if (!eq1(t))
             for (int i = i_start; i < i_end; ++i) B_(i, j) = B_(i, j) * t;
         for (int k = 0; k < j; ++k) {
-            if (!dd_iszero(A_(k, j))) {
+            if (!eq0(A_(k, j))) {
                 const T akj = alpha * A_(k, j);
                 for (int i = i_start; i < i_end; ++i)
                     B_(i, j) = B_(i, j) + akj * B_(i, k);
@@ -558,7 +562,7 @@ inline void mtrmm_rlt_core(int i_start, int i_end, int N, T alpha,
 {
     for (int k = N - 1; k >= 0; --k) {
         for (int j = k + 1; j < N; ++j) {
-            if (!dd_iszero(A_(j, k))) {
+            if (!eq0(A_(j, k))) {
                 const T ajk = alpha * A_(j, k);
                 for (int i = i_start; i < i_end; ++i)
                     B_(i, j) = B_(i, j) + ajk * B_(i, k);
@@ -566,7 +570,7 @@ inline void mtrmm_rlt_core(int i_start, int i_end, int N, T alpha,
         }
         T t = alpha;
         if (nounit) t = t * A_(k, k);
-        if (!dd_isone(t))
+        if (!eq1(t))
             for (int i = i_start; i < i_end; ++i) B_(i, k) = B_(i, k) * t;
     }
 }
@@ -576,7 +580,7 @@ inline void mtrmm_rut_core(int i_start, int i_end, int N, T alpha,
 {
     for (int k = 0; k < N; ++k) {
         for (int j = 0; j < k; ++j) {
-            if (!dd_iszero(A_(j, k))) {
+            if (!eq0(A_(j, k))) {
                 const T ajk = alpha * A_(j, k);
                 for (int i = i_start; i < i_end; ++i)
                     B_(i, j) = B_(i, j) + ajk * B_(i, k);
@@ -584,7 +588,7 @@ inline void mtrmm_rut_core(int i_start, int i_end, int N, T alpha,
         }
         T t = alpha;
         if (nounit) t = t * A_(k, k);
-        if (!dd_isone(t))
+        if (!eq1(t))
             for (int i = i_start; i < i_end; ++i) B_(i, k) = B_(i, k) * t;
     }
 }
@@ -871,9 +875,7 @@ extern "C" void mtrmm_serial(
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    auto up = [](const char *p) {
-        return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-    };
+    using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
     const char SIDE = up(side);
     const char UPLO = up(uplo);
     char TR = up(transa);
@@ -882,7 +884,7 @@ extern "C" void mtrmm_serial(
 
     if (M == 0 || N == 0) return;
 
-    if (dd_iszero(alpha)) { mtrmm_zero_B(M, N, b, ldb); return; }
+    if (eq0(alpha)) { mtrmm_zero_B(M, N, b, ldb); return; }
 
     const int nb = trmm_nb();
 

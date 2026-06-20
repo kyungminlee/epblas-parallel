@@ -4,7 +4,9 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_tri_simd.h"
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -14,19 +16,18 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 #define WHER_OMP_MIN 64
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const R rzero{0.0, 0.0};
-inline bool dd_iszero(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 inline T rcmul(R const &r, T const &z) { return T{ r * z.re, r * z.im }; }
 }
 
@@ -46,13 +47,13 @@ static void wher_contig(char UPLO, int N, R alpha, T *a, std::size_t lda, const 
 #endif
     for (int j = 0; j < N; ++j) {
         const T xj = x[j];
-        if (!cdd_iszero(xj)) {
+        if (!ceq0(xj)) {
             const T t = rcmul(alpha, cconj(xj));
             T *aj = &A_(0, j);
             if (UPLO == 'L') {
-                mf_tri::caxpy_add(N - (j + 1), &aj[j + 1], &x[j + 1], t);
+                mf_kernels::caxpy_add(N - (j + 1), &aj[j + 1], &x[j + 1], t);
             } else {
-                mf_tri::caxpy_add(j, &aj[0], &x[0], t);
+                mf_kernels::caxpy_add(j, &aj[0], &x[0], t);
             }
             /* Diagonal stays real. */
             T prod = cmul(t, x[j]);
@@ -75,7 +76,7 @@ extern "C" void wher_(
     const R alpha = *alpha_;
     const char UPLO = up(uplo);
 
-    if (N == 0 || dd_iszero(alpha)) return;
+    if (N == 0 || eq0(alpha)) return;
 
     if (incx == 1) {
         wher_contig(UPLO, N, alpha, a, lda, x);

@@ -25,13 +25,15 @@
  */
 
 #include "wtrmm_kernel.h"
+#include "mf_pred.h"
 #include "wgemm_kernel.h"   /* wgemm_serial for the trailing update */
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
+#include "mf_util.h"
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"   /* cdd_mul, cdd_add primitives */
+#include "mf_simd_fast.h"   /* cmul, cadd primitives */
 #include <immintrin.h>
 #endif
 
@@ -39,6 +41,10 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+using mf_pred::ceq1;
 namespace {
 
 int g_nb_trmm = 0;
@@ -50,14 +56,6 @@ int trmm_nb(void) {
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 const T one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
 
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
-inline bool cdd_isone(const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
@@ -76,7 +74,7 @@ inline T A_op(const T *a, int lda, int row, int col, int conj_flag) {
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_dd::NR;
+constexpr int kSimdLane = simd_fast::NR;
 constexpr int kMaxBlockM = 128;
 
 inline void pack_B_4col_cdd(int M, const T *b, int ldb, int j_start, int j_count,
@@ -141,20 +139,20 @@ inline void simd_wtrmm_lln(int M, const T *a, int lda, T alpha, int nounit,
         __m256d bkih = _mm256_load_pd(&bih[k * kSimdLane]);
         __m256d bkil = _mm256_load_pd(&bil[k * kSimdLane]);
         __m256d trh, trl, tih, til;
-        simd_dd::cdd_mul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
+        simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                          trh, trl, tih, til);
         for (int i = M - 1; i > k; --i) {
             __m256d akrh, akrl, akih, akil;
             broadcast_A_cdd(a, lda, i, k, 0, akrh, akrl, akih, akil);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(trh, trl, tih, til, akrh, akrl, akih, akil,
+            simd_fast::cmul(trh, trl, tih, til, akrh, akrl, akih, akil,
                              prh, prl, pih, pil);
             __m256d birh = _mm256_load_pd(&brh[i * kSimdLane]);
             __m256d birl = _mm256_load_pd(&brl[i * kSimdLane]);
             __m256d biih = _mm256_load_pd(&bih[i * kSimdLane]);
             __m256d biil = _mm256_load_pd(&bil[i * kSimdLane]);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(birh, birl, biih, biil, prh, prl, pih, pil,
+            simd_fast::cadd(birh, birl, biih, biil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             _mm256_store_pd(&brh[i * kSimdLane], nrh);
             _mm256_store_pd(&brl[i * kSimdLane], nrl);
@@ -165,7 +163,7 @@ inline void simd_wtrmm_lln(int M, const T *a, int lda, T alpha, int nounit,
             __m256d akrh, akrl, akih, akil;
             broadcast_A_cdd(a, lda, k, k, 0, akrh, akrl, akih, akil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_mul(trh, trl, tih, til, akrh, akrl, akih, akil,
+            simd_fast::cmul(trh, trl, tih, til, akrh, akrl, akih, akil,
                              nrh, nrl, nih, nil_);
             trh = nrh; trl = nrl; tih = nih; til = nil_;
         }
@@ -189,20 +187,20 @@ inline void simd_wtrmm_lun(int M, const T *a, int lda, T alpha, int nounit,
         __m256d bkih = _mm256_load_pd(&bih[k * kSimdLane]);
         __m256d bkil = _mm256_load_pd(&bil[k * kSimdLane]);
         __m256d trh, trl, tih, til;
-        simd_dd::cdd_mul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
+        simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                          trh, trl, tih, til);
         for (int i = 0; i < k; ++i) {
             __m256d akrh, akrl, akih, akil;
             broadcast_A_cdd(a, lda, i, k, 0, akrh, akrl, akih, akil);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(trh, trl, tih, til, akrh, akrl, akih, akil,
+            simd_fast::cmul(trh, trl, tih, til, akrh, akrl, akih, akil,
                              prh, prl, pih, pil);
             __m256d birh = _mm256_load_pd(&brh[i * kSimdLane]);
             __m256d birl = _mm256_load_pd(&brl[i * kSimdLane]);
             __m256d biih = _mm256_load_pd(&bih[i * kSimdLane]);
             __m256d biil = _mm256_load_pd(&bil[i * kSimdLane]);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(birh, birl, biih, biil, prh, prl, pih, pil,
+            simd_fast::cadd(birh, birl, biih, biil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             _mm256_store_pd(&brh[i * kSimdLane], nrh);
             _mm256_store_pd(&brl[i * kSimdLane], nrl);
@@ -213,7 +211,7 @@ inline void simd_wtrmm_lun(int M, const T *a, int lda, T alpha, int nounit,
             __m256d akrh, akrl, akih, akil;
             broadcast_A_cdd(a, lda, k, k, 0, akrh, akrl, akih, akil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_mul(trh, trl, tih, til, akrh, akrl, akih, akil,
+            simd_fast::cmul(trh, trl, tih, til, akrh, akrl, akih, akil,
                              nrh, nrl, nih, nil_);
             trh = nrh; trl = nrl; tih = nih; til = nil_;
         }
@@ -243,7 +241,7 @@ inline void simd_wtrmm_llTC(int M, const T *a, int lda, T alpha, int nounit,
             __m256d aiih, aiil, aiiih, aiiil;
             broadcast_A_cdd(a, lda, i, i, conj_flag, aiih, aiil, aiiih, aiiil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_mul(trh, trl, tih, til, aiih, aiil, aiiih, aiiil,
+            simd_fast::cmul(trh, trl, tih, til, aiih, aiil, aiiih, aiiil,
                              nrh, nrl, nih, nil_);
             trh = nrh; trl = nrl; tih = nih; til = nil_;
         }
@@ -255,15 +253,15 @@ inline void simd_wtrmm_llTC(int M, const T *a, int lda, T alpha, int nounit,
             __m256d bkih = _mm256_load_pd(&bih[k * kSimdLane]);
             __m256d bkil = _mm256_load_pd(&bil[k * kSimdLane]);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(akrh, akrl, akih, akil, bkrh, bkrl, bkih, bkil,
+            simd_fast::cmul(akrh, akrl, akih, akil, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(trh, trl, tih, til, prh, prl, pih, pil,
+            simd_fast::cadd(trh, trl, tih, til, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             trh = nrh; trl = nrl; tih = nih; til = nil_;
         }
         __m256d nrh, nrl, nih, nil_;
-        simd_dd::cdd_mul(arh, arl, aih, ail, trh, trl, tih, til,
+        simd_fast::cmul(arh, arl, aih, ail, trh, trl, tih, til,
                          nrh, nrl, nih, nil_);
         _mm256_store_pd(&brh[i * kSimdLane], nrh);
         _mm256_store_pd(&brl[i * kSimdLane], nrl);
@@ -291,7 +289,7 @@ inline void simd_wtrmm_luTC(int M, const T *a, int lda, T alpha, int nounit,
             __m256d aiih, aiil, aiiih, aiiil;
             broadcast_A_cdd(a, lda, i, i, conj_flag, aiih, aiil, aiiih, aiiil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_mul(trh, trl, tih, til, aiih, aiil, aiiih, aiiil,
+            simd_fast::cmul(trh, trl, tih, til, aiih, aiil, aiiih, aiiil,
                              nrh, nrl, nih, nil_);
             trh = nrh; trl = nrl; tih = nih; til = nil_;
         }
@@ -303,15 +301,15 @@ inline void simd_wtrmm_luTC(int M, const T *a, int lda, T alpha, int nounit,
             __m256d bkih = _mm256_load_pd(&bih[k * kSimdLane]);
             __m256d bkil = _mm256_load_pd(&bil[k * kSimdLane]);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(akrh, akrl, akih, akil, bkrh, bkrl, bkih, bkil,
+            simd_fast::cmul(akrh, akrl, akih, akil, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(trh, trl, tih, til, prh, prl, pih, pil,
+            simd_fast::cadd(trh, trl, tih, til, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             trh = nrh; trl = nrl; tih = nih; til = nil_;
         }
         __m256d nrh, nrl, nih, nil_;
-        simd_dd::cdd_mul(arh, arl, aih, ail, trh, trl, tih, til,
+        simd_fast::cmul(arh, arl, aih, ail, trh, trl, tih, til,
                          nrh, nrl, nih, nil_);
         _mm256_store_pd(&brh[i * kSimdLane], nrh);
         _mm256_store_pd(&brl[i * kSimdLane], nrl);
@@ -352,7 +350,7 @@ inline void wtrmm_lln_core(int j_start, int j_end, int M, T alpha,
 {
     for (int j = j_start; j < j_end; ++j) {
         for (int k = M - 1; k >= 0; --k) {
-            if (!cdd_iszero(B_(k, j))) {
+            if (!ceq0(B_(k, j))) {
                 T temp = cmul(alpha, B_(k, j));
                 for (int i = M - 1; i > k; --i)
                     B_(i, j) = cadd(B_(i, j), cmul(temp, A_(i, k)));
@@ -368,7 +366,7 @@ inline void wtrmm_lun_core(int j_start, int j_end, int M, T alpha,
 {
     for (int j = j_start; j < j_end; ++j) {
         for (int k = 0; k < M; ++k) {
-            if (!cdd_iszero(B_(k, j))) {
+            if (!ceq0(B_(k, j))) {
                 T temp = cmul(alpha, B_(k, j));
                 for (int i = 0; i < k; ++i)
                     B_(i, j) = cadd(B_(i, j), cmul(temp, A_(i, k)));
@@ -470,17 +468,17 @@ inline void simd_wtrmm_r4_rln(int ib, int N, T alpha,
         if (nounit) t = cmul(t, A_(j, j));
         __m256d brh, brl, bih, bil;
         load_4cell_csoa(bj, ib, brh, brl, bih, bil);
-        if (!cdd_isone(t)) {
+        if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
             broadcast_c4(t, trh, trl, tih, til);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_mul(brh, brl, bih, bil, trh, trl, tih, til,
+            simd_fast::cmul(brh, brl, bih, bil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
             brh = nrh; brl = nrl; bih = nih; bil = nil_;
         }
         for (int k = j + 1; k < N; ++k) {
             const T akj_v = A_(k, j);
-            if (cdd_iszero(akj_v)) continue;
+            if (ceq0(akj_v)) continue;
             const T akj = cmul(alpha, akj_v);
             __m256d arh, arl, aih, ail;
             broadcast_c4(akj, arh, arl, aih, ail);
@@ -488,10 +486,10 @@ inline void simd_wtrmm_r4_rln(int ib, int N, T alpha,
             __m256d bkrh, bkrl, bkih, bkil;
             load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
+            simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(brh, brl, bih, bil, prh, prl, pih, pil,
+            simd_fast::cadd(brh, brl, bih, bil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             brh = nrh; brl = nrl; bih = nih; bil = nil_;
         }
@@ -508,17 +506,17 @@ inline void simd_wtrmm_r4_run(int ib, int N, T alpha,
         if (nounit) t = cmul(t, A_(j, j));
         __m256d brh, brl, bih, bil;
         load_4cell_csoa(bj, ib, brh, brl, bih, bil);
-        if (!cdd_isone(t)) {
+        if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
             broadcast_c4(t, trh, trl, tih, til);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_mul(brh, brl, bih, bil, trh, trl, tih, til,
+            simd_fast::cmul(brh, brl, bih, bil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
             brh = nrh; brl = nrl; bih = nih; bil = nil_;
         }
         for (int k = 0; k < j; ++k) {
             const T akj_v = A_(k, j);
-            if (cdd_iszero(akj_v)) continue;
+            if (ceq0(akj_v)) continue;
             const T akj = cmul(alpha, akj_v);
             __m256d arh, arl, aih, ail;
             broadcast_c4(akj, arh, arl, aih, ail);
@@ -526,10 +524,10 @@ inline void simd_wtrmm_r4_run(int ib, int N, T alpha,
             __m256d bkrh, bkrl, bkih, bkil;
             load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
+            simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(brh, brl, bih, bil, prh, prl, pih, pil,
+            simd_fast::cadd(brh, brl, bih, bil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             brh = nrh; brl = nrl; bih = nih; bil = nil_;
         }
@@ -546,7 +544,7 @@ inline void simd_wtrmm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
         load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
         for (int j = k + 1; j < N; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
-            if (cdd_iszero(ajk)) continue;
+            if (ceq0(ajk)) continue;
             const T scaled = cmul(alpha, ajk);
             __m256d arh, arl, aih, ail;
             broadcast_c4(scaled, arh, arl, aih, ail);
@@ -554,20 +552,20 @@ inline void simd_wtrmm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
             __m256d bjrh, bjrl, bjih, bjil;
             load_4cell_csoa(bj, ib, bjrh, bjrl, bjih, bjil);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
+            simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(bjrh, bjrl, bjih, bjil, prh, prl, pih, pil,
+            simd_fast::cadd(bjrh, bjrl, bjih, bjil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             store_4cell_csoa(bj, ib, nrh, nrl, nih, nil_);
         }
         T t = alpha;
         if (nounit) t = cmul(t, A_op(a, lda, k, k, conj_flag));
-        if (!cdd_isone(t)) {
+        if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
             broadcast_c4(t, trh, trl, tih, til);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_mul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
+            simd_fast::cmul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
             store_4cell_csoa(const_cast<T*>(bk), ib, nrh, nrl, nih, nil_);
         }
@@ -583,7 +581,7 @@ inline void simd_wtrmm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
         load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
         for (int j = 0; j < k; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
-            if (cdd_iszero(ajk)) continue;
+            if (ceq0(ajk)) continue;
             const T scaled = cmul(alpha, ajk);
             __m256d arh, arl, aih, ail;
             broadcast_c4(scaled, arh, arl, aih, ail);
@@ -591,20 +589,20 @@ inline void simd_wtrmm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
             __m256d bjrh, bjrl, bjih, bjil;
             load_4cell_csoa(bj, ib, bjrh, bjrl, bjih, bjil);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
+            simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(bjrh, bjrl, bjih, bjil, prh, prl, pih, pil,
+            simd_fast::cadd(bjrh, bjrl, bjih, bjil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             store_4cell_csoa(bj, ib, nrh, nrl, nih, nil_);
         }
         T t = alpha;
         if (nounit) t = cmul(t, A_op(a, lda, k, k, conj_flag));
-        if (!cdd_isone(t)) {
+        if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
             broadcast_c4(t, trh, trl, tih, til);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_mul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
+            simd_fast::cmul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
             store_4cell_csoa(const_cast<T*>(bk), ib, nrh, nrl, nih, nil_);
         }
@@ -648,10 +646,10 @@ inline void wtrmm_rln_core(int i_start, int i_end, int N, T alpha,
     for (int j = 0; j < N; ++j) {
         T t = alpha;
         if (nounit) t = cmul(t, A_(j, j));
-        if (!cdd_isone(t))
+        if (!ceq1(t))
             for (int i = i_start; i < i_end; ++i) B_(i, j) = cmul(B_(i, j), t);
         for (int k = j + 1; k < N; ++k) {
-            if (!cdd_iszero(A_(k, j))) {
+            if (!ceq0(A_(k, j))) {
                 const T akj = cmul(alpha, A_(k, j));
                 for (int i = i_start; i < i_end; ++i)
                     B_(i, j) = cadd(B_(i, j), cmul(akj, B_(i, k)));
@@ -666,10 +664,10 @@ inline void wtrmm_run_core(int i_start, int i_end, int N, T alpha,
     for (int j = N - 1; j >= 0; --j) {
         T t = alpha;
         if (nounit) t = cmul(t, A_(j, j));
-        if (!cdd_isone(t))
+        if (!ceq1(t))
             for (int i = i_start; i < i_end; ++i) B_(i, j) = cmul(B_(i, j), t);
         for (int k = 0; k < j; ++k) {
-            if (!cdd_iszero(A_(k, j))) {
+            if (!ceq0(A_(k, j))) {
                 const T akj = cmul(alpha, A_(k, j));
                 for (int i = i_start; i < i_end; ++i)
                     B_(i, j) = cadd(B_(i, j), cmul(akj, B_(i, k)));
@@ -685,7 +683,7 @@ inline void wtrmm_rlTC_core(int i_start, int i_end, int N, T alpha,
     for (int k = N - 1; k >= 0; --k) {
         for (int j = k + 1; j < N; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
-            if (!cdd_iszero(ajk)) {
+            if (!ceq0(ajk)) {
                 const T scaled = cmul(alpha, ajk);
                 for (int i = i_start; i < i_end; ++i)
                     B_(i, j) = cadd(B_(i, j), cmul(scaled, B_(i, k)));
@@ -693,7 +691,7 @@ inline void wtrmm_rlTC_core(int i_start, int i_end, int N, T alpha,
         }
         T t = alpha;
         if (nounit) t = cmul(t, A_op(a, lda, k, k, conj_flag));
-        if (!cdd_isone(t))
+        if (!ceq1(t))
             for (int i = i_start; i < i_end; ++i) B_(i, k) = cmul(B_(i, k), t);
     }
 }
@@ -705,7 +703,7 @@ inline void wtrmm_ruTC_core(int i_start, int i_end, int N, T alpha,
     for (int k = 0; k < N; ++k) {
         for (int j = 0; j < k; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
-            if (!cdd_iszero(ajk)) {
+            if (!ceq0(ajk)) {
                 const T scaled = cmul(alpha, ajk);
                 for (int i = i_start; i < i_end; ++i)
                     B_(i, j) = cadd(B_(i, j), cmul(scaled, B_(i, k)));
@@ -713,7 +711,7 @@ inline void wtrmm_ruTC_core(int i_start, int i_end, int N, T alpha,
         }
         T t = alpha;
         if (nounit) t = cmul(t, A_op(a, lda, k, k, conj_flag));
-        if (!cdd_isone(t))
+        if (!ceq1(t))
             for (int i = i_start; i < i_end; ++i) B_(i, k) = cmul(B_(i, k), t);
     }
 }
@@ -1018,9 +1016,7 @@ extern "C" void wtrmm_serial(
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    auto up = [](const char *p) {
-        return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-    };
+    using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
     const char SIDE = up(side);
     const char UPLO = up(uplo);
     const char TR = up(transa);   /* complex: N/T/C kept distinct */
@@ -1028,7 +1024,7 @@ extern "C" void wtrmm_serial(
 
     if (M == 0 || N == 0) return;
 
-    if (cdd_iszero(alpha)) { wtrmm_zero_B(M, N, b, ldb); return; }
+    if (ceq0(alpha)) { wtrmm_zero_B(M, N, b, ldb); return; }
 
     const int nb = trmm_nb();
 

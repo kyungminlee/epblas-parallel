@@ -14,6 +14,8 @@
  * beta scale (schedule(static)). Delegates to whemm_serial when nested.
  */
 #include "whemm_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include <cstddef>
 #include <cctype>
 #ifdef _OPENMP
@@ -25,18 +27,13 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+using mf_pred::ceq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
-inline bool cdd_isone(const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 }  // namespace
 
 extern "C" void whemm_(
@@ -66,8 +63,8 @@ extern "C" void whemm_(
 
     if (M == 0 || N == 0) return;
 
-    if (cdd_iszero(alpha)) {
-        if (cdd_isone(beta)) return;
+    if (ceq0(alpha)) {
+        if (ceq1(beta)) return;
 #ifdef _OPENMP
         const int axis = (SIDE == 'L') ? M : N;
         const bool use_omp = (axis >= WHEMM_OMP_MIN && blas_omp_max_threads() > 1);

@@ -6,7 +6,9 @@
 #include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
-#include "mf_tri_simd.h"   /* mf_tri::axpy_sub / dot — shared SoA loop kernels */
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -18,11 +20,12 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 const T zero_dd{0.0, 0.0};
 
 /* Column base offsets into the packed array (column-major triangle).
@@ -39,9 +42,9 @@ inline std::size_t cbU(int j) {
 
 /* In-place contiguous (incx==1) packed triangular solve. Per column j, &ap[cb*]
  * is a contiguous run, so this is the packed twin of mtbsv_contig: NoTrans is a
- * band AXPY of the solved x[j] into the trailing/leading rows (mf_tri::axpy_sub,
+ * band AXPY of the solved x[j] into the trailing/leading rows (mf_kernels::axpy_sub,
  * order-free -> bit-exact); Trans is a column dot against the already-solved x
- * (mf_tri::dot, vector accumulate + hreduce -> within tolerance). The diagonal
+ * (mf_kernels::dot, vector accumulate + hreduce -> within tolerance). The diagonal
  * divide and cross-column recurrence stay scalar/exact. The strided entry
  * gathers into contiguous scratch and reuses this. */
 static void mtpsv_serial_contig(char UPLO, char TR, int nounit,
@@ -50,18 +53,18 @@ static void mtpsv_serial_contig(char UPLO, char TR, int nounit,
     if (TR == 'N') {
         if (UPLO == 'U') {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                if (!dd_iszero(x[j])) {
+                if (!eq0(x[j])) {
                     const T *aj = &ap[cbU(j)];
                     if (nounit) x[j] = x[j] / aj[j];
-                    mf_tri::axpy_sub(j, &x[0], &aj[0], x[j]);
+                    mf_kernels::axpy_sub(j, &x[0], &aj[0], x[j]);
                 }
             }
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                if (!dd_iszero(x[j])) {
+                if (!eq0(x[j])) {
                     const T *aj = &ap[cbL((int)j, (int)n)];
                     if (nounit) x[j] = x[j] / aj[0];
-                    mf_tri::axpy_sub(n - 1 - j, &x[j + 1], &aj[1], x[j]);
+                    mf_kernels::axpy_sub(n - 1 - j, &x[j + 1], &aj[1], x[j]);
                 }
             }
         }
@@ -69,14 +72,14 @@ static void mtpsv_serial_contig(char UPLO, char TR, int nounit,
         if (UPLO == 'U') {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T *aj = &ap[cbU(j)];
-                T tmp = x[j] - mf_tri::dot(j, &aj[0], &x[0]);
+                T tmp = x[j] - mf_kernels::dot(j, &aj[0], &x[0]);
                 if (nounit) tmp = tmp / aj[j];
                 x[j] = tmp;
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 const T *aj = &ap[cbL((int)j, (int)n)];
-                T tmp = x[j] - mf_tri::dot(n - 1 - j, &aj[1], &x[j + 1]);
+                T tmp = x[j] - mf_kernels::dot(n - 1 - j, &aj[1], &x[j + 1]);
                 if (nounit) tmp = tmp / aj[0];
                 x[j] = tmp;
             }
@@ -125,7 +128,7 @@ static void mtpsv_serial(char UPLO, char TR, int nounit,
                 int kk = (N * (N + 1)) / 2 - 1;
                 int jx = kx + (N - 1) * incx;
                 for (int j = N - 1; j >= 0; --j) {
-                    if (!dd_iszero(x[jx])) {
+                    if (!eq0(x[jx])) {
                         if (nounit) x[jx] = x[jx] / ap[kk];
                         const T tmp = x[jx];
                         int ix = jx;
@@ -141,7 +144,7 @@ static void mtpsv_serial(char UPLO, char TR, int nounit,
                 int kk = 0;
                 int jx = kx;
                 for (int j = 0; j < N; ++j) {
-                    if (!dd_iszero(x[jx])) {
+                    if (!eq0(x[jx])) {
                         if (nounit) x[jx] = x[jx] / ap[kk];
                         const T tmp = x[jx];
                         int ix = jx;
@@ -202,31 +205,31 @@ static void mtpsv_block(char UPLO, char TR, int nounit,
     if (TR == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (int j = j1 - 1; j >= j0; --j) {
-                if (dd_iszero(x[j])) continue;
+                if (eq0(x[j])) continue;
                 const std::size_t b = cbU(j);
                 if (nounit) x[j] = x[j] / ap[b + j];
-                mf_tri::axpy_sub(j - j0, &x[j0], &ap[b + j0], x[j]);
+                mf_kernels::axpy_sub(j - j0, &x[j0], &ap[b + j0], x[j]);
             }
         } else {                                        /* Lower: forward */
             for (int j = j0; j < j1; ++j) {
-                if (dd_iszero(x[j])) continue;
+                if (eq0(x[j])) continue;
                 const std::size_t b = cbL(j, N);
                 if (nounit) x[j] = x[j] / ap[b];
-                mf_tri::axpy_sub(j1 - (j + 1), &x[j + 1], &ap[b + 1], x[j]);
+                mf_kernels::axpy_sub(j1 - (j + 1), &x[j + 1], &ap[b + 1], x[j]);
             }
         }
     } else {
         if (!lower) {                                   /* Upper^T: forward, k<j */
             for (int j = j0; j < j1; ++j) {
                 const std::size_t b = cbU(j);
-                T tmp = x[j] - mf_tri::dot(j - j0, &ap[b + j0], &x[j0]);
+                T tmp = x[j] - mf_kernels::dot(j - j0, &ap[b + j0], &x[j0]);
                 if (nounit) tmp = tmp / ap[b + j];
                 x[j] = tmp;
             }
         } else {                                        /* Lower^T: backward, k>j */
             for (int j = j1 - 1; j >= j0; --j) {
                 const std::size_t b = cbL(j, N);
-                T tmp = x[j] - mf_tri::dot(j1 - (j + 1), &ap[b + 1], &x[j + 1]);
+                T tmp = x[j] - mf_kernels::dot(j1 - (j + 1), &ap[b + 1], &x[j + 1]);
                 if (nounit) tmp = tmp / ap[b];
                 x[j] = tmp;
             }
@@ -263,9 +266,9 @@ __attribute__((noinline)) static bool mtpsv_omp(
                     int rhi = j1 + (int)((long long)(N - j1) * (tid + 1) / nthreads);
                     for (int i = j0; i < j1; ++i) {
                         const T xi = x[i];
-                        if (dd_iszero(xi)) continue;
+                        if (eq0(xi)) continue;
                         const T *col = &ap[cbL(i, N)];      /* col[k-i] = A(k,i) */
-                        mf_tri::axpy_sub(rhi - rlo, &x[rlo], &col[rlo - i], xi);
+                        mf_kernels::axpy_sub(rhi - rlo, &x[rlo], &col[rlo - i], xi);
                     }
                 }
             }
@@ -281,9 +284,9 @@ __attribute__((noinline)) static bool mtpsv_omp(
                     int rhi = (int)((long long)j0 * (tid + 1) / nthreads);
                     for (int i = j0; i < j1; ++i) {
                         const T xi = x[i];
-                        if (dd_iszero(xi)) continue;
+                        if (eq0(xi)) continue;
                         const T *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
-                        mf_tri::axpy_sub(rhi - rlo, &x[rlo], &col[rlo], xi);
+                        mf_kernels::axpy_sub(rhi - rlo, &x[rlo], &col[rlo], xi);
                     }
                 }
             }
@@ -303,7 +306,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbL(i, N)];
-                            x[i] = x[i] - mf_tri::dot(N - j1, &col[j1 - i], &x[j1]);
+                            x[i] = x[i] - mf_kernels::dot(N - j1, &col[j1 - i], &x[j1]);
                         }
                     }
                 }
@@ -320,7 +323,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbU(i)];
-                            x[i] = x[i] - mf_tri::dot(j0, &col[0], &x[0]);
+                            x[i] = x[i] - mf_kernels::dot(j0, &col[0], &x[0]);
                         }
                     }
                 }

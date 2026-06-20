@@ -1,12 +1,13 @@
 /* mger — multifloats real DD rank-1 update.
  * SIMD path: per j, broadcast t=alpha*y[j]; inner i loop SoA-SIMD
- * with simd_dd::dd_mul + dd_add into A column j. Pre-pack x once. */
+ * with simd_fast::mul + add into A column j. Pre-pack x once. */
 
 #include <cstddef>
 #include <cstdlib>
 #include <multifloats.h>
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -17,9 +18,11 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
 namespace {
 #define MGER_OMP_MIN 64
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 static inline __attribute__((always_inline)) void
@@ -60,7 +63,7 @@ mger_col(int M, const double *x_hi, const double *x_lo, T t, T *ajT)
     const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
     double *aj = reinterpret_cast<double *>(ajT);
     int i = 0;
-    /* 8-wide head: two INDEPENDENT 4-lane DD chains hide the long dd_mul->dd_add
+    /* 8-wide head: two INDEPENDENT 4-lane DD chains hide the long mul->add
      * EFT latency (no native SIMD for one scalar DD) that a single chain leaves
      * exposed while the column streams from cache. ~7% at N=1024, ~11% cache-
      * resident. Bit-identical — each 4-lane group matches the 4-wide loop. */
@@ -69,11 +72,11 @@ mger_col(int M, const double *x_hi, const double *x_lo, T t, T *ajT)
         soa_load4(aj + 2 * i,       a0h, a0l);
         soa_load4(aj + 2 * (i + 4), a1h, a1l);
         __m256d p0h, p0l, p1h, p1l;
-        simd_dd::dd_mul(thi, tlo, _mm256_loadu_pd(x_hi + i),     _mm256_loadu_pd(x_lo + i),     p0h, p0l);
-        simd_dd::dd_mul(thi, tlo, _mm256_loadu_pd(x_hi + i + 4), _mm256_loadu_pd(x_lo + i + 4), p1h, p1l);
+        simd_fast::mul(thi, tlo, _mm256_loadu_pd(x_hi + i),     _mm256_loadu_pd(x_lo + i),     p0h, p0l);
+        simd_fast::mul(thi, tlo, _mm256_loadu_pd(x_hi + i + 4), _mm256_loadu_pd(x_lo + i + 4), p1h, p1l);
         __m256d n0h, n0l, n1h, n1l;
-        simd_dd::dd_add(a0h, a0l, p0h, p0l, n0h, n0l);
-        simd_dd::dd_add(a1h, a1l, p1h, p1l, n1h, n1l);
+        simd_fast::add(a0h, a0l, p0h, p0l, n0h, n0l);
+        simd_fast::add(a1h, a1l, p1h, p1l, n1h, n1l);
         soa_store4(aj + 2 * i,       n0h, n0l);
         soa_store4(aj + 2 * (i + 4), n1h, n1l);
     }
@@ -83,9 +86,9 @@ mger_col(int M, const double *x_hi, const double *x_lo, T t, T *ajT)
         __m256d xh = _mm256_loadu_pd(x_hi + i);
         __m256d xl = _mm256_loadu_pd(x_lo + i);
         __m256d p_h, p_l;
-        simd_dd::dd_mul(thi, tlo, xh, xl, p_h, p_l);
+        simd_fast::mul(thi, tlo, xh, xl, p_h, p_l);
         __m256d nh, nl;
-        simd_dd::dd_add(a_h, a_l, p_h, p_l, nh, nl);
+        simd_fast::add(a_h, a_l, p_h, p_l, nh, nl);
         soa_store4(aj + 2 * i, nh, nl);
     }
     for (; i < M; ++i) ajT[i] = ajT[i] + t * T{x_hi[i], x_lo[i]};
@@ -104,7 +107,7 @@ extern "C" void mger_(
     const int incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
 
-    if (M == 0 || N == 0 || dd_iszero(alpha)) return;
+    if (M == 0 || N == 0 || eq0(alpha)) return;
 
     const int jy0 = (incy < 0) ? -(N - 1) * incy : 0;
     const int ix0 = (incx < 0) ? -(M - 1) * incx : 0;
@@ -126,7 +129,7 @@ extern "C" void mger_(
 #endif
     for (int j = 0; j < N; ++j) {
         const T yj = y[jy0 + j * incy];
-        if (dd_iszero(yj)) continue;
+        if (eq0(yj)) continue;
         mger_col(M, x_hi, x_lo, alpha * yj, &A_(0, j));
     }
     std::free(x_hi); std::free(x_lo);
@@ -145,7 +148,7 @@ extern "C" void mger_(
 #endif
     for (int j = 0; j < N; ++j) {
         const T yj = y[jy0 + j * incy];
-        if (!dd_iszero(yj)) {
+        if (!eq0(yj)) {
             const T t = alpha * yj;
             T *aj = &A_(0, j);
             if (x_unit) { for (int i = 0; i < M; ++i) aj[i] = aj[i] + t * xp[i]; }

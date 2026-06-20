@@ -5,7 +5,9 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_tri_simd.h"   /* mf_tri::caxpy_add / cdot — shared complex SoA kernels */
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <cmath>
 #include <omp.h>
@@ -18,19 +20,15 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -53,15 +51,15 @@ static void wtrmv_serial_N_lower(bool nounit, int n,
             y[i] = nounit ? cmul(x[i], A_(i, i)) : x[i];
         for (int j = ie - 1; j >= ib; --j) {            /* within-tile, descending j */
             const T xj = x[j];
-            if (cdd_iszero(xj)) continue;
+            if (ceq0(xj)) continue;
             const T *col = &A_(0, j);
-            mf_tri::caxpy_add(ie - (j + 1), &y[j + 1], &col[j + 1], xj);
+            mf_kernels::caxpy_add(ie - (j + 1), &y[j + 1], &col[j + 1], xj);
         }
         for (int j = ib - 1; j >= 0; --j) {             /* below-tile columns, descending j */
             const T xj = x[j];
-            if (cdd_iszero(xj)) continue;
+            if (ceq0(xj)) continue;
             const T *col = &A_(0, j);
-            mf_tri::caxpy_add(ie - ib, &y[ib], &col[ib], xj);
+            mf_kernels::caxpy_add(ie - ib, &y[ib], &col[ib], xj);
         }
     }
     for (int i = 0; i < n; ++i) x[i] = y[i];
@@ -117,7 +115,7 @@ static void wtrmv_partition(bool upper, std::ptrdiff_t n, int nthreads,
  * the contiguous matrix column block [m_from,m_to); writes its own rows directly
  * plus the off-block "spill" rows into the thread's private y slot (merged by a
  * bounded reduction). DTB tiling keeps the active y-tile hot. Each contiguous
- * column run is a SIMD AXPY (mf_tri::caxpy_add) so the threaded path stays
+ * column run is a SIMD AXPY (mf_kernels::caxpy_add) so the threaded path stays
  * vectorized like the serial one. */
 static void wtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
                            std::ptrdiff_t m_from, std::ptrdiff_t m_to,
@@ -129,26 +127,26 @@ static void wtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
         if (upper && is > 0) {
             for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
                 const T xj = x[j];
-                if (!cdd_iszero(xj)) mf_tri::caxpy_add(is, &y[0], &A_(0, j), xj);
+                if (!ceq0(xj)) mf_kernels::caxpy_add(is, &y[0], &A_(0, j), xj);
             }
         }
         for (std::ptrdiff_t i = is; i < is + min_i; ++i) {
             if (upper && i > is) {
                 const T xi = x[i];
-                if (!cdd_iszero(xi)) mf_tri::caxpy_add(i - is, &y[is], &A_(is, i), xi);
+                if (!ceq0(xi)) mf_kernels::caxpy_add(i - is, &y[is], &A_(is, i), xi);
             }
             y[i] = cadd(y[i], nounit ? cmul(A_(i, i), x[i]) : x[i]);
             if (!upper && i + 1 < is + min_i) {
                 const T xi = x[i];
-                if (!cdd_iszero(xi))
-                    mf_tri::caxpy_add(is + min_i - (i + 1), &y[i + 1], &A_(i + 1, i), xi);
+                if (!ceq0(xi))
+                    mf_kernels::caxpy_add(is + min_i - (i + 1), &y[i + 1], &A_(i + 1, i), xi);
             }
         }
         if (!upper && is + min_i < n) {
             for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
                 const T xj = x[j];
-                if (!cdd_iszero(xj))
-                    mf_tri::caxpy_add(n - (is + min_i), &y[is + min_i], &A_(is + min_i, j), xj);
+                if (!ceq0(xj))
+                    mf_kernels::caxpy_add(n - (is + min_i), &y[is + min_i], &A_(is + min_i, j), xj);
             }
         }
     }
@@ -178,8 +176,8 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
                 T diagc = A_(j, j); if (conj) diagc = cconj(diagc);
                 T s = nounit ? cmul(diagc, x[j]) : x[j];
                 const T *aj = &A_(0, j);
-                if (upper) s = cadd(s, mf_tri::cdot(j, &aj[0], &x[0], conj));
-                else       s = cadd(s, mf_tri::cdot(n - j - 1, &aj[j + 1], &x[j + 1], conj));
+                if (upper) s = cadd(s, mf_kernels::cdot(j, &aj[0], &x[0], conj));
+                else       s = cadd(s, mf_kernels::cdot(n - j - 1, &aj[j + 1], &x[j + 1], conj));
                 y_buf[j] = s;
             }
             #pragma omp for schedule(static)
@@ -258,7 +256,7 @@ __attribute__((noinline)) static bool wtrmv_omp(
 #endif
 
 /* Contiguous (incx==1) in-place serial triangular matvec. NoTrans is a column
- * AXPY (mf_tri::caxpy_add, bit-exact); Trans/ConjTrans is a column dot (mf_tri::cdot,
+ * AXPY (mf_kernels::caxpy_add, bit-exact); Trans/ConjTrans is a column dot (mf_kernels::cdot,
  * within DD fuzz tol). The strided entry gathers x to scratch and reuses this. */
 static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
                                 int n, const T *a, std::size_t lda, T *x)
@@ -268,15 +266,15 @@ static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
             if (n >= 128) { wtrmv_serial_N_lower(nounit, n, a, lda, x); return; }
             for (int j = n - 1; j >= 0; --j) {
                 const T temp = x[j];
-                if (!cdd_iszero(temp))
-                    mf_tri::caxpy_add(n - 1 - j, &x[j + 1], &A_(j + 1, j), temp);
+                if (!ceq0(temp))
+                    mf_kernels::caxpy_add(n - 1 - j, &x[j + 1], &A_(j + 1, j), temp);
                 if (nounit) x[j] = cmul(x[j], A_(j, j));
             }
         } else {
             for (int j = 0; j < n; ++j) {
                 const T temp = x[j];
-                if (!cdd_iszero(temp))
-                    mf_tri::caxpy_add(j, &x[0], &A_(0, j), temp);
+                if (!ceq0(temp))
+                    mf_kernels::caxpy_add(j, &x[0], &A_(0, j), temp);
                 if (nounit) x[j] = cmul(x[j], A_(j, j));
             }
         }
@@ -285,14 +283,14 @@ static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
             for (int j = 0; j < n; ++j) {
                 T temp = x[j];
                 if (nounit) temp = cmul(temp, conj ? cconj(A_(j, j)) : A_(j, j));
-                temp = cadd(temp, mf_tri::cdot(n - 1 - j, &A_(j + 1, j), &x[j + 1], conj));
+                temp = cadd(temp, mf_kernels::cdot(n - 1 - j, &A_(j + 1, j), &x[j + 1], conj));
                 x[j] = temp;
             }
         } else {
             for (int j = n - 1; j >= 0; --j) {
                 T temp = x[j];
                 if (nounit) temp = cmul(temp, conj ? cconj(A_(j, j)) : A_(j, j));
-                temp = cadd(temp, mf_tri::cdot(j, &A_(0, j), &x[0], conj));
+                temp = cadd(temp, mf_kernels::cdot(j, &A_(0, j), &x[0], conj));
                 x[j] = temp;
             }
         }
@@ -347,14 +345,14 @@ extern "C" void wtrmv_(
             if (UPLO == 'L') {
                 for (int j = N - 1; j >= 0; --j) {
                     const T temp = x[kx + j * incx];
-                    if (!cdd_iszero(temp))
+                    if (!ceq0(temp))
                         for (int i = j + 1; i < N; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
                     if (nounit) x[kx + j * incx] = cmul(x[kx + j * incx], A_(j, j));
                 }
             } else {
                 for (int j = 0; j < N; ++j) {
                     const T temp = x[kx + j * incx];
-                    if (!cdd_iszero(temp))
+                    if (!ceq0(temp))
                         for (int i = 0; i < j; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
                     if (nounit) x[kx + j * incx] = cmul(x[kx + j * incx], A_(j, j));
                 }

@@ -1,6 +1,7 @@
 /* iwamax — multifloats complex DD: 1-based argmax(|re|+|im|). */
 #include <stddef.h>
 #include <multifloats.h>
+#include "mf_pred.h"
 #include <multifloats/float64x2.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -8,6 +9,7 @@
 #endif
 #ifdef WBLAS_SIMD_DD
 #include <immintrin.h>
+#include "mf_simd_exact.h"
 #endif
 
 namespace mf = multifloats;
@@ -15,49 +17,24 @@ using R = mf::float64x2;
 using T = mf::complex64x2;
 
 namespace {
-/* Inline magnitude — see imamax.cpp: the public fabsdd() is out-of-line, so
- * cabs1 emitted two PLT calls per element. a < 0 ? -a : a is header-inline and
- * yields the identical canonical magnitude. */
-inline R t_abs(R a) { return a < 0 ? -a : a; }
-inline bool dd_gt(R a, R b) {
-    return a.limbs[0] > b.limbs[0]
-        || (a.limbs[0] == b.limbs[0] && a.limbs[1] > b.limbs[1]);
-}
-inline R cabs1(T const &z) { return t_abs(z.re) + t_abs(z.im); }
+/* Inline magnitude/compare from mf_pred — mf_pred::mag stays header-inline (the
+ * public fabsdd() is out-of-line; cabs1 would emit two PLT calls per element). */
+using mf_pred::mag;
+using mf_pred::gt;
+inline R cabs1(T const &z) { return mag(z.re) + mag(z.im); }
 
 #ifdef WBLAS_SIMD_DD
 /* SoA argmax over a contiguous complex-DD range, 4 lanes/iter, so par beats the
  * scalar reference instead of tying it (see imamax.cpp for the real twin).
  *
- * The magnitude is cabs1 = t_abs(re) + t_abs(im), a DD add. Bit-exactness with
+ * The magnitude is cabs1 = abs(re) + abs(im), a DD add. Bit-exactness with
  * the scalar argmax therefore demands the *same* error-free transform the scalar
- * float64x2::operator+ uses (two_sum on BOTH limbs, then fast_two_sum) — NOT the
- * cheaper simd_dd::dd_add, whose lo limb differs by ~1 ulp and would flip
- * near-ties. The non-finite / both-hi-zero short-circuits of operator+ are
- * skipped: inputs here are abs values, finite for finite x, and a zero element
- * yields a zero magnitude on the main path too (sign of zero is irrelevant to
- * the comparison). */
-inline void s_two_sum(__m256d a, __m256d b, __m256d &s, __m256d &e) {
-    s = _mm256_add_pd(a, b);
-    __m256d ap = _mm256_sub_pd(s, b);
-    __m256d bp = _mm256_sub_pd(s, ap);
-    e = _mm256_add_pd(_mm256_sub_pd(a, ap), _mm256_sub_pd(b, bp));
-}
-inline void s_fast_two_sum(__m256d a, __m256d b, __m256d &s, __m256d &e) {
-    s = _mm256_add_pd(a, b);
-    __m256d bp = _mm256_sub_pd(s, a);
-    e = _mm256_sub_pd(b, bp);
-}
-inline void dd_add_exact(__m256d ah, __m256d al, __m256d bh, __m256d bl,
-                         __m256d &rh, __m256d &rl) {
-    __m256d a, b, c, d;
-    s_two_sum(ah, bh, a, b);
-    s_two_sum(al, bl, c, d);
-    s_fast_two_sum(a, c, a, c);
-    b = _mm256_add_pd(b, d);
-    b = _mm256_add_pd(b, c);
-    s_fast_two_sum(a, b, rh, rl);
-}
+ * float64x2::operator+ uses (two_sum on BOTH limbs, then fast_two_sum) — i.e.
+ * simd_exact::add (NOT the cheaper simd_fast::add, whose lo limb differs by ~1
+ * ulp and would flip near-ties). The non-finite / both-hi-zero short-circuits of
+ * operator+ are skipped: inputs here are abs values, finite for finite x, and a
+ * zero element yields a zero magnitude on the main path too (sign of zero is
+ * irrelevant to the comparison). */
 /* Deinterleave 4 complex-DD elements (re.hi,re.lo,im.hi,im.lo each) via a 4x4
  * transpose into SoA limb vectors. */
 inline void deint4c(const T *p, __m256d &reh, __m256d &rel,
@@ -76,7 +53,7 @@ inline void deint4c(const T *p, __m256d &reh, __m256d &rel,
     imh = _mm256_permute2f128_pd(t0, t2, 0x31);
     iml = _mm256_permute2f128_pd(t1, t3, 0x31);
 }
-/* |re|+|im| for 4 lanes: t_abs(x) = (|hi|, sign(hi)*lo) branchlessly, summed
+/* |re|+|im| for 4 lanes: abs(x) = (|hi|, sign(hi)*lo) branchlessly, summed
  * with the exact EFT add. */
 inline void cabs1_4(const T *p, __m256d &mh, __m256d &ml) {
     const __m256d sgn = _mm256_set1_pd(-0.0);
@@ -86,7 +63,7 @@ inline void cabs1_4(const T *p, __m256d &mh, __m256d &ml) {
     __m256d arl = _mm256_xor_pd(rel, _mm256_and_pd(reh, sgn));
     __m256d aih = _mm256_andnot_pd(sgn, imh);
     __m256d ail = _mm256_xor_pd(iml, _mm256_and_pd(imh, sgn));
-    dd_add_exact(arh, arl, aih, ail, mh, ml);
+    simd_exact::add(arh, arl, aih, ail, mh, ml);
 }
 
 inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
@@ -132,7 +109,7 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
     R bv{mh[0], ml[0]};
     for (int k = 1; k < 4; ++k) {
         R cv{mh[k], ml[k]};
-        if (dd_gt(cv, bv) || (cv.limbs[0] == bv.limbs[0] &&
+        if (gt(cv, bv) || (cv.limbs[0] == bv.limbs[0] &&
                               cv.limbs[1] == bv.limbs[1] && li[k] < best)) {
             bv = cv; best = (ptrdiff_t)li[k];
         }
@@ -195,7 +172,7 @@ __attribute__((noinline)) static int iwamax_omp(int n, const T *x, int *out)
     R bestv{0.0, 0.0};
     for (int t = 0; t < nthreads; ++t) {
         if (idx[t] == 0) continue;
-        if (best == 0 || dd_gt(val[t], bestv)) { best = idx[t]; bestv = val[t]; }
+        if (best == 0 || gt(val[t], bestv)) { best = idx[t]; bestv = val[t]; }
     }
     *out = best;
     return 1;
@@ -222,7 +199,7 @@ extern "C" int iwamax_(const int *n_, const T *x, const int *incx_)
     int ix = incx;
     for (int i = 2; i <= n; ++i) {
         R av = cabs1(x[ix]);
-        if (dd_gt(av, bestv)) { bestv = av; best = i; }
+        if (gt(av, bestv)) { bestv = av; best = i; }
         ix += incx;
     }
     return best;

@@ -1,7 +1,7 @@
 /*
- * mf_simd_dd.h — the faithful 4-wide SoA double-double primitive vocabulary,
+ * mf_simd_exact.h — the faithful 4-wide SoA double-double primitive vocabulary,
  * shared by every multifloats routine that drops below the scalar-DD floor
- * (band matvecs mtbmv/wtbmv, the rank kernels in mf_rank1_simd.h, ...).
+ * (band matvecs mtbmv/wtbmv, the rank/tri/dot kernels in mf_kernels.h, ...).
  *
  * DD is arithmetic-bound — there is no native SIMD for a single scalar DD — so
  * the lever is packing 4 INDEPENDENT DD values across the ymm lanes (hi limbs
@@ -11,14 +11,26 @@
  * FAITHFUL means every primitive here mirrors the multifloats::float64x2 /
  * complex64x2 scalar operators OP FOR OP, so a kernel built from them is
  * bit-identical to its scalar reference on every finite, non-degenerate lane.
- * This is the deliberate opposite of the sloppy 1-ulp simd_dd::dd_mul/dd_add in
- * mgemm_simd_kernel.h (which fuse cross terms into FMAs): reach for those only
- * where bit-exactness is not required, and for those that are, ONLY use the
- * mf_simd:: ops below. (The scalar operators short-circuit on non-finite and on
- * the both-hi-zero -0 case; those lanes are not reproduced — random fuzz never
- * hits them and the consistency tolerance absorbs the measure-zero case.) All
- * arithmetic uses explicit _mm256 intrinsics the compiler never fuses, so
- * -ffp-contract cannot collapse a two_prod/two_sum into an FMA and break it.
+ * It is the counterpart to the fast 1-ulp simd_fast::mul/add in
+ * mf_simd_fast.h (which fuse the cross terms into FMAs).
+ *
+ * ACCURACY POLICY (the real one, as the tree actually uses these two sets):
+ *   - The FAST simd_fast:: set is the DEFAULT. The whole GEMM/GEMV/GER/SYMV/L3
+ *     family AND the tolerance-bound L1 RMW routines (maxpy/mscal/mrot/...) run
+ *     on it; fuzz absorbs the 1-ulp lane/tail mismatch. A single routine may even
+ *     mix the two — e.g. maxpy's SIMD body uses the fast set while its scalar tail
+ *     uses the faithful operator. Reach for the fast set unless a routine has a
+ *     specific reason to be bit-exact.
+ *   - The FAITHFUL simd_exact:: set below is mandatory ONLY where a routine's whole
+ *     purpose is to match the scalar float64x2/complex64x2 operator bit-for-bit,
+ *     so its SIMD body and its scalar #else/tail agree: the triangular / rank /
+ *     band family (the mf_kernels:: shaped loops are layered on these). Use simd_exact::
+ *     there, never the fast set.
+ * (The scalar operators short-circuit on non-finite and on the both-hi-zero -0
+ * case; those lanes are not reproduced — random fuzz never hits them and the
+ * consistency tolerance absorbs the measure-zero case.) All arithmetic uses
+ * explicit _mm256 intrinsics the compiler never fuses, so -ffp-contract cannot
+ * collapse a two_prod/two_sum into an FMA and break it.
  *
  * The whole header is a no-op unless MBLAS_SIMD_DD (AVX2+FMA) is defined, so
  * callers may include it unconditionally.
@@ -30,20 +42,20 @@
 #include <cstddef>
 #include <immintrin.h>
 #include <multifloats.h>
-#include "mgemm_simd_kernel.h"   /* simd_dd::twoprod / twosum / fast2sum (EFTs) */
+#include "mf_simd_fast.h"   /* simd_fast::twoprod / twosum / fast2sum (EFTs) */
 
-namespace mf_simd {
+namespace simd_exact {
 
-using simd_dd::twoprod;
-using simd_dd::twosum;
-using simd_dd::fast2sum;
+using simd_fast::twoprod;
+using simd_fast::twosum;
+using simd_fast::fast2sum;
 
 /* ---- real double-double ------------------------------------------------- */
 
 /* DD * DD, faithful to float64x2::operator* (two_prod + one_prod cross terms +
  * fast_two_sum — cross terms added, NOT FMA-fused, to match the operator). */
 static inline __attribute__((always_inline)) void
-dd_mul(__m256d ah, __m256d al, __m256d bh, __m256d bl,
+mul(__m256d ah, __m256d al, __m256d bh, __m256d bl,
        __m256d &rh, __m256d &rl)
 {
     __m256d p00, e00;
@@ -58,7 +70,7 @@ dd_mul(__m256d ah, __m256d al, __m256d bh, __m256d bl,
 /* DD + DD, faithful to float64x2::operator+ (two_sum on both limbs,
  * fast_two_sum combine). */
 static inline __attribute__((always_inline)) void
-dd_add(__m256d ah, __m256d al, __m256d bh, __m256d bl,
+add(__m256d ah, __m256d al, __m256d bh, __m256d bl,
        __m256d &rh, __m256d &rl)
 {
     __m256d a, b, c, d;
@@ -74,11 +86,11 @@ dd_add(__m256d ah, __m256d al, __m256d bh, __m256d bl,
  * plain 0-b subtract would drop it), matching float64x2::operator- limb-for-
  * limb. */
 static inline __attribute__((always_inline)) void
-dd_sub(__m256d ah, __m256d al, __m256d bh, __m256d bl,
+sub(__m256d ah, __m256d al, __m256d bh, __m256d bl,
        __m256d &rh, __m256d &rl)
 {
     const __m256d sgn = _mm256_set1_pd(-0.0);
-    dd_add(ah, al, _mm256_xor_pd(bh, sgn), _mm256_xor_pd(bl, sgn), rh, rl);
+    add(ah, al, _mm256_xor_pd(bh, sgn), _mm256_xor_pd(bl, sgn), rh, rl);
 }
 
 /* AoS<->SoA for 4 packed float64x2 (8 contiguous doubles).
@@ -108,11 +120,11 @@ store_dd4(multifloats::float64x2 *p, __m256d hi, __m256d lo)
 }
 
 /* Horizontal reduce of a 4-lane DD accumulator to a single float64x2, via a
- * faithful dd_add tree (lane0+lane2, lane1+lane3, then the two survivors). The
+ * faithful add tree (lane0+lane2, lane1+lane3, then the two survivors). The
  * reduction reorders vs a scalar left-fold, so a dot built on a vector
  * accumulator + this reduce matches its scalar reference only within the
  * consistency tolerance (not bit-for-bit) — which is exactly what the band/tri
- * dot reductions need. Mirrors the simd_dd hreduce in the trsv kernels but
+ * dot reductions need. Mirrors the simd_fast hreduce in the trsv kernels but
  * stays in the faithful (non-FMA-fused) vocabulary. */
 static inline __attribute__((always_inline)) multifloats::float64x2
 hreduce(__m256d sh, __m256d sl)
@@ -120,11 +132,11 @@ hreduce(__m256d sh, __m256d sl)
     __m256d sh_sw = _mm256_permute2f128_pd(sh, sh, 0x01);
     __m256d sl_sw = _mm256_permute2f128_pd(sl, sl, 0x01);
     __m256d ph, pl;
-    dd_add(sh, sl, sh_sw, sl_sw, ph, pl);
+    add(sh, sl, sh_sw, sl_sw, ph, pl);
     __m256d ph_sw = _mm256_shuffle_pd(ph, ph, 0x5);
     __m256d pl_sw = _mm256_shuffle_pd(pl, pl, 0x5);
     __m256d rh, rl;
-    dd_add(ph, pl, ph_sw, pl_sw, rh, rl);
+    add(ph, pl, ph_sw, pl_sw, rh, rl);
     double h[4], l[4];
     _mm256_storeu_pd(h, rh); _mm256_storeu_pd(l, rl);
     return multifloats::float64x2{h[0], l[0]};
@@ -154,21 +166,21 @@ struct cx4 { __m256d reh, rel, imh, iml; };
 static inline cx4 cmul_soa(const cx4 &a, const cx4 &b)
 {
     __m256d p1h, p1l, p2h, p2l, p3h, p3l, p4h, p4l;
-    dd_mul(a.reh, a.rel, b.reh, b.rel, p1h, p1l);   /* re·re */
-    dd_mul(a.imh, a.iml, b.imh, b.iml, p2h, p2l);   /* im·im */
-    dd_mul(a.reh, a.rel, b.imh, b.iml, p3h, p3l);   /* re·im */
-    dd_mul(a.imh, a.iml, b.reh, b.rel, p4h, p4l);   /* im·re */
+    mul(a.reh, a.rel, b.reh, b.rel, p1h, p1l);   /* re·re */
+    mul(a.imh, a.iml, b.imh, b.iml, p2h, p2l);   /* im·im */
+    mul(a.reh, a.rel, b.imh, b.iml, p3h, p3l);   /* re·im */
+    mul(a.imh, a.iml, b.reh, b.rel, p4h, p4l);   /* im·re */
     cx4 r;
-    dd_sub(p1h, p1l, p2h, p2l, r.reh, r.rel);
-    dd_add(p3h, p3l, p4h, p4l, r.imh, r.iml);
+    sub(p1h, p1l, p2h, p2l, r.reh, r.rel);
+    add(p3h, p3l, p4h, p4l, r.imh, r.iml);
     return r;
 }
 
 static inline cx4 cadd_soa(const cx4 &a, const cx4 &b)
 {
     cx4 r;
-    dd_add(a.reh, a.rel, b.reh, b.rel, r.reh, r.rel);
-    dd_add(a.imh, a.iml, b.imh, b.iml, r.imh, r.iml);
+    add(a.reh, a.rel, b.reh, b.rel, r.reh, r.rel);
+    add(a.imh, a.iml, b.imh, b.iml, r.imh, r.iml);
     return r;
 }
 
@@ -182,8 +194,8 @@ static inline cx4 cconj_soa(const cx4 &a)
 static inline cx4 csub_soa(const cx4 &a, const cx4 &b)
 {
     cx4 r;
-    dd_sub(a.reh, a.rel, b.reh, b.rel, r.reh, r.rel);
-    dd_sub(a.imh, a.iml, b.imh, b.iml, r.imh, r.iml);
+    sub(a.reh, a.rel, b.reh, b.rel, r.reh, r.rel);
+    sub(a.imh, a.iml, b.imh, b.iml, r.imh, r.iml);
     return r;
 }
 
@@ -258,7 +270,7 @@ cstore4(multifloats::complex64x2 *p, const cx4 &c)
 }
 
 /* Horizontal reduce of a 4-lane complex accumulator to one complex64x2, folding
- * real and imag limbs through the faithful dd_add tree (reorders -> within tol). */
+ * real and imag limbs through the faithful add tree (reorders -> within tol). */
 static inline __attribute__((always_inline)) multifloats::complex64x2
 chreduce(const cx4 &s)
 {
@@ -278,6 +290,6 @@ static inline cx4 cgather4(const multifloats::complex64x2 *p, std::ptrdiff_t s)
     return r;
 }
 
-}  // namespace mf_simd
+}  // namespace simd_exact
 
 #endif  // MBLAS_SIMD_DD

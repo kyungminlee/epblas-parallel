@@ -6,7 +6,9 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_tri_simd.h"   /* mf_tri::caxpy_add / cdot — shared complex SoA kernels */
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -18,21 +20,17 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+using mf_pred::ceq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const R rzero{0.0, 0.0};
 const T czero{ rzero, rzero };
-inline bool dd_iszero(const R &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
-inline bool cdd_isone(const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0 && dd_iszero(x.im);
-}
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -66,12 +64,12 @@ static bool wgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
         const int j1 = (r1 + KU < N) ? (r1 + KU) : N;
         for (int j = j0; j < j1; ++j) {
             const T tmp = cmul(alpha, x[j]);
-            if (cdd_iszero(tmp)) continue;
+            if (ceq0(tmp)) continue;
             int i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
             if (i_lo < r0) i_lo = r0;
             if (i_hi > r1) i_hi = r1;
             if (i_lo < i_hi)
-                mf_tri::caxpy_add(i_hi - i_lo, &y[i_lo], &A_(KU - j + i_lo, j), tmp);
+                mf_kernels::caxpy_add(i_hi - i_lo, &y[i_lo], &A_(KU - j + i_lo, j), tmp);
         }
     }
     return true;
@@ -90,9 +88,9 @@ static void wgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
 #endif
     for (int j = 0; j < N; ++j) {
         const T tmp = cmul(alpha, x[j]);
-        if (cdd_iszero(tmp)) continue;
+        if (ceq0(tmp)) continue;
         int i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
-        mf_tri::caxpy_add(i_hi - i_lo, &y[i_lo], &A_(KU - j + i_lo, j), tmp);
+        mf_kernels::caxpy_add(i_hi - i_lo, &y[i_lo], &A_(KU - j + i_lo, j), tmp);
     }
 }
 
@@ -109,7 +107,7 @@ static void wgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
 #endif
     for (int j = 0; j < N; ++j) {
         int i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
-        const T s = mf_tri::cdot(i_hi - i_lo, &A_(KU - j + i_lo, j), &x[i_lo], conj);
+        const T s = mf_kernels::cdot(i_hi - i_lo, &A_(KU - j + i_lo, j), &x[i_lo], conj);
         y[j] = cadd(y[j], cmul(alpha, s));
     }
 }
@@ -135,17 +133,17 @@ extern "C" void wgbmv_(
     const bool notrans = (TR == 'N');
     const bool conj = (TR == 'C');
 
-    if (M == 0 || N == 0 || (cdd_iszero(alpha) && cdd_isone(beta))) return;
+    if (M == 0 || N == 0 || (ceq0(alpha) && ceq1(beta))) return;
 
     const int leny = notrans ? M : N;
     const int lenx = notrans ? N : M;
 
-    if (!cdd_isone(beta)) {
+    if (!ceq1(beta)) {
         int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-        if (cdd_iszero(beta)) for (int i = 0; i < leny; ++i) { y[iy] = czero; iy += incy; }
+        if (ceq0(beta)) for (int i = 0; i < leny; ++i) { y[iy] = czero; iy += incy; }
         else                  for (int i = 0; i < leny; ++i) { y[iy] = cmul(beta, y[iy]); iy += incy; }
     }
-    if (cdd_iszero(alpha)) return;
+    if (ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
         if (notrans) wgbmv_n_contig(M, N, KL, KU, alpha, a, lda, x, y);

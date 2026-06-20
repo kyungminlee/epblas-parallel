@@ -4,8 +4,10 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_dotkernel.h"
-#include "mf_tri_simd.h"
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
+#include "mf_packed.h"
 #ifdef _OPENMP
 #include <cstdlib>
 #include <omp.h>
@@ -18,17 +20,15 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(const R &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 
 /* Bit-exact row-tiled upper-triangular packed NoTrans serial matvec (incx==1).
  * Packed upper column j stores rows 0..j-1 contiguously at ap[j(j+1)/2], so the
@@ -38,9 +38,7 @@ inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }
  * processing within-tile then above-tile columns in strictly ascending order so
  * each output element's accumulation (diagonal first, then ascending column
  * index) is byte-identical to the untiled loop. */
-inline std::size_t wtpmv_kk_upper(int j) {
-    return static_cast<std::size_t>(j) * (j + 1) / 2;
-}
+using mf_packed::kk_upper;
 static void wtpmv_serial_N_upper(bool nounit, int n, const T *ap, T *x) {
     const int RB = 32;
     std::vector<T> ybuf(static_cast<std::size_t>(n));
@@ -48,18 +46,18 @@ static void wtpmv_serial_N_upper(bool nounit, int n, const T *ap, T *x) {
     for (int ib = 0; ib < n; ib += RB) {
         const int ie = ib + RB < n ? ib + RB : n;
         for (int i = ib; i < ie; ++i)
-            y[i] = nounit ? cmul(x[i], ap[wtpmv_kk_upper(i) + i]) : x[i];
+            y[i] = nounit ? cmul(x[i], ap[kk_upper(i) + i]) : x[i];
         for (int j = ib; j < ie; ++j) {                 /* within-tile, ascending j */
             const T xj = x[j];
-            if (cdd_iszero(xj)) continue;
-            const T *col = &ap[wtpmv_kk_upper(j)];
-            mf_tri::caxpy_add(j - ib, &y[ib], &col[ib], xj);
+            if (ceq0(xj)) continue;
+            const T *col = &ap[kk_upper(j)];
+            mf_kernels::caxpy_add(j - ib, &y[ib], &col[ib], xj);
         }
         for (int j = ie; j < n; ++j) {                  /* above-tile columns, ascending j */
             const T xj = x[j];
-            if (cdd_iszero(xj)) continue;
-            const T *col = &ap[wtpmv_kk_upper(j)];
-            mf_tri::caxpy_add(ie - ib, &y[ib], &col[ib], xj);
+            if (ceq0(xj)) continue;
+            const T *col = &ap[kk_upper(j)];
+            mf_kernels::caxpy_add(ie - ib, &y[ib], &col[ib], xj);
         }
     }
     for (int i = 0; i < n; ++i) x[i] = y[i];
@@ -78,9 +76,9 @@ static void wtpmv_serial_contig(bool upper, bool trans, bool noconj,
             } else {
                 int kk = 0;
                 for (int j = 0; j < N; ++j) {
-                    if (!cdd_iszero(x[j])) {
+                    if (!ceq0(x[j])) {
                         const T tmp = x[j];
-                        mf_tri::caxpy_add(j, &x[0], &ap[kk], tmp);
+                        mf_kernels::caxpy_add(j, &x[0], &ap[kk], tmp);
                         if (nounit) x[j] = cmul(x[j], ap[kk + j]);
                     }
                     kk += j + 1;
@@ -89,9 +87,9 @@ static void wtpmv_serial_contig(bool upper, bool trans, bool noconj,
         } else {
             int kk = (N * (N + 1)) / 2 - 1;
             for (int j = N - 1; j >= 0; --j) {
-                if (!cdd_iszero(x[j])) {
+                if (!ceq0(x[j])) {
                     const T tmp = x[j];
-                    mf_tri::caxpy_add(N - 1 - j, &x[j + 1], &ap[kk - (N - 2 - j)], tmp);
+                    mf_kernels::caxpy_add(N - 1 - j, &x[j + 1], &ap[kk - (N - 2 - j)], tmp);
                     if (nounit) x[j] = cmul(x[j], ap[kk - (N - 1 - j)]);
                 }
                 kk -= (N - j);
@@ -101,8 +99,8 @@ static void wtpmv_serial_contig(bool upper, bool trans, bool noconj,
         if (upper) {
             int kk = (N * (N + 1)) / 2 - 1;              /* diag of column j */
             for (int j = N - 1; j >= 0; --j) {
-                T dot = noconj ? mfdot::wdotu_unit(j, &ap[kk - j], x)
-                               : mfdot::wdotc_unit(j, &ap[kk - j], x);
+                T dot = noconj ? mf_kernels::wdotu_unit(j, &ap[kk - j], x)
+                               : mf_kernels::wdotc_unit(j, &ap[kk - j], x);
                 T r = nounit ? cmul(x[j], (noconj ? ap[kk] : cconj(ap[kk]))) : x[j];
                 x[j] = cadd(r, dot);
                 kk -= j + 1;
@@ -111,8 +109,8 @@ static void wtpmv_serial_contig(bool upper, bool trans, bool noconj,
             int kk = 0;                                  /* diag of column j */
             for (int j = 0; j < N; ++j) {
                 const int len = N - 1 - j;
-                T dot = noconj ? mfdot::wdotu_unit(len, &ap[kk + 1], &x[j + 1])
-                               : mfdot::wdotc_unit(len, &ap[kk + 1], &x[j + 1]);
+                T dot = noconj ? mf_kernels::wdotu_unit(len, &ap[kk + 1], &x[j + 1])
+                               : mf_kernels::wdotc_unit(len, &ap[kk + 1], &x[j + 1]);
                 T r = nounit ? cmul(x[j], (noconj ? ap[kk] : cconj(ap[kk]))) : x[j];
                 x[j] = cadd(r, dot);
                 kk += N - j;
@@ -125,16 +123,8 @@ static void wtpmv_serial_contig(bool upper, bool trans, bool noconj,
 #ifdef _OPENMP
 namespace {
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
-/* Base index of packed column j. Upper: kk=j(j+1)/2, diag at kk+j, off-diag rows
- * 0..j-1 at kk+0..j-1. Lower: kk=j*N-j(j-1)/2, diag at kk+0, rows j+1..N-1 at
- * kk+1..N-1-j. So &ap[kk] is column j contiguous — identical to the dense
- * (wtrmv) per-column kernel, just with packed offsets. */
-inline std::size_t kk_upper(std::ptrdiff_t j) {
-    return static_cast<std::size_t>(j) * (j + 1) / 2;
-}
-inline std::size_t kk_lower(std::ptrdiff_t j, std::ptrdiff_t n) {
-    return static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2;
-}
+using mf_packed::kk_upper;
+using mf_packed::kk_lower;
 }
 
 /* Threaded contiguous-x core, mirroring wtrmv_omp_contig with packed column
@@ -160,10 +150,10 @@ static bool wtpmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
                 T diagc = upper ? aj[j] : aj[0]; if (conj) diagc = cconj(diagc);
                 T s = nounit ? cmul(diagc, x[j]) : x[j];
                 T dot = upper
-                    ? (conj ? mfdot::wdotc_unit(j, &aj[0], &x[0])
-                            : mfdot::wdotu_unit(j, &aj[0], &x[0]))
-                    : (conj ? mfdot::wdotc_unit(n - j - 1, &aj[1], &x[j + 1])
-                            : mfdot::wdotu_unit(n - j - 1, &aj[1], &x[j + 1]));
+                    ? (conj ? mf_kernels::wdotc_unit(j, &aj[0], &x[0])
+                            : mf_kernels::wdotu_unit(j, &aj[0], &x[0]))
+                    : (conj ? mf_kernels::wdotc_unit(n - j - 1, &aj[1], &x[j + 1])
+                            : mf_kernels::wdotu_unit(n - j - 1, &aj[1], &x[j + 1]));
                 y_buf[j] = cadd(s, dot);
             }
             #pragma omp for schedule(static)
@@ -185,12 +175,12 @@ static bool wtpmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
                 const T xj = x[j];
                 if (upper) {
                     const T *aj = &ap[kk_upper(j)];
-                    if (!cdd_iszero(xj)) mf_tri::caxpy_add(j, &y_priv[0], &aj[0], xj);
+                    if (!ceq0(xj)) mf_kernels::caxpy_add(j, &y_priv[0], &aj[0], xj);
                     y_priv[j] = cadd(y_priv[j], cmul(xj, nounit ? aj[j] : one_cdd));
                 } else {
                     const T *aj = &ap[kk_lower(j, n)];
                     y_priv[j] = cadd(y_priv[j], cmul(xj, nounit ? aj[0] : one_cdd));
-                    if (!cdd_iszero(xj)) mf_tri::caxpy_add(n - j - 1, &y_priv[j + 1], &aj[1], xj);
+                    if (!ceq0(xj)) mf_kernels::caxpy_add(n - j - 1, &y_priv[j + 1], &aj[1], xj);
                 }
             }
             #pragma omp for schedule(static)

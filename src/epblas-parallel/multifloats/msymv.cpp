@@ -10,8 +10,10 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_util.h"
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
@@ -25,13 +27,14 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const T zero_dd{0.0, 0.0};
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 static inline __attribute__((always_inline)) void
@@ -52,11 +55,11 @@ hreduce_dd(__m256d s_h, __m256d s_l)
     __m256d sh_sw = _mm256_permute2f128_pd(s_h, s_h, 0x01);
     __m256d sl_sw = _mm256_permute2f128_pd(s_l, s_l, 0x01);
     __m256d p_h, p_l;
-    simd_dd::dd_add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
+    simd_fast::add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
     __m256d ph_sw = _mm256_shuffle_pd(p_h, p_h, 0x5);
     __m256d pl_sw = _mm256_shuffle_pd(p_l, p_l, 0x5);
     __m256d r_h, r_l;
-    simd_dd::dd_add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
+    simd_fast::add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
     double rh[4], rl[4];
     _mm256_storeu_pd(rh, r_h); _mm256_storeu_pd(rl, r_l);
     return T{rh[0], rl[0]};
@@ -116,15 +119,15 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
             __m256d xh = _mm256_loadu_pd(x_hi + k);
             __m256d xl = _mm256_loadu_pd(x_lo + k);
             __m256d p1h, p1l;
-            simd_dd::dd_mul(t1h, t1l, a_h, a_l, p1h, p1l);
+            simd_fast::mul(t1h, t1l, a_h, a_l, p1h, p1l);
             __m256d nyh, nyl;
-            simd_dd::dd_add(yh, yl, p1h, p1l, nyh, nyl);
+            simd_fast::add(yh, yl, p1h, p1l, nyh, nyl);
             _mm256_storeu_pd(yacc_hi + k, nyh);
             _mm256_storeu_pd(yacc_lo + k, nyl);
             __m256d p2h, p2l;
-            simd_dd::dd_mul(a_h, a_l, xh, xl, p2h, p2l);
+            simd_fast::mul(a_h, a_l, xh, xl, p2h, p2l);
             __m256d nsh, nsl;
-            simd_dd::dd_add(s_h, s_l, p2h, p2l, nsh, nsl);
+            simd_fast::add(s_h, s_l, p2h, p2l, nsh, nsl);
             s_h = nsh; s_l = nsl;
         }
         T temp2 = hreduce_dd(s_h, s_l);
@@ -148,15 +151,15 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
             __m256d xh = _mm256_loadu_pd(x_hi + k);
             __m256d xl = _mm256_loadu_pd(x_lo + k);
             __m256d p1h, p1l;
-            simd_dd::dd_mul(t1h, t1l, a_h, a_l, p1h, p1l);
+            simd_fast::mul(t1h, t1l, a_h, a_l, p1h, p1l);
             __m256d nyh, nyl;
-            simd_dd::dd_add(yh, yl, p1h, p1l, nyh, nyl);
+            simd_fast::add(yh, yl, p1h, p1l, nyh, nyl);
             _mm256_storeu_pd(yacc_hi + k, nyh);
             _mm256_storeu_pd(yacc_lo + k, nyl);
             __m256d p2h, p2l;
-            simd_dd::dd_mul(a_h, a_l, xh, xl, p2h, p2l);
+            simd_fast::mul(a_h, a_l, xh, xl, p2h, p2l);
             __m256d nsh, nsl;
-            simd_dd::dd_add(s_h, s_l, p2h, p2l, nsh, nsl);
+            simd_fast::add(s_h, s_l, p2h, p2l, nsh, nsl);
             s_h = nsh; s_l = nsl;
         }
         T temp2 = hreduce_dd(s_h, s_l);
@@ -299,15 +302,15 @@ extern "C" void msymv_(
 
     if (N == 0) return;
 
-    if (!dd_isone(beta)) {
+    if (!eq1(beta)) {
         int iy = (incy < 0) ? -(N - 1) * incy : 0;
         for (int i = 0; i < N; ++i) {
-            if (dd_iszero(beta)) y[iy] = zero_dd;
+            if (eq0(beta)) y[iy] = zero_dd;
             else                 y[iy] = y[iy] * beta;
             iy += incy;
         }
     }
-    if (dd_iszero(alpha)) return;
+    if (eq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
         msymv_contig(lower, N, a, lda, x, y, alpha);

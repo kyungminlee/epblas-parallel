@@ -5,8 +5,9 @@
 #include <cstdlib>
 #include <vector>
 #include <multifloats.h>
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -18,12 +19,11 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
 namespace {
 #define WGERC_OMP_MIN 64
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
@@ -71,7 +71,7 @@ soa_store4_cdd(double *p,
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
 /* Contiguous (unit-stride) core: A += alpha * x * conj(y)^T, x length M, y length
- * N. SIMD column-AXPY (cdd_mul/cdd_add) when MBLAS_SIMD_DD; columns of A disjoint
+ * N. SIMD column-AXPY (cmul/cadd) when MBLAS_SIMD_DD; columns of A disjoint
  * so OMP-over-j is race-free and bit-exact. Strided callers gather x/y around it. */
 static void wgerc_contig(int M, int N, T alpha, T *a, std::size_t lda,
                          const T *x, const T *y)
@@ -95,7 +95,7 @@ static void wgerc_contig(int M, int N, T alpha, T *a, std::size_t lda,
 #endif
         for (int j = 0; j < N; ++j) {
             const T yj = cconj(y[j]);
-            if (cdd_iszero(yj)) continue;
+            if (ceq0(yj)) continue;
             const T t = cmul(alpha, yj);
             const __m256d trh = _mm256_set1_pd(t.re.limbs[0]);
             const __m256d trl = _mm256_set1_pd(t.re.limbs[1]);
@@ -111,10 +111,10 @@ static void wgerc_contig(int M, int N, T alpha, T *a, std::size_t lda,
                 __m256d xih = _mm256_loadu_pd(x_ih + i);
                 __m256d xil = _mm256_loadu_pd(x_il + i);
                 __m256d p_rh, p_rl, p_ih, p_il;
-                simd_dd::cdd_mul(trh, trl, tih, til, xrh, xrl, xih, xil,
+                simd_fast::cmul(trh, trl, tih, til, xrh, xrl, xih, xil,
                                  p_rh, p_rl, p_ih, p_il);
                 __m256d nrh, nrl, nih, nil;
-                simd_dd::cdd_add(a_rh, a_rl, a_ih, a_il, p_rh, p_rl, p_ih, p_il,
+                simd_fast::cadd(a_rh, a_rl, a_ih, a_il, p_rh, p_rl, p_ih, p_il,
                                  nrh, nrl, nih, nil);
                 soa_store4_cdd(aj + 4 * i, nrh, nrl, nih, nil);
             }
@@ -129,7 +129,7 @@ static void wgerc_contig(int M, int N, T alpha, T *a, std::size_t lda,
 #endif
         for (int j = 0; j < N; ++j) {
             const T yj = cconj(y[j]);
-            if (!cdd_iszero(yj)) {
+            if (!ceq0(yj)) {
                 const T t = cmul(alpha, yj);
                 T *aj = &A_(0, j);
                 for (int i = 0; i < M; ++i) aj[i] = cadd(aj[i], cmul(t, x[i]));
@@ -149,7 +149,7 @@ extern "C" void wgerc_(
     const int incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
 
-    if (M == 0 || N == 0 || cdd_iszero(alpha)) return;
+    if (M == 0 || N == 0 || ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
         wgerc_contig(M, N, alpha, a, lda, x, y);

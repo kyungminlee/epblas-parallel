@@ -4,25 +4,20 @@
  * the second component.
  */
 #include <multifloats.h>
+#include "mf_pred.h"
 #include <multifloats/float64x2.h>
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
 namespace {
-inline bool dd_lt0(T x) { return x.limbs[0] < 0.0; }
-inline bool dd_eq0(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_gt0(T x) { return x.limbs[0] > 0.0 || (x.limbs[0] == 0.0 && x.limbs[1] > 0.0); }
-/* Inline magnitude — the public fabsdd() is an out-of-line library call (the
- * scalar generator emitted 27 PLT calls to it → ~1.27x vs ob's inlined abs).
- * a < 0 ? -a : a uses only header-inline ops and yields the identical canonical
- * magnitude (same idiom as imamax t_abs; verified bit-exact). */
-inline T dd_abs(T a) { return a < 0 ? -a : a; }
-inline bool dd_abs_gt(T a, T b) {
-    T aa = dd_abs(a), bb = dd_abs(b);
-    return aa.limbs[0] > bb.limbs[0]
-        || (aa.limbs[0] == bb.limbs[0] && aa.limbs[1] > bb.limbs[1]);
-}
+/* lt0/eq0/gt0/mag/abs_gt from mf_pred (limb-lexicographic; mag stays inline to
+ * dodge the out-of-line fabsdd PLT calls — see mf_pred.h). */
+using mf_pred::lt0;
+using mf_pred::eq0;
+using mf_pred::gt0;
+using mf_pred::mag;
+using mf_pred::abs_gt;
 }
 
 extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
@@ -34,21 +29,21 @@ extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
     T d1 = *d1_, d2 = *d2_, x1 = *x1_, y1 = *y1_;
     T flag, h11{}, h12{}, h21{}, h22{};
 
-    if (dd_lt0(d1)) {
+    if (lt0(d1)) {
         flag = T{-1.0, 0.0};
         h11 = h12 = h21 = h22 = zero;
         d1 = d2 = x1 = zero;
     } else {
         T p2 = d2 * y1;
-        if (dd_eq0(p2)) { dparam[0] = T{-2.0, 0.0}; return; }
+        if (eq0(p2)) { dparam[0] = T{-2.0, 0.0}; return; }
         T p1 = d1 * x1;
         T q2 = p2 * y1;
         T q1 = p1 * x1;
-        if (dd_abs_gt(q1, q2)) {
+        if (abs_gt(q1, q2)) {
             h21 = T{-y1.limbs[0], -y1.limbs[1]} / x1;
             h12 = p2 / p1;
             T u = one - h12 * h21;
-            if (dd_gt0(u)) {
+            if (gt0(u)) {
                 flag = zero;
                 d1 = d1 / u; d2 = d2 / u; x1 = x1 * u;
             } else {
@@ -57,7 +52,7 @@ extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
                 d1 = d2 = x1 = zero;
             }
         } else {
-            if (dd_lt0(q2)) {
+            if (lt0(q2)) {
                 flag = T{-1.0, 0.0};
                 h11 = h12 = h21 = h22 = zero;
                 d1 = d2 = x1 = zero;
@@ -73,32 +68,32 @@ extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
             }
         }
         /* SCALE-CHECK */
-        if (!dd_eq0(d1)) {
-            while ((dd_abs_gt(rgamsq, d1) || !dd_abs_gt(gamsq, d1))) {
-                if (dd_eq0(flag)) { h11 = one; h22 = one; flag = T{-1.0, 0.0}; }
+        if (!eq0(d1)) {
+            while ((abs_gt(rgamsq, d1) || !abs_gt(gamsq, d1))) {
+                if (eq0(flag)) { h11 = one; h22 = one; flag = T{-1.0, 0.0}; }
                 else              { h21 = T{-1.0, 0.0}; h12 = one; flag = T{-1.0, 0.0}; }
-                if (dd_abs_gt(rgamsq, d1)) { d1 = d1 * gam * gam; x1 = x1 / gam;
+                if (abs_gt(rgamsq, d1)) { d1 = d1 * gam * gam; x1 = x1 / gam;
                     h11 = h11 / gam; h12 = h12 / gam; }
                 else                       { d1 = d1 / (gam * gam); x1 = x1 * gam;
                     h11 = h11 * gam; h12 = h12 * gam; }
-                if (dd_abs_gt(rgamsq, d1) || !dd_abs_gt(gamsq, d1)) continue; else break;
+                if (abs_gt(rgamsq, d1) || !abs_gt(gamsq, d1)) continue; else break;
             }
         }
-        if (!dd_eq0(d2)) {
-            while (dd_abs_gt(rgamsq, dd_abs(d2)) || !dd_abs_gt(gamsq, dd_abs(d2))) {
-                if (dd_eq0(flag)) { h11 = one; h22 = one; flag = T{-1.0, 0.0}; }
+        if (!eq0(d2)) {
+            while (abs_gt(rgamsq, mag(d2)) || !abs_gt(gamsq, mag(d2))) {
+                if (eq0(flag)) { h11 = one; h22 = one; flag = T{-1.0, 0.0}; }
                 else              { h21 = T{-1.0, 0.0}; h12 = one; flag = T{-1.0, 0.0}; }
-                if (dd_abs_gt(rgamsq, dd_abs(d2))) { d2 = d2 * gam * gam;
+                if (abs_gt(rgamsq, mag(d2))) { d2 = d2 * gam * gam;
                     h21 = h21 / gam; h22 = h22 / gam; }
                 else                                { d2 = d2 / (gam * gam);
                     h21 = h21 * gam; h22 = h22 * gam; }
-                if (dd_abs_gt(rgamsq, dd_abs(d2)) || !dd_abs_gt(gamsq, dd_abs(d2))) continue; else break;
+                if (abs_gt(rgamsq, mag(d2)) || !abs_gt(gamsq, mag(d2))) continue; else break;
             }
         }
     }
     dparam[0] = flag;
-    if (dd_lt0(flag))      { dparam[1]=h11; dparam[2]=h21; dparam[3]=h12; dparam[4]=h22; }
-    else if (dd_eq0(flag)) { dparam[3]=h12; dparam[2]=h21; }
+    if (lt0(flag))      { dparam[1]=h11; dparam[2]=h21; dparam[3]=h12; dparam[4]=h22; }
+    else if (eq0(flag)) { dparam[3]=h12; dparam[2]=h21; }
     else                   { dparam[1]=h11; dparam[4]=h22; }
     *d1_ = d1; *d2_ = d2; *x1_ = x1;
 }

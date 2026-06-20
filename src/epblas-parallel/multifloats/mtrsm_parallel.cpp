@@ -14,6 +14,8 @@
  * last thread absorbs the M&3 tail. Delegates to mtrsm_serial when nested.
  */
 #include "mtrsm_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include <cstddef>
 #include <cctype>
 #ifdef _OPENMP
@@ -24,11 +26,12 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 }  // namespace
 
 extern "C" void mtrsm_(
@@ -59,7 +62,7 @@ extern "C" void mtrsm_(
 
     if (M == 0 || N == 0) return;
 
-    if (dd_iszero(alpha)) { mtrsm_zero_B(M, N, b, ldb); return; }
+    if (eq0(alpha)) { mtrsm_zero_B(M, N, b, ldb); return; }
 
     if (SIDE == 'L') {
         const int nb = mtrsm_block_nb();

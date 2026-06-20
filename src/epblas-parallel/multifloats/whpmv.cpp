@@ -4,7 +4,9 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_tri_simd.h"
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <cstdlib>
 #include <cstring>
@@ -18,21 +20,17 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+using mf_pred::ceq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const R rzero{0.0, 0.0};
 const T czero{ rzero, rzero };
-inline bool dd_iszero(const R &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
-inline bool cdd_isone(const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0 && dd_iszero(x.im);
-}
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
 inline T cmul_r(T const &a, R const &r) { return T{ a.re * r, a.im * r }; }
 
 /* One Hermitian-packed column j's contribution ADDED into accumulator yacc:
@@ -45,8 +43,8 @@ inline T cmul_r(T const &a, R const &r) { return T{ a.re * r, a.im * r }; }
 inline void whpmv_col_upper(int j, const T *ap, const T *x, T alpha, T *yacc) {
     const std::size_t kk = static_cast<std::size_t>(j) * (j + 1) / 2;
     const T t1 = cmul(alpha, x[j]);
-    mf_tri::caxpy_add(j, yacc, &ap[kk], t1);
-    const T t2 = mf_tri::cdot(j, &ap[kk], x, true);
+    mf_kernels::caxpy_add(j, yacc, &ap[kk], t1);
+    const T t2 = mf_kernels::cdot(j, &ap[kk], x, true);
     yacc[j] = cadd(yacc[j], cadd(cmul_r(t1, ap[kk + j].re), cmul(alpha, t2)));
 }
 
@@ -56,8 +54,8 @@ inline void whpmv_col_lower(int j, int N, const T *ap, const T *x, T alpha, T *y
     const T t1 = cmul(alpha, x[j]);
     yacc[j] = cadd(yacc[j], cmul_r(t1, ap[kk].re));
     const int len = N - j - 1;
-    mf_tri::caxpy_add(len, &yacc[j + 1], &ap[kk + 1], t1);
-    const T t2 = mf_tri::cdot(len, &ap[kk + 1], &x[j + 1], true);
+    mf_kernels::caxpy_add(len, &yacc[j + 1], &ap[kk + 1], t1);
+    const T t2 = mf_kernels::cdot(len, &ap[kk + 1], &x[j + 1], true);
     yacc[j] = cadd(yacc[j], cmul(alpha, t2));
 }
 }
@@ -129,14 +127,14 @@ extern "C" void whpmv_(
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 
-    if (N == 0 || (cdd_iszero(alpha) && cdd_isone(beta))) return;
+    if (N == 0 || (ceq0(alpha) && ceq1(beta))) return;
 
-    if (!cdd_isone(beta)) {
+    if (!ceq1(beta)) {
         int iy = (incy < 0) ? -(N - 1) * incy : 0;
-        if (cdd_iszero(beta)) for (int i = 0; i < N; ++i) { y[iy] = czero; iy += incy; }
+        if (ceq0(beta)) for (int i = 0; i < N; ++i) { y[iy] = czero; iy += incy; }
         else                  for (int i = 0; i < N; ++i) { y[iy] = cmul(beta, y[iy]); iy += incy; }
     }
-    if (cdd_iszero(alpha)) return;
+    if (ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
         whpmv_contig(UPLO == 'U', N, ap, x, alpha, y);

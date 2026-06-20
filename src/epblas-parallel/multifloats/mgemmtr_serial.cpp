@@ -20,6 +20,8 @@
  * cores, so the two paths are bitwise-identical.
  */
 #include "mgemmtr_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include "mgemm_kernel.h"
 #include <cstdlib>
 #include <cctype>
@@ -27,13 +29,16 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-inline char up(const char *p) { return (char)std::toupper((unsigned char)*p); }
 const T zero_dd{0.0, 0.0};
 const T one_dd {1.0, 0.0};
-inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (const T &x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #define A_(i, j)  a[(std::size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(std::size_t)(j) * ldb + (i)]
@@ -56,14 +61,14 @@ inline void diag_add(int jc, int jb, int K, T alpha,
             if (tb == 'N') {
                 for (int l = 0; l < K; ++l) {
                     const T t = alpha * B_(l, j);
-                    if (dd_iszero(t)) continue;
+                    if (eq0(t)) continue;
                     const T *al = &A_(0, l);
                     for (int i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
                 }
             } else {
                 for (int l = 0; l < K; ++l) {
                     const T t = alpha * B_(j, l);
-                    if (dd_iszero(t)) continue;
+                    if (eq0(t)) continue;
                     const T *al = &A_(0, l);
                     for (int i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
                 }
@@ -113,7 +118,7 @@ void mgemmtr_beta_core(int j0, int j1, int N, bool upper,
         const int is = upper ? 0 : j;
         const int ie = upper ? (j + 1) : N;
         T *cj = &C_(0, j);
-        if (dd_iszero(beta)) for (int i = is; i < ie; ++i) cj[i] = zero_dd;
+        if (eq0(beta)) for (int i = is; i < ie; ++i) cj[i] = zero_dd;
         else                 for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
     }
 }
@@ -135,8 +140,8 @@ void mgemmtr_block_core(int jc, int jb, int N, int K,
         const int is = upper ? 0 : j;
         const int ie = upper ? (j + 1) : N;
         T *cj = &C_(0, j);
-        if (dd_iszero(beta))      for (int i = is; i < ie; ++i) cj[i] = zero_dd;
-        else if (!dd_isone(beta)) for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
+        if (eq0(beta))      for (int i = is; i < ie; ++i) cj[i] = zero_dd;
+        else if (!eq1(beta)) for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
     }
 
     /* Diagonal jb×jb triangle: scalar. */
@@ -185,8 +190,8 @@ extern "C" void mgemmtr_serial(
 
     if (N <= 0) return;
 
-    if (dd_iszero(alpha) || K == 0) {
-        if (dd_isone(beta)) return;
+    if (eq0(alpha) || K == 0) {
+        if (eq1(beta)) return;
         mgemmtr_beta_core(0, N, N, upper, beta, c, ldc);
         return;
     }

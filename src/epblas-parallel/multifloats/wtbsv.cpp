@@ -4,28 +4,29 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_tri_simd.h"
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(const R &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T csub(T const &a, T const &b) { return T{ a.re - b.re, a.im - b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::csub;
+using mf_kernels::cconj;
 inline T cdiv(T const &a, T const &b) {
-    const R d = b.re * b.re + b.im * b.im;
-    const R inv_d = R{1.0, 0.0} / d;
-    return T{ (a.re * b.re + a.im * b.im) * inv_d,
-              (a.im * b.re - a.re * b.im) * inv_d };
+    /* a / b = a·conj(b) / |b|², direct DD divide (canonical form shared with
+     * wtpsv/wtrsv/wtrsm_serial — see F2, simd_audit). */
+    const R denom = b.re * b.re + b.im * b.im;
+    return T{ (a.re * b.re + a.im * b.im) / denom,
+              (a.im * b.re - a.re * b.im) / denom };
 }
 }
 
@@ -42,19 +43,19 @@ static void wtbsv_serial_contig(char UPLO, char TR, int noconj, int nounit,
     if (TR == 'N') {
         if (UPLO == 'U') {
             for (int j = N - 1; j >= 0; --j) {
-                if (!cdd_iszero(x[j])) {
+                if (!ceq0(x[j])) {
                     const int L = K - j;
                     if (nounit) x[j] = cdiv(x[j], A_(K, j));
                     const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    mf_tri::caxpy_sub(j - i_lo, &x[i_lo], &A_(L + i_lo, j), x[j]);
+                    mf_kernels::caxpy_sub(j - i_lo, &x[i_lo], &A_(L + i_lo, j), x[j]);
                 }
             }
         } else {
             for (int j = 0; j < N; ++j) {
-                if (!cdd_iszero(x[j])) {
+                if (!ceq0(x[j])) {
                     if (nounit) x[j] = cdiv(x[j], A_(0, j));
                     const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    mf_tri::caxpy_sub(i_hi - (j + 1), &x[j + 1], &A_(1, j), x[j]);
+                    mf_kernels::caxpy_sub(i_hi - (j + 1), &x[j + 1], &A_(1, j), x[j]);
                 }
             }
         }
@@ -63,14 +64,14 @@ static void wtbsv_serial_contig(char UPLO, char TR, int noconj, int nounit,
             for (int j = 0; j < N; ++j) {
                 const int L = K - j;
                 const int i_lo = (j - K > 0) ? (j - K) : 0;
-                T tmp = csub(x[j], mf_tri::cdot(j - i_lo, &A_(L + i_lo, j), &x[i_lo], conj));
+                T tmp = csub(x[j], mf_kernels::cdot(j - i_lo, &A_(L + i_lo, j), &x[i_lo], conj));
                 if (nounit) tmp = cdiv(tmp, (noconj ? A_(K, j) : cconj(A_(K, j))));
                 x[j] = tmp;
             }
         } else {
             for (int j = N - 1; j >= 0; --j) {
                 const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                T tmp = csub(x[j], mf_tri::cdot(i_hi - (j + 1), &A_(1, j), &x[j + 1], conj));
+                T tmp = csub(x[j], mf_kernels::cdot(i_hi - (j + 1), &A_(1, j), &x[j + 1], conj));
                 if (nounit) tmp = cdiv(tmp, (noconj ? A_(0, j) : cconj(A_(0, j))));
                 x[j] = tmp;
             }

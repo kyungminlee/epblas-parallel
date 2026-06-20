@@ -8,7 +8,10 @@
 #include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
-#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
+#include "mf_packed.h"     /* mf_packed::kk_upper / kk_lower — packed column offsets */
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -19,27 +22,20 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
-namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 
-/* Base index of packed column j (its first stored element). Upper: kk=j(j+1)/2,
- * rows 0..j-1 at kk+0..j-1, diag at kk+j. Lower: kk=j*N-j(j-1)/2, diag at kk+0,
- * rows j+1..N-1 at kk+1..N-1-j. So &ap[kk] is column j stored contiguously —
- * identical to the dense (mtrmv) per-column kernel, just with packed offsets. */
-inline std::size_t kk_upper(std::ptrdiff_t j) {
-    return static_cast<std::size_t>(j) * (j + 1) / 2;
-}
-inline std::size_t kk_lower(std::ptrdiff_t j, std::ptrdiff_t n) {
-    return static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2;
-}
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+namespace {
+
+using mf_packed::kk_upper;   /* packed column base offsets — see mf_packed.h */
+using mf_packed::kk_lower;
 
 /* In-place contiguous (incx==1) triangular packed matvec. Per column j, &ap[kk]
  * is a contiguous run, so this is the packed twin of mtrmv_contig: NoTrans is a
- * column AXPY scaled by x[j] (mf_tri::axpy_add, order-free -> bit-exact); Trans
- * is a column dot against the off-diagonal x (mf_tri::dot, vector accumulate +
+ * column AXPY scaled by x[j] (mf_kernels::axpy_add, order-free -> bit-exact); Trans
+ * is a column dot against the off-diagonal x (mf_kernels::dot, vector accumulate +
  * hreduce -> within tolerance). The diagonal scaling matches the reference:
  * after the axpy for NoTrans, folded into the dot seed for Trans. The strided
  * entry gathers into contiguous scratch and reuses this. */
@@ -51,14 +47,14 @@ void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T *aj = &ap[kk_upper(j)];
                 const T tmp = x[j];
-                if (!dd_iszero(tmp)) mf_tri::axpy_add(j, &x[0], &aj[0], tmp);
+                if (!eq0(tmp)) mf_kernels::axpy_add(j, &x[0], &aj[0], tmp);
                 if (nounit) x[j] = x[j] * aj[j];
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 const T *aj = &ap[kk_lower(j, n)];
                 const T tmp = x[j];
-                if (!dd_iszero(tmp)) mf_tri::axpy_add(n - 1 - j, &x[j + 1], &aj[1], tmp);
+                if (!eq0(tmp)) mf_kernels::axpy_add(n - 1 - j, &x[j + 1], &aj[1], tmp);
                 if (nounit) x[j] = x[j] * aj[0];
             }
         }
@@ -67,13 +63,13 @@ void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 const T *aj = &ap[kk_upper(j)];
                 T tmp = nounit ? (aj[j] * x[j]) : x[j];
-                x[j] = tmp + mf_tri::dot(j, &aj[0], &x[0]);
+                x[j] = tmp + mf_kernels::dot(j, &aj[0], &x[0]);
             }
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T *aj = &ap[kk_lower(j, n)];
                 T tmp = nounit ? (aj[0] * x[j]) : x[j];
-                x[j] = tmp + mf_tri::dot(n - 1 - j, &aj[1], &x[j + 1]);
+                x[j] = tmp + mf_kernels::dot(n - 1 - j, &aj[1], &x[j + 1]);
             }
         }
     }
@@ -107,10 +103,10 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
                 const T *aj = upper ? &ap[kk_upper(j)] : &ap[kk_lower(j, n)];
                 if (upper) {
                     T temp = nounit ? (aj[j] * x[j]) : x[j];
-                    y_buf[j] = temp + mf_tri::dot(j, &aj[0], &x[0]);
+                    y_buf[j] = temp + mf_kernels::dot(j, &aj[0], &x[0]);
                 } else {
                     T temp = nounit ? (aj[0] * x[j]) : x[j];
-                    y_buf[j] = temp + mf_tri::dot(n - 1 - j, &aj[1], &x[j + 1]);
+                    y_buf[j] = temp + mf_kernels::dot(n - 1 - j, &aj[1], &x[j + 1]);
                 }
             }
             #pragma omp for schedule(static)
@@ -132,12 +128,12 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
                 const T xj = x[j];
                 if (upper) {
                     const T *aj = &ap[kk_upper(j)];
-                    if (!dd_iszero(xj)) mf_tri::axpy_add(j, &y_priv[0], &aj[0], xj);
+                    if (!eq0(xj)) mf_kernels::axpy_add(j, &y_priv[0], &aj[0], xj);
                     y_priv[j] = y_priv[j] + xj * (nounit ? aj[j] : one_dd);
                 } else {
                     const T *aj = &ap[kk_lower(j, n)];
                     y_priv[j] = y_priv[j] + xj * (nounit ? aj[0] : one_dd);
-                    if (!dd_iszero(xj)) mf_tri::axpy_add(n - 1 - j, &y_priv[j + 1], &aj[1], xj);
+                    if (!eq0(xj)) mf_kernels::axpy_add(n - 1 - j, &y_priv[j + 1], &aj[1], xj);
                 }
             }
             #pragma omp for schedule(static)
@@ -246,7 +242,7 @@ extern "C" void mtpmv_(
                 std::ptrdiff_t kk = 0;
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    if (!dd_iszero(x[jx])) {
+                    if (!eq0(x[jx])) {
                         const T tmp = x[jx];
                         std::ptrdiff_t ix = kx;
                         for (std::ptrdiff_t k = kk; k < kk + j; ++k) {
@@ -263,7 +259,7 @@ extern "C" void mtpmv_(
                 kx += (n - 1) * sx;
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                    if (!dd_iszero(x[jx])) {
+                    if (!eq0(x[jx])) {
                         const T tmp = x[jx];
                         std::ptrdiff_t ix = kx;
                         for (std::ptrdiff_t k = kk; k > kk - (n - 1 - j); --k) {

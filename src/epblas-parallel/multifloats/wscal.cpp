@@ -3,12 +3,13 @@
  */
 #include <cstddef>
 #include <multifloats.h>
+#include "mf_pred.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -16,11 +17,10 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq1;
 namespace {
-inline bool cdd_isone(const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
@@ -66,7 +66,7 @@ static void wscal_unit(int n, T alpha, T *x)
         __m256d xrh, xrl, xih, xil;
         load_4cell_csoa(&x[i], xrh, xrl, xih, xil);
         __m256d nrh, nrl, nih, nil_;
-        simd_dd::cdd_mul(xrh, xrl, xih, xil, arh, arl, aih, ail,
+        simd_fast::cmul(xrh, xrl, xih, xil, arh, arl, aih, ail,
                          nrh, nrl, nih, nil_);
         store_4cell_csoa(&x[i], nrh, nrl, nih, nil_);
     }
@@ -99,7 +99,7 @@ extern "C" void wscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
 {
     const int n = *n_, incx = *incx_;
     const T alpha = *alpha_;
-    if (n <= 0 || cdd_isone(alpha)) return;
+    if (n <= 0 || ceq1(alpha)) return;
 
     if (incx == 1) {
 #ifdef _OPENMP

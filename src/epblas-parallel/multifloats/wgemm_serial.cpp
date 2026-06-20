@@ -17,7 +17,7 @@
 #include <cctype>
 
 #ifdef WBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -145,10 +145,10 @@ void wgemm_inner_kernel(int ib, int jb, int pb, T alpha,
  * one per real component (re_hi / re_lo / im_hi / im_lo). Conjugate
  * transpose 'C' negates the im_h / im_l limbs during pack.
  *
- * Panel width W = simd_dd::NR * WGEMM_SIMD_NR_PAN. Each array has
+ * Panel width W = simd_fast::NR * WGEMM_SIMD_NR_PAN. Each array has
  * W elements per p iteration.
  */
-constexpr int wsimd_pack_W() { return simd_dd::NR * WGEMM_SIMD_NR_PAN; }
+constexpr int wsimd_pack_W() { return simd_fast::NR * WGEMM_SIMD_NR_PAN; }
 
 void wgemm_pack_B_soa_complex(const T * __restrict__ B, int ldb,
                               int pc, int jc, int pb, int jb, int tb,
@@ -222,9 +222,9 @@ simd_writeback_complex(__m256d alpha_rh, __m256d alpha_rl,
                        __m256d acc_ih, __m256d acc_il,
                        T *C_row_i, int ldc, int j0, int nr_eff)
 {
-    constexpr int NR = simd_dd::NR;
+    constexpr int NR = simd_fast::NR;
     __m256d ph_rh, ph_rl, ph_ih, ph_il;
-    simd_dd::cdd_mul(alpha_rh, alpha_rl, alpha_ih, alpha_il,
+    simd_fast::cmul(alpha_rh, alpha_rl, alpha_ih, alpha_il,
                      acc_rh, acc_rl, acc_ih, acc_il,
                      ph_rh, ph_rl, ph_ih, ph_il);
     alignas(32) double rh_a[NR], rl_a[NR], ih_a[NR], il_a[NR];
@@ -253,7 +253,7 @@ inner_kernel_simd_complex_t(int ib, int jb, int pb, T alpha,
                             const double * __restrict__ Bp_il,
                             T * __restrict__ C, int ldc)
 {
-    constexpr int NR_LANE = simd_dd::NR;
+    constexpr int NR_LANE = simd_fast::NR;
     constexpr int W = NR_LANE * NR_PAN;
     const int j_panels = (jb + W - 1) / W;
     const __m256d alpha_rh = _mm256_set1_pd(alpha.re.limbs[0]);
@@ -300,10 +300,10 @@ inner_kernel_simd_complex_t(int ib, int jb, int pb, T alpha,
                     #pragma GCC unroll 8
                     for (int n = 0; n < NR_PAN; ++n) {
                         __m256d r_rh, r_rl, r_ih, r_il;
-                        simd_dd::cdd_mul(arh, arl, aih, ail,
+                        simd_fast::cmul(arh, arl, aih, ail,
                                          brh[n], brl[n], bih[n], bil[n],
                                          r_rh, r_rl, r_ih, r_il);
-                        simd_dd::cdd_add(ac_rh[k][n], ac_rl[k][n],
+                        simd_fast::cadd(ac_rh[k][n], ac_rl[k][n],
                                          ac_ih[k][n], ac_il[k][n],
                                          r_rh, r_rl, r_ih, r_il,
                                          ac_rh[k][n], ac_rl[k][n],
@@ -350,9 +350,9 @@ inner_kernel_simd_complex_t(int ib, int jb, int pb, T alpha,
                     __m256d bih = _mm256_loadu_pd(&p_ih[p * W + n * NR_LANE]);
                     __m256d bil = _mm256_loadu_pd(&p_il[p * W + n * NR_LANE]);
                     __m256d r_rh, r_rl, r_ih, r_il;
-                    simd_dd::cdd_mul(arh, arl, aih, ail, brh, brl, bih, bil,
+                    simd_fast::cmul(arh, arl, aih, ail, brh, brl, bih, bil,
                                      r_rh, r_rl, r_ih, r_il);
-                    simd_dd::cdd_add(ac_rh, ac_rl, ac_ih, ac_il,
+                    simd_fast::cadd(ac_rh, ac_rl, ac_ih, ac_il,
                                      r_rh, r_rl, r_ih, r_il,
                                      ac_rh, ac_rl, ac_ih, ac_il);
                 }

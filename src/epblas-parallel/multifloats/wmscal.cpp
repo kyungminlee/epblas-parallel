@@ -4,12 +4,13 @@
  */
 #include <cstddef>
 #include <multifloats.h>
+#include "mf_pred.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -17,8 +18,10 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq1;
 namespace {
-inline bool dd_isone(R x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 inline void load_4cell_csoa(const T *p, __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il) {
@@ -60,8 +63,8 @@ static void wmscal_unit(int n, R alpha, T *x)
         load_4cell_csoa(&x[i], xrh, xrl, xih, xil);
         /* α (real) × (xre + j·xim) → α·xre + j·α·xim — scale each limb-pair */
         __m256d nrh, nrl, nih, nil_;
-        simd_dd::dd_mul(xrh, xrl, ah, al, nrh, nrl);
-        simd_dd::dd_mul(xih, xil, ah, al, nih, nil_);
+        simd_fast::mul(xrh, xrl, ah, al, nrh, nrl);
+        simd_fast::mul(xih, xil, ah, al, nih, nil_);
         store_4cell_csoa(&x[i], nrh, nrl, nih, nil_);
     }
     for (int i = n4; i < n; ++i) { x[i].re = x[i].re * alpha; x[i].im = x[i].im * alpha; }
@@ -93,7 +96,7 @@ extern "C" void wmscal_(const int *n_, const R *alpha_, T *x, const int *incx_)
 {
     const int n = *n_, incx = *incx_;
     const R alpha = *alpha_;
-    if (n <= 0 || dd_isone(alpha)) return;
+    if (n <= 0 || eq1(alpha)) return;
 
     if (incx == 1) {
 #ifdef _OPENMP

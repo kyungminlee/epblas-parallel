@@ -3,7 +3,7 @@
  *
  * x is gathered+split once into SoA limb arrays (xh/xl); this both makes
  * the strided (incx != 1) case unit-stride from then on and feeds the
- * 4-wide AVX2 SoA double-double axpy kernel (mf_rank1::dd_axpy) that is
+ * 4-wide AVX2 SoA double-double axpy kernel (mf_kernels::dd_axpy) that is
  * bit-identical to the scalar operators. Full storage → column j is the
  * contiguous run &A_(0,j); OMP over columns (lda apart, no false sharing).
  */
@@ -12,7 +12,9 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
-#include "mf_rank1_simd.h"
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -21,12 +23,13 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 #define MSYR_OMP_MIN 64
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(double h, double l) { return h == 0.0 && l == 0.0; }
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -45,7 +48,7 @@ extern "C" void msyr_(
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
-    if (N == 0 || dd_iszero(alpha.limbs[0], alpha.limbs[1])) return;
+    if (N == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
 
     /* Gather x in logical order 0..N-1 and split into SoA limbs. O(N); also
      * the strided->contiguous fix (only x is strided — A is full storage). */
@@ -65,7 +68,7 @@ extern "C" void msyr_(
     const int use_omp = (N >= MSYR_OMP_MIN && blas_omp_max_threads() > 1);
     /* static,1 cyclic interleave balances the triangular column skew (column
      * j writes j+1 (U) / N-j (L) elems); full storage → columns lda apart, no
-     * false sharing. The hot inner loop is mf_rank1::dd_axpy, so the per-
+     * false sharing. The hot inner loop is mf_kernels::dd_axpy, so the per-
      * column UPLO branch is negligible and the old serial-codegen concern
      * (the if()-clause outlining the inner loop) no longer applies. */
 #endif
@@ -74,18 +77,18 @@ extern "C" void msyr_(
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
         for (int j = 0; j < N; ++j) {
-            if (dd_iszero(xhp[j], xlp[j])) continue;
+            if (eq0(xhp[j], xlp[j])) continue;
             const T t = alpha * T{xhp[j], xlp[j]};
-            mf_rank1::dd_axpy(N - j, xhp + j, xlp + j, t.limbs[0], t.limbs[1], &A_(j, j));
+            mf_kernels::dd_axpy(N - j, xhp + j, xlp + j, t.limbs[0], t.limbs[1], &A_(j, j));
         }
     } else {
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
         for (int j = 0; j < N; ++j) {
-            if (dd_iszero(xhp[j], xlp[j])) continue;
+            if (eq0(xhp[j], xlp[j])) continue;
             const T t = alpha * T{xhp[j], xlp[j]};
-            mf_rank1::dd_axpy(j + 1, xhp, xlp, t.limbs[0], t.limbs[1], &A_(0, j));
+            mf_kernels::dd_axpy(j + 1, xhp, xlp, t.limbs[0], t.limbs[1], &A_(0, j));
         }
     }
 }

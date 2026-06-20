@@ -13,10 +13,12 @@
 #include <cstddef>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_util.h"
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include <cstdlib>
 #include <immintrin.h>
-#include "mf_simd_dd.h"   /* faithful SoA dd_mul/dd_add/load_dd4/gather_dd4 */
+#include "mf_simd_exact.h"   /* faithful SoA mul/add/load_dd4/gather_dd4 */
 #endif
 #ifdef _OPENMP
 #include <cstdlib>
@@ -29,11 +31,12 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(const T &x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -51,7 +54,7 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
         if (upper) {
             if (incx == 1) {
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    if (!dd_iszero(x[j])) {
+                    if (!eq0(x[j])) {
                         const T temp = x[j];
                         std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
                         const T *col = &A_(0, j);
@@ -63,7 +66,7 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
             } else {
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    if (!dd_iszero(x[jx])) {
+                    if (!eq0(x[jx])) {
                         const T temp = x[jx];
                         std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
                         std::ptrdiff_t ix = kx;
@@ -79,7 +82,7 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
         } else {
             if (incx == 1) {
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                    if (!dd_iszero(x[j])) {
+                    if (!eq0(x[j])) {
                         const T temp = x[j];
                         std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
                         const T *col = &A_(0, j);
@@ -92,7 +95,7 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
                 kx += (n - 1) * incx;
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                    if (!dd_iszero(x[jx])) {
+                    if (!eq0(x[jx])) {
                         const T temp = x[jx];
                         std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
                         std::ptrdiff_t ix = kx;
@@ -172,8 +175,8 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
  * once — is deinterleaved inline with load_dd4.  Columns run in reference order
  * (upper ascending / lower descending) and within a column every write lands on
  * a distinct row i != j, so 4-wide-over-i is order-free and the result is
- * bit-identical to the scalar reference on every non-degenerate lane (mf_simd
- * dd_mul/dd_add mirror the float64x2 multiply/add operators op-for-op).  x is
+ * bit-identical to the scalar reference on every non-degenerate lane (simd_exact
+ * mul/add mirror the float64x2 multiply/add operators op-for-op).  x is
  * already at logical index 0 (caller shifted for incx<0); a strided x is gathered
  * into the SoA limb arrays up front and scattered back at the end — the O(N)
  * gather is repaid by the SoA core quartering the O(N*K) band work (gather alone,
@@ -197,10 +200,10 @@ static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
             const std::ptrdiff_t off = k - j;
             int i = (j > k) ? j - k : 0;
             for (; i + 4 <= j; i += 4) {
-                __m256d mh, ml; mf_simd::load_dd4(&col[off + i], mh, ml);
-                __m256d ph, pl; mf_simd::dd_mul(mh, ml, bh, bl, ph, pl);
+                __m256d mh, ml; simd_exact::load_dd4(&col[off + i], mh, ml);
+                __m256d ph, pl; simd_exact::mul(mh, ml, bh, bl, ph, pl);
                 __m256d rh, rl;
-                mf_simd::dd_add(_mm256_loadu_pd(xh + i), _mm256_loadu_pd(xl + i), ph, pl, rh, rl);
+                simd_exact::add(_mm256_loadu_pd(xh + i), _mm256_loadu_pd(xl + i), ph, pl, rh, rl);
                 _mm256_storeu_pd(xh + i, rh); _mm256_storeu_pd(xl + i, rl);
             }
             const T xj{xh[j], xl[j]};
@@ -216,10 +219,10 @@ static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
             const int i_hi = (j + k < n - 1) ? j + k : n - 1;   /* inclusive top row */
             int i = j + 1;
             for (; i + 4 <= i_hi + 1; i += 4) {
-                __m256d mh, ml; mf_simd::load_dd4(&col[off + i], mh, ml);
-                __m256d ph, pl; mf_simd::dd_mul(mh, ml, bh, bl, ph, pl);
+                __m256d mh, ml; simd_exact::load_dd4(&col[off + i], mh, ml);
+                __m256d ph, pl; simd_exact::mul(mh, ml, bh, bl, ph, pl);
                 __m256d rh, rl;
-                mf_simd::dd_add(_mm256_loadu_pd(xh + i), _mm256_loadu_pd(xl + i), ph, pl, rh, rl);
+                simd_exact::add(_mm256_loadu_pd(xh + i), _mm256_loadu_pd(xl + i), ph, pl, rh, rl);
                 _mm256_storeu_pd(xh + i, rh); _mm256_storeu_pd(xl + i, rl);
             }
             const T xj{xh[j], xl[j]};
@@ -252,14 +255,14 @@ static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
             if (r >= k && r + 4 <= hi) {                 /* full band: llen == k */
                 __m256d sh, sl;
                 if (nounit) {
-                    __m256d dh, dl; mf_simd::gather_dd4(&A_(k, r), lda, dh, dl);
-                    mf_simd::dd_mul(dh, dl, _mm256_loadu_pd(xh + r), _mm256_loadu_pd(xl + r), sh, sl);
+                    __m256d dh, dl; simd_exact::gather_dd4(&A_(k, r), lda, dh, dl);
+                    simd_exact::mul(dh, dl, _mm256_loadu_pd(xh + r), _mm256_loadu_pd(xl + r), sh, sl);
                 } else { sh = _mm256_loadu_pd(xh + r); sl = _mm256_loadu_pd(xl + r); }
                 for (int d = 1; d <= k; ++d) {
-                    __m256d mh, ml; mf_simd::gather_dd4(&A_(k - d, r), lda, mh, ml);
+                    __m256d mh, ml; simd_exact::gather_dd4(&A_(k - d, r), lda, mh, ml);
                     __m256d ph, pl;
-                    mf_simd::dd_mul(mh, ml, _mm256_loadu_pd(xh + (r - d)), _mm256_loadu_pd(xl + (r - d)), ph, pl);
-                    mf_simd::dd_add(sh, sl, ph, pl, sh, sl);
+                    simd_exact::mul(mh, ml, _mm256_loadu_pd(xh + (r - d)), _mm256_loadu_pd(xl + (r - d)), ph, pl);
+                    simd_exact::add(sh, sl, ph, pl, sh, sl);
                 }
                 _mm256_storeu_pd(yh + r, sh); _mm256_storeu_pd(yl + r, sl);
                 r += 4;
@@ -277,14 +280,14 @@ static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
             if (r + 3 <= n - 1 - k && r + 4 <= hi) {     /* full band: rlen == k */
                 __m256d sh, sl;
                 if (nounit) {
-                    __m256d dh, dl; mf_simd::gather_dd4(&A_(0, r), lda, dh, dl);
-                    mf_simd::dd_mul(dh, dl, _mm256_loadu_pd(xh + r), _mm256_loadu_pd(xl + r), sh, sl);
+                    __m256d dh, dl; simd_exact::gather_dd4(&A_(0, r), lda, dh, dl);
+                    simd_exact::mul(dh, dl, _mm256_loadu_pd(xh + r), _mm256_loadu_pd(xl + r), sh, sl);
                 } else { sh = _mm256_loadu_pd(xh + r); sl = _mm256_loadu_pd(xl + r); }
                 for (int d = 1; d <= k; ++d) {
-                    __m256d mh, ml; mf_simd::gather_dd4(&A_(d, r), lda, mh, ml);
+                    __m256d mh, ml; simd_exact::gather_dd4(&A_(d, r), lda, mh, ml);
                     __m256d ph, pl;
-                    mf_simd::dd_mul(mh, ml, _mm256_loadu_pd(xh + (r + d)), _mm256_loadu_pd(xl + (r + d)), ph, pl);
-                    mf_simd::dd_add(sh, sl, ph, pl, sh, sl);
+                    simd_exact::mul(mh, ml, _mm256_loadu_pd(xh + (r + d)), _mm256_loadu_pd(xl + (r + d)), ph, pl);
+                    simd_exact::add(sh, sl, ph, pl, sh, sl);
                 }
                 _mm256_storeu_pd(yh + r, sh); _mm256_storeu_pd(yl + r, sl);
                 r += 4;
@@ -412,10 +415,10 @@ static void mtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
             const int i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
             int i = i_lo;
             for (; i + 4 <= i_hi; i += 4) {
-                __m256d mh, ml; mf_simd::load_dd4(&col[off + i], mh, ml);
-                __m256d ph, pl; mf_simd::dd_mul(mh, ml, bh, bl, ph, pl);
+                __m256d mh, ml; simd_exact::load_dd4(&col[off + i], mh, ml);
+                __m256d ph, pl; simd_exact::mul(mh, ml, bh, bl, ph, pl);
                 __m256d rh, rl;
-                mf_simd::dd_add(_mm256_loadu_pd(yh + i), _mm256_loadu_pd(yl + i), ph, pl, rh, rl);
+                simd_exact::add(_mm256_loadu_pd(yh + i), _mm256_loadu_pd(yl + i), ph, pl, rh, rl);
                 _mm256_storeu_pd(yh + i, rh); _mm256_storeu_pd(yl + i, rl);
             }
             const T tmp{xh[j], xl[j]};
@@ -435,10 +438,10 @@ static void mtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
             const int i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
             int i = i_lo;
             for (; i + 4 <= i_hi; i += 4) {
-                __m256d mh, ml; mf_simd::load_dd4(&col[off + i], mh, ml);
-                __m256d ph, pl; mf_simd::dd_mul(mh, ml, bh, bl, ph, pl);
+                __m256d mh, ml; simd_exact::load_dd4(&col[off + i], mh, ml);
+                __m256d ph, pl; simd_exact::mul(mh, ml, bh, bl, ph, pl);
                 __m256d rh, rl;
-                mf_simd::dd_add(_mm256_loadu_pd(yh + i), _mm256_loadu_pd(yl + i), ph, pl, rh, rl);
+                simd_exact::add(_mm256_loadu_pd(yh + i), _mm256_loadu_pd(yl + i), ph, pl, rh, rl);
                 _mm256_storeu_pd(yh + i, rh); _mm256_storeu_pd(yl + i, rl);
             }
             const T tmp{xh[j], xl[j]};

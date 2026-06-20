@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
-#include "mf_tri_simd.h"   /* mf_tri::axpy_add / dot — shared SoA loop kernels */
+#include "mf_util.h"
+#include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -15,21 +17,22 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const T zero_dd{0.0, 0.0};
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
 /* Contiguous (unit-stride) dense triangular matvec, x[0..n-1] in logical order.
  * Per column j this is the full-triangle twin of the band cores: NoTrans is an
- * axpy of column j (scaled by x[j]) into the off-diagonal rows -> mf_tri::axpy_add
+ * axpy of column j (scaled by x[j]) into the off-diagonal rows -> mf_kernels::axpy_add
  * (order-free, bit-exact); Trans is a dot of column j with the off-diagonal x
- * rows -> mf_tri::dot (vector accumulate + hreduce, within tolerance). The
+ * rows -> mf_kernels::dot (vector accumulate + hreduce, within tolerance). The
  * diagonal scaling matches the scalar reference: applied after the axpy for
  * NoTrans, folded into the dot seed for Trans. A strided x is gathered to a
  * contiguous scratch by the caller and scattered back. */
@@ -41,16 +44,16 @@ static void mtrmv_contig(bool upper, bool trans, bool nounit,
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 const T *aj = &A_(0, j);
                 const T temp = x[j];
-                if (!dd_iszero(temp))
-                    mf_tri::axpy_add(n - 1 - j, &x[j + 1], &aj[j + 1], temp);
+                if (!eq0(temp))
+                    mf_kernels::axpy_add(n - 1 - j, &x[j + 1], &aj[j + 1], temp);
                 if (nounit) x[j] = x[j] * aj[j];
             }
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T *aj = &A_(0, j);
                 const T temp = x[j];
-                if (!dd_iszero(temp))
-                    mf_tri::axpy_add(j, &x[0], &aj[0], temp);
+                if (!eq0(temp))
+                    mf_kernels::axpy_add(j, &x[0], &aj[0], temp);
                 if (nounit) x[j] = x[j] * aj[j];
             }
         }
@@ -59,14 +62,14 @@ static void mtrmv_contig(bool upper, bool trans, bool nounit,
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T *aj = &A_(0, j);
                 T temp = nounit ? (x[j] * aj[j]) : x[j];
-                temp = temp + mf_tri::dot(n - 1 - j, &aj[j + 1], &x[j + 1]);
+                temp = temp + mf_kernels::dot(n - 1 - j, &aj[j + 1], &x[j + 1]);
                 x[j] = temp;
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 const T *aj = &A_(0, j);
                 T temp = nounit ? (x[j] * aj[j]) : x[j];
-                temp = temp + mf_tri::dot(j, &aj[0], &x[0]);
+                temp = temp + mf_kernels::dot(j, &aj[0], &x[0]);
                 x[j] = temp;
             }
         }
@@ -102,14 +105,14 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
                     T temp = nounit ? (x[j] * A_(j, j)) : x[j];
                     const T *aj = &A_(0, j);
-                    y_buf[j] = temp + mf_tri::dot(n - 1 - j, &aj[j + 1], &x[j + 1]);
+                    y_buf[j] = temp + mf_kernels::dot(n - 1 - j, &aj[j + 1], &x[j + 1]);
                 }
             } else {
                 #pragma omp for schedule(static, 1)
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
                     T temp = nounit ? (x[j] * A_(j, j)) : x[j];
                     const T *aj = &A_(0, j);
-                    y_buf[j] = temp + mf_tri::dot(j, &aj[0], &x[0]);
+                    y_buf[j] = temp + mf_kernels::dot(j, &aj[0], &x[0]);
                 }
             }
             #pragma omp for schedule(static)
@@ -132,16 +135,16 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
                     const T xj = x[j];
                     const T *aj = &A_(0, j);
                     y_priv[j] = y_priv[j] + xj * (nounit ? aj[j] : one_dd);
-                    if (!dd_iszero(xj))
-                        mf_tri::axpy_add(n - 1 - j, &y_priv[j + 1], &aj[j + 1], xj);
+                    if (!eq0(xj))
+                        mf_kernels::axpy_add(n - 1 - j, &y_priv[j + 1], &aj[j + 1], xj);
                 }
             } else {
                 #pragma omp for schedule(static, 1)
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
                     const T xj = x[j];
                     const T *aj = &A_(0, j);
-                    if (!dd_iszero(xj))
-                        mf_tri::axpy_add(j, &y_priv[0], &aj[0], xj);
+                    if (!eq0(xj))
+                        mf_kernels::axpy_add(j, &y_priv[0], &aj[0], xj);
                     y_priv[j] = y_priv[j] + xj * (nounit ? aj[j] : one_dd);
                 }
             }
@@ -232,14 +235,14 @@ extern "C" void mtrmv_(
         if (UPLO == 'L') {
             for (int j = N - 1; j >= 0; --j) {
                 const T temp = x[kx + j * incx];
-                if (!dd_iszero(temp))
+                if (!eq0(temp))
                     for (int i = j + 1; i < N; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
                 if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
             }
         } else {
             for (int j = 0; j < N; ++j) {
                 const T temp = x[kx + j * incx];
-                if (!dd_iszero(temp))
+                if (!eq0(temp))
                     for (int i = 0; i < j; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
                 if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
             }

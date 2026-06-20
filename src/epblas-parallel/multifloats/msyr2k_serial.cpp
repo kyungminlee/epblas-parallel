@@ -11,29 +11,32 @@
  * inside its own omp region.
  */
 #include "msyr2k_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include "mgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
 const T zero_dd{0.0, 0.0};
 const T one_dd {1.0, 0.0};
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -41,7 +44,7 @@ inline bool dd_isone (T x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_dd::NR;
+constexpr int kSimdLane = simd_fast::NR;
 constexpr int kMaxBlockM = 128;
 constexpr int kMaxK      = 512;
 
@@ -107,8 +110,8 @@ inline void simd_syr2k_diag_tn(int jc, int jb, int K, T alpha,
         __m256d bjh = _mm256_load_pd(bj_h);
         __m256d bjl = _mm256_load_pd(bj_l);
         __m256d t1h, t1l, t2h, t2l;
-        simd_dd::dd_mul(a_h, a_l, ajh, ajl, t1h, t1l);  /* t1 = α·Aj */
-        simd_dd::dd_mul(a_h, a_l, bjh, bjl, t2h, t2l);  /* t2 = α·Bj */
+        simd_fast::mul(a_h, a_l, ajh, ajl, t1h, t1l);  /* t1 = α·Aj */
+        simd_fast::mul(a_h, a_l, bjh, bjl, t2h, t2l);  /* t2 = α·Bj */
         for (int i = jc; i < jc + jb; ++i) {
             const int ir = i - jc;
             const T ail = A_(i, ll);
@@ -118,14 +121,14 @@ inline void simd_syr2k_diag_tn(int jc, int jb, int K, T alpha,
             __m256d bih = _mm256_set1_pd(bil.limbs[0]);
             __m256d bili = _mm256_set1_pd(bil.limbs[1]);
             __m256d p1h, p1l, p2h, p2l;
-            simd_dd::dd_mul(bih, bili, t1h, t1l, p1h, p1l);  /* B(i,l)·t1 */
-            simd_dd::dd_mul(aih, aili, t2h, t2l, p2h, p2l);  /* A(i,l)·t2 */
+            simd_fast::mul(bih, bili, t1h, t1l, p1h, p1l);  /* B(i,l)·t1 */
+            simd_fast::mul(aih, aili, t2h, t2l, p2h, p2l);  /* A(i,l)·t2 */
             __m256d sh, sl;
-            simd_dd::dd_add(p1h, p1l, p2h, p2l, sh, sl);
+            simd_fast::add(p1h, p1l, p2h, p2l, sh, sl);
             __m256d ck_h = _mm256_load_pd(&ch[ir * kSimdLane]);
             __m256d ck_l = _mm256_load_pd(&cl[ir * kSimdLane]);
             __m256d nh, nl;
-            simd_dd::dd_add(ck_h, ck_l, sh, sl, nh, nl);
+            simd_fast::add(ck_h, ck_l, sh, sl, nh, nl);
             _mm256_store_pd(&ch[ir * kSimdLane], nh);
             _mm256_store_pd(&cl[ir * kSimdLane], nl);
         }
@@ -161,12 +164,12 @@ inline void simd_syr2k_diag_tt_chunk(int jc, int jb, int kc,
             __m256d bjv = _mm256_load_pd(&bjh[ll * kSimdLane]);
             __m256d bjvl = _mm256_load_pd(&bjl[ll * kSimdLane]);
             __m256d p1h, p1l, p2h, p2l;
-            simd_dd::dd_mul(aih, aili, bjv, bjvl, p1h, p1l);   /* Ai(l) · Bj */
-            simd_dd::dd_mul(bih, bili, ajv, ajvl, p2h, p2l);   /* Bi(l) · Aj */
+            simd_fast::mul(aih, aili, bjv, bjvl, p1h, p1l);   /* Ai(l) · Bj */
+            simd_fast::mul(bih, bili, ajv, ajvl, p2h, p2l);   /* Bi(l) · Aj */
             __m256d ph, pl;
-            simd_dd::dd_add(p1h, p1l, p2h, p2l, ph, pl);
+            simd_fast::add(p1h, p1l, p2h, p2l, ph, pl);
             __m256d nh, nl;
-            simd_dd::dd_add(sh, sl, ph, pl, nh, nl);
+            simd_fast::add(sh, sl, ph, pl, nh, nl);
             sh = nh; sl = nl;
         }
         _mm256_store_pd(&acc_h[ir * kSimdLane], sh);
@@ -230,11 +233,11 @@ inline void simd_syr2k_diag_panels(int jc, int jb, int K, T alpha,
                 __m256d sh = _mm256_load_pd(&acc_h[ir * kSimdLane]);
                 __m256d sl = _mm256_load_pd(&acc_l[ir * kSimdLane]);
                 __m256d ph, pl;
-                simd_dd::dd_mul(a_h, a_l, sh, sl, ph, pl);
+                simd_fast::mul(a_h, a_l, sh, sl, ph, pl);
                 __m256d ck_h = _mm256_load_pd(&ch[ir * kSimdLane]);
                 __m256d ck_l = _mm256_load_pd(&cl[ir * kSimdLane]);
                 __m256d nh, nl;
-                simd_dd::dd_add(ck_h, ck_l, ph, pl, nh, nl);
+                simd_fast::add(ck_h, ck_l, ph, pl, nh, nl);
                 _mm256_store_pd(&ch[ir * kSimdLane], nh);
                 _mm256_store_pd(&cl[ir * kSimdLane], nl);
             }
@@ -307,7 +310,7 @@ void msyr2k_scale_col(int j, int N, char UPLO, T beta, T *c, int ldc) {
     const int i_lo = (UPLO == 'L') ? j : 0;
     const int i_hi = (UPLO == 'L') ? N : j + 1;
     T *cj = c + static_cast<std::size_t>(j) * ldc;
-    if (dd_iszero(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
+    if (eq0(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
     else                 for (int i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
 }
 
@@ -320,8 +323,8 @@ void msyr2k_block(int jc, int jb, int N, int K, char UPLO, char TR,
         const int i_lo = (UPLO == 'L') ? j : 0;
         const int i_hi = (UPLO == 'L') ? N : j + 1;
         T *cj = c + static_cast<std::size_t>(j) * ldc;
-        if (dd_iszero(beta))      for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
-        else if (!dd_isone(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
+        if (eq0(beta))      for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
+        else if (!eq1(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
     }
 
     diag_dispatch(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR);
@@ -390,8 +393,8 @@ extern "C" void msyr2k_serial(
 
     if (N == 0) return;
 
-    if (dd_iszero(alpha) || K == 0) {
-        if (dd_isone(beta)) return;
+    if (eq0(alpha) || K == 0) {
+        if (eq1(beta)) return;
         for (int j = 0; j < N; ++j) msyr2k_scale_col(j, N, UPLO, beta, c, ldc);
         return;
     }

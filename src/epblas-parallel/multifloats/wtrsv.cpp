@@ -1,15 +1,17 @@
 /* wtrsv — multifloats complex DD triangular solve.
  * SIMD: pre-pack x to SoA scratch; per i, scalar divide then SIMD
- * inner loop using cdd_mul/cdd_add. TRANS='C' applies dd_neg to A.im
- * before cdd_mul to implement conj(A). */
+ * inner loop using cmul/cadd. TRANS='C' applies neg to A.im
+ * before cmul to implement conj(A). */
 
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_util.h"
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -24,15 +26,13 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
@@ -40,10 +40,11 @@ inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T csub(T const &a, T const &b) { return T{ a.re - b.re, a.im - b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 inline T cdiv(T const &a, T const &b) {
-    const R d = b.re * b.re + b.im * b.im;
-    const R inv_d = R{1.0, 0.0} / d;
-    return T{ (a.re * b.re + a.im * b.im) * inv_d,
-              (a.im * b.re - a.re * b.im) * inv_d };
+    /* a / b = a·conj(b) / |b|², direct DD divide (canonical form shared with
+     * wtbsv/wtpsv/wtrsm_serial — see F2, simd_audit). */
+    const R denom = b.re * b.re + b.im * b.im;
+    return T{ (a.re * b.re + a.im * b.im) / denom,
+              (a.im * b.re - a.re * b.im) / denom };
 }
 
 #ifdef MBLAS_SIMD_DD
@@ -72,14 +73,14 @@ hreduce_cdd(__m256d s_rh, __m256d s_rl, __m256d s_ih, __m256d s_il)
     __m256d sih_sw = _mm256_permute2f128_pd(s_ih, s_ih, 0x01);
     __m256d sil_sw = _mm256_permute2f128_pd(s_il, s_il, 0x01);
     __m256d p_rh, p_rl, p_ih, p_il;
-    simd_dd::cdd_add(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
+    simd_fast::cadd(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
                      p_rh, p_rl, p_ih, p_il);
     __m256d prh_sw = _mm256_shuffle_pd(p_rh, p_rh, 0x5);
     __m256d prl_sw = _mm256_shuffle_pd(p_rl, p_rl, 0x5);
     __m256d pih_sw = _mm256_shuffle_pd(p_ih, p_ih, 0x5);
     __m256d pil_sw = _mm256_shuffle_pd(p_il, p_il, 0x5);
     __m256d r_rh, r_rl, r_ih, r_il;
-    simd_dd::cdd_add(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
+    simd_fast::cadd(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
                      r_rh, r_rl, r_ih, r_il);
     double rh[4], rl[4], ih[4], il[4];
     _mm256_storeu_pd(rh, r_rh); _mm256_storeu_pd(rl, r_rl);
@@ -116,14 +117,14 @@ wtrsv_col_msub(T *x, const T *ai, T xi, int lo, int hi)
         __m256d arh, arl, aih, ail;
         soa_load4_cdd(aip + 4 * k, arh, arl, aih, ail);
         __m256d prh, prl, pih, pil;
-        simd_dd::cdd_mul(xrh, xrl, xih, xil, arh, arl, aih, ail,
+        simd_fast::cmul(xrh, xrl, xih, xil, arh, arl, aih, ail,
                          prh, prl, pih, pil);
-        simd_dd::dd_neg(prh, prl);
-        simd_dd::dd_neg(pih, pil);
+        simd_fast::neg(prh, prl);
+        simd_fast::neg(pih, pil);
         __m256d crh, crl, cih, cil;
         soa_load4_cdd(xp + 4 * k, crh, crl, cih, cil);
         __m256d rrh, rrl, rih, ril;
-        simd_dd::cdd_add(crh, crl, cih, cil, prh, prl, pih, pil,
+        simd_fast::cadd(crh, crl, cih, cil, prh, prl, pih, pil,
                          rrh, rrl, rih, ril);
         soa_store4_cdd(xp + 4 * k, rrh, rrl, rih, ril);
     }
@@ -140,13 +141,13 @@ wtrsv_dot_range(const T *ai, const T *x, int lo, int hi, bool conj_a)
     for (; k + 4 <= hi; k += 4) {
         __m256d arh, arl, aih, ail;
         soa_load4_cdd(aip + 4 * k, arh, arl, aih, ail);
-        if (conj_a) simd_dd::dd_neg(aih, ail);
+        if (conj_a) simd_fast::neg(aih, ail);
         __m256d xrh, xrl, xih, xil;
         soa_load4_cdd(xp + 4 * k, xrh, xrl, xih, xil);
         __m256d prh, prl, pih, pil;
-        simd_dd::cdd_mul(arh, arl, aih, ail, xrh, xrl, xih, xil,
+        simd_fast::cmul(arh, arl, aih, ail, xrh, xrl, xih, xil,
                          prh, prl, pih, pil);
-        simd_dd::cdd_add(srh, srl, sih, sil, prh, prl, pih, pil,
+        simd_fast::cadd(srh, srl, sih, sil, prh, prl, pih, pil,
                          srh, srl, sih, sil);
     }
     T s = hreduce_cdd(srh, srl, sih, sil);
@@ -195,7 +196,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
         if (TR == 'N') {
             auto do_axpy_range = [&](int i, int k_lo, int k_hi) {
                 T xi = load_x(i);
-                if (cdd_iszero(xi)) return;
+                if (ceq0(xi)) return;
                 if (nounit) { xi = cdiv(xi, A_(i, i)); store_x(i, xi); }
                 const __m256d xrh = _mm256_set1_pd(xi.re.limbs[0]);
                 const __m256d xrl = _mm256_set1_pd(xi.re.limbs[1]);
@@ -215,12 +216,12 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
                     __m256d xkih = _mm256_loadu_pd(x_ih + k);
                     __m256d xkil = _mm256_loadu_pd(x_il + k);
                     __m256d p_rh, p_rl, p_ih, p_il;
-                    simd_dd::cdd_mul(xrh, xrl, xih, xil, a_rh, a_rl, a_ih, a_il,
+                    simd_fast::cmul(xrh, xrl, xih, xil, a_rh, a_rl, a_ih, a_il,
                                      p_rh, p_rl, p_ih, p_il);
-                    simd_dd::dd_neg(p_rh, p_rl);
-                    simd_dd::dd_neg(p_ih, p_il);
+                    simd_fast::neg(p_rh, p_rl);
+                    simd_fast::neg(p_ih, p_il);
                     __m256d nrh, nrl, nih, nil;
-                    simd_dd::cdd_add(xkrh, xkrl, xkih, xkil, p_rh, p_rl, p_ih, p_il,
+                    simd_fast::cadd(xkrh, xkrl, xkih, xkil, p_rh, p_rl, p_ih, p_il,
                                      nrh, nrl, nih, nil);
                     _mm256_storeu_pd(x_rh + k, nrh);
                     _mm256_storeu_pd(x_rl + k, nrl);
@@ -252,16 +253,16 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
                 for (; k + 3 < k_hi; k += 4) {
                     __m256d a_rh, a_rl, a_ih, a_il;
                     soa_load4_cdd(aip + 4 * k, a_rh, a_rl, a_ih, a_il);
-                    if (conj_a) simd_dd::dd_neg(a_ih, a_il);
+                    if (conj_a) simd_fast::neg(a_ih, a_il);
                     __m256d xkrh = _mm256_loadu_pd(x_rh + k);
                     __m256d xkrl = _mm256_loadu_pd(x_rl + k);
                     __m256d xkih = _mm256_loadu_pd(x_ih + k);
                     __m256d xkil = _mm256_loadu_pd(x_il + k);
                     __m256d p_rh, p_rl, p_ih, p_il;
-                    simd_dd::cdd_mul(a_rh, a_rl, a_ih, a_il, xkrh, xkrl, xkih, xkil,
+                    simd_fast::cmul(a_rh, a_rl, a_ih, a_il, xkrh, xkrl, xkih, xkil,
                                      p_rh, p_rl, p_ih, p_il);
                     __m256d nsrh, nsrl, nsih, nsil;
-                    simd_dd::cdd_add(s_rh, s_rl, s_ih, s_il, p_rh, p_rl, p_ih, p_il,
+                    simd_fast::cadd(s_rh, s_rl, s_ih, s_il, p_rh, p_rl, p_ih, p_il,
                                      nsrh, nsrl, nsih, nsil);
                     s_rh = nsrh; s_rl = nsrl; s_ih = nsih; s_il = nsil;
                 }
@@ -294,7 +295,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
         if (TR == 'N') {
             if (UPLO == 'L') {
                 for (int i = 0; i < N; ++i) {
-                    if (!cdd_iszero(x[i])) {
+                    if (!ceq0(x[i])) {
                         if (nounit) x[i] = cdiv(x[i], A_(i, i));
                         const T xi = x[i];
                         const T *ai = &A_(0, i);
@@ -303,7 +304,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
                 }
             } else {
                 for (int i = N - 1; i >= 0; --i) {
-                    if (!cdd_iszero(x[i])) {
+                    if (!ceq0(x[i])) {
                         if (nounit) x[i] = cdiv(x[i], A_(i, i));
                         const T xi = x[i];
                         const T *ai = &A_(0, i);
@@ -385,7 +386,7 @@ __attribute__((noinline)) static bool wtrsv_omp(
                     int rhi = j1 + (int)((long long)(N - j1) * (tid + 1) / nthreads);
                     for (int i = j0; i < j1; ++i) {
                         const T xi = x[i];
-                        if (cdd_iszero(xi)) continue;
+                        if (ceq0(xi)) continue;
                         const T *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         wtrsv_col_msub(x, ai, xi, rlo, rhi);
@@ -407,7 +408,7 @@ __attribute__((noinline)) static bool wtrsv_omp(
                     int rhi = (int)((long long)j0 * (tid + 1) / nthreads);
                     for (int i = j0; i < j1; ++i) {
                         const T xi = x[i];
-                        if (cdd_iszero(xi)) continue;
+                        if (ceq0(xi)) continue;
                         const T *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         wtrsv_col_msub(x, ai, xi, rlo, rhi);

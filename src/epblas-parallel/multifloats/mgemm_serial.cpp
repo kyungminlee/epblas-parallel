@@ -19,7 +19,7 @@
 #include <cctype>
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -120,8 +120,8 @@ void mgemm_inner_kernel(int ib, int jb, int pb, T alpha,
  * can always run the full NR-wide tile; the writeback masks padded
  * lanes.
  */
-/* Panel width W = simd_dd::NR * MGEMM_SIMD_NR_PAN (4 / 8 / …) */
-constexpr int simd_pack_W() { return simd_dd::NR * MGEMM_SIMD_NR_PAN; }
+/* Panel width W = simd_fast::NR * MGEMM_SIMD_NR_PAN (4 / 8 / …) */
+constexpr int simd_pack_W() { return simd_fast::NR * MGEMM_SIMD_NR_PAN; }
 
 void mgemm_pack_B_soa(const T * __restrict__ B, int ldb,
                       int pc, int jc, int pb, int jb, int tb,
@@ -174,9 +174,9 @@ simd_writeback(__m256d alpha_h, __m256d alpha_l,
                __m256d acc_h, __m256d acc_l,
                T *C_row_i, int ldc, int j0, int nr_eff)
 {
-    constexpr int NR = simd_dd::NR;
+    constexpr int NR = simd_fast::NR;
     __m256d ph, pl;
-    simd_dd::dd_mul(alpha_h, alpha_l, acc_h, acc_l, ph, pl);
+    simd_fast::mul(alpha_h, alpha_l, acc_h, acc_l, ph, pl);
     alignas(32) double ph_a[NR], pl_a[NR];
     _mm256_store_pd(ph_a, ph);
     _mm256_store_pd(pl_a, pl);
@@ -224,7 +224,7 @@ inner_kernel_simd_t(int ib, int jb, int pb, T alpha,
                     const double * __restrict__ Bp_lo,
                     T * __restrict__ C, int ldc)
 {
-    constexpr int NR_LANE = simd_dd::NR;   /* = 4 (one ymm) */
+    constexpr int NR_LANE = simd_fast::NR;   /* = 4 (one ymm) */
     constexpr int W = NR_LANE * NR_PAN;    /* total cols per call */
     const int j_panels = (jb + W - 1) / W;
     const __m256d alpha_h = _mm256_set1_pd(alpha.limbs[0]);
@@ -260,8 +260,8 @@ inner_kernel_simd_t(int ib, int jb, int pb, T alpha,
                     #pragma GCC unroll 8
                     for (int n = 0; n < NR_PAN; ++n) {
                         __m256d rh, rl;
-                        simd_dd::dd_mul(ah, al, bh[n], bl[n], rh, rl);
-                        simd_dd::dd_add(ach[k][n], acl[k][n], rh, rl,
+                        simd_fast::mul(ah, al, bh[n], bl[n], rh, rl);
+                        simd_fast::add(ach[k][n], acl[k][n], rh, rl,
                                         ach[k][n], acl[k][n]);
                     }
                 }
@@ -297,8 +297,8 @@ inner_kernel_simd_t(int ib, int jb, int pb, T alpha,
                     __m256d bh = _mm256_loadu_pd(&Bp_h_panel[p * W + n * NR_LANE]);
                     __m256d bl = _mm256_loadu_pd(&Bp_l_panel[p * W + n * NR_LANE]);
                     __m256d rh, rl;
-                    simd_dd::dd_mul(ah, al, bh, bl, rh, rl);
-                    simd_dd::dd_add(acc_h, acc_l, rh, rl, acc_h, acc_l);
+                    simd_fast::mul(ah, al, bh, bl, rh, rl);
+                    simd_fast::add(acc_h, acc_l, rh, rl, acc_h, acc_l);
                 }
                 simd_writeback(alpha_h, alpha_l, acc_h, acc_l,
                                &C[i], ldc, panel_j0, panel_eff);

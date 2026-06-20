@@ -43,7 +43,7 @@ void wgemm_inner_kernel(int ib, int jb, int pb, wgemm_T alpha,
                         wgemm_T *C, int ldc);
 
 #ifdef WBLAS_SIMD_DD
-/* SIMD panel width W = simd_dd::NR * WGEMM_SIMD_NR_PAN (runtime accessor so
+/* SIMD panel width W = simd_fast::NR * WGEMM_SIMD_NR_PAN (runtime accessor so
  * the parallel driver can size the SoA Bp pad without the SIMD headers). */
 int wgemm_simd_pack_W(void);
 /* Complex SoA pack of B (re/im hi/lo split) + templated AVX2 kernel. */

@@ -14,6 +14,8 @@
  * real branches because T and C differ for complex.
  */
 #include "wgemmtr_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include "wgemm_kernel.h"
 #include <cstdlib>
 #include <cctype>
@@ -22,19 +24,16 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+using mf_pred::ceq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-inline char up(const char *p) { return (char)std::toupper((unsigned char)*p); }
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 const T one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
-inline bool cdd_isone(const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
@@ -70,7 +69,7 @@ inline void diag_add(int jc, int jb, int K, T alpha,
                 else if (!conj_b)  bl = B_(j, l);
                 else               bl = cconj(B_(j, l));
                 const T t = cmul(alpha, bl);
-                if (cdd_iszero(t)) continue;
+                if (ceq0(t)) continue;
                 const T *al = &A_(0, l);
                 for (int i = is; i < ie; ++i) cj[i] = cadd(cj[i], cmul(t, al[i]));
             }
@@ -119,7 +118,7 @@ void wgemmtr_beta_core(int j0, int j1, int N, bool upper,
         const int is = upper ? 0 : j;
         const int ie = upper ? (j + 1) : N;
         T *cj = &C_(0, j);
-        if (cdd_iszero(beta)) for (int i = is; i < ie; ++i) cj[i] = zero_cdd;
+        if (ceq0(beta)) for (int i = is; i < ie; ++i) cj[i] = zero_cdd;
         else                  for (int i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
     }
 }
@@ -139,8 +138,8 @@ void wgemmtr_block_core(int jc, int jb, int N, int K,
         const int is = upper ? 0 : j;
         const int ie = upper ? (j + 1) : N;
         T *cj = &C_(0, j);
-        if (cdd_iszero(beta))      for (int i = is; i < ie; ++i) cj[i] = zero_cdd;
-        else if (!cdd_isone(beta)) for (int i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
+        if (ceq0(beta))      for (int i = is; i < ie; ++i) cj[i] = zero_cdd;
+        else if (!ceq1(beta)) for (int i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
     }
 
     /* Diagonal jb×jb triangle: scalar. */
@@ -189,8 +188,8 @@ extern "C" void wgemmtr_serial(
 
     if (N <= 0) return;
 
-    if (cdd_iszero(alpha) || K == 0) {
-        if (cdd_isone(beta)) return;
+    if (ceq0(alpha) || K == 0) {
+        if (ceq1(beta)) return;
         wgemmtr_beta_core(0, N, N, upper, beta, c, ldc);
         return;
     }

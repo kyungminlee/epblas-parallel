@@ -17,6 +17,8 @@
  * conjugate transpose differs from the plain transpose for complex.
  */
 #include "wtrsm_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include <cstddef>
 #include <cctype>
 #ifdef _OPENMP
@@ -27,14 +29,12 @@
 namespace mf = multifloats;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 }  // namespace
 
 extern "C" void wtrsm_(
@@ -64,7 +64,7 @@ extern "C" void wtrsm_(
 
     if (M == 0 || N == 0) return;
 
-    if (cdd_iszero(alpha)) { wtrsm_zero_B(M, N, b, ldb); return; }
+    if (ceq0(alpha)) { wtrsm_zero_B(M, N, b, ldb); return; }
 
     if (SIDE == 'L') {
         const int nb = wtrsm_block_nb();

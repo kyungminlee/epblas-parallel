@@ -7,8 +7,10 @@
 #include <cstdlib>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_util.h"
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -22,12 +24,13 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const T zero_dd{0.0, 0.0};
-inline bool dd_iszero(T x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
 
 #ifdef MBLAS_SIMD_DD
 static inline __attribute__((always_inline)) void
@@ -46,11 +49,11 @@ hreduce_dd(__m256d s_h, __m256d s_l)
     __m256d sh_sw = _mm256_permute2f128_pd(s_h, s_h, 0x01);
     __m256d sl_sw = _mm256_permute2f128_pd(s_l, s_l, 0x01);
     __m256d p_h, p_l;
-    simd_dd::dd_add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
+    simd_fast::add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
     __m256d ph_sw = _mm256_shuffle_pd(p_h, p_h, 0x5);
     __m256d pl_sw = _mm256_shuffle_pd(p_l, p_l, 0x5);
     __m256d r_h, r_l;
-    simd_dd::dd_add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
+    simd_fast::add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
     double rh[4], rl[4];
     _mm256_storeu_pd(rh, r_h); _mm256_storeu_pd(rl, r_l);
     return T{rh[0], rl[0]};
@@ -82,10 +85,10 @@ mtrsv_col_msub(T *x, const T *ai, T xi, int lo, int hi)
         soa_load4(aip + 2 * k, ah, al);
         soa_load4(xp  + 2 * k, ch, cl);
         __m256d ph, pl;
-        simd_dd::dd_mul(xh, xl, ah, al, ph, pl);
-        simd_dd::dd_neg(ph, pl);
+        simd_fast::mul(xh, xl, ah, al, ph, pl);
+        simd_fast::neg(ph, pl);
         __m256d rh, rl;
-        simd_dd::dd_add(ch, cl, ph, pl, rh, rl);
+        simd_fast::add(ch, cl, ph, pl, rh, rl);
         soa_store4(xp + 2 * k, rh, rl);
     }
     for (; k < hi; ++k) x[k] = x[k] - xi * ai[k];
@@ -102,8 +105,8 @@ mtrsv_dot_range(const T *ai, const T *x, int lo, int hi)
         soa_load4(aip + 2 * k, ah, al);
         soa_load4(xp  + 2 * k, xih, xil);
         __m256d ph, pl;
-        simd_dd::dd_mul(ah, al, xih, xil, ph, pl);
-        simd_dd::dd_add(sh, sl, ph, pl, sh, sl);
+        simd_fast::mul(ah, al, xih, xil, ph, pl);
+        simd_fast::add(sh, sl, ph, pl, sh, sl);
     }
     T s = hreduce_dd(sh, sl);
     for (; k < hi; ++k) s = s + ai[k] * x[k];
@@ -135,7 +138,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
             if (UPLO == 'L') {
                 for (int i = 0; i < N; ++i) {
                     T xi{x_hi[i], x_lo[i]};
-                    if (dd_iszero(xi)) continue;
+                    if (eq0(xi)) continue;
                     if (nounit) xi = xi / A_(i, i);
                     x_hi[i] = xi.limbs[0]; x_lo[i] = xi.limbs[1];
                     const __m256d xih = _mm256_set1_pd(xi.limbs[0]);
@@ -154,10 +157,10 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                         __m256d xh = _mm256_loadu_pd(x_hi + k);
                         __m256d xl = _mm256_loadu_pd(x_lo + k);
                         __m256d p_h, p_l;
-                        simd_dd::dd_mul(xih, xil, a_h, a_l, p_h, p_l);
-                        simd_dd::dd_neg(p_h, p_l);
+                        simd_fast::mul(xih, xil, a_h, a_l, p_h, p_l);
+                        simd_fast::neg(p_h, p_l);
                         __m256d nxh, nxl;
-                        simd_dd::dd_add(xh, xl, p_h, p_l, nxh, nxl);
+                        simd_fast::add(xh, xl, p_h, p_l, nxh, nxl);
                         _mm256_storeu_pd(x_hi + k, nxh);
                         _mm256_storeu_pd(x_lo + k, nxl);
                     }
@@ -171,7 +174,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
             } else {
                 for (int i = N - 1; i >= 0; --i) {
                     T xi{x_hi[i], x_lo[i]};
-                    if (dd_iszero(xi)) continue;
+                    if (eq0(xi)) continue;
                     if (nounit) xi = xi / A_(i, i);
                     x_hi[i] = xi.limbs[0]; x_lo[i] = xi.limbs[1];
                     const __m256d xih = _mm256_set1_pd(xi.limbs[0]);
@@ -184,10 +187,10 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                         __m256d xh = _mm256_loadu_pd(x_hi + k);
                         __m256d xl = _mm256_loadu_pd(x_lo + k);
                         __m256d p_h, p_l;
-                        simd_dd::dd_mul(xih, xil, a_h, a_l, p_h, p_l);
-                        simd_dd::dd_neg(p_h, p_l);
+                        simd_fast::mul(xih, xil, a_h, a_l, p_h, p_l);
+                        simd_fast::neg(p_h, p_l);
                         __m256d nxh, nxl;
-                        simd_dd::dd_add(xh, xl, p_h, p_l, nxh, nxl);
+                        simd_fast::add(xh, xl, p_h, p_l, nxh, nxl);
                         _mm256_storeu_pd(x_hi + k, nxh);
                         _mm256_storeu_pd(x_lo + k, nxl);
                     }
@@ -217,9 +220,9 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                         __m256d xh = _mm256_loadu_pd(x_hi + k);
                         __m256d xl = _mm256_loadu_pd(x_lo + k);
                         __m256d p_h, p_l;
-                        simd_dd::dd_mul(a_h, a_l, xh, xl, p_h, p_l);
+                        simd_fast::mul(a_h, a_l, xh, xl, p_h, p_l);
                         __m256d nsh, nsl;
-                        simd_dd::dd_add(s_h, s_l, p_h, p_l, nsh, nsl);
+                        simd_fast::add(s_h, s_l, p_h, p_l, nsh, nsl);
                         s_h = nsh; s_l = nsl;
                     }
                     T s_red = hreduce_dd(s_h, s_l);
@@ -244,9 +247,9 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                         __m256d xh = _mm256_loadu_pd(x_hi + k);
                         __m256d xl = _mm256_loadu_pd(x_lo + k);
                         __m256d p_h, p_l;
-                        simd_dd::dd_mul(a_h, a_l, xh, xl, p_h, p_l);
+                        simd_fast::mul(a_h, a_l, xh, xl, p_h, p_l);
                         __m256d nsh, nsl;
-                        simd_dd::dd_add(s_h, s_l, p_h, p_l, nsh, nsl);
+                        simd_fast::add(s_h, s_l, p_h, p_l, nsh, nsl);
                         s_h = nsh; s_l = nsl;
                     }
                     T s_red = hreduce_dd(s_h, s_l);
@@ -267,7 +270,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
         if (TR == 'N') {
             if (UPLO == 'L') {
                 for (int i = 0; i < N; ++i) {
-                    if (!dd_iszero(x[i])) {
+                    if (!eq0(x[i])) {
                         if (nounit) x[i] = x[i] / A_(i, i);
                         const T xi = x[i];
                         const T *ai = &A_(0, i);
@@ -276,7 +279,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                 }
             } else {
                 for (int i = N - 1; i >= 0; --i) {
-                    if (!dd_iszero(x[i])) {
+                    if (!eq0(x[i])) {
                         if (nounit) x[i] = x[i] / A_(i, i);
                         const T xi = x[i];
                         const T *ai = &A_(0, i);
@@ -329,7 +332,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     const std::ptrdiff_t ixi = kx + i * sx;
-                    if (!dd_iszero(x[ixi])) {
+                    if (!eq0(x[ixi])) {
                         const T *ai = &A_(0, i);
                         if (nounit) x[ixi] = x[ixi] / ai[i];
                         const T xi = x[ixi];
@@ -340,7 +343,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
             } else {
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
                     const std::ptrdiff_t ixi = kx + i * sx;
-                    if (!dd_iszero(x[ixi])) {
+                    if (!eq0(x[ixi])) {
                         const T *ai = &A_(0, i);
                         if (nounit) x[ixi] = x[ixi] / ai[i];
                         const T xi = x[ixi];
@@ -408,7 +411,7 @@ __attribute__((noinline)) static bool mtrsv_omp(
                     int rhi = j1 + (int)((long long)(N - j1) * (tid + 1) / nthreads);
                     for (int i = j0; i < j1; ++i) {
                         const T xi = x[i];
-                        if (dd_iszero(xi)) continue;
+                        if (eq0(xi)) continue;
                         const T *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         mtrsv_col_msub(x, ai, xi, rlo, rhi);
@@ -430,7 +433,7 @@ __attribute__((noinline)) static bool mtrsv_omp(
                     int rhi = (int)((long long)j0 * (tid + 1) / nthreads);
                     for (int i = j0; i < j1; ++i) {
                         const T xi = x[i];
-                        if (dd_iszero(xi)) continue;
+                        if (eq0(xi)) continue;
                         const T *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         mtrsv_col_msub(x, ai, xi, rlo, rhi);

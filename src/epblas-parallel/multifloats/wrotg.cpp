@@ -5,6 +5,7 @@
  *   r = (a/|a|) · sqrt(|a|² + |b|²);  a := r
  */
 #include <multifloats.h>
+#include "mf_pred.h"
 #include <multifloats/float64x2.h>
 
 namespace mf = multifloats;
@@ -12,7 +13,7 @@ using R = mf::float64x2;
 using T = mf::complex64x2;
 
 namespace {
-inline bool dd_eq0(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
+using mf_pred::eq0;
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
@@ -28,13 +29,13 @@ extern "C" void wrotg_(T *a_, const T *b_, R *c, T *s)
     const T a = *a_, b = *b_;
     const T czero{R{0.0, 0.0}, R{0.0, 0.0}};
     const R g2 = b.re * b.re + b.im * b.im;     /* |b|² */
-    if (dd_eq0(g2)) {
+    if (eq0(g2)) {
         *c = R{1.0, 0.0};
         *s = czero;
         return;
     }
     const R f2 = a.re * a.re + a.im * a.im;     /* |a|² */
-    if (dd_eq0(f2)) {
+    if (eq0(f2)) {
         *c = R{0.0, 0.0};
         const R d = sqrtdd(g2);                 /* |b| */
         *s = cdiv_real(cconj(b), d);            /* conj(b)/|b| */

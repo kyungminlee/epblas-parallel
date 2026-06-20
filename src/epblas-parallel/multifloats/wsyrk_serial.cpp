@@ -4,7 +4,7 @@
  * TRANS ∈ {N, T}.
  *
  * AVX2 4-wide SIMD diag kernel + wgemm_serial trailing. Complex DD analog of
- * msyrk's SIMD diag (cdd_mul / cdd_add primitives, 4 SoA arrays per packed
+ * msyrk's SIMD diag (cmul / cadd primitives, 4 SoA arrays per packed
  * matrix). Computes the full square diag block and writes only the UPLO
  * triangle on unpack.
  *
@@ -12,13 +12,15 @@
  * wsyrk_parallel.cpp can call wsyrk_block from inside its own omp region.
  */
 #include "wsyrk_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
 
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 
@@ -26,23 +28,18 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+using mf_pred::ceq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 const T one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
 
-inline bool cdd_iszero(const T &x) {
-    return x.re.limbs[0] == 0.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
-inline bool cdd_isone(const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0
-        && x.im.limbs[0] == 0.0 && x.im.limbs[1] == 0.0;
-}
 
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
@@ -54,7 +51,7 @@ inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_dd::NR;
+constexpr int kSimdLane = simd_fast::NR;
 constexpr int kMaxBlockM = 128;
 constexpr int kMaxK      = 512;
 
@@ -133,7 +130,7 @@ inline void simd_syrk_diag_tn(int jc, int jb, int K, T alpha,
         __m256d aj_ih = _mm256_load_pd(bj_ih);
         __m256d aj_il = _mm256_load_pd(bj_il);
         __m256d trh, trl, tih, til;
-        simd_dd::cdd_mul(a_rh, a_rl, a_ih, a_il,
+        simd_fast::cmul(a_rh, a_rl, a_ih, a_il,
                          aj_rh, aj_rl, aj_ih, aj_il,
                          trh, trl, tih, til);
         for (int i = jc; i < jc + jb; ++i) {
@@ -141,7 +138,7 @@ inline void simd_syrk_diag_tn(int jc, int jb, int K, T alpha,
             __m256d aih, ail, aiih, aiil;
             broadcast_cdd(A_(i, l), aih, ail, aiih, aiil);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(trh, trl, tih, til,
+            simd_fast::cmul(trh, trl, tih, til,
                              aih, ail, aiih, aiil,
                              prh, prl, pih, pil);
             __m256d ck_rh = _mm256_load_pd(&crh[ir * kSimdLane]);
@@ -149,7 +146,7 @@ inline void simd_syrk_diag_tn(int jc, int jb, int K, T alpha,
             __m256d ck_ih = _mm256_load_pd(&cih[ir * kSimdLane]);
             __m256d ck_il = _mm256_load_pd(&cil[ir * kSimdLane]);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(ck_rh, ck_rl, ck_ih, ck_il,
+            simd_fast::cadd(ck_rh, ck_rl, ck_ih, ck_il,
                              prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             _mm256_store_pd(&crh[ir * kSimdLane], nrh);
@@ -187,11 +184,11 @@ inline void simd_syrk_diag_tt_chunk(int jc, int jb, int kc,
             __m256d ajih_v = _mm256_load_pd(&ajih[ll * kSimdLane]);
             __m256d ajil_v = _mm256_load_pd(&ajil[ll * kSimdLane]);
             __m256d prh, prl, pih, pil;
-            simd_dd::cdd_mul(aih, ail, aiih, aiil,
+            simd_fast::cmul(aih, ail, aiih, aiil,
                              ajh, ajl, ajih_v, ajil_v,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
-            simd_dd::cdd_add(srh, srl, sih, sil,
+            simd_fast::cadd(srh, srl, sih, sil,
                              prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
             srh = nrh; srl = nrl; sih = nih; sil = nil_;
@@ -269,7 +266,7 @@ inline void simd_syrk_diag_panels(int jc, int jb, int K, T alpha,
                 __m256d sih = _mm256_load_pd(&acc_ih[ir * kSimdLane]);
                 __m256d sil = _mm256_load_pd(&acc_il[ir * kSimdLane]);
                 __m256d prh, prl, pih, pil;
-                simd_dd::cdd_mul(a_rh, a_rl, a_ih, a_il,
+                simd_fast::cmul(a_rh, a_rl, a_ih, a_il,
                                  srh, srl, sih, sil,
                                  prh, prl, pih, pil);
                 __m256d ck_rh = _mm256_load_pd(&crh[ir * kSimdLane]);
@@ -277,7 +274,7 @@ inline void simd_syrk_diag_panels(int jc, int jb, int K, T alpha,
                 __m256d ck_ih = _mm256_load_pd(&cih[ir * kSimdLane]);
                 __m256d ck_il = _mm256_load_pd(&cil[ir * kSimdLane]);
                 __m256d nrh, nrl, nih, nil_;
-                simd_dd::cdd_add(ck_rh, ck_rl, ck_ih, ck_il,
+                simd_fast::cadd(ck_rh, ck_rl, ck_ih, ck_il,
                                  prh, prl, pih, pil,
                                  nrh, nrl, nih, nil_);
                 _mm256_store_pd(&crh[ir * kSimdLane], nrh);
@@ -304,7 +301,7 @@ void syrk_diag_add(int jc, int jb, int K, T alpha,
             T *cj = c + static_cast<std::size_t>(j) * ldc;
             for (int l = 0; l < K; ++l) {
                 const T ajl = A_(j, l);
-                if (!cdd_iszero(ajl)) {
+                if (!ceq0(ajl)) {
                     const T t = cmul(alpha, ajl);
                     for (int i = i_lo; i < i_hi; ++i) cj[i] = cadd(cj[i], cmul(t, A_(i, l)));
                 }
@@ -351,7 +348,7 @@ void wsyrk_scale_col(int j, int N, char UPLO, T beta, T *c, int ldc) {
     const int i_lo = (UPLO == 'L') ? j : 0;
     const int i_hi = (UPLO == 'L') ? N : j + 1;
     T *cj = c + static_cast<std::size_t>(j) * ldc;
-    if (cdd_iszero(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_cdd;
+    if (ceq0(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_cdd;
     else                  for (int i = i_lo; i < i_hi; ++i) cj[i] = cmul(cj[i], beta);
 }
 
@@ -363,8 +360,8 @@ void wsyrk_block(int jc, int jb, int N, int K, char UPLO, char TR,
         const int i_lo = (UPLO == 'L') ? j : 0;
         const int i_hi = (UPLO == 'L') ? N : j + 1;
         T *cj = c + static_cast<std::size_t>(j) * ldc;
-        if (cdd_iszero(beta))      for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_cdd;
-        else if (!cdd_isone(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = cmul(cj[i], beta);
+        if (ceq0(beta))      for (int i = i_lo; i < i_hi; ++i) cj[i] = zero_cdd;
+        else if (!ceq1(beta)) for (int i = i_lo; i < i_hi; ++i) cj[i] = cmul(cj[i], beta);
     }
 
     diag_dispatch(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR);
@@ -419,8 +416,8 @@ extern "C" void wsyrk_serial(
 
     if (N == 0) return;
 
-    if (cdd_iszero(alpha) || K == 0) {
-        if (cdd_isone(beta)) return;
+    if (ceq0(alpha) || K == 0) {
+        if (ceq1(beta)) return;
         for (int j = 0; j < N; ++j) wsyrk_scale_col(j, N, UPLO, beta, c, ldc);
         return;
     }

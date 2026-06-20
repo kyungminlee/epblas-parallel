@@ -16,6 +16,8 @@
  * (schedule(static)). Delegates to wherk_serial when nested.
  */
 #include "wherk_kernel.h"
+#include "mf_util.h"
+#include "mf_pred.h"
 #include <cstddef>
 #include <cctype>
 #ifdef _OPENMP
@@ -27,12 +29,13 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::eq0;
+using mf_pred::eq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
-inline bool dd_iszero(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool dd_isone (R x) { return x.limbs[0] == 1.0 && x.limbs[1] == 0.0; }
 }  // namespace
 
 extern "C" void wherk_(
@@ -60,8 +63,8 @@ extern "C" void wherk_(
 
     if (N == 0) return;
 
-    if (dd_iszero(alpha) || K == 0) {
-        if (dd_isone(beta)) {
+    if (eq0(alpha) || K == 0) {
+        if (eq1(beta)) {
             for (int j = 0; j < N; ++j) wherk_zero_diag_im(j, c, ldc);
             return;
         }

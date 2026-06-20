@@ -1,15 +1,17 @@
 /* whemv — multifloats Hermitian matrix-vector.
- * SIMD: same two-pass pattern as msymv with cdd_mul/cdd_add; Hermitian
- * uses conj(A[k,i]) for the temp2 accumulation, achieved by dd_neg on
- * the loaded A.im before the cdd_mul. Diagonal A[i,i] kept real. */
+ * SIMD: same two-pass pattern as msymv with cmul/cadd; Hermitian
+ * uses conj(A[k,i]) for the temp2 accumulation, achieved by neg on
+ * the loaded A.im before the cmul. Diagonal A[i,i] kept real. */
 
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_util.h"
+#include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
-#include "mgemm_simd_kernel.h"
+#include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
@@ -24,18 +26,16 @@ namespace mf = multifloats;
 using R = mf::float64x2;
 using T = mf::complex64x2;
 
+
+/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+using mf_pred::ceq0;
+using mf_pred::ceq1;
+
+using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline char up(const char *p) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 const R rzero{0.0, 0.0};
 const T zero_cdd{ rzero, rzero };
 
-inline bool dd_iszero(R x) { return x.limbs[0] == 0.0 && x.limbs[1] == 0.0; }
-inline bool cdd_iszero(const T &x) { return dd_iszero(x.re) && dd_iszero(x.im); }
-inline bool cdd_isone (const T &x) {
-    return x.re.limbs[0] == 1.0 && x.re.limbs[1] == 0.0 && dd_iszero(x.im);
-}
 inline T cmul(T const &a, T const &b) {
     return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
@@ -69,14 +69,14 @@ hreduce_cdd(__m256d s_rh, __m256d s_rl, __m256d s_ih, __m256d s_il)
     __m256d sih_sw = _mm256_permute2f128_pd(s_ih, s_ih, 0x01);
     __m256d sil_sw = _mm256_permute2f128_pd(s_il, s_il, 0x01);
     __m256d p_rh, p_rl, p_ih, p_il;
-    simd_dd::cdd_add(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
+    simd_fast::cadd(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
                      p_rh, p_rl, p_ih, p_il);
     __m256d prh_sw = _mm256_shuffle_pd(p_rh, p_rh, 0x5);
     __m256d prl_sw = _mm256_shuffle_pd(p_rl, p_rl, 0x5);
     __m256d pih_sw = _mm256_shuffle_pd(p_ih, p_ih, 0x5);
     __m256d pil_sw = _mm256_shuffle_pd(p_il, p_il, 0x5);
     __m256d r_rh, r_rl, r_ih, r_il;
-    simd_dd::cdd_add(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
+    simd_fast::cadd(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
                      r_rh, r_rl, r_ih, r_il);
     double rh[4], rl[4], ih[4], il[4];
     _mm256_storeu_pd(rh, r_rh); _mm256_storeu_pd(rl, r_rl);
@@ -135,22 +135,22 @@ whemv_inner(int i, int k_lo, int k_hi, const T *a, std::size_t lda, T alpha,
         __m256d xil = _mm256_loadu_pd(x_il + k);
         /* y[k] += temp1 * A[k,i] */
         __m256d p_rh, p_rl, p_ih, p_il;
-        simd_dd::cdd_mul(t1rh, t1rl, t1ih, t1il, a_rh, a_rl, a_ih, a_il,
+        simd_fast::cmul(t1rh, t1rl, t1ih, t1il, a_rh, a_rl, a_ih, a_il,
                          p_rh, p_rl, p_ih, p_il);
         __m256d nrh, nrl, nih, nil;
-        simd_dd::cdd_add(yrh, yrl, yih, yil, p_rh, p_rl, p_ih, p_il,
+        simd_fast::cadd(yrh, yrl, yih, yil, p_rh, p_rl, p_ih, p_il,
                          nrh, nrl, nih, nil);
         _mm256_storeu_pd(yacc_rh + k, nrh);
         _mm256_storeu_pd(yacc_rl + k, nrl);
         _mm256_storeu_pd(yacc_ih + k, nih);
         _mm256_storeu_pd(yacc_il + k, nil);
         /* temp2 += conj(A[k,i]) * x[k] */
-        simd_dd::dd_neg(a_ih, a_il);
+        simd_fast::neg(a_ih, a_il);
         __m256d q_rh, q_rl, q_ih, q_il;
-        simd_dd::cdd_mul(a_rh, a_rl, a_ih, a_il, xrh, xrl, xih, xil,
+        simd_fast::cmul(a_rh, a_rl, a_ih, a_il, xrh, xrl, xih, xil,
                          q_rh, q_rl, q_ih, q_il);
         __m256d nsrh, nsrl, nsih, nsil;
-        simd_dd::cdd_add(s_rh, s_rl, s_ih, s_il, q_rh, q_rl, q_ih, q_il,
+        simd_fast::cadd(s_rh, s_rl, s_ih, s_il, q_rh, q_rl, q_ih, q_il,
                          nsrh, nsrl, nsih, nsil);
         s_rh = nsrh; s_rl = nsrl; s_ih = nsih; s_il = nsil;
     }
@@ -345,15 +345,15 @@ extern "C" void whemv_(
 
     if (N == 0) return;
 
-    if (!cdd_isone(beta)) {
+    if (!ceq1(beta)) {
         int iy = (incy < 0) ? -(N - 1) * incy : 0;
         for (int i = 0; i < N; ++i) {
-            if (cdd_iszero(beta)) y[iy] = zero_cdd;
+            if (ceq0(beta)) y[iy] = zero_cdd;
             else                  y[iy] = cmul(y[iy], beta);
             iy += incy;
         }
     }
-    if (cdd_iszero(alpha)) return;
+    if (ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
         whemv_contig(UPLO == 'L', N, a, lda, alpha, x, y);
