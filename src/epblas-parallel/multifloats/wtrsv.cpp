@@ -86,6 +86,76 @@ hreduce_cdd(__m256d s_rh, __m256d s_rl, __m256d s_ih, __m256d s_il)
     _mm256_storeu_pd(ih, r_ih); _mm256_storeu_pd(il, r_il);
     return T{ R{rh[0], rl[0]}, R{ih[0], il[0]} };
 }
+static inline __attribute__((always_inline)) void
+soa_store4_cdd(double *p, __m256d rh, __m256d rl, __m256d ih, __m256d il)
+{
+    __m256d t0 = _mm256_permute2f128_pd(rh, ih, 0x20);
+    __m256d t2 = _mm256_permute2f128_pd(rh, ih, 0x31);
+    __m256d t1 = _mm256_permute2f128_pd(rl, il, 0x20);
+    __m256d t3 = _mm256_permute2f128_pd(rl, il, 0x31);
+    _mm256_storeu_pd(p +  0, _mm256_unpacklo_pd(t0, t1));
+    _mm256_storeu_pd(p +  4, _mm256_unpackhi_pd(t0, t1));
+    _mm256_storeu_pd(p +  8, _mm256_unpacklo_pd(t2, t3));
+    _mm256_storeu_pd(p + 12, _mm256_unpackhi_pd(t2, t3));
+}
+
+/* Off-diagonal SIMD kernels for the blocked threaded solve.
+ * msub: x[k] = csub(x[k], cmul(xi, ai[k]))  for k in [lo,hi)  (NoTrans).
+ * dot : returns sum_{k in [lo,hi)} (conj?conj(ai[k]):ai[k]) * x[k]  (Trans). */
+static inline void
+wtrsv_col_msub(T *x, const T *ai, T xi, int lo, int hi)
+{
+    double *xp = reinterpret_cast<double *>(x);
+    const double *aip = reinterpret_cast<const double *>(ai);
+    const __m256d xrh = _mm256_set1_pd(xi.re.limbs[0]);
+    const __m256d xrl = _mm256_set1_pd(xi.re.limbs[1]);
+    const __m256d xih = _mm256_set1_pd(xi.im.limbs[0]);
+    const __m256d xil = _mm256_set1_pd(xi.im.limbs[1]);
+    int k = lo;
+    for (; k + 4 <= hi; k += 4) {
+        __m256d arh, arl, aih, ail;
+        soa_load4_cdd(aip + 4 * k, arh, arl, aih, ail);
+        __m256d prh, prl, pih, pil;
+        simd_dd::cdd_mul(xrh, xrl, xih, xil, arh, arl, aih, ail,
+                         prh, prl, pih, pil);
+        simd_dd::dd_neg(prh, prl);
+        simd_dd::dd_neg(pih, pil);
+        __m256d crh, crl, cih, cil;
+        soa_load4_cdd(xp + 4 * k, crh, crl, cih, cil);
+        __m256d rrh, rrl, rih, ril;
+        simd_dd::cdd_add(crh, crl, cih, cil, prh, prl, pih, pil,
+                         rrh, rrl, rih, ril);
+        soa_store4_cdd(xp + 4 * k, rrh, rrl, rih, ril);
+    }
+    for (; k < hi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
+}
+static inline T
+wtrsv_dot_range(const T *ai, const T *x, int lo, int hi, bool conj_a)
+{
+    const double *aip = reinterpret_cast<const double *>(ai);
+    const double *xp  = reinterpret_cast<const double *>(x);
+    __m256d srh = _mm256_setzero_pd(), srl = _mm256_setzero_pd();
+    __m256d sih = _mm256_setzero_pd(), sil = _mm256_setzero_pd();
+    int k = lo;
+    for (; k + 4 <= hi; k += 4) {
+        __m256d arh, arl, aih, ail;
+        soa_load4_cdd(aip + 4 * k, arh, arl, aih, ail);
+        if (conj_a) simd_dd::dd_neg(aih, ail);
+        __m256d xrh, xrl, xih, xil;
+        soa_load4_cdd(xp + 4 * k, xrh, xrl, xih, xil);
+        __m256d prh, prl, pih, pil;
+        simd_dd::cdd_mul(arh, arl, aih, ail, xrh, xrl, xih, xil,
+                         prh, prl, pih, pil);
+        simd_dd::cdd_add(srh, srl, sih, sil, prh, prl, pih, pil,
+                         srh, srl, sih, sil);
+    }
+    T s = hreduce_cdd(srh, srl, sih, sil);
+    for (; k < hi; ++k) {
+        const T e = conj_a ? cconj(ai[k]) : ai[k];
+        s = cadd(s, cmul(e, x[k]));
+    }
+    return s;
+}
 #endif
 }
 
@@ -317,7 +387,11 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         const T xi = x[i];
                         if (cdd_iszero(xi)) continue;
                         const T *ai = &A_(0, i);
+#ifdef MBLAS_SIMD_DD
+                        wtrsv_col_msub(x, ai, xi, rlo, rhi);
+#else
                         for (int k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
+#endif
                     }
                 }
             }
@@ -335,7 +409,11 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         const T xi = x[i];
                         if (cdd_iszero(xi)) continue;
                         const T *ai = &A_(0, i);
+#ifdef MBLAS_SIMD_DD
+                        wtrsv_col_msub(x, ai, xi, rlo, rhi);
+#else
                         for (int k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
+#endif
                     }
                 }
             }
@@ -355,11 +433,15 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *ai = &A_(0, i);
+#ifdef MBLAS_SIMD_DD
+                            T s = wtrsv_dot_range(ai, x, j1, N, conj_a);
+#else
                             T s = zero_cdd;
                             for (int k = j1; k < N; ++k) {
                                 const T e = conj_a ? cconj(ai[k]) : ai[k];
                                 s = cadd(s, cmul(e, x[k]));
                             }
+#endif
                             x[i] = csub(x[i], s);
                         }
                     }
@@ -377,11 +459,15 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *ai = &A_(0, i);
+#ifdef MBLAS_SIMD_DD
+                            T s = wtrsv_dot_range(ai, x, 0, j0, conj_a);
+#else
                             T s = zero_cdd;
                             for (int k = 0; k < j0; ++k) {
                                 const T e = conj_a ? cconj(ai[k]) : ai[k];
                                 s = cadd(s, cmul(e, x[k]));
                             }
+#endif
                             x[i] = csub(x[i], s);
                         }
                     }

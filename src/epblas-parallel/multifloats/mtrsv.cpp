@@ -55,6 +55,60 @@ hreduce_dd(__m256d s_h, __m256d s_l)
     _mm256_storeu_pd(rh, r_h); _mm256_storeu_pd(rl, r_l);
     return T{rh[0], rl[0]};
 }
+static inline __attribute__((always_inline)) void
+soa_store4(double *p, __m256d hi, __m256d lo)
+{
+    __m256d hp = _mm256_permute4x64_pd(hi, 0xD8);  /* [h0,h2,h1,h3] */
+    __m256d lp = _mm256_permute4x64_pd(lo, 0xD8);  /* [l0,l2,l1,l3] */
+    __m256d a01 = _mm256_unpacklo_pd(hp, lp);      /* [h0,l0,h1,l1] */
+    __m256d a23 = _mm256_unpackhi_pd(hp, lp);      /* [h2,l2,h3,l3] */
+    _mm256_storeu_pd(p,     a01);
+    _mm256_storeu_pd(p + 4, a23);
+}
+
+/* Off-diagonal SIMD kernels for the blocked threaded solve.
+ * msub:  x[k] -= xi * ai[k]  for k in [lo,hi)  (NoTrans axpy form).
+ * dot :  returns sum_{k in [lo,hi)} ai[k] * x[k] (Trans dot form). */
+static inline void
+mtrsv_col_msub(T *x, const T *ai, T xi, int lo, int hi)
+{
+    double *xp = reinterpret_cast<double *>(x);
+    const double *aip = reinterpret_cast<const double *>(ai);
+    const __m256d xh = _mm256_set1_pd(xi.limbs[0]);
+    const __m256d xl = _mm256_set1_pd(xi.limbs[1]);
+    int k = lo;
+    for (; k + 4 <= hi; k += 4) {
+        __m256d ah, al, ch, cl;
+        soa_load4(aip + 2 * k, ah, al);
+        soa_load4(xp  + 2 * k, ch, cl);
+        __m256d ph, pl;
+        simd_dd::dd_mul(xh, xl, ah, al, ph, pl);
+        simd_dd::dd_neg(ph, pl);
+        __m256d rh, rl;
+        simd_dd::dd_add(ch, cl, ph, pl, rh, rl);
+        soa_store4(xp + 2 * k, rh, rl);
+    }
+    for (; k < hi; ++k) x[k] = x[k] - xi * ai[k];
+}
+static inline T
+mtrsv_dot_range(const T *ai, const T *x, int lo, int hi)
+{
+    const double *aip = reinterpret_cast<const double *>(ai);
+    const double *xp  = reinterpret_cast<const double *>(x);
+    __m256d sh = _mm256_setzero_pd(), sl = _mm256_setzero_pd();
+    int k = lo;
+    for (; k + 4 <= hi; k += 4) {
+        __m256d ah, al, xih, xil;
+        soa_load4(aip + 2 * k, ah, al);
+        soa_load4(xp  + 2 * k, xih, xil);
+        __m256d ph, pl;
+        simd_dd::dd_mul(ah, al, xih, xil, ph, pl);
+        simd_dd::dd_add(sh, sl, ph, pl, sh, sl);
+    }
+    T s = hreduce_dd(sh, sl);
+    for (; k < hi; ++k) s = s + ai[k] * x[k];
+    return s;
+}
 #endif
 }
 
@@ -356,7 +410,11 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         const T xi = x[i];
                         if (dd_iszero(xi)) continue;
                         const T *ai = &A_(0, i);
+#ifdef MBLAS_SIMD_DD
+                        mtrsv_col_msub(x, ai, xi, rlo, rhi);
+#else
                         for (int k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
+#endif
                     }
                 }
             }
@@ -374,7 +432,11 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         const T xi = x[i];
                         if (dd_iszero(xi)) continue;
                         const T *ai = &A_(0, i);
+#ifdef MBLAS_SIMD_DD
+                        mtrsv_col_msub(x, ai, xi, rlo, rhi);
+#else
                         for (int k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
+#endif
                     }
                 }
             }
@@ -394,8 +456,12 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *ai = &A_(0, i);
+#ifdef MBLAS_SIMD_DD
+                            T s = mtrsv_dot_range(ai, x, j1, N);
+#else
                             T s = zero_dd;
                             for (int k = j1; k < N; ++k) s = s + ai[k] * x[k];
+#endif
                             x[i] = x[i] - s;
                         }
                     }
@@ -413,8 +479,12 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
                         for (int i = ilo; i < ihi; ++i) {
                             const T *ai = &A_(0, i);
+#ifdef MBLAS_SIMD_DD
+                            T s = mtrsv_dot_range(ai, x, 0, j0);
+#else
                             T s = zero_dd;
                             for (int k = 0; k < j0; ++k) s = s + ai[k] * x[k];
+#endif
                             x[i] = x[i] - s;
                         }
                     }
