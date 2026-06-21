@@ -21,6 +21,7 @@
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 
@@ -264,45 +265,8 @@ void symm_diag_add_L(int ic, int ib, int N, T alpha,
 
 #ifdef MBLAS_SIMD_DD
 
-/* AoS→SoA for 4 complex DD cells from a column. Each cell is 4 doubles
- * in memory: [re.hi, re.lo, im.hi, im.lo]. */
-inline void load_4cell_csoa(const T *col, int ofs,
-                            __m256d &rh, __m256d &rl,
-                            __m256d &ih, __m256d &il)
-{
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs]));     /* c0 */
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 1])); /* c1 */
-    __m256d v2 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 2])); /* c2 */
-    __m256d v3 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 3])); /* c3 */
-    /* 4×4 transpose */
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);  /* [c0.rh, c1.rh, c0.ih, c1.ih] */
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);  /* [c0.rl, c1.rl, c0.il, c1.il] */
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);  /* [c2.rh, c3.rh, c2.ih, c3.ih] */
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);  /* [c2.rl, c3.rl, c2.il, c3.il] */
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);  /* [c0.rh, c1.rh, c2.rh, c3.rh] */
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);  /* [c0.ih, c1.ih, c2.ih, c3.ih] */
-    il = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
-
-inline void store_4cell_csoa(T *col, int ofs,
-                             __m256d rh, __m256d rl,
-                             __m256d ih, __m256d il)
-{
-    /* Inverse 4×4 transpose */
-    __m256d t0 = _mm256_unpacklo_pd(rh, rl);    /* [c0.rh, c0.rl, c2.rh, c2.rl] */
-    __m256d t1 = _mm256_unpackhi_pd(rh, rl);    /* [c1.rh, c1.rl, c3.rh, c3.rl] */
-    __m256d t2 = _mm256_unpacklo_pd(ih, il);    /* [c0.ih, c0.il, c2.ih, c2.il] */
-    __m256d t3 = _mm256_unpackhi_pd(ih, il);    /* [c1.ih, c1.il, c3.ih, c3.il] */
-    __m256d v0 = _mm256_permute2f128_pd(t0, t2, 0x20);  /* [c0.rh, c0.rl, c0.ih, c0.il] */
-    __m256d v1 = _mm256_permute2f128_pd(t1, t3, 0x20);
-    __m256d v2 = _mm256_permute2f128_pd(t0, t2, 0x31);
-    __m256d v3 = _mm256_permute2f128_pd(t1, t3, 0x31);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs]),     v0);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 1]), v1);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 2]), v2);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 3]), v3);
-}
+using simd_exact::cload4;
+using simd_exact::cstore4;
 
 /* SIDE='R' complex symmetric diag, 4-row SIMD. */
 inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
@@ -315,7 +279,7 @@ inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
         for (int j = jc; j < jc + jb; ++j) {
             T *cj = c + static_cast<std::size_t>(j) * ldc;
             __m256d crh, crl, cih, cil;
-            load_4cell_csoa(cj, ib, crh, crl, cih, cil);
+            cload4(cj + ib, crh, crl, cih, cil);
 
             for (int k = jc; k < jc + jb; ++k) {
                 T tval;
@@ -331,7 +295,7 @@ inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
                 __m256d til = _mm256_set1_pd(tval.im.limbs[1]);
                 const T *bk = b + static_cast<std::size_t>(k) * ldb;
                 __m256d brh, brl, bih, bil;
-                load_4cell_csoa(bk, ib, brh, brl, bih, bil);
+                cload4(bk + ib, brh, brl, bih, bil);
                 __m256d prh, prl, pih, pil;
                 simd_fast::cmul(trh, trl, tih, til,
                                  brh, brl, bih, bil,
@@ -343,7 +307,7 @@ inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
                 crh = nrh; crl = nrl; cih = nih; cil = nil_;
             }
 
-            store_4cell_csoa(cj, ib, crh, crl, cih, cil);
+            cstore4(cj + ib, crh, crl, cih, cil);
         }
     }
 

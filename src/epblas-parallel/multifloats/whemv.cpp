@@ -12,6 +12,7 @@
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
@@ -43,23 +44,7 @@ inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 
 #ifdef MBLAS_SIMD_DD
-static inline __attribute__((always_inline)) void
-soa_load4_cdd(const double *p,
-              __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il)
-{
-    __m256d v0 = _mm256_loadu_pd(p +  0);
-    __m256d v1 = _mm256_loadu_pd(p +  4);
-    __m256d v2 = _mm256_loadu_pd(p +  8);
-    __m256d v3 = _mm256_loadu_pd(p + 12);
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    il = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
+using simd_exact::cload4;
 /* Horizontal-reduce 4-lane complex DD to scalar T (lane 0). */
 static inline __attribute__((always_inline)) T
 hreduce_cdd(__m256d s_rh, __m256d s_rl, __m256d s_ih, __m256d s_il)
@@ -124,7 +109,7 @@ whemv_inner(int i, int k_lo, int k_hi, const T *a, std::size_t lda, T alpha,
     }
     for (; k + 3 < k_hi; k += 4) {
         __m256d a_rh, a_rl, a_ih, a_il;
-        soa_load4_cdd(aip + 4 * k, a_rh, a_rl, a_ih, a_il);
+        cload4(aip + 4 * k, a_rh, a_rl, a_ih, a_il);
         __m256d yrh = _mm256_loadu_pd(yacc_rh + k);
         __m256d yrl = _mm256_loadu_pd(yacc_rl + k);
         __m256d yih = _mm256_loadu_pd(yacc_ih + k);

@@ -36,3 +36,6 @@ bench/cmp5/__pycache__/
 
 # generated dual-link drivers (regenerable via scripts/gen_dual_harnesses.py)
 bench/dual/drivers/
+
+# CTest scratch output
+Testing/

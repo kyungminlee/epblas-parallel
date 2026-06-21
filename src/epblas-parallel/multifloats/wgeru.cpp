@@ -9,6 +9,7 @@
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -31,41 +32,8 @@ inline T cmul(T const &a, T const &b) {
 inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 
 #ifdef MBLAS_SIMD_DD
-static inline __attribute__((always_inline)) void
-soa_load4_cdd(const double *p,
-              __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il)
-{
-    __m256d v0 = _mm256_loadu_pd(p +  0);
-    __m256d v1 = _mm256_loadu_pd(p +  4);
-    __m256d v2 = _mm256_loadu_pd(p +  8);
-    __m256d v3 = _mm256_loadu_pd(p + 12);
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    il = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
-static inline __attribute__((always_inline)) void
-soa_store4_cdd(double *p,
-               __m256d rh, __m256d rl, __m256d ih, __m256d il)
-{
-    /* Inverse of soa_load4_cdd. */
-    __m256d t0 = _mm256_permute2f128_pd(rh, ih, 0x20); /* [r0h,r1h,i0h,i1h] */
-    __m256d t2 = _mm256_permute2f128_pd(rh, ih, 0x31); /* [r2h,r3h,i2h,i3h] */
-    __m256d t1 = _mm256_permute2f128_pd(rl, il, 0x20); /* [r0l,r1l,i0l,i1l] */
-    __m256d t3 = _mm256_permute2f128_pd(rl, il, 0x31); /* [r2l,r3l,i2l,i3l] */
-    __m256d v0 = _mm256_unpacklo_pd(t0, t1); /* [r0h,r0l,i0h,i0l] */
-    __m256d v1 = _mm256_unpackhi_pd(t0, t1); /* [r1h,r1l,i1h,i1l] */
-    __m256d v2 = _mm256_unpacklo_pd(t2, t3);
-    __m256d v3 = _mm256_unpackhi_pd(t2, t3);
-    _mm256_storeu_pd(p +  0, v0);
-    _mm256_storeu_pd(p +  4, v1);
-    _mm256_storeu_pd(p +  8, v2);
-    _mm256_storeu_pd(p + 12, v3);
-}
+using simd_exact::cload4;
+using simd_exact::cstore4;
 #endif
 }
 
@@ -106,7 +74,7 @@ static void wgeru_contig(int M, int N, T alpha, T *a, std::size_t lda,
             int i = 0;
             for (; i + 3 < M; i += 4) {
                 __m256d a_rh, a_rl, a_ih, a_il;
-                soa_load4_cdd(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
+                cload4(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
                 __m256d xrh = _mm256_loadu_pd(x_rh + i);
                 __m256d xrl = _mm256_loadu_pd(x_rl + i);
                 __m256d xih = _mm256_loadu_pd(x_ih + i);
@@ -117,7 +85,7 @@ static void wgeru_contig(int M, int N, T alpha, T *a, std::size_t lda,
                 __m256d nrh, nrl, nih, nil;
                 simd_fast::cadd(a_rh, a_rl, a_ih, a_il, p_rh, p_rl, p_ih, p_il,
                                  nrh, nrl, nih, nil);
-                soa_store4_cdd(aj + 4 * i, nrh, nrl, nih, nil);
+                cstore4(aj + 4 * i, nrh, nrl, nih, nil);
             }
             T *ajs = &A_(0, j);
             for (; i < M; ++i) ajs[i] = cadd(ajs[i], cmul(t, x[i]));

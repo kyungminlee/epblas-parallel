@@ -28,6 +28,7 @@
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"   /* mul, add, neg primitives */
+#include "mf_simd_exact.h"  /* canonical load_dd4 */
 #include <immintrin.h>
 #endif
 
@@ -371,25 +372,9 @@ inline void mtrsm_lut_core(int j_start, int j_end, int M, T alpha,
 
 #ifdef MBLAS_SIMD_DD
 
-inline void load_4cell_soa(const T *col, int ofs, __m256d &h, __m256d &l)
-{
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 2]));
-    __m256d lo = _mm256_unpacklo_pd(v0, v1);
-    __m256d hi = _mm256_unpackhi_pd(v0, v1);
-    h = _mm256_permute4x64_pd(lo, 0xD8);
-    l = _mm256_permute4x64_pd(hi, 0xD8);
-}
-
-inline void store_4cell_soa(T *col, int ofs, __m256d h, __m256d l)
-{
-    __m256d lo = _mm256_unpacklo_pd(h, l);
-    __m256d hi = _mm256_unpackhi_pd(h, l);
-    __m256d v0 = _mm256_permute2f128_pd(lo, hi, 0x20);
-    __m256d v1 = _mm256_permute2f128_pd(lo, hi, 0x31);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs]),     v0);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 2]), v1);
-}
+/* AoS→SoA 4-cell transpose load: canonical simd_exact::load_dd4 (col + ofs). */
+using simd_exact::load_dd4;
+using simd_exact::store_dd4;
 
 /* RLN: B := α·B / L (R-side, lower-tri L, no transpose).
  * For each ib (4-row chunk), iterate j = N-1..0:
@@ -403,7 +388,7 @@ inline void simd_trsm_r4_rln(int ib, int N, T alpha,
     for (int j = N - 1; j >= 0; --j) {
         T *bj = b + static_cast<std::size_t>(j) * ldb;
         __m256d bjh, bjl;
-        load_4cell_soa(bj, ib, bjh, bjl);
+        load_dd4(bj + ib, bjh, bjl);
         if (alpha_nontriv) {
             __m256d nh, nl;
             simd_fast::mul(bjh, bjl, ah, al, nh, nl);
@@ -416,7 +401,7 @@ inline void simd_trsm_r4_rln(int ib, int N, T alpha,
             __m256d akl = _mm256_set1_pd(akj.limbs[1]);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkh, bkl;
-            load_4cell_soa(bk, ib, bkh, bkl);
+            load_dd4(bk + ib, bkh, bkl);
             __m256d ph, pl;
             simd_fast::mul(akh, akl, bkh, bkl, ph, pl);
             simd_fast::neg(ph, pl);
@@ -432,7 +417,7 @@ inline void simd_trsm_r4_rln(int ib, int N, T alpha,
             simd_fast::mul(bjh, bjl, ih, il, nh, nl);
             bjh = nh; bjl = nl;
         }
-        store_4cell_soa(bj, ib, bjh, bjl);
+        store_dd4(bj + ib, bjh, bjl);
     }
 }
 
@@ -445,7 +430,7 @@ inline void simd_trsm_r4_run(int ib, int N, T alpha,
     for (int j = 0; j < N; ++j) {
         T *bj = b + static_cast<std::size_t>(j) * ldb;
         __m256d bjh, bjl;
-        load_4cell_soa(bj, ib, bjh, bjl);
+        load_dd4(bj + ib, bjh, bjl);
         if (alpha_nontriv) {
             __m256d nh, nl;
             simd_fast::mul(bjh, bjl, ah, al, nh, nl);
@@ -458,7 +443,7 @@ inline void simd_trsm_r4_run(int ib, int N, T alpha,
             __m256d akl = _mm256_set1_pd(akj.limbs[1]);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkh, bkl;
-            load_4cell_soa(bk, ib, bkh, bkl);
+            load_dd4(bk + ib, bkh, bkl);
             __m256d ph, pl;
             simd_fast::mul(akh, akl, bkh, bkl, ph, pl);
             simd_fast::neg(ph, pl);
@@ -474,7 +459,7 @@ inline void simd_trsm_r4_run(int ib, int N, T alpha,
             simd_fast::mul(bjh, bjl, ih, il, nh, nl);
             bjh = nh; bjl = nl;
         }
-        store_4cell_soa(bj, ib, bjh, bjl);
+        store_dd4(bj + ib, bjh, bjl);
     }
 }
 
@@ -489,7 +474,7 @@ inline void simd_trsm_r4_rlt(int ib, int N, T alpha,
     for (int k = 0; k < N; ++k) {
         T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkh, bkl;
-        load_4cell_soa(bk, ib, bkh, bkl);
+        load_dd4(bk + ib, bkh, bkl);
         if (nounit) {
             const T inv = one_dd / A_(k, k);
             __m256d ih = _mm256_set1_pd(inv.limbs[0]);
@@ -497,7 +482,7 @@ inline void simd_trsm_r4_rlt(int ib, int N, T alpha,
             __m256d nh, nl;
             simd_fast::mul(bkh, bkl, ih, il, nh, nl);
             bkh = nh; bkl = nl;
-            store_4cell_soa(bk, ib, bkh, bkl);
+            store_dd4(bk + ib, bkh, bkl);
         }
         for (int j = k + 1; j < N; ++j) {
             const T ajk = A_(j, k);
@@ -506,18 +491,18 @@ inline void simd_trsm_r4_rlt(int ib, int N, T alpha,
             __m256d ajl = _mm256_set1_pd(ajk.limbs[1]);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjh, bjl;
-            load_4cell_soa(bj, ib, bjh, bjl);
+            load_dd4(bj + ib, bjh, bjl);
             __m256d ph, pl;
             simd_fast::mul(ajh, ajl, bkh, bkl, ph, pl);
             simd_fast::neg(ph, pl);
             __m256d nh, nl;
             simd_fast::add(bjh, bjl, ph, pl, nh, nl);
-            store_4cell_soa(bj, ib, nh, nl);
+            store_dd4(bj + ib, nh, nl);
         }
         if (alpha_nontriv) {
             __m256d nh, nl;
             simd_fast::mul(bkh, bkl, ah, al, nh, nl);
-            store_4cell_soa(bk, ib, nh, nl);
+            store_dd4(bk + ib, nh, nl);
         }
     }
 }
@@ -531,7 +516,7 @@ inline void simd_trsm_r4_rut(int ib, int N, T alpha,
     for (int k = N - 1; k >= 0; --k) {
         T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkh, bkl;
-        load_4cell_soa(bk, ib, bkh, bkl);
+        load_dd4(bk + ib, bkh, bkl);
         if (nounit) {
             const T inv = one_dd / A_(k, k);
             __m256d ih = _mm256_set1_pd(inv.limbs[0]);
@@ -539,7 +524,7 @@ inline void simd_trsm_r4_rut(int ib, int N, T alpha,
             __m256d nh, nl;
             simd_fast::mul(bkh, bkl, ih, il, nh, nl);
             bkh = nh; bkl = nl;
-            store_4cell_soa(bk, ib, bkh, bkl);
+            store_dd4(bk + ib, bkh, bkl);
         }
         for (int j = 0; j < k; ++j) {
             const T ajk = A_(j, k);
@@ -548,18 +533,18 @@ inline void simd_trsm_r4_rut(int ib, int N, T alpha,
             __m256d ajl = _mm256_set1_pd(ajk.limbs[1]);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjh, bjl;
-            load_4cell_soa(bj, ib, bjh, bjl);
+            load_dd4(bj + ib, bjh, bjl);
             __m256d ph, pl;
             simd_fast::mul(ajh, ajl, bkh, bkl, ph, pl);
             simd_fast::neg(ph, pl);
             __m256d nh, nl;
             simd_fast::add(bjh, bjl, ph, pl, nh, nl);
-            store_4cell_soa(bj, ib, nh, nl);
+            store_dd4(bj + ib, nh, nl);
         }
         if (alpha_nontriv) {
             __m256d nh, nl;
             simd_fast::mul(bkh, bkl, ah, al, nh, nl);
-            store_4cell_soa(bk, ib, nh, nl);
+            store_dd4(bk + ib, nh, nl);
         }
     }
 }

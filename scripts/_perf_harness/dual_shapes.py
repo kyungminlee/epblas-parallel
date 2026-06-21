@@ -280,9 +280,15 @@ def _l2_sizes(is_c):
     return (128, 256, 512) if is_c else (128, 256, 512, 1024)
 
 
-def _l1_sizes():
-    # span cache-resident -> past-L3 so the RMW threading crossover is visible
-    return (1024, 65536, 1048576)
+def _l1_sizes(is_c):
+    # span cache-resident -> past-L3 so the RMW threading crossover is visible.
+    # The harness holds element-ops constant per cell (budget / N), so every cell
+    # costs ~equal wall time EXCEPT the 1 M point, which thrashes memory — and a
+    # complex DD element is 32 B (vs 16 B real), so the scalar mig leg streams the
+    # 32 MB complex buffer ~2-4x slower, making that one cell dominate the whole
+    # complex L1 bench. Drop it for complex (the 64 Ki cell already shows the
+    # past-L2 crossover); the real side keeps the full past-L3 span.
+    return (1024, 65536) if is_c else (1024, 65536, 1048576)
 
 
 # kbuf builders (set in setup): keep the unit-stride key bare so it matches the
@@ -731,8 +737,8 @@ def build_tpmv_tpsv(name, is_c):
 # ---------------------------------------------------------------------------
 # L1 — unit stride only (matches the legacy L1 harnesses).
 # ---------------------------------------------------------------------------
-def _l1_sweep(call_args='sizes[i]'):
-    return f'''{_size_iters(_l1_sizes(), 'l1')}
+def _l1_sweep(is_c, call_args='sizes[i]'):
+    return f'''{_size_iters(_l1_sizes(is_c), 'l1')}
     for (int i = 0; i < nsz; ++i)
         run_one({call_args}, itersarr[i], reps);'''
 
@@ -752,7 +758,7 @@ def build_axpy(name, is_c):
     spec = Spec(params='int N', setup=setup,
                 call='&N, &alpha, X, &one, Y, &one',
                 reset='memcpy(Y, Yi, (size_t)N * sizeof(T));', touch=_out_touch('Y'),
-                free='    free(X); free(Y); free(Yi);', sweep=_l1_sweep())
+                free='    free(X); free(Y); free(Yi);', sweep=_l1_sweep(is_c))
     return is_c, 'void', sig, spec
 
 
@@ -769,7 +775,7 @@ def build_scal(name, is_c, alpha_real):
     char kbuf[4]; kbuf[0] = '-'; kbuf[1] = 0;'''
     spec = Spec(params='int N', setup=setup, call='&N, &alpha, X, &one',
                 reset='memcpy(X, Xi, (size_t)N * sizeof(T));', touch=_out_touch('X'),
-                free='    free(X); free(Xi);', sweep=_l1_sweep())
+                free='    free(X); free(Xi);', sweep=_l1_sweep(is_c))
     return is_c, 'void', sig, spec
 
 
@@ -790,7 +796,7 @@ def build_copy_swap(name, is_c, swap):
     char kbuf[4]; kbuf[0] = '-'; kbuf[1] = 0;'''
     spec = Spec(params='int N', setup=setup, call='&N, X, &one, Y, &one',
                 reset=reset, touch=_out_touch('Y'),
-                free='    free(X); free(Y); free(Xi); free(Yi);', sweep=_l1_sweep())
+                free='    free(X); free(Y); free(Xi); free(Yi);', sweep=_l1_sweep(is_c))
     return is_c, 'void', sig, spec
 
 
@@ -805,7 +811,7 @@ def build_dot(name, is_c, conj):
     {fill('Y', 'N', is_c, 1)}
     char kbuf[4]; kbuf[0] = '-'; kbuf[1] = 0;'''
     spec = Spec(params='int N', setup=setup, call='&N, X, &one, Y, &one',
-                leg_kind=kind, free='    free(X); free(Y);', sweep=_l1_sweep())
+                leg_kind=kind, free='    free(X); free(Y);', sweep=_l1_sweep(is_c))
     return is_c, ret, sig, spec
 
 
@@ -817,7 +823,7 @@ def build_reduce(name, is_c):
     {fill('X', 'N', is_c, 0)}
     char kbuf[4]; kbuf[0] = '-'; kbuf[1] = 0;'''
     spec = Spec(params='int N', setup=setup, call='&N, X, &one',
-                leg_kind='retreal', free='    free(X);', sweep=_l1_sweep())
+                leg_kind='retreal', free='    free(X);', sweep=_l1_sweep(is_c))
     return is_c, 'RT', sig, spec
 
 
@@ -828,7 +834,7 @@ def build_iamax(name, is_c):
     {fill('X', 'N', is_c, 0)}
     char kbuf[4]; kbuf[0] = '-'; kbuf[1] = 0;'''
     spec = Spec(params='int N', setup=setup, call='&N, X, &one',
-                leg_kind='retint', free='    free(X);', sweep=_l1_sweep())
+                leg_kind='retint', free='    free(X);', sweep=_l1_sweep(is_c))
     return is_c, 'int', sig, spec
 
 
@@ -852,7 +858,7 @@ def build_rot(name, is_c, real_cs):
     spec = Spec(params='int N', setup=setup, call='&N, X, &one, Y, &one, &c_, &s_',
                 reset='memcpy(X, Xi, (size_t)N * sizeof(T)); memcpy(Y, Yi, (size_t)N * sizeof(T));',
                 touch=_out_touch('X'),
-                free='    free(X); free(Y); free(Xi); free(Yi);', sweep=_l1_sweep())
+                free='    free(X); free(Y); free(Xi); free(Yi);', sweep=_l1_sweep(is_c))
     return is_c, 'void', sig, spec
 
 
@@ -872,7 +878,7 @@ def build_rotm(name):
     spec = Spec(params='int N', setup=setup, call='&N, X, &one, Y, &one, PARAM',
                 reset='memcpy(X, Xi, (size_t)N * sizeof(T)); memcpy(Y, Yi, (size_t)N * sizeof(T));',
                 touch=_out_touch('X'),
-                free='    free(X); free(Y); free(Xi); free(Yi);', sweep=_l1_sweep())
+                free='    free(X); free(Y); free(Xi); free(Yi);', sweep=_l1_sweep(False))
     return False, 'void', sig, spec
 
 

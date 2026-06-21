@@ -18,6 +18,7 @@
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -50,26 +51,7 @@ inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
 
 #ifdef MBLAS_SIMD_DD
-/* Deinterleave 4 consecutive AoS complex-DD elements (16 doubles)
- * into 4 SoA vectors via 4×4 transpose. */
-static inline __attribute__((always_inline)) void
-soa_load4_cdd(const double *p,
-              __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il)
-{
-    __m256d v0 = _mm256_loadu_pd(p +  0);   /* [r0h, r0l, i0h, i0l] */
-    __m256d v1 = _mm256_loadu_pd(p +  4);   /* [r1h, r1l, i1h, i1l] */
-    __m256d v2 = _mm256_loadu_pd(p +  8);   /* [r2h, r2l, i2h, i2l] */
-    __m256d v3 = _mm256_loadu_pd(p + 12);   /* [r3h, r3l, i3h, i3l] */
-    /* Per-lane unpack. */
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1); /* [r0h, r1h, i0h, i1h] */
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1); /* [r0l, r1l, i0l, i1l] */
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3); /* [r2h, r3h, i2h, i3h] */
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3); /* [r2l, r3l, i2l, i3l] */
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20); /* [r0h, r1h, r2h, r3h] */
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31); /* [i0h, i1h, i2h, i3h] */
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20); /* [r0l, r1l, r2l, r3l] */
-    il = _mm256_permute2f128_pd(t1, t3, 0x31); /* [i0l, i1l, i2l, i3l] */
-}
+using simd_exact::cload4;
 #endif
 
 } /* namespace */
@@ -101,7 +83,7 @@ static inline void wgemv_n_simd_rows(int i_lo, int i_hi, int N, T alpha,
         int i = i_lo;
         for (; i + 3 < i_hi; i += 4) {
             __m256d a_rh, a_rl, a_ih, a_il;
-            soa_load4_cdd(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
+            cload4(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
             __m256d p_rh, p_rl, p_ih, p_il;
             simd_fast::cmul(trh, trl, tih, til, a_rh, a_rl, a_ih, a_il,
                              p_rh, p_rl, p_ih, p_il);
@@ -232,7 +214,7 @@ static void wgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         int i = 0;
         for (; i + 3 < M; i += 4) {
             __m256d a_rh, a_rl, a_ih, a_il;
-            soa_load4_cdd(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
+            cload4(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
             if (conj_a) simd_fast::neg(a_ih, a_il);
             __m256d xrh = _mm256_loadu_pd(x_rh + i);
             __m256d xrl = _mm256_loadu_pd(x_rl + i);

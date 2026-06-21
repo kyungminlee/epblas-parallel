@@ -31,6 +31,7 @@
 
 #ifdef WBLAS_SIMD_DD
 #include "mf_simd_fast.h"   /* mul, add, neg, cmul/add */
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 
@@ -547,41 +548,8 @@ inline void wtrsm_simd_diag(trsm_simd_cop op, int j_start, int j_end,
 
 /* ── SIDE='R' SIMD: 4-row chunks of B; column-walk trsm. ─────── */
 
-inline void load_4cell_csoa(const T *col, int ofs,
-                            __m256d &rh, __m256d &rl,
-                            __m256d &ih, __m256d &il)
-{
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 1]));
-    __m256d v2 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 2]));
-    __m256d v3 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 3]));
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);
-    il = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
-
-inline void store_4cell_csoa(T *col, int ofs,
-                             __m256d rh, __m256d rl,
-                             __m256d ih, __m256d il)
-{
-    __m256d t0 = _mm256_unpacklo_pd(rh, rl);
-    __m256d t1 = _mm256_unpackhi_pd(rh, rl);
-    __m256d t2 = _mm256_unpacklo_pd(ih, il);
-    __m256d t3 = _mm256_unpackhi_pd(ih, il);
-    __m256d v0 = _mm256_permute2f128_pd(t0, t2, 0x20);
-    __m256d v1 = _mm256_permute2f128_pd(t1, t3, 0x20);
-    __m256d v2 = _mm256_permute2f128_pd(t0, t2, 0x31);
-    __m256d v3 = _mm256_permute2f128_pd(t1, t3, 0x31);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs]),     v0);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 1]), v1);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 2]), v2);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 3]), v3);
-}
+using simd_exact::cload4;
+using simd_exact::cstore4;
 
 inline void broadcast_c4(const T &v, __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il)
 {
@@ -599,7 +567,7 @@ inline void simd_wtrsm_r4_rln(int ib, int N, T alpha,
     for (int j = N - 1; j >= 0; --j) {
         T *bj = b + static_cast<std::size_t>(j) * ldb;
         __m256d brh, brl, bih, bil;
-        load_4cell_csoa(bj, ib, brh, brl, bih, bil);
+        cload4(bj + ib, brh, brl, bih, bil);
         if (alpha_nontriv) {
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(brh, brl, bih, bil, arh, arl, aih, ail,
@@ -613,7 +581,7 @@ inline void simd_wtrsm_r4_rln(int ib, int N, T alpha,
             broadcast_c4(akj, akrh, akrl, akih, akil);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkrh, bkrl, bkih, bkil;
-            load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+            cload4(bk + ib, bkrh, bkrl, bkih, bkil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(akrh, akrl, akih, akil, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
@@ -633,7 +601,7 @@ inline void simd_wtrsm_r4_rln(int ib, int N, T alpha,
                              nrh, nrl, nih, nil_);
             brh = nrh; brl = nrl; bih = nih; bil = nil_;
         }
-        store_4cell_csoa(bj, ib, brh, brl, bih, bil);
+        cstore4(bj + ib, brh, brl, bih, bil);
     }
 }
 
@@ -646,7 +614,7 @@ inline void simd_wtrsm_r4_run(int ib, int N, T alpha,
     for (int j = 0; j < N; ++j) {
         T *bj = b + static_cast<std::size_t>(j) * ldb;
         __m256d brh, brl, bih, bil;
-        load_4cell_csoa(bj, ib, brh, brl, bih, bil);
+        cload4(bj + ib, brh, brl, bih, bil);
         if (alpha_nontriv) {
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(brh, brl, bih, bil, arh, arl, aih, ail,
@@ -660,7 +628,7 @@ inline void simd_wtrsm_r4_run(int ib, int N, T alpha,
             broadcast_c4(akj, akrh, akrl, akih, akil);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkrh, bkrl, bkih, bkil;
-            load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+            cload4(bk + ib, bkrh, bkrl, bkih, bkil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(akrh, akrl, akih, akil, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
@@ -680,7 +648,7 @@ inline void simd_wtrsm_r4_run(int ib, int N, T alpha,
                              nrh, nrl, nih, nil_);
             brh = nrh; brl = nrl; bih = nih; bil = nil_;
         }
-        store_4cell_csoa(bj, ib, brh, brl, bih, bil);
+        cstore4(bj + ib, brh, brl, bih, bil);
     }
 }
 
@@ -694,7 +662,7 @@ inline void simd_wtrsm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
     for (int k = 0; k < N; ++k) {
         T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkrh, bkrl, bkih, bkil;
-        load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+        cload4(bk + ib, bkrh, bkrl, bkih, bkil);
         if (nounit) {
             const T inv = cdiv(one_cdd, A_op(a, lda, k, k, conj_flag));
             __m256d irh, irl, iih, iil;
@@ -703,7 +671,7 @@ inline void simd_wtrsm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, irh, irl, iih, iil,
                              nrh, nrl, nih, nil_);
             bkrh = nrh; bkrl = nrl; bkih = nih; bkil = nil_;
-            store_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+            cstore4(bk + ib, bkrh, bkrl, bkih, bkil);
         }
         for (int j = k + 1; j < N; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
@@ -712,7 +680,7 @@ inline void simd_wtrsm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
             broadcast_c4(ajk, ajrh, ajrl, ajih, ajil);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjrh, bjrl, bjih, bjil;
-            load_4cell_csoa(bj, ib, bjrh, bjrl, bjih, bjil);
+            cload4(bj + ib, bjrh, bjrl, bjih, bjil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(ajrh, ajrl, ajih, ajil, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
@@ -721,13 +689,13 @@ inline void simd_wtrsm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cadd(bjrh, bjrl, bjih, bjil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
-            store_4cell_csoa(bj, ib, nrh, nrl, nih, nil_);
+            cstore4(bj + ib, nrh, nrl, nih, nil_);
         }
         if (alpha_nontriv) {
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, arh, arl, aih, ail,
                              nrh, nrl, nih, nil_);
-            store_4cell_csoa(bk, ib, nrh, nrl, nih, nil_);
+            cstore4(bk + ib, nrh, nrl, nih, nil_);
         }
     }
 }
@@ -741,7 +709,7 @@ inline void simd_wtrsm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
     for (int k = N - 1; k >= 0; --k) {
         T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkrh, bkrl, bkih, bkil;
-        load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+        cload4(bk + ib, bkrh, bkrl, bkih, bkil);
         if (nounit) {
             const T inv = cdiv(one_cdd, A_op(a, lda, k, k, conj_flag));
             __m256d irh, irl, iih, iil;
@@ -750,7 +718,7 @@ inline void simd_wtrsm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, irh, irl, iih, iil,
                              nrh, nrl, nih, nil_);
             bkrh = nrh; bkrl = nrl; bkih = nih; bkil = nil_;
-            store_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+            cstore4(bk + ib, bkrh, bkrl, bkih, bkil);
         }
         for (int j = 0; j < k; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
@@ -759,7 +727,7 @@ inline void simd_wtrsm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
             broadcast_c4(ajk, ajrh, ajrl, ajih, ajil);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjrh, bjrl, bjih, bjil;
-            load_4cell_csoa(bj, ib, bjrh, bjrl, bjih, bjil);
+            cload4(bj + ib, bjrh, bjrl, bjih, bjil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(ajrh, ajrl, ajih, ajil, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
@@ -768,13 +736,13 @@ inline void simd_wtrsm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cadd(bjrh, bjrl, bjih, bjil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
-            store_4cell_csoa(bj, ib, nrh, nrl, nih, nil_);
+            cstore4(bj + ib, nrh, nrl, nih, nil_);
         }
         if (alpha_nontriv) {
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, arh, arl, aih, ail,
                              nrh, nrl, nih, nil_);
-            store_4cell_csoa(bk, ib, nrh, nrl, nih, nil_);
+            cstore4(bk + ib, nrh, nrl, nih, nil_);
         }
     }
 }

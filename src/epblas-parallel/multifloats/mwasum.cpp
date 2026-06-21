@@ -15,32 +15,14 @@ using T = mf::complex64x2;
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 
 namespace {
 /* canonical EFTs — mf_simd_fast.h (2a-5) */
 using simd_fast::fast2sum;
 using simd_fast::twosum;
-inline void load_4cell_csoa(const T *p, __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il) {
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[0]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[1]));
-    __m256d v2 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[2]));
-    __m256d v3 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[3]));
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);
-    il = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
-inline R horizontal_dd(__m256d h, __m256d l) {
-    alignas(32) double ha[4], la[4];
-    _mm256_store_pd(ha, h); _mm256_store_pd(la, l);
-    R s{ha[0], la[0]};
-    for (int k = 1; k < 4; ++k) s = s + R{ha[k], la[k]};
-    return s;
-}
+using simd_exact::cload4;
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
 }
 #endif
 
@@ -59,7 +41,7 @@ static R mwasum_unit(int n, const T *x)
     const int n4 = n & ~3;
     for (int i = 0; i < n4; i += 4) {
         __m256d rh, rl, ih, il;
-        load_4cell_csoa(&x[i], rh, rl, ih, il);
+        cload4(&x[i], rh, rl, ih, il);
         /* |re|: clear sign on hi, xor lo */
         __m256d sgr = _mm256_and_pd(rh, signbit);
         __m256d arh = _mm256_andnot_pd(signbit, rh);

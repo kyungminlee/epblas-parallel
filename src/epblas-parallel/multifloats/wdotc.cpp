@@ -23,57 +23,18 @@ inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 
 namespace {
 /* canonical EFTs — mf_simd_fast.h (2a-5) */
 using simd_fast::twoprod;
 using simd_fast::fast2sum;
 using simd_fast::twosum;
-inline void load_4cell_csoa(const T *p, __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il) {
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[0]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[1]));
-    __m256d v2 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[2]));
-    __m256d v3 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[3]));
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);
-    il = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
-inline R horizontal_dd(__m256d h, __m256d l) {
-    alignas(32) double ha[4], la[4];
-    _mm256_store_pd(ha, h); _mm256_store_pd(la, l);
-    R s{ha[0], la[0]};
-    for (int k = 1; k < 4; ++k) s = s + R{ha[k], la[k]};
-    return s;
-}
-inline void absorb(__m256d ph, __m256d pl,
-                   __m256d &a0, __m256d &a1, __m256d &a2)
-{
-    __m256d e0, e1, e2;
-    twosum(a0, ph, a0, e0);
-    twosum(a1, pl, a1, e1);
-    twosum(a1, e0, a1, e2);
-    a2 = _mm256_add_pd(a2, _mm256_add_pd(e1, e2));
-}
-inline void renorm3(__m256d &a0, __m256d &a1, __m256d &a2) {
-    __m256d t, e;
-    fast2sum(a1, a2, t, e);
-    a1 = t; a2 = e;
-    fast2sum(a0, a1, a0, a1);
-    a1 = _mm256_add_pd(a1, a2);
-    fast2sum(a0, a1, a0, a1);
-    a2 = _mm256_setzero_pd();
-}
-inline void dd_prod(__m256d xh, __m256d xl, __m256d yh, __m256d yl,
-                    __m256d &ph, __m256d &pl) {
-    twoprod(xh, yh, ph, pl);
-    pl = _mm256_add_pd(pl,
-            _mm256_add_pd(_mm256_mul_pd(xh, yl), _mm256_mul_pd(xl, yh)));
-}
+using simd_exact::cload4;
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
+using simd_fast::absorb;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
+using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
+using simd_fast::dd_prod;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
 }
 #endif
 
@@ -95,8 +56,8 @@ mf_kernels::wdotc_unit(int n, const multifloats::complex64x2 *x,
     const int n4 = n & ~3;
     for (int i = 0; i < n4; i += 4) {
         __m256d xrh, xrl, xih, xil, yrh, yrl, yih, yil;
-        load_4cell_csoa(&x[i], xrh, xrl, xih, xil);
-        load_4cell_csoa(&y[i], yrh, yrl, yih, yil);
+        cload4(&x[i], xrh, xrl, xih, xil);
+        cload4(&y[i], yrh, yrl, yih, yil);
         /* conj(x)·y = (xr·yr + xi·yi) + j·(xr·yi - xi·yr) */
         __m256d rh, rl, ph, pl;
         dd_prod(xrh, xrl, yrh, yrl, rh, rl);

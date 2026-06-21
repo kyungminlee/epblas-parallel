@@ -11,6 +11,7 @@
 #endif
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 
@@ -19,22 +20,8 @@ using T = mf::float64x2;
 
 namespace {
 #ifdef MBLAS_SIMD_DD
-inline void load_4cell_soa(const T *p, __m256d &h, __m256d &l) {
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(p));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(p + 2));
-    __m256d lo = _mm256_unpacklo_pd(v0, v1);
-    __m256d hi = _mm256_unpackhi_pd(v0, v1);
-    h = _mm256_permute4x64_pd(lo, 0xD8);
-    l = _mm256_permute4x64_pd(hi, 0xD8);
-}
-inline void store_4cell_soa(T *p, __m256d h, __m256d l) {
-    __m256d lo = _mm256_unpacklo_pd(h, l);
-    __m256d hi = _mm256_unpackhi_pd(h, l);
-    __m256d v0 = _mm256_permute2f128_pd(lo, hi, 0x20);
-    __m256d v1 = _mm256_permute2f128_pd(lo, hi, 0x31);
-    _mm256_storeu_pd(reinterpret_cast<double*>(p),     v0);
-    _mm256_storeu_pd(reinterpret_cast<double*>(p + 2), v1);
-}
+using simd_exact::load_dd4;
+using simd_exact::store_dd4;
 #endif
 }
 
@@ -50,8 +37,8 @@ static void mrot_unit(int n, const T c, const T s, T *x, T *y)
     const int n4 = n & ~3;
     for (int i = 0; i < n4; i += 4) {
         __m256d xh, xl, yh, yl;
-        load_4cell_soa(&x[i], xh, xl);
-        load_4cell_soa(&y[i], yh, yl);
+        load_dd4(&x[i], xh, xl);
+        load_dd4(&y[i], yh, yl);
         __m256d cxh, cxl; simd_fast::mul(ch, cl, xh, xl, cxh, cxl);
         __m256d syh, syl; simd_fast::mul(sh, sl, yh, yl, syh, syl);
         __m256d nxh, nxl; simd_fast::add(cxh, cxl, syh, syl, nxh, nxl);
@@ -59,8 +46,8 @@ static void mrot_unit(int n, const T c, const T s, T *x, T *y)
         __m256d sxh, sxl; simd_fast::mul(sh, sl, xh, xl, sxh, sxl);
         simd_fast::neg(sxh, sxl);
         __m256d nyh, nyl; simd_fast::add(cyh, cyl, sxh, sxl, nyh, nyl);
-        store_4cell_soa(&x[i], nxh, nxl);
-        store_4cell_soa(&y[i], nyh, nyl);
+        store_dd4(&x[i], nxh, nxl);
+        store_dd4(&y[i], nyh, nyl);
     }
     for (int i = n4; i < n; ++i) {
         T tx = c * x[i] + s * y[i];

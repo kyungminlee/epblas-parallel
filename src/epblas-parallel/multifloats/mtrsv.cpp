@@ -11,6 +11,7 @@
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -33,16 +34,8 @@ namespace {
 const T zero_dd{0.0, 0.0};
 
 #ifdef MBLAS_SIMD_DD
-static inline __attribute__((always_inline)) void
-soa_load4(const double *p, __m256d &hi, __m256d &lo)
-{
-    __m256d a01 = _mm256_loadu_pd(p);
-    __m256d a23 = _mm256_loadu_pd(p + 4);
-    __m256d t0 = _mm256_unpacklo_pd(a01, a23);
-    __m256d t1 = _mm256_unpackhi_pd(a01, a23);
-    hi = _mm256_permute4x64_pd(t0, 0xD8);
-    lo = _mm256_permute4x64_pd(t1, 0xD8);
-}
+using simd_exact::load_dd4;
+using simd_exact::store_dd4;
 static inline __attribute__((always_inline)) T
 hreduce_dd(__m256d s_h, __m256d s_l)
 {
@@ -58,17 +51,6 @@ hreduce_dd(__m256d s_h, __m256d s_l)
     _mm256_storeu_pd(rh, r_h); _mm256_storeu_pd(rl, r_l);
     return T{rh[0], rl[0]};
 }
-static inline __attribute__((always_inline)) void
-soa_store4(double *p, __m256d hi, __m256d lo)
-{
-    __m256d hp = _mm256_permute4x64_pd(hi, 0xD8);  /* [h0,h2,h1,h3] */
-    __m256d lp = _mm256_permute4x64_pd(lo, 0xD8);  /* [l0,l2,l1,l3] */
-    __m256d a01 = _mm256_unpacklo_pd(hp, lp);      /* [h0,l0,h1,l1] */
-    __m256d a23 = _mm256_unpackhi_pd(hp, lp);      /* [h2,l2,h3,l3] */
-    _mm256_storeu_pd(p,     a01);
-    _mm256_storeu_pd(p + 4, a23);
-}
-
 /* Off-diagonal SIMD kernels for the blocked threaded solve.
  * msub:  x[k] -= xi * ai[k]  for k in [lo,hi)  (NoTrans axpy form).
  * dot :  returns sum_{k in [lo,hi)} ai[k] * x[k] (Trans dot form). */
@@ -82,14 +64,14 @@ mtrsv_col_msub(T *x, const T *ai, T xi, int lo, int hi)
     int k = lo;
     for (; k + 4 <= hi; k += 4) {
         __m256d ah, al, ch, cl;
-        soa_load4(aip + 2 * k, ah, al);
-        soa_load4(xp  + 2 * k, ch, cl);
+        load_dd4(aip + 2 * k, ah, al);
+        load_dd4(xp  + 2 * k, ch, cl);
         __m256d ph, pl;
         simd_fast::mul(xh, xl, ah, al, ph, pl);
         simd_fast::neg(ph, pl);
         __m256d rh, rl;
         simd_fast::add(ch, cl, ph, pl, rh, rl);
-        soa_store4(xp + 2 * k, rh, rl);
+        store_dd4(xp + 2 * k, rh, rl);
     }
     for (; k < hi; ++k) x[k] = x[k] - xi * ai[k];
 }
@@ -102,8 +84,8 @@ mtrsv_dot_range(const T *ai, const T *x, int lo, int hi)
     int k = lo;
     for (; k + 4 <= hi; k += 4) {
         __m256d ah, al, xih, xil;
-        soa_load4(aip + 2 * k, ah, al);
-        soa_load4(xp  + 2 * k, xih, xil);
+        load_dd4(aip + 2 * k, ah, al);
+        load_dd4(xp  + 2 * k, xih, xil);
         __m256d ph, pl;
         simd_fast::mul(ah, al, xih, xil, ph, pl);
         simd_fast::add(sh, sl, ph, pl, sh, sl);
@@ -153,7 +135,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                     }
                     for (; k + 3 < N; k += 4) {
                         __m256d a_h, a_l;
-                        soa_load4(aip + 2 * k, a_h, a_l);
+                        load_dd4(aip + 2 * k, a_h, a_l);
                         __m256d xh = _mm256_loadu_pd(x_hi + k);
                         __m256d xl = _mm256_loadu_pd(x_lo + k);
                         __m256d p_h, p_l;
@@ -183,7 +165,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                     int k = 0;
                     for (; k + 3 < i; k += 4) {
                         __m256d a_h, a_l;
-                        soa_load4(aip + 2 * k, a_h, a_l);
+                        load_dd4(aip + 2 * k, a_h, a_l);
                         __m256d xh = _mm256_loadu_pd(x_hi + k);
                         __m256d xl = _mm256_loadu_pd(x_lo + k);
                         __m256d p_h, p_l;
@@ -216,7 +198,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                     }
                     for (; k + 3 < N; k += 4) {
                         __m256d a_h, a_l;
-                        soa_load4(aip + 2 * k, a_h, a_l);
+                        load_dd4(aip + 2 * k, a_h, a_l);
                         __m256d xh = _mm256_loadu_pd(x_hi + k);
                         __m256d xl = _mm256_loadu_pd(x_lo + k);
                         __m256d p_h, p_l;
@@ -243,7 +225,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                     int k = 0;
                     for (; k + 3 < i; k += 4) {
                         __m256d a_h, a_l;
-                        soa_load4(aip + 2 * k, a_h, a_l);
+                        load_dd4(aip + 2 * k, a_h, a_l);
                         __m256d xh = _mm256_loadu_pd(x_hi + k);
                         __m256d xl = _mm256_loadu_pd(x_lo + k);
                         __m256d p_h, p_l;

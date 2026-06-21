@@ -119,6 +119,23 @@ store_dd4(multifloats::float64x2 *p, __m256d hi, __m256d lo)
     _mm256_storeu_pd(d + 4, a23);
 }
 
+/* Raw-pointer overload: the matvec/ger/symv/trsv consumers index a packed A
+ * panel as `const double*` + element offset, not as a typed float64x2*. Reinterpret
+ * and reuse the canonical transpose so there is one body, not a per-site cast. */
+static inline __attribute__((always_inline)) void
+load_dd4(const double *p, __m256d &hi, __m256d &lo)
+{
+    load_dd4(reinterpret_cast<const multifloats::float64x2 *>(p), hi, lo);
+}
+
+/* Raw-pointer store overload: same rationale as the load double* overload — the
+ * ger/trsv consumers write a packed panel addressed as double* + element offset. */
+static inline __attribute__((always_inline)) void
+store_dd4(double *p, __m256d hi, __m256d lo)
+{
+    store_dd4(reinterpret_cast<multifloats::float64x2 *>(p), hi, lo);
+}
+
 /* Horizontal reduce of a 4-lane DD accumulator to a single float64x2, via a
  * faithful add tree (lane0+lane2, lane1+lane3, then the two survivors). The
  * reduction reorders vs a scalar left-fold, so a dot built on a vector
@@ -248,6 +265,25 @@ static inline cx4 cload4(const multifloats::complex64x2 *p)
     return r;
 }
 
+/* Out-ref bridges over the struct-return cload4 — the matvec/ger/dot/RMW consumers
+ * deinterleave straight into four named __m256d lanes rather than a cx4. Thin
+ * always-inline wrappers: same transpose, no convention divergence in the body.
+ * The double* overload reinterprets a `const double*` + offset panel (16 doubles). */
+static inline __attribute__((always_inline)) void
+cload4(const multifloats::complex64x2 *p,
+       __m256d &reh, __m256d &rel, __m256d &imh, __m256d &iml)
+{
+    cx4 c = cload4(p);
+    reh = c.reh; rel = c.rel; imh = c.imh; iml = c.iml;
+}
+static inline __attribute__((always_inline)) void
+cload4(const double *p,
+       __m256d &reh, __m256d &rel, __m256d &imh, __m256d &iml)
+{
+    cx4 c = cload4(reinterpret_cast<const multifloats::complex64x2 *>(p));
+    reh = c.reh; rel = c.rel; imh = c.imh; iml = c.iml;
+}
+
 /* Interleave 4 SoA complex lanes back to 4 contiguous complex64x2 (16 doubles) —
  * the exact inverse of cload4 (a 4×4 double transpose). Used to write the result
  * of a NoTrans complex AXPY back to a contiguous x/y run. */
@@ -267,6 +303,23 @@ cstore4(multifloats::complex64x2 *p, const cx4 &c)
     _mm256_storeu_pd(d + 4,  c1);
     _mm256_storeu_pd(d + 8,  c2);
     _mm256_storeu_pd(d + 12, c3);
+}
+
+/* Four-lane store bridges over the struct-return cstore4 — the inverse of the
+ * out-ref cload4 bridges. The matvec/ger/dot/RMW consumers hold the result in
+ * four named __m256d lanes; the double* overload writes a `double*` + offset
+ * panel (16 doubles). Same transpose, no convention divergence in the body. */
+static inline __attribute__((always_inline)) void
+cstore4(multifloats::complex64x2 *p,
+        __m256d reh, __m256d rel, __m256d imh, __m256d iml)
+{
+    cstore4(p, cx4{reh, rel, imh, iml});
+}
+static inline __attribute__((always_inline)) void
+cstore4(double *p,
+        __m256d reh, __m256d rel, __m256d imh, __m256d iml)
+{
+    cstore4(reinterpret_cast<multifloats::complex64x2 *>(p), cx4{reh, rel, imh, iml});
 }
 
 /* Horizontal reduce of a 4-lane complex accumulator to one complex64x2, folding

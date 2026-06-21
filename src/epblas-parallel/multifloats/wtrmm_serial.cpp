@@ -34,6 +34,7 @@
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"   /* cmul, cadd primitives */
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 
@@ -417,41 +418,8 @@ inline void wtrmm_run_core(int, int, int, T, const T*, int, T*, int, int);
 inline void wtrmm_rlTC_core(int, int, int, T, const T*, int, T*, int, int, int);
 inline void wtrmm_ruTC_core(int, int, int, T, const T*, int, T*, int, int, int);
 
-inline void load_4cell_csoa(const T *col, int ofs,
-                            __m256d &rh, __m256d &rl,
-                            __m256d &ih, __m256d &il)
-{
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 1]));
-    __m256d v2 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 2]));
-    __m256d v3 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 3]));
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);
-    il = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
-
-inline void store_4cell_csoa(T *col, int ofs,
-                             __m256d rh, __m256d rl,
-                             __m256d ih, __m256d il)
-{
-    __m256d t0 = _mm256_unpacklo_pd(rh, rl);
-    __m256d t1 = _mm256_unpackhi_pd(rh, rl);
-    __m256d t2 = _mm256_unpacklo_pd(ih, il);
-    __m256d t3 = _mm256_unpackhi_pd(ih, il);
-    __m256d v0 = _mm256_permute2f128_pd(t0, t2, 0x20);
-    __m256d v1 = _mm256_permute2f128_pd(t1, t3, 0x20);
-    __m256d v2 = _mm256_permute2f128_pd(t0, t2, 0x31);
-    __m256d v3 = _mm256_permute2f128_pd(t1, t3, 0x31);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs]),     v0);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 1]), v1);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 2]), v2);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 3]), v3);
-}
+using simd_exact::cload4;
+using simd_exact::cstore4;
 
 inline void broadcast_c4(const T &v, __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il)
 {
@@ -467,7 +435,7 @@ inline void simd_wtrmm_r4_rln(int ib, int N, T alpha,
         T t = alpha;
         if (nounit) t = cmul(t, A_(j, j));
         __m256d brh, brl, bih, bil;
-        load_4cell_csoa(bj, ib, brh, brl, bih, bil);
+        cload4(bj + ib, brh, brl, bih, bil);
         if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
             broadcast_c4(t, trh, trl, tih, til);
@@ -484,7 +452,7 @@ inline void simd_wtrmm_r4_rln(int ib, int N, T alpha,
             broadcast_c4(akj, arh, arl, aih, ail);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkrh, bkrl, bkih, bkil;
-            load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+            cload4(bk + ib, bkrh, bkrl, bkih, bkil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
@@ -493,7 +461,7 @@ inline void simd_wtrmm_r4_rln(int ib, int N, T alpha,
                              nrh, nrl, nih, nil_);
             brh = nrh; brl = nrl; bih = nih; bil = nil_;
         }
-        store_4cell_csoa(bj, ib, brh, brl, bih, bil);
+        cstore4(bj + ib, brh, brl, bih, bil);
     }
 }
 
@@ -505,7 +473,7 @@ inline void simd_wtrmm_r4_run(int ib, int N, T alpha,
         T t = alpha;
         if (nounit) t = cmul(t, A_(j, j));
         __m256d brh, brl, bih, bil;
-        load_4cell_csoa(bj, ib, brh, brl, bih, bil);
+        cload4(bj + ib, brh, brl, bih, bil);
         if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
             broadcast_c4(t, trh, trl, tih, til);
@@ -522,7 +490,7 @@ inline void simd_wtrmm_r4_run(int ib, int N, T alpha,
             broadcast_c4(akj, arh, arl, aih, ail);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkrh, bkrl, bkih, bkil;
-            load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+            cload4(bk + ib, bkrh, bkrl, bkih, bkil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
@@ -531,7 +499,7 @@ inline void simd_wtrmm_r4_run(int ib, int N, T alpha,
                              nrh, nrl, nih, nil_);
             brh = nrh; brl = nrl; bih = nih; bil = nil_;
         }
-        store_4cell_csoa(bj, ib, brh, brl, bih, bil);
+        cstore4(bj + ib, brh, brl, bih, bil);
     }
 }
 
@@ -541,7 +509,7 @@ inline void simd_wtrmm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
     for (int k = N - 1; k >= 0; --k) {
         const T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkrh, bkrl, bkih, bkil;
-        load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+        cload4(bk + ib, bkrh, bkrl, bkih, bkil);
         for (int j = k + 1; j < N; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
             if (ceq0(ajk)) continue;
@@ -550,14 +518,14 @@ inline void simd_wtrmm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
             broadcast_c4(scaled, arh, arl, aih, ail);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjrh, bjrl, bjih, bjil;
-            load_4cell_csoa(bj, ib, bjrh, bjrl, bjih, bjil);
+            cload4(bj + ib, bjrh, bjrl, bjih, bjil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cadd(bjrh, bjrl, bjih, bjil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
-            store_4cell_csoa(bj, ib, nrh, nrl, nih, nil_);
+            cstore4(bj + ib, nrh, nrl, nih, nil_);
         }
         T t = alpha;
         if (nounit) t = cmul(t, A_op(a, lda, k, k, conj_flag));
@@ -567,7 +535,7 @@ inline void simd_wtrmm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
-            store_4cell_csoa(const_cast<T*>(bk), ib, nrh, nrl, nih, nil_);
+            cstore4(const_cast<T*>(bk) + ib, nrh, nrl, nih, nil_);
         }
     }
 }
@@ -578,7 +546,7 @@ inline void simd_wtrmm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
     for (int k = 0; k < N; ++k) {
         const T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkrh, bkrl, bkih, bkil;
-        load_4cell_csoa(bk, ib, bkrh, bkrl, bkih, bkil);
+        cload4(bk + ib, bkrh, bkrl, bkih, bkil);
         for (int j = 0; j < k; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
             if (ceq0(ajk)) continue;
@@ -587,14 +555,14 @@ inline void simd_wtrmm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
             broadcast_c4(scaled, arh, arl, aih, ail);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjrh, bjrl, bjih, bjil;
-            load_4cell_csoa(bj, ib, bjrh, bjrl, bjih, bjil);
+            cload4(bj + ib, bjrh, bjrl, bjih, bjil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(arh, arl, aih, ail, bkrh, bkrl, bkih, bkil,
                              prh, prl, pih, pil);
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cadd(bjrh, bjrl, bjih, bjil, prh, prl, pih, pil,
                              nrh, nrl, nih, nil_);
-            store_4cell_csoa(bj, ib, nrh, nrl, nih, nil_);
+            cstore4(bj + ib, nrh, nrl, nih, nil_);
         }
         T t = alpha;
         if (nounit) t = cmul(t, A_op(a, lda, k, k, conj_flag));
@@ -604,7 +572,7 @@ inline void simd_wtrmm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
-            store_4cell_csoa(const_cast<T*>(bk), ib, nrh, nrl, nih, nil_);
+            cstore4(const_cast<T*>(bk) + ib, nrh, nrl, nih, nil_);
         }
     }
 }

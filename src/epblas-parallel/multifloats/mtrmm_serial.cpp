@@ -29,6 +29,7 @@
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"   /* mul, add primitives */
+#include "mf_simd_exact.h"  /* canonical load_dd4 */
 #include <immintrin.h>
 #endif
 
@@ -331,25 +332,9 @@ inline void mtrmm_run_core(int, int, int, T, const T*, int, T*, int, int);
 inline void mtrmm_rlt_core(int, int, int, T, const T*, int, T*, int, int);
 inline void mtrmm_rut_core(int, int, int, T, const T*, int, T*, int, int);
 
-inline void load_4cell_soa(const T *col, int ofs, __m256d &h, __m256d &l)
-{
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 2]));
-    __m256d lo = _mm256_unpacklo_pd(v0, v1);
-    __m256d hi = _mm256_unpackhi_pd(v0, v1);
-    h = _mm256_permute4x64_pd(lo, 0xD8);
-    l = _mm256_permute4x64_pd(hi, 0xD8);
-}
-
-inline void store_4cell_soa(T *col, int ofs, __m256d h, __m256d l)
-{
-    __m256d lo = _mm256_unpacklo_pd(h, l);
-    __m256d hi = _mm256_unpackhi_pd(h, l);
-    __m256d v0 = _mm256_permute2f128_pd(lo, hi, 0x20);
-    __m256d v1 = _mm256_permute2f128_pd(lo, hi, 0x31);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs]),     v0);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 2]), v1);
-}
+/* AoS→SoA 4-cell transpose load: canonical simd_exact::load_dd4 (col + ofs). */
+using simd_exact::load_dd4;
+using simd_exact::store_dd4;
 
 /* R-side trmm SIMD: 4-row chunks of B[i_start:i_end, 0..N).
  * For each 4-row chunk, run the trmm column-by-column with broadcast A. */
@@ -361,7 +346,7 @@ inline void simd_trmm_r4_rln(int ib, int N, T alpha, const T *a, int lda,
         T t = alpha;
         if (nounit) t = t * A_(j, j);
         __m256d bjh, bjl;
-        load_4cell_soa(bj, ib, bjh, bjl);
+        load_dd4(bj + ib, bjh, bjl);
         if (!eq1(t)) {
             __m256d th = _mm256_set1_pd(t.limbs[0]);
             __m256d tl = _mm256_set1_pd(t.limbs[1]);
@@ -377,14 +362,14 @@ inline void simd_trmm_r4_rln(int ib, int N, T alpha, const T *a, int lda,
             __m256d akl = _mm256_set1_pd(akj.limbs[1]);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkh, bkl;
-            load_4cell_soa(bk, ib, bkh, bkl);
+            load_dd4(bk + ib, bkh, bkl);
             __m256d ph, pl;
             simd_fast::mul(akh, akl, bkh, bkl, ph, pl);
             __m256d nh, nl;
             simd_fast::add(bjh, bjl, ph, pl, nh, nl);
             bjh = nh; bjl = nl;
         }
-        store_4cell_soa(bj, ib, bjh, bjl);
+        store_dd4(bj + ib, bjh, bjl);
     }
 }
 
@@ -396,7 +381,7 @@ inline void simd_trmm_r4_run(int ib, int N, T alpha, const T *a, int lda,
         T t = alpha;
         if (nounit) t = t * A_(j, j);
         __m256d bjh, bjl;
-        load_4cell_soa(bj, ib, bjh, bjl);
+        load_dd4(bj + ib, bjh, bjl);
         if (!eq1(t)) {
             __m256d th = _mm256_set1_pd(t.limbs[0]);
             __m256d tl = _mm256_set1_pd(t.limbs[1]);
@@ -412,14 +397,14 @@ inline void simd_trmm_r4_run(int ib, int N, T alpha, const T *a, int lda,
             __m256d akl = _mm256_set1_pd(akj.limbs[1]);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkh, bkl;
-            load_4cell_soa(bk, ib, bkh, bkl);
+            load_dd4(bk + ib, bkh, bkl);
             __m256d ph, pl;
             simd_fast::mul(akh, akl, bkh, bkl, ph, pl);
             __m256d nh, nl;
             simd_fast::add(bjh, bjl, ph, pl, nh, nl);
             bjh = nh; bjl = nl;
         }
-        store_4cell_soa(bj, ib, bjh, bjl);
+        store_dd4(bj + ib, bjh, bjl);
     }
 }
 
@@ -432,7 +417,7 @@ inline void simd_trmm_r4_rlt(int ib, int N, T alpha, const T *a, int lda,
     for (int k = N - 1; k >= 0; --k) {
         const T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkh, bkl;
-        load_4cell_soa(bk, ib, bkh, bkl);  /* original B(:,k) before scaling */
+        load_dd4(bk + ib, bkh, bkl);  /* original B(:,k) before scaling */
         for (int j = k + 1; j < N; ++j) {
             const T ajk_v = A_(j, k);
             if (eq0(ajk_v)) continue;
@@ -441,12 +426,12 @@ inline void simd_trmm_r4_rlt(int ib, int N, T alpha, const T *a, int lda,
             __m256d al = _mm256_set1_pd(ajk.limbs[1]);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjh, bjl;
-            load_4cell_soa(bj, ib, bjh, bjl);
+            load_dd4(bj + ib, bjh, bjl);
             __m256d ph, pl;
             simd_fast::mul(ah, al, bkh, bkl, ph, pl);
             __m256d nh, nl;
             simd_fast::add(bjh, bjl, ph, pl, nh, nl);
-            store_4cell_soa(bj, ib, nh, nl);
+            store_dd4(bj + ib, nh, nl);
         }
         T t = alpha;
         if (nounit) t = t * A_(k, k);
@@ -455,7 +440,7 @@ inline void simd_trmm_r4_rlt(int ib, int N, T alpha, const T *a, int lda,
             __m256d tl = _mm256_set1_pd(t.limbs[1]);
             __m256d nh, nl;
             simd_fast::mul(bkh, bkl, th, tl, nh, nl);
-            store_4cell_soa(const_cast<T*>(bk), ib, nh, nl);
+            store_dd4(const_cast<T*>(bk) + ib, nh, nl);
         }
     }
 }
@@ -466,7 +451,7 @@ inline void simd_trmm_r4_rut(int ib, int N, T alpha, const T *a, int lda,
     for (int k = 0; k < N; ++k) {
         const T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkh, bkl;
-        load_4cell_soa(bk, ib, bkh, bkl);
+        load_dd4(bk + ib, bkh, bkl);
         for (int j = 0; j < k; ++j) {
             const T ajk_v = A_(j, k);
             if (eq0(ajk_v)) continue;
@@ -475,12 +460,12 @@ inline void simd_trmm_r4_rut(int ib, int N, T alpha, const T *a, int lda,
             __m256d al = _mm256_set1_pd(ajk.limbs[1]);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjh, bjl;
-            load_4cell_soa(bj, ib, bjh, bjl);
+            load_dd4(bj + ib, bjh, bjl);
             __m256d ph, pl;
             simd_fast::mul(ah, al, bkh, bkl, ph, pl);
             __m256d nh, nl;
             simd_fast::add(bjh, bjl, ph, pl, nh, nl);
-            store_4cell_soa(bj, ib, nh, nl);
+            store_dd4(bj + ib, nh, nl);
         }
         T t = alpha;
         if (nounit) t = t * A_(k, k);
@@ -489,7 +474,7 @@ inline void simd_trmm_r4_rut(int ib, int N, T alpha, const T *a, int lda,
             __m256d tl = _mm256_set1_pd(t.limbs[1]);
             __m256d nh, nl;
             simd_fast::mul(bkh, bkl, th, tl, nh, nl);
-            store_4cell_soa(const_cast<T*>(bk), ib, nh, nl);
+            store_dd4(const_cast<T*>(bk) + ib, nh, nl);
         }
     }
 }

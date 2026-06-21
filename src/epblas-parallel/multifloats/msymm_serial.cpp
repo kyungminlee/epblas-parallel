@@ -24,6 +24,7 @@
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 
@@ -218,28 +219,9 @@ void symm_diag_add_L(int ic, int ib, int N, T alpha,
 
 #ifdef MBLAS_SIMD_DD
 
-/* AoS→SoA: load 4 DD cells from a column into (hi, lo) 4-lane vectors.
- * Memory layout per cell: [hi, lo] back-to-back. */
-inline void load_4cell_soa(const T *col, int ofs,
-                           __m256d &h, __m256d &l)
-{
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&col[ofs + 2]));
-    __m256d lo = _mm256_unpacklo_pd(v0, v1);   /* [c0h, c2h, c1h, c3h] */
-    __m256d hi = _mm256_unpackhi_pd(v0, v1);   /* [c0l, c2l, c1l, c3l] */
-    h = _mm256_permute4x64_pd(lo, 0xD8);       /* [c0h, c1h, c2h, c3h] */
-    l = _mm256_permute4x64_pd(hi, 0xD8);       /* [c0l, c1l, c2l, c3l] */
-}
-
-inline void store_4cell_soa(T *col, int ofs, __m256d h, __m256d l)
-{
-    __m256d lo = _mm256_unpacklo_pd(h, l);     /* [c0h, c0l, c2h, c2l] */
-    __m256d hi = _mm256_unpackhi_pd(h, l);     /* [c1h, c1l, c3h, c3l] */
-    __m256d v0 = _mm256_permute2f128_pd(lo, hi, 0x20);  /* [c0h, c0l, c1h, c1l] */
-    __m256d v1 = _mm256_permute2f128_pd(lo, hi, 0x31);  /* [c2h, c2l, c3h, c3l] */
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs]),     v0);
-    _mm256_storeu_pd(reinterpret_cast<double*>(&col[ofs + 2]), v1);
-}
+/* AoS→SoA 4-cell transpose load: canonical simd_exact::load_dd4 (col + ofs). */
+using simd_exact::load_dd4;
+using simd_exact::store_dd4;
 
 /* SIDE='R' symmetric diag-block kernel, 4-row SIMD.
  *
@@ -257,7 +239,7 @@ inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
         for (int j = jc; j < jc + jb; ++j) {
             T *cj = c + static_cast<std::size_t>(j) * ldc;
             __m256d ch, cl;
-            load_4cell_soa(cj, ib, ch, cl);
+            load_dd4(cj + ib, ch, cl);
 
             for (int k = jc; k < jc + jb; ++k) {
                 T tval;
@@ -271,7 +253,7 @@ inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
                 const __m256d tl = _mm256_set1_pd(tval.limbs[1]);
                 const T *bk = b + static_cast<std::size_t>(k) * ldb;
                 __m256d bh, bl;
-                load_4cell_soa(bk, ib, bh, bl);
+                load_dd4(bk + ib, bh, bl);
                 __m256d ph, pl;
                 simd_fast::mul(th, tl, bh, bl, ph, pl);
                 __m256d nh, nl;
@@ -279,7 +261,7 @@ inline void simd_symm_diag_R(int jc, int jb, int M, T alpha,
                 ch = nh; cl = nl;
             }
 
-            store_4cell_soa(cj, ib, ch, cl);
+            store_dd4(cj + ib, ch, cl);
         }
     }
 

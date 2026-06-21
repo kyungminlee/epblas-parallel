@@ -8,6 +8,7 @@
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -25,26 +26,8 @@ namespace {
 #define MGER_OMP_MIN 64
 
 #ifdef MBLAS_SIMD_DD
-static inline __attribute__((always_inline)) void
-soa_load4(const double *p, __m256d &hi, __m256d &lo)
-{
-    __m256d a01 = _mm256_loadu_pd(p);
-    __m256d a23 = _mm256_loadu_pd(p + 4);
-    __m256d t0 = _mm256_unpacklo_pd(a01, a23);
-    __m256d t1 = _mm256_unpackhi_pd(a01, a23);
-    hi = _mm256_permute4x64_pd(t0, 0xD8);
-    lo = _mm256_permute4x64_pd(t1, 0xD8);
-}
-static inline __attribute__((always_inline)) void
-soa_store4(double *p, __m256d hi, __m256d lo)
-{
-    __m256d hp = _mm256_permute4x64_pd(hi, 0xD8);  /* [h0,h2,h1,h3] */
-    __m256d lp = _mm256_permute4x64_pd(lo, 0xD8);  /* [l0,l2,l1,l3] */
-    __m256d a01 = _mm256_unpacklo_pd(hp, lp);      /* [h0,l0,h1,l1] */
-    __m256d a23 = _mm256_unpackhi_pd(hp, lp);      /* [h2,l2,h3,l3] */
-    _mm256_storeu_pd(p,     a01);
-    _mm256_storeu_pd(p + 4, a23);
-}
+using simd_exact::load_dd4;
+using simd_exact::store_dd4;
 #endif
 }
 
@@ -69,27 +52,27 @@ mger_col(int M, const double *x_hi, const double *x_lo, T t, T *ajT)
      * resident. Bit-identical — each 4-lane group matches the 4-wide loop. */
     for (; i + 8 <= M; i += 8) {
         __m256d a0h, a0l, a1h, a1l;
-        soa_load4(aj + 2 * i,       a0h, a0l);
-        soa_load4(aj + 2 * (i + 4), a1h, a1l);
+        load_dd4(aj + 2 * i,       a0h, a0l);
+        load_dd4(aj + 2 * (i + 4), a1h, a1l);
         __m256d p0h, p0l, p1h, p1l;
         simd_fast::mul(thi, tlo, _mm256_loadu_pd(x_hi + i),     _mm256_loadu_pd(x_lo + i),     p0h, p0l);
         simd_fast::mul(thi, tlo, _mm256_loadu_pd(x_hi + i + 4), _mm256_loadu_pd(x_lo + i + 4), p1h, p1l);
         __m256d n0h, n0l, n1h, n1l;
         simd_fast::add(a0h, a0l, p0h, p0l, n0h, n0l);
         simd_fast::add(a1h, a1l, p1h, p1l, n1h, n1l);
-        soa_store4(aj + 2 * i,       n0h, n0l);
-        soa_store4(aj + 2 * (i + 4), n1h, n1l);
+        store_dd4(aj + 2 * i,       n0h, n0l);
+        store_dd4(aj + 2 * (i + 4), n1h, n1l);
     }
     for (; i + 3 < M; i += 4) {
         __m256d a_h, a_l;
-        soa_load4(aj + 2 * i, a_h, a_l);
+        load_dd4(aj + 2 * i, a_h, a_l);
         __m256d xh = _mm256_loadu_pd(x_hi + i);
         __m256d xl = _mm256_loadu_pd(x_lo + i);
         __m256d p_h, p_l;
         simd_fast::mul(thi, tlo, xh, xl, p_h, p_l);
         __m256d nh, nl;
         simd_fast::add(a_h, a_l, p_h, p_l, nh, nl);
-        soa_store4(aj + 2 * i, nh, nl);
+        store_dd4(aj + 2 * i, nh, nl);
     }
     for (; i < M; ++i) ajT[i] = ajT[i] + t * T{x_hi[i], x_lo[i]};
 }

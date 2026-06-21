@@ -19,27 +19,15 @@ using T = mf::float64x2;
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 
 namespace {
 /* canonical EFTs — mf_simd_fast.h (2a-5) */
 using simd_fast::twoprod;
 using simd_fast::fast2sum;
 using simd_fast::twosum;
-inline void load_4cell_soa(const T *p, __m256d &h, __m256d &l) {
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(p));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(p + 2));
-    __m256d lo = _mm256_unpacklo_pd(v0, v1);
-    __m256d hi = _mm256_unpackhi_pd(v0, v1);
-    h = _mm256_permute4x64_pd(lo, 0xD8);
-    l = _mm256_permute4x64_pd(hi, 0xD8);
-}
-inline T horizontal_dd(__m256d h, __m256d l) {
-    alignas(32) double ha[4], la[4];
-    _mm256_store_pd(ha, h); _mm256_store_pd(la, l);
-    T s{ha[0], la[0]};
-    for (int k = 1; k < 4; ++k) s = s + T{ha[k], la[k]};
-    return s;
-}
+using simd_exact::load_dd4;
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
 }
 #endif
 
@@ -55,7 +43,7 @@ static double mnrm2_maxabs_unit(int n, const T *x)
         _mm256_set1_epi64x(static_cast<long long>(0x7FFFFFFFFFFFFFFFULL)));
     const int n4 = n & ~3;
     for (int i = 0; i < n4; i += 4) {
-        __m256d xh, xl; load_4cell_soa(&x[i], xh, xl); (void)xl;
+        __m256d xh, xl; load_dd4(&x[i], xh, xl); (void)xl;
         __m256d ax = _mm256_and_pd(xh, absmask);
         mx = _mm256_max_pd(mx, ax);
     }
@@ -91,7 +79,7 @@ static T mnrm2_ssq_unit(int n, const T *x, T scale)
     int counter = K;
     const int n4 = n & ~3;
     for (int i = 0; i < n4; i += 4) {
-        __m256d xh, xl; load_4cell_soa(&x[i], xh, xl);
+        __m256d xh, xl; load_dd4(&x[i], xh, xl);
         /* t = x · inv  (DD mul, drop xl*invl) */
         __m256d th, tl;
         twoprod(xh, invh, th, tl);

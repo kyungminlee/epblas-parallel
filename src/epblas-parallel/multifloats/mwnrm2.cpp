@@ -18,53 +18,18 @@ using T = mf::complex64x2;
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 
 namespace {
 /* canonical EFTs — mf_simd_fast.h (2a-5) */
 using simd_fast::twoprod;
 using simd_fast::fast2sum;
 using simd_fast::twosum;
-inline void load_4cell_csoa(const T *p, __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il) {
-    __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[0]));
-    __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[1]));
-    __m256d v2 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[2]));
-    __m256d v3 = _mm256_loadu_pd(reinterpret_cast<const double*>(&p[3]));
-    __m256d t0 = _mm256_unpacklo_pd(v0, v1);
-    __m256d t1 = _mm256_unpackhi_pd(v0, v1);
-    __m256d t2 = _mm256_unpacklo_pd(v2, v3);
-    __m256d t3 = _mm256_unpackhi_pd(v2, v3);
-    rh = _mm256_permute2f128_pd(t0, t2, 0x20);
-    rl = _mm256_permute2f128_pd(t1, t3, 0x20);
-    ih = _mm256_permute2f128_pd(t0, t2, 0x31);
-    il = _mm256_permute2f128_pd(t1, t3, 0x31);
-}
-inline R horizontal_dd(__m256d h, __m256d l) {
-    alignas(32) double ha[4], la[4];
-    _mm256_store_pd(ha, h); _mm256_store_pd(la, l);
-    R s{ha[0], la[0]};
-    for (int k = 1; k < 4; ++k) s = s + R{ha[k], la[k]};
-    return s;
-}
+using simd_exact::cload4;
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
+using simd_fast::absorb;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
+using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
 
-/* Absorb (ph, pl) into wide-acc (a0, a1, a2). */
-inline void absorb(__m256d ph, __m256d pl,
-                   __m256d &a0, __m256d &a1, __m256d &a2)
-{
-    __m256d e0, e1, e2;
-    twosum(a0, ph, a0, e0);
-    twosum(a1, pl, a1, e1);
-    twosum(a1, e0, a1, e2);
-    a2 = _mm256_add_pd(a2, _mm256_add_pd(e1, e2));
-}
-inline void renorm(__m256d &a0, __m256d &a1, __m256d &a2) {
-    __m256d t, e;
-    fast2sum(a1, a2, t, e);
-    a1 = t; a2 = e;
-    fast2sum(a0, a1, a0, a1);
-    a1 = _mm256_add_pd(a1, a2);
-    fast2sum(a0, a1, a0, a1);
-    a2 = _mm256_setzero_pd();
-}
 }
 #endif
 
@@ -80,7 +45,7 @@ static double mwnrm2_maxabs_unit(int n, const T *x)
     const int n4 = n & ~3;
     for (int i = 0; i < n4; i += 4) {
         __m256d rh, rl, ih, il;
-        load_4cell_csoa(&x[i], rh, rl, ih, il); (void)rl; (void)il;
+        cload4(&x[i], rh, rl, ih, il); (void)rl; (void)il;
         mx = _mm256_max_pd(mx, _mm256_and_pd(rh, absmask));
         mx = _mm256_max_pd(mx, _mm256_and_pd(ih, absmask));
     }
@@ -131,10 +96,10 @@ static R mwnrm2_ssq_unit(int n, const T *x, R scale)
     };
     for (int i = 0; i < n4; i += 4) {
         __m256d rh, rl, ih, il;
-        load_4cell_csoa(&x[i], rh, rl, ih, il);
+        cload4(&x[i], rh, rl, ih, il);
         sq_into(rh, rl);
         sq_into(ih, il);
-        if (--counter == 0) { renorm(a0, a1, a2); counter = K; }
+        if (--counter == 0) { renorm3(a0, a1, a2); counter = K; }
     }
     __m256d t = _mm256_add_pd(a1, a2);
     s = horizontal_dd(a0, t);

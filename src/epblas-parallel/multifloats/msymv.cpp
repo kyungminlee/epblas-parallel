@@ -14,6 +14,7 @@
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
@@ -37,16 +38,7 @@ namespace {
 const T zero_dd{0.0, 0.0};
 
 #ifdef MBLAS_SIMD_DD
-static inline __attribute__((always_inline)) void
-soa_load4(const double *p, __m256d &hi, __m256d &lo)
-{
-    __m256d a01 = _mm256_loadu_pd(p);
-    __m256d a23 = _mm256_loadu_pd(p + 4);
-    __m256d t0 = _mm256_unpacklo_pd(a01, a23);
-    __m256d t1 = _mm256_unpackhi_pd(a01, a23);
-    hi = _mm256_permute4x64_pd(t0, 0xD8);
-    lo = _mm256_permute4x64_pd(t1, 0xD8);
-}
+using simd_exact::load_dd4;
 /* Horizontal-reduce a 4-lane DD vector pair to scalar DD (lane 0
  * of result holds the sum across all 4 lanes). */
 static inline __attribute__((always_inline)) T
@@ -113,7 +105,7 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
         }
         for (; k + 3 < N; k += 4) {
             __m256d a_h, a_l;
-            soa_load4(aip + 2 * k, a_h, a_l);
+            load_dd4(aip + 2 * k, a_h, a_l);
             __m256d yh = _mm256_loadu_pd(yacc_hi + k);
             __m256d yl = _mm256_loadu_pd(yacc_lo + k);
             __m256d xh = _mm256_loadu_pd(x_hi + k);
@@ -145,7 +137,7 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
         int k = 0;
         for (; k + 3 < i; k += 4) {
             __m256d a_h, a_l;
-            soa_load4(aip + 2 * k, a_h, a_l);
+            load_dd4(aip + 2 * k, a_h, a_l);
             __m256d yh = _mm256_loadu_pd(yacc_hi + k);
             __m256d yl = _mm256_loadu_pd(yacc_lo + k);
             __m256d xh = _mm256_loadu_pd(x_hi + k);

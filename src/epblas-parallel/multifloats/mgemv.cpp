@@ -20,6 +20,7 @@
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 #ifdef _OPENMP
@@ -47,18 +48,7 @@ namespace {
 const T zero_dd{0.0, 0.0};
 
 #ifdef MBLAS_SIMD_DD
-/* Deinterleave 4 contiguous AoS DD elements at *p (8 doubles) into
- * SoA (hi, lo) vectors. p is `T*` cast to double*. */
-static inline __attribute__((always_inline)) void
-soa_load4(const double *p, __m256d &hi, __m256d &lo)
-{
-    __m256d a01 = _mm256_loadu_pd(p);       /* [h0, l0, h1, l1] */
-    __m256d a23 = _mm256_loadu_pd(p + 4);   /* [h2, l2, h3, l3] */
-    __m256d t0 = _mm256_unpacklo_pd(a01, a23);   /* [h0, h2, h1, h3] */
-    __m256d t1 = _mm256_unpackhi_pd(a01, a23);   /* [l0, l2, l1, l3] */
-    hi = _mm256_permute4x64_pd(t0, 0xD8);    /* [h0, h1, h2, h3] */
-    lo = _mm256_permute4x64_pd(t1, 0xD8);    /* [l0, l1, l2, l3] */
-}
+using simd_exact::load_dd4;
 #endif
 
 } /* namespace */
@@ -107,7 +97,7 @@ static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
             int i = lo;
             for (; i + 3 < hi; i += 4) {
                 __m256d a_hi, a_lo;
-                soa_load4(aj + 2 * i, a_hi, a_lo);
+                load_dd4(aj + 2 * i, a_hi, a_lo);
                 __m256d p_hi, p_lo;
                 simd_fast::mul(thi, tlo, a_hi, a_lo, p_hi, p_lo);
                 __m256d yh = _mm256_loadu_pd(y_hi + i);
@@ -174,7 +164,7 @@ static void mgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         int i = 0;
         for (; i + 3 < M; i += 4) {
             __m256d a_h, a_l;
-            soa_load4(aj + 2 * i, a_h, a_l);
+            load_dd4(aj + 2 * i, a_h, a_l);
             __m256d xh = _mm256_loadu_pd(x_hi + i);
             __m256d xl = _mm256_loadu_pd(x_lo + i);
             __m256d p_h, p_l;
