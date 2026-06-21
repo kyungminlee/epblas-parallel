@@ -294,14 +294,7 @@ extern "C" void wgemv_(
 
     const int leny = (TR == 'N') ? M : N;
 
-    if (!ceq1(beta)) {
-        int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-        for (int i = 0; i < leny; ++i) {
-            if (ceq0(beta)) y[iy] = zero_cdd;
-            else                  y[iy] = cmul(y[iy], beta);
-            iy += incy;
-        }
-    }
+    mf_kernels::cscale_y(leny, beta, y, incy);
     if (ceq0(alpha)) return;
 
     const int conj_a = (TR == 'C');

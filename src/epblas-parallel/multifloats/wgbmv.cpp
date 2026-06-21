@@ -27,8 +27,6 @@ using mf_pred::ceq1;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-const R rzero{0.0, 0.0};
-const T czero{ rzero, rzero };
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 }
@@ -138,11 +136,7 @@ extern "C" void wgbmv_(
     const int leny = notrans ? M : N;
     const int lenx = notrans ? N : M;
 
-    if (!ceq1(beta)) {
-        int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-        if (ceq0(beta)) for (int i = 0; i < leny; ++i) { y[iy] = czero; iy += incy; }
-        else                  for (int i = 0; i < leny; ++i) { y[iy] = cmul(beta, y[iy]); iy += incy; }
-    }
+    mf_kernels::cscale_y(leny, beta, y, incy);
     if (ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {

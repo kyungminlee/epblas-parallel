@@ -189,14 +189,7 @@ extern "C" void mgbmv_(
     const int leny = (TR == 'N') ? M : N;
     const int lenx = (TR == 'N') ? N : M;
 
-    if (!eq1(beta)) {
-        int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-        if (eq0(beta)) {
-            for (int i = 0; i < leny; ++i) { y[iy] = zero_dd; iy += incy; }
-        } else {
-            for (int i = 0; i < leny; ++i) { y[iy] = beta * y[iy]; iy += incy; }
-        }
-    }
+    mf_kernels::scale_y(leny, beta, y, incy);
     if (eq0(alpha)) return;
 
     if (TR == 'N') {

@@ -167,11 +167,7 @@ extern "C" void whpmv_(
 
     if (N == 0 || (ceq0(alpha) && ceq1(beta))) return;
 
-    if (!ceq1(beta)) {
-        int iy = (incy < 0) ? -(N - 1) * incy : 0;
-        if (ceq0(beta)) for (int i = 0; i < N; ++i) { y[iy] = czero; iy += incy; }
-        else                  for (int i = 0; i < N; ++i) { y[iy] = cmul(beta, y[iy]); iy += incy; }
-    }
+    mf_kernels::cscale_y(N, beta, y, incy);
     if (ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {

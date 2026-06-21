@@ -12,6 +12,7 @@
 #include <multifloats.h>
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
 #include "mf_simd_exact.h"
@@ -293,14 +294,7 @@ extern "C" void msymv_(
 
     if (N == 0) return;
 
-    if (!eq1(beta)) {
-        int iy = (incy < 0) ? -(N - 1) * incy : 0;
-        for (int i = 0; i < N; ++i) {
-            if (eq0(beta)) y[iy] = zero_dd;
-            else                 y[iy] = y[iy] * beta;
-            iy += incy;
-        }
-    }
+    mf_kernels::scale_y(N, beta, y, incy);
     if (eq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {

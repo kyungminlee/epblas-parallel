@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <multifloats.h>
 #include "mf_simd_exact.h"
+#include "mf_pred.h"
 
 namespace mf_kernels {
 
@@ -49,6 +50,27 @@ inline CT cconj(const CT &a) {
 /* real scalar * complex (the old scale_r / cmul_r / rcmul trio; scalar-first.
  * DD multiply is commutative bit-for-bit, so the operand order is cosmetic). */
 inline CT rcmul(const T &r, const CT &z) { return CT{ r * z.re, r * z.im }; }
+
+/* y := beta*y, or y := 0 when beta == 0, over the length-n vector y with stride
+ * inc — the beta prologue every dense/banded/packed L2 matvec runs on its output
+ * before the alpha*A*x accumulation. No-op when beta == 1. A negative stride
+ * starts at the far end so the walk visits elements in the same order as the
+ * matvec update. Cold O(n) setup (one pass, never a SIMD hot loop); the eq tests
+ * come from mf_pred. DD (and complex-DD) multiply is commutative bit-for-bit, so
+ * the operand order is cosmetic — call sites that wrote beta*y and y*beta both
+ * map here unchanged. */
+static inline void scale_y(int n, const T &beta, T *y, int inc) {
+    if (mf_pred::eq1(beta)) return;
+    int iy = (inc < 0) ? -(n - 1) * inc : 0;
+    if (mf_pred::eq0(beta)) for (int i = 0; i < n; ++i) { y[iy] = T{}; iy += inc; }
+    else                    for (int i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += inc; }
+}
+static inline void cscale_y(int n, const CT &beta, CT *y, int inc) {
+    if (mf_pred::ceq1(beta)) return;
+    int iy = (inc < 0) ? -(n - 1) * inc : 0;
+    if (mf_pred::ceq0(beta)) for (int i = 0; i < n; ++i) { y[iy] = CT{}; iy += inc; }
+    else                     for (int i = 0; i < n; ++i) { y[iy] = cmul(beta, y[iy]); iy += inc; }
+}
 
 #ifdef MBLAS_SIMD_DD
 

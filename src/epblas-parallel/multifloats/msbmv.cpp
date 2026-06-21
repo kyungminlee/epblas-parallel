@@ -198,14 +198,7 @@ extern "C" void msbmv_(
 
     if (N == 0 || (eq0(alpha) && eq1(beta))) return;
 
-    if (!eq1(beta)) {
-        int iy = (incy < 0) ? -(N - 1) * incy : 0;
-        if (eq0(beta)) {
-            for (int i = 0; i < N; ++i) { y[iy] = zero_dd; iy += incy; }
-        } else {
-            for (int i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
-        }
-    }
+    mf_kernels::scale_y(N, beta, y, incy);
     if (eq0(alpha)) return;
 
 #ifdef _OPENMP

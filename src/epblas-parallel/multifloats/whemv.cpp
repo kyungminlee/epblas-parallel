@@ -322,14 +322,7 @@ extern "C" void whemv_(
 
     if (N == 0) return;
 
-    if (!ceq1(beta)) {
-        int iy = (incy < 0) ? -(N - 1) * incy : 0;
-        for (int i = 0; i < N; ++i) {
-            if (ceq0(beta)) y[iy] = zero_cdd;
-            else                  y[iy] = cmul(y[iy], beta);
-            iy += incy;
-        }
-    }
+    mf_kernels::cscale_y(N, beta, y, incy);
     if (ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {

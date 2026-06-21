@@ -18,6 +18,7 @@
 #include <multifloats.h>
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "mf_kernels.h"
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
 #include "mf_simd_exact.h"
@@ -228,14 +229,7 @@ extern "C" void mgemv_(
     const int leny = notrans ? M : N;
     const int lenx = notrans ? N : M;
 
-    if (!eq1(beta)) {
-        int iy = (incy < 0) ? -(leny - 1) * incy : 0;
-        for (int i = 0; i < leny; ++i) {
-            if (eq0(beta)) y[iy] = zero_dd;
-            else                 y[iy] = y[iy] * beta;
-            iy += incy;
-        }
-    }
+    mf_kernels::scale_y(leny, beta, y, incy);
     if (eq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
