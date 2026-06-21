@@ -134,7 +134,6 @@ static bool mgbmv_t_omp(int M, int N, int KL, int KU, T alpha,
     int nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
 
-    if (incx < 0) x -= static_cast<std::ptrdiff_t>(M - 1) * incx;
     if (incy < 0) y -= static_cast<std::ptrdiff_t>(N - 1) * incy;
 
     const T *xptr = x;
@@ -142,7 +141,7 @@ static bool mgbmv_t_omp(int M, int N, int KL, int KU, T alpha,
     if (incx != 1) {
         xbuf = static_cast<T *>(std::malloc(static_cast<std::size_t>(M) * sizeof(T)));
         if (!xbuf) return false;
-        for (int i = 0; i < M; ++i) xbuf[i] = x[static_cast<std::ptrdiff_t>(i) * incx];
+        mf_kernels::gather_strided(M, x, incx, xbuf);
         xptr = xbuf;
     }
 
@@ -208,15 +207,13 @@ extern "C" void mgbmv_(
          * scratch, run the SIMD scatter core, scatter y back. O(M+N) gather vs
          * O(M*band) work; the in-place strided walk is the alloc-fail fallback. */
         {
-            const std::ptrdiff_t bx = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
-            const std::ptrdiff_t by = (incy < 0) ? -(std::ptrdiff_t)(M - 1) * incy : 0;
             T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
             T *ys = static_cast<T *>(std::malloc((std::size_t)M * sizeof(T)));
             if (xs && ys) {
-                for (int i = 0; i < N; ++i) xs[i] = x[bx + (std::ptrdiff_t)i * incx];
-                for (int i = 0; i < M; ++i) ys[i] = y[by + (std::ptrdiff_t)i * incy];
+                mf_kernels::gather_strided(N, x, incx, xs);
+                mf_kernels::gather_strided(M, y, incy, ys);
                 mgbmv_n_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, xs, ys);
-                for (int i = 0; i < M; ++i) y[by + (std::ptrdiff_t)i * incy] = ys[i];
+                mf_kernels::scatter_strided(M, y, incy, ys);
                 std::free(xs); std::free(ys);
                 return;
             }
@@ -254,15 +251,13 @@ extern "C" void mgbmv_(
         /* Strided: gather x (len M) and beta-scaled y (len N), run the SIMD dot
          * core, scatter y back; the in-place strided walk is the alloc-fail fallback. */
         {
-            const std::ptrdiff_t bx = (incx < 0) ? -(std::ptrdiff_t)(M - 1) * incx : 0;
-            const std::ptrdiff_t by = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
             T *xs = static_cast<T *>(std::malloc((std::size_t)M * sizeof(T)));
             T *ys = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
             if (xs && ys) {
-                for (int i = 0; i < M; ++i) xs[i] = x[bx + (std::ptrdiff_t)i * incx];
-                for (int i = 0; i < N; ++i) ys[i] = y[by + (std::ptrdiff_t)i * incy];
+                mf_kernels::gather_strided(M, x, incx, xs);
+                mf_kernels::gather_strided(N, y, incy, ys);
                 mgbmv_t_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, xs, ys);
-                for (int i = 0; i < N; ++i) y[by + (std::ptrdiff_t)i * incy] = ys[i];
+                mf_kernels::scatter_strided(N, y, incy, ys);
                 std::free(xs); std::free(ys);
                 return;
             }

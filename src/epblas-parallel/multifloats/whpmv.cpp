@@ -176,13 +176,9 @@ extern "C" void whpmv_(
     }
     /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
      * core, scatter y back. Handles negative increments; O(N) vs O(N^2) work. */
-    const T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
-    T *ybase = (incy < 0) ? y - (std::ptrdiff_t)(N - 1) * incy : y;
     std::vector<T> xs(static_cast<std::size_t>(N)), ys(static_cast<std::size_t>(N));
-    for (int i = 0; i < N; ++i) {
-        xs[i] = xbase[(std::ptrdiff_t)i * incx];
-        ys[i] = ybase[(std::ptrdiff_t)i * incy];
-    }
+    mf_kernels::gather_strided(N, x, incx, xs.data());
+    mf_kernels::gather_strided(N, y, incy, ys.data());
     whpmv_contig(UPLO == 'U', N, ap, xs.data(), alpha, ys.data());
-    for (int i = 0; i < N; ++i) ybase[(std::ptrdiff_t)i * incy] = ys[i];
+    mf_kernels::scatter_strided(N, y, incy, ys.data());
 }

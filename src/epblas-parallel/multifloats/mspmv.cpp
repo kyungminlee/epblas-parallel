@@ -156,9 +156,6 @@ __attribute__((noinline)) static bool mspmv_omp(
     int nthreads = blas_omp_max_threads();
     if (nthreads > MSPMV_MAX_CPUS) nthreads = MSPMV_MAX_CPUS;
 
-    if (incx < 0) x -= (std::ptrdiff_t)(n - 1) * incx;
-    if (incy < 0) y -= (std::ptrdiff_t)(n - 1) * incy;
-
     /* Unit-stride: ob-style column-partition axpydot (contiguous column read,
      * ~3.3x). */
     if (incx == 1 && incy == 1)
@@ -172,13 +169,11 @@ __attribute__((noinline)) static bool mspmv_omp(
     T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     T *ys = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (!xs || !ys) { std::free(xs); std::free(ys); return false; }
-    for (int i = 0; i < n; ++i) {
-        xs[i] = x[(std::ptrdiff_t)i * incx];
-        ys[i] = y[(std::ptrdiff_t)i * incy];
-    }
+    mf_kernels::gather_strided(n, x, incx, xs);
+    mf_kernels::gather_strided(n, y, incy, ys);
     bool ok = mspmv_axpydot(upper, n, ap, xs, alpha, ys, nthreads);
     if (ok)
-        for (int i = 0; i < n; ++i) y[(std::ptrdiff_t)i * incy] = ys[i];
+        mf_kernels::scatter_strided(n, y, incy, ys);
     std::free(xs);
     std::free(ys);
     return ok;
@@ -221,17 +216,13 @@ extern "C" void mspmv_(
      * SIMD contiguous core (y += alpha*A*x), scatter y back. O(N) gather/scatter
      * vs O(N*N) packed work; the in-place strided walk is the alloc-fail fallback. */
     {
-        const std::ptrdiff_t bx = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
-        const std::ptrdiff_t by = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
         T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
         T *ys = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
         if (xs && ys) {
-            for (int i = 0; i < N; ++i) {
-                xs[i] = x[bx + (std::ptrdiff_t)i * incx];
-                ys[i] = y[by + (std::ptrdiff_t)i * incy];
-            }
+            mf_kernels::gather_strided(N, x, incx, xs);
+            mf_kernels::gather_strided(N, y, incy, ys);
             mspmv_contig(UPLO == 'U', N, ap, xs, alpha, ys);
-            for (int i = 0; i < N; ++i) y[by + (std::ptrdiff_t)i * incy] = ys[i];
+            mf_kernels::scatter_strided(N, y, incy, ys);
             std::free(xs); std::free(ys);
             return;
         }

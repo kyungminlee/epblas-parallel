@@ -72,6 +72,25 @@ static inline void cscale_y(int n, const CT &beta, CT *y, int inc) {
     else                     for (int i = 0; i < n; ++i) { y[iy] = cmul(beta, y[iy]); iy += inc; }
 }
 
+/* Gather the length-n strided vector x (stride inc) into the contiguous scratch
+ * dst, or scatter the contiguous src back into x — the O(n) data movement every
+ * strided L2 matvec runs to reach its unit-stride SIMD core (gather x/y, run the
+ * core, scatter y). A negative stride starts at the far end so logical element i
+ * lands at dst[i] either way, matching the matvec's element order. Pass the RAW
+ * caller pointer (the far-end adjustment is computed here, NOT pre-applied). Cold
+ * straight copies, zero arithmetic -> no rounding-order change, bit-identical to
+ * the hand-written gather/scatter loops they replace. Same class as scale_y. */
+template <class V>
+static inline void gather_strided(int n, const V *x, int inc, V *dst) {
+    const V *base = (inc < 0) ? x - (std::ptrdiff_t)(n - 1) * inc : x;
+    for (int i = 0; i < n; ++i) dst[i] = base[(std::ptrdiff_t)i * inc];
+}
+template <class V>
+static inline void scatter_strided(int n, V *x, int inc, const V *src) {
+    V *base = (inc < 0) ? x - (std::ptrdiff_t)(n - 1) * inc : x;
+    for (int i = 0; i < n; ++i) base[(std::ptrdiff_t)i * inc] = src[i];
+}
+
 #ifdef MBLAS_SIMD_DD
 
 /* xp[i] += t*cp[i] — 4-wide SoA, scalar tail. Order-free -> bit-exact. */

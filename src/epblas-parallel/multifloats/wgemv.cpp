@@ -306,26 +306,22 @@ extern "C" void wgemv_(
         }
         /* Strided: gather x (len N) to contiguous, run the SIMD core on a
          * contiguous y scratch (already beta-applied), scatter back. */
-        const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(N - 1) * incx : x;
-        T *ybase = (incy < 0) ? y - static_cast<std::ptrdiff_t>(M - 1) * incy : y;
         std::vector<T> xs(static_cast<std::size_t>(N)), ys(static_cast<std::size_t>(M));
-        for (int j = 0; j < N; ++j) xs[j] = xbase[static_cast<std::ptrdiff_t>(j) * incx];
-        for (int i = 0; i < M; ++i) ys[i] = ybase[static_cast<std::ptrdiff_t>(i) * incy];
+        mf_kernels::gather_strided(N, x, incx, xs.data());
+        mf_kernels::gather_strided(M, y, incy, ys.data());
         wgemv_n_contig(M, N, alpha, a, lda, xs.data(), ys.data());
-        for (int i = 0; i < M; ++i) ybase[static_cast<std::ptrdiff_t>(i) * incy] = ys[i];
+        mf_kernels::scatter_strided(M, y, incy, ys.data());
     } else {
         if (incx == 1 && incy == 1) {
             wgemv_t_contig(M, N, alpha, a, lda, x, y, conj_a);
             return;
         }
         /* Strided: gather x (len M), contiguous y scratch (len N), scatter back. */
-        const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(M - 1) * incx : x;
-        T *ybase = (incy < 0) ? y - static_cast<std::ptrdiff_t>(N - 1) * incy : y;
         std::vector<T> xs(static_cast<std::size_t>(M)), ys(static_cast<std::size_t>(N));
-        for (int i = 0; i < M; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
-        for (int j = 0; j < N; ++j) ys[j] = ybase[static_cast<std::ptrdiff_t>(j) * incy];
+        mf_kernels::gather_strided(M, x, incx, xs.data());
+        mf_kernels::gather_strided(N, y, incy, ys.data());
         wgemv_t_contig(M, N, alpha, a, lda, xs.data(), ys.data(), conj_a);
-        for (int j = 0; j < N; ++j) ybase[static_cast<std::ptrdiff_t>(j) * incy] = ys[j];
+        mf_kernels::scatter_strided(N, y, incy, ys.data());
     }
 }
 

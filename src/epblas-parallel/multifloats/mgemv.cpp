@@ -240,14 +240,12 @@ extern "C" void mgemv_(
 
     /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
      * core, scatter y back. Handles negative increments; O(M+N) gather. */
-    const T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(lenx - 1) * incx : x;
-    T *ybase = (incy < 0) ? y - (std::ptrdiff_t)(leny - 1) * incy : y;
     std::vector<T> xs(static_cast<std::size_t>(lenx)), ys(static_cast<std::size_t>(leny));
-    for (int i = 0; i < lenx; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
-    for (int i = 0; i < leny; ++i) ys[i] = ybase[(std::ptrdiff_t)i * incy];
+    mf_kernels::gather_strided(lenx, x, incx, xs.data());
+    mf_kernels::gather_strided(leny, y, incy, ys.data());
     if (notrans) mgemv_n_contig(M, N, alpha, a, lda, xs.data(), ys.data());
     else         mgemv_t_contig(M, N, alpha, a, lda, xs.data(), ys.data());
-    for (int i = 0; i < leny; ++i) ybase[(std::ptrdiff_t)i * incy] = ys[i];
+    mf_kernels::scatter_strided(leny, y, incy, ys.data());
 }
 
 #undef A_
