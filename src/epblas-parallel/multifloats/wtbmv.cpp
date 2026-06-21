@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cctype>
 #include <multifloats.h>
+#include "mf_kernels.h"
 #include "mf_util.h"
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
@@ -28,11 +29,9 @@ using mf_pred::ceq0;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 
 /* Band inner-loop kernels, carved out as noinline so each compiles once in
  * isolation: the DD complex MAC then stays register-resident with the

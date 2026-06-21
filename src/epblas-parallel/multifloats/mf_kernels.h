@@ -46,6 +46,9 @@ inline CT csub(const CT &a, const CT &b) { return CT{ a.re - b.re, a.im - b.im }
 inline CT cconj(const CT &a) {
     return CT{ a.re, T{ -a.im.limbs[0], -a.im.limbs[1] } };
 }
+/* real scalar * complex (the old scale_r / cmul_r / rcmul trio; scalar-first.
+ * DD multiply is commutative bit-for-bit, so the operand order is cosmetic). */
+inline CT rcmul(const T &r, const CT &z) { return CT{ r * z.re, r * z.im }; }
 
 #ifdef MBLAS_SIMD_DD
 
@@ -97,14 +100,9 @@ static inline T dot(std::ptrdiff_t len, const T *cp, const T *xp) {
 
 /* ---- complex double-double kernels (w family) --------------------------- */
 
-static inline simd_exact::cx4 cbcast(const CT &t) {
-    return simd_exact::cx4{ _mm256_set1_pd(t.re.limbs[0]), _mm256_set1_pd(t.re.limbs[1]),
-                         _mm256_set1_pd(t.im.limbs[0]), _mm256_set1_pd(t.im.limbs[1]) };
-}
-
 /* xp[i] += t*cp[i] — 4-wide complex SoA, scalar tail. Order-free -> bit-exact. */
 static inline void caxpy_add(std::ptrdiff_t len, CT *xp, const CT *cp, const CT &t) {
-    const simd_exact::cx4 tt = cbcast(t);
+    const simd_exact::cx4 tt = simd_exact::vbcast(t);
     std::ptrdiff_t i = 0;
     /* 8-wide head: two INDEPENDENT 4-lane complex chains. A complex MAC
      * (cmul_soa = 4 mul + sub + add) is a long latency chain with no native
@@ -134,7 +132,7 @@ static inline void caxpy_add(std::ptrdiff_t len, CT *xp, const CT *cp, const CT 
 
 /* xp[i] -= t*cp[i] — 4-wide complex SoA, scalar tail. Order-free -> bit-exact. */
 static inline void caxpy_sub(std::ptrdiff_t len, CT *xp, const CT *cp, const CT &t) {
-    const simd_exact::cx4 tt = cbcast(t);
+    const simd_exact::cx4 tt = simd_exact::vbcast(t);
     std::ptrdiff_t i = 0;
     for (; i + 4 <= len; i += 4) {
         simd_exact::cx4 c = simd_exact::cload4(cp + i);

@@ -14,6 +14,7 @@
 #include "wher2k_kernel.h"
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "mf_kernels.h"
 #include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
@@ -21,6 +22,7 @@
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 
@@ -43,12 +45,10 @@ const T czero{ rzero, rzero };
 const T cone { rone,  rzero };
 
 
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
-inline T rcmul(R const &r, T const &z) { return T{ r * z.re, r * z.im }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
+using mf_kernels::rcmul;
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -103,13 +103,7 @@ inline void unpack_4col_her2k_triangle(int jc, int jb, int j_start, int j_count,
     }
 }
 
-inline void broadcast_cdd(const T &v,
-                          __m256d &rh, __m256d &rl,
-                          __m256d &ih, __m256d &il)
-{
-    rh = _mm256_set1_pd(v.re.limbs[0]); rl = _mm256_set1_pd(v.re.limbs[1]);
-    ih = _mm256_set1_pd(v.im.limbs[0]); il = _mm256_set1_pd(v.im.limbs[1]);
-}
+using simd_exact::vbcast;
 
 /* TR='N': t1 = α · conj(B(j_panel..+4, l)),
  *         t2 = conj(α) · conj(A(j_panel..+4, l));
@@ -121,7 +115,7 @@ inline void simd_her2k_diag_tn(int jc, int jb, int K, T alpha,
                                double *cih, double *cil)
 {
     __m256d a_rh, a_rl, a_ih, a_il;
-    broadcast_cdd(alpha, a_rh, a_rl, a_ih, a_il);
+    vbcast(alpha, a_rh, a_rl, a_ih, a_il);
     const __m256d zero_v = _mm256_setzero_pd();
     __m256d ac_ih = _mm256_sub_pd(zero_v, a_ih);    /* conj(α).im = -α.im */
     __m256d ac_il = _mm256_sub_pd(zero_v, a_il);
@@ -156,8 +150,8 @@ inline void simd_her2k_diag_tn(int jc, int jb, int K, T alpha,
             const int ir = i - jc;
             __m256d aih, ail_, aiih, aiil;
             __m256d bih, bil_, biih, biil;
-            broadcast_cdd(A_(i, ll), aih, ail_, aiih, aiil);
-            broadcast_cdd(B_(i, ll), bih, bil_, biih, biil);
+            vbcast(A_(i, ll), aih, ail_, aiih, aiil);
+            vbcast(B_(i, ll), bih, bil_, biih, biil);
             __m256d p1rh, p1rl, p1ih, p1il, p2rh, p2rl, p2ih, p2il;
             simd_fast::cmul(aih, ail_, aiih, aiil, t1rh, t1rl, t1ih, t1il,
                              p1rh, p1rl, p1ih, p1il);
@@ -325,7 +319,7 @@ inline void simd_her2k_diag_panels(int jc, int jb, int K, T alpha,
             }
             /* Finalize: C[panel] += α·s1 + conj(α)·s2 (single combine, as untiled). */
             __m256d a_rh, a_rl, a_ih, a_il;
-            broadcast_cdd(alpha, a_rh, a_rl, a_ih, a_il);
+            vbcast(alpha, a_rh, a_rl, a_ih, a_il);
             const __m256d zero_v = _mm256_setzero_pd();
             __m256d ac_ih = _mm256_sub_pd(zero_v, a_ih);
             __m256d ac_il = _mm256_sub_pd(zero_v, a_il);

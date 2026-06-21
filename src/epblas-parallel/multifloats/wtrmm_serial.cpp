@@ -26,6 +26,7 @@
 
 #include "wtrmm_kernel.h"
 #include "mf_pred.h"
+#include "mf_kernels.h"
 #include "wgemm_kernel.h"   /* wgemm_serial for the trailing update */
 #include <cstddef>
 #include <cstdlib>
@@ -58,11 +59,9 @@ const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 const T one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
 
 
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, -a.im }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -421,11 +420,7 @@ inline void wtrmm_ruTC_core(int, int, int, T, const T*, int, T*, int, int, int);
 using simd_exact::cload4;
 using simd_exact::cstore4;
 
-inline void broadcast_c4(const T &v, __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il)
-{
-    rh = _mm256_set1_pd(v.re.limbs[0]); rl = _mm256_set1_pd(v.re.limbs[1]);
-    ih = _mm256_set1_pd(v.im.limbs[0]); il = _mm256_set1_pd(v.im.limbs[1]);
-}
+using simd_exact::vbcast;
 
 inline void simd_wtrmm_r4_rln(int ib, int N, T alpha,
                               const T *a, int lda, T *b, int ldb, int nounit)
@@ -438,7 +433,7 @@ inline void simd_wtrmm_r4_rln(int ib, int N, T alpha,
         cload4(bj + ib, brh, brl, bih, bil);
         if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
-            broadcast_c4(t, trh, trl, tih, til);
+            vbcast(t, trh, trl, tih, til);
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(brh, brl, bih, bil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
@@ -449,7 +444,7 @@ inline void simd_wtrmm_r4_rln(int ib, int N, T alpha,
             if (ceq0(akj_v)) continue;
             const T akj = cmul(alpha, akj_v);
             __m256d arh, arl, aih, ail;
-            broadcast_c4(akj, arh, arl, aih, ail);
+            vbcast(akj, arh, arl, aih, ail);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkrh, bkrl, bkih, bkil;
             cload4(bk + ib, bkrh, bkrl, bkih, bkil);
@@ -476,7 +471,7 @@ inline void simd_wtrmm_r4_run(int ib, int N, T alpha,
         cload4(bj + ib, brh, brl, bih, bil);
         if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
-            broadcast_c4(t, trh, trl, tih, til);
+            vbcast(t, trh, trl, tih, til);
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(brh, brl, bih, bil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
@@ -487,7 +482,7 @@ inline void simd_wtrmm_r4_run(int ib, int N, T alpha,
             if (ceq0(akj_v)) continue;
             const T akj = cmul(alpha, akj_v);
             __m256d arh, arl, aih, ail;
-            broadcast_c4(akj, arh, arl, aih, ail);
+            vbcast(akj, arh, arl, aih, ail);
             const T *bk = b + static_cast<std::size_t>(k) * ldb;
             __m256d bkrh, bkrl, bkih, bkil;
             cload4(bk + ib, bkrh, bkrl, bkih, bkil);
@@ -515,7 +510,7 @@ inline void simd_wtrmm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
             if (ceq0(ajk)) continue;
             const T scaled = cmul(alpha, ajk);
             __m256d arh, arl, aih, ail;
-            broadcast_c4(scaled, arh, arl, aih, ail);
+            vbcast(scaled, arh, arl, aih, ail);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjrh, bjrl, bjih, bjil;
             cload4(bj + ib, bjrh, bjrl, bjih, bjil);
@@ -531,7 +526,7 @@ inline void simd_wtrmm_r4_rlTC(int ib, int N, T alpha, int conj_flag,
         if (nounit) t = cmul(t, A_op(a, lda, k, k, conj_flag));
         if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
-            broadcast_c4(t, trh, trl, tih, til);
+            vbcast(t, trh, trl, tih, til);
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
@@ -552,7 +547,7 @@ inline void simd_wtrmm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
             if (ceq0(ajk)) continue;
             const T scaled = cmul(alpha, ajk);
             __m256d arh, arl, aih, ail;
-            broadcast_c4(scaled, arh, arl, aih, ail);
+            vbcast(scaled, arh, arl, aih, ail);
             T *bj = b + static_cast<std::size_t>(j) * ldb;
             __m256d bjrh, bjrl, bjih, bjil;
             cload4(bj + ib, bjrh, bjrl, bjih, bjil);
@@ -568,7 +563,7 @@ inline void simd_wtrmm_r4_ruTC(int ib, int N, T alpha, int conj_flag,
         if (nounit) t = cmul(t, A_op(a, lda, k, k, conj_flag));
         if (!ceq1(t)) {
             __m256d trh, trl, tih, til;
-            broadcast_c4(t, trh, trl, tih, til);
+            vbcast(t, trh, trl, tih, til);
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);

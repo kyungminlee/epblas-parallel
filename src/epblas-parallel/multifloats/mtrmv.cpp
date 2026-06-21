@@ -10,6 +10,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define MTRMV_OMP_MIN 128
 #define MTRMV_MAX_CPUS 256
 #endif
@@ -22,9 +23,6 @@ using T = mf::float64x2;
 using mf_pred::eq0;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
-namespace {
-const T zero_dd{0.0, 0.0};
-}
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
@@ -77,16 +75,55 @@ static void mtrmv_contig(bool upper, bool trans, bool nounit,
 }
 
 #ifdef _OPENMP
-/* Threaded contiguous-x core, mirroring kind10 etrmv_omp_contig. The earlier
- * row-gather threaded poorly: NoTrans read the matrix by ROW (A_(r,c) strided
- * by lda across columns) — cache-hostile for column-major DD storage — and the
- * contiguous-block row partition load-imbalanced the triangular work, so par4
- * barely beat par1. This instead keeps matrix access COLUMN-contiguous and uses
- * schedule(static,1) cyclic distribution to balance the triangular work:
+/* NoTrans tiled column-AXPY kernel (real-DD twin of wtrmv_kernel_N). Reads only
+ * the contiguous matrix column block [m_from,m_to); writes its own rows directly
+ * plus the off-block "spill" rows into the thread's private y slot (merged by a
+ * bounded reduction). DTB tiling keeps the active y-tile hot. Each contiguous
+ * column run is a SIMD AXPY (mf_kernels::axpy_add) so the threaded path stays
+ * vectorized like the serial one. */
+static void mtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
+                           std::ptrdiff_t m_from, std::ptrdiff_t m_to,
+                           const T *a, std::size_t lda, const T *x, T *y)
+{
+    const std::ptrdiff_t TB = 32;
+    for (std::ptrdiff_t is = m_from; is < m_to; is += TB) {
+        std::ptrdiff_t min_i = (m_to - is < TB) ? m_to - is : TB;
+        if (upper && is > 0) {
+            for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
+                const T xj = x[j];
+                if (!eq0(xj)) mf_kernels::axpy_add(is, &y[0], &A_(0, j), xj);
+            }
+        }
+        for (std::ptrdiff_t i = is; i < is + min_i; ++i) {
+            if (upper && i > is) {
+                const T xi = x[i];
+                if (!eq0(xi)) mf_kernels::axpy_add(i - is, &y[is], &A_(is, i), xi);
+            }
+            y[i] = y[i] + (nounit ? A_(i, i) * x[i] : x[i]);
+            if (!upper && i + 1 < is + min_i) {
+                const T xi = x[i];
+                if (!eq0(xi))
+                    mf_kernels::axpy_add(is + min_i - (i + 1), &y[i + 1], &A_(i + 1, i), xi);
+            }
+        }
+        if (!upper && is + min_i < n) {
+            for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
+                const T xj = x[j];
+                if (!eq0(xj))
+                    mf_kernels::axpy_add(n - (is + min_i), &y[is + min_i], &A_(is + min_i, j), xj);
+            }
+        }
+    }
+}
+
+/* Threaded contiguous-x core, mirroring wtrmv_omp_contig with real-DD math.
+ * Matrix access stays COLUMN-contiguous:
  *   - Trans: each x[j] is an independent dot over a contiguous column slice
- *     (disjoint writes → no reduction).
- *   - NoTrans: per-thread private accumulator + column AXPY (contiguous),
- *     reduced at the end (esymv pattern).
+ *     (disjoint writes → no reduction), cyclic schedule(static,1).
+ *   - NoTrans: OpenBLAS contiguous row-block scheme via mf_omp::tri_area_bounds —
+ *     each thread reads only its column block and merges its BOUNDED spill rows,
+ *     replacing the old per-thread accumulator + O(nt·n) reduction (which floored
+ *     par4 scaling at large n; see [[project_l2_rowgather_scaling]]).
  * DD addition reorders vs the serial path → within fuzz tol; the serial path
  * stays bit-exact. Operates on a contiguous x; the strided dispatch gathers /
  * scatters around it. Returns true on success, false if a scratch alloc failed
@@ -121,42 +158,48 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
         std::free(y_buf);
         return true;
     } else {
-        const T one_dd{1.0, 0.0};
-        T *y_priv_all = static_cast<T *>(
-            std::calloc((std::size_t)nt * (std::size_t)n, sizeof(T)));
-        if (!y_priv_all) return false;
-        #pragma omp parallel num_threads(nt)
+        /* NoTrans: contiguous row-block scheme. Each thread reads only its matrix
+         * column block (good cache locality vs cyclic) and merges its bounded
+         * spill rows — beats the full per-thread accumulator + O(nt·n) reduction
+         * at large n. Same equal-area split as wtrmv: UPPER column work grows with
+         * the index ⇒ heavy_high=upper; the forward slices are read REVERSED for
+         * upper so the thin top slice carries the heavy top rows. */
+        std::ptrdiff_t *range = static_cast<std::ptrdiff_t *>(
+            std::malloc((std::size_t)(nt + 1) * sizeof(std::ptrdiff_t)));
+        if (!range) return false;
+        int ncpu = mf_omp::tri_area_bounds(n, nt, 7, 16, upper,
+                                           MTRMV_MAX_CPUS, range);
+        T *buf_all = static_cast<T *>(
+            std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(T)));
+        if (!buf_all) { std::free(range); return false; }
+        #pragma omp parallel num_threads(ncpu)
         {
-            const std::ptrdiff_t tid = omp_get_thread_num();
-            T *y_priv = &y_priv_all[(std::size_t)tid * n];  /* calloc-zeroed */
-            if (!upper) {
-                #pragma omp for schedule(static, 1)
-                for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    const T xj = x[j];
-                    const T *aj = &A_(0, j);
-                    y_priv[j] = y_priv[j] + xj * (nounit ? aj[j] : one_dd);
-                    if (!eq0(xj))
-                        mf_kernels::axpy_add(n - 1 - j, &y_priv[j + 1], &aj[j + 1], xj);
-                }
-            } else {
-                #pragma omp for schedule(static, 1)
-                for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    const T xj = x[j];
-                    const T *aj = &A_(0, j);
-                    if (!eq0(xj))
-                        mf_kernels::axpy_add(j, &y_priv[0], &aj[0], xj);
-                    y_priv[j] = y_priv[j] + xj * (nounit ? aj[j] : one_dd);
-                }
+            const int tid = omp_get_thread_num();
+            T *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
+            std::ptrdiff_t m_from, m_to;
+            if (upper) { m_from = range[ncpu - tid - 1]; m_to = range[ncpu - tid]; }
+            else       { m_from = range[tid];            m_to = range[tid + 1]; }
+            if (m_from < m_to)
+                mtrmv_kernel_N(upper, nounit, n, m_from, m_to, a, lda, x, y);
+        }
+        /* Bounded reduction: merge each thread's spill rows into slot 0. */
+        if (upper) {
+            for (int t = 1; t < ncpu; ++t) {
+                std::ptrdiff_t m_to_t = range[ncpu - t];
+                const T *slot = &buf_all[(std::size_t)t * n];
+                for (std::ptrdiff_t i = 0; i < m_to_t; ++i)
+                    buf_all[i] = buf_all[i] + slot[i];
             }
-            #pragma omp for schedule(static)
-            for (std::ptrdiff_t i = 0; i < n; ++i) {
-                T s = zero_dd;
-                for (std::ptrdiff_t t = 0; t < nt; ++t)
-                    s = s + y_priv_all[(std::size_t)t * n + i];
-                x[i] = s;
+        } else {
+            for (int t = 1; t < ncpu; ++t) {
+                std::ptrdiff_t m_from_t = range[t];
+                const T *slot = &buf_all[(std::size_t)t * n];
+                for (std::ptrdiff_t i = m_from_t; i < n; ++i)
+                    buf_all[i] = buf_all[i] + slot[i];
             }
         }
-        std::free(y_priv_all);
+        for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = buf_all[i];
+        std::free(buf_all); std::free(range);
         return true;
     }
 }

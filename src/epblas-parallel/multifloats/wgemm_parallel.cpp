@@ -18,6 +18,8 @@
  */
 
 #include "wgemm_kernel.h"
+#include "mf_kernels.h"
+#include "mf_pred.h"
 #include <cstddef>
 #include <cstdlib>
 #ifdef _OPENMP
@@ -29,18 +31,9 @@ using R = mf::float64x2;
 using T = mf::complex64x2;
 
 namespace {
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im,
-              a.re * b.im + a.im * b.re };
-}
-inline bool ciszero(T const &a) {
-    return a.re.limbs[0] == 0.0 && a.re.limbs[1] == 0.0
-        && a.im.limbs[0] == 0.0 && a.im.limbs[1] == 0.0;
-}
-inline bool cisone(T const &a) {
-    return a.re.limbs[0] == 1.0 && a.re.limbs[1] == 0.0
-        && a.im.limbs[0] == 0.0 && a.im.limbs[1] == 0.0;
-}
+using mf_kernels::cmul;
+using mf_pred::ceq0;
+using mf_pred::ceq1;
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 }  // namespace
 
@@ -75,13 +68,13 @@ extern "C" void wgemm_(
      * pre-split wgemm_). */
     for (int j = 0; j < N; ++j) {
         T *cj = &c[static_cast<std::size_t>(j) * ldc];
-        if (ciszero(beta)) {
+        if (ceq0(beta)) {
             for (int i = 0; i < M; ++i) cj[i] = zero_cdd;
-        } else if (!cisone(beta)) {
+        } else if (!ceq1(beta)) {
             for (int i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
         }
     }
-    if (ciszero(alpha) || K == 0) return;
+    if (ceq0(alpha) || K == 0) return;
 
     int MC, KC, NC;
     wgemm_choose_blocks(&MC, &KC, &NC);

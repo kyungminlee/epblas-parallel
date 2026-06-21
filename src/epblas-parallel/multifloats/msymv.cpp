@@ -21,6 +21,7 @@
 #include <cstring>
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define MSYMV_OMP_MIN 256
 #define MSYMV_MAX_CPUS 256
 #endif
@@ -41,21 +42,7 @@ const T zero_dd{0.0, 0.0};
 using simd_exact::load_dd4;
 /* Horizontal-reduce a 4-lane DD vector pair to scalar DD (lane 0
  * of result holds the sum across all 4 lanes). */
-static inline __attribute__((always_inline)) T
-hreduce_dd(__m256d s_h, __m256d s_l)
-{
-    __m256d sh_sw = _mm256_permute2f128_pd(s_h, s_h, 0x01);
-    __m256d sl_sw = _mm256_permute2f128_pd(s_l, s_l, 0x01);
-    __m256d p_h, p_l;
-    simd_fast::add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
-    __m256d ph_sw = _mm256_shuffle_pd(p_h, p_h, 0x5);
-    __m256d pl_sw = _mm256_shuffle_pd(p_l, p_l, 0x5);
-    __m256d r_h, r_l;
-    simd_fast::add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
-    double rh[4], rl[4];
-    _mm256_storeu_pd(rh, r_h); _mm256_storeu_pd(rl, r_l);
-    return T{rh[0], rl[0]};
-}
+using simd_fast::hreduce;
 #endif
 }
 
@@ -122,7 +109,7 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
             simd_fast::add(s_h, s_l, p2h, p2l, nsh, nsl);
             s_h = nsh; s_l = nsl;
         }
-        T temp2 = hreduce_dd(s_h, s_l);
+        T temp2 = hreduce(s_h, s_l);
         for (; k < N; ++k) {
             T yk{yacc_hi[k], yacc_lo[k]};
             T aki = ai[k];
@@ -154,7 +141,7 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
             simd_fast::add(s_h, s_l, p2h, p2l, nsh, nsl);
             s_h = nsh; s_l = nsl;
         }
-        T temp2 = hreduce_dd(s_h, s_l);
+        T temp2 = hreduce(s_h, s_l);
         for (; k < i; ++k) {
             T yk{yacc_hi[k], yacc_lo[k]};
             T aki = ai[k];
@@ -171,11 +158,15 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
 #endif
 
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
-/* Threaded symmetric matvec: private-y-accumulator. y_hi/y_lo enter holding the
- * beta-scaled y. Columns are distributed cyclically (balances the triangular
- * work); each thread folds its columns into a private zero buffer via msymv_col,
- * then the partials are reduced back onto y_hi/y_lo. Contiguous column access is
- * preserved (best bandwidth for BW-bound real DD). Returns true if handled. */
+/* Threaded symmetric matvec. y_hi/y_lo enter holding the beta-scaled y. Columns
+ * are split into area-balanced CONTIGUOUS slices (per-column work ~ (N-i) lower /
+ * ~i upper -> tri_area_bounds, heavy_high=upper), each thread folding its slice
+ * into a private zero buffer via msymv_col (contiguous A + localized row writes).
+ * A BOUNDED reduction then sums just each thread's populated row window (lower:
+ * col i writes rows [i,N) -> thread window [range[t],N); upper: rows [0,i] ->
+ * [0,range[t+1])) onto y. Escapes the old cyclic scheme's O(nthreads*N) full
+ * fold. Reorders the per-row sum vs serial -> within DD fuzz tol. Returns true
+ * if handled. */
 __attribute__((noinline)) static bool msymv_omp(
     bool lower, int N, const T *a, std::size_t lda, const T *x,
     const double *x_hi, const double *x_lo,
@@ -185,26 +176,34 @@ __attribute__((noinline)) static bool msymv_omp(
     if (nthreads <= 1 || omp_in_parallel()) return false;
     if (nthreads > MSYMV_MAX_CPUS) nthreads = MSYMV_MAX_CPUS;
 
+    std::ptrdiff_t range[MSYMV_MAX_CPUS + 1];
+    int ncpu = mf_omp::tri_area_bounds(N, nthreads, 3, 4, !lower,
+                                       MSYMV_MAX_CPUS, range);
+    if (ncpu <= 1) return false;
+
     const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
     const std::size_t per = 2 * N_pad;
     double *pool = static_cast<double *>(
-        std::aligned_alloc(32, static_cast<std::size_t>(nthreads) * per * sizeof(double)));
+        std::aligned_alloc(32, static_cast<std::size_t>(ncpu) * per * sizeof(double)));
     if (!pool) return false;
-    std::memset(pool, 0, static_cast<std::size_t>(nthreads) * per * sizeof(double));
+    std::memset(pool, 0, static_cast<std::size_t>(ncpu) * per * sizeof(double));
 
-    #pragma omp parallel num_threads(nthreads)
+    #pragma omp parallel num_threads(ncpu)
     {
         int tid = omp_get_thread_num();
         double *yp_hi = pool + static_cast<std::size_t>(tid) * per;
         double *yp_lo = yp_hi + N_pad;
-        for (int i = tid; i < N; i += nthreads)
+        for (int i = (int)range[tid]; i < (int)range[tid + 1]; ++i)
             msymv_col(lower, i, N, a, lda, x, x_hi, x_lo, yp_hi, yp_lo, alpha);
     }
 
-    for (int t = 0; t < nthreads; ++t) {
+    /* Bounded reduction: fold each thread's populated row window onto y. */
+    for (int t = 0; t < ncpu; ++t) {
         const double *yp_hi = pool + static_cast<std::size_t>(t) * per;
         const double *yp_lo = yp_hi + N_pad;
-        for (int k = 0; k < N; ++k) {
+        std::ptrdiff_t k_from, k_to;
+        mf_omp::tri_row_window(t, !lower, range, N, k_from, k_to);
+        for (std::ptrdiff_t k = k_from; k < k_to; ++k) {
             T yk{y_hi[k], y_lo[k]};
             yk = yk + T{yp_hi[k], yp_lo[k]};
             y_hi[k] = yk.limbs[0]; y_lo[k] = yk.limbs[1];

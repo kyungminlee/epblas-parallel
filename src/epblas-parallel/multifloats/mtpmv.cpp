@@ -13,8 +13,10 @@
 #include "mf_kernels.h"
 #include "mf_packed.h"     /* mf_packed::kk_upper / kk_lower — packed column offsets */
 #ifdef _OPENMP
+#include <cmath>
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define MTPMV_OMP_MIN 128
 #define MTPMV_MAX_CPUS 256
 #endif
@@ -77,17 +79,16 @@ void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
 }
 
 #ifdef _OPENMP
-namespace {
-const T zero_dd{0.0, 0.0};
-}
-
 /* Threaded contiguous-x core, mirroring mtrmv_omp_contig but with packed column
  * offsets. The earlier row-gather threaded poorly: NoTrans walked a column-
  * JUMPING run (offset += c+1 per step) — cache-hostile — and the contiguous-
  * block row partition load-imbalanced the triangular work. This keeps packed-
- * column access contiguous and uses schedule(static,1) cyclic balancing:
- *   - Trans: each x[j] is an independent contiguous-column dot (disjoint writes).
- *   - NoTrans: per-thread accumulator + column AXPY, reduced at the end.
+ * column access contiguous:
+ *   - Trans: each x[j] is an independent contiguous-column dot (disjoint writes),
+ *     schedule(static,1) cyclic balancing.
+ *   - NoTrans: area-balanced contiguous COLUMN partition (packed twin of the
+ *     mspmv axpydot) + per-thread slot + BOUNDED reduction, escaping the old
+ *     cyclic O(nt*n) full fold that floored par4/par1 at ~0.47.
  * DD addition reorders vs serial → within fuzz tol; serial stays bit-exact.
  * Returns true on success, false if a scratch alloc failed. */
 static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
@@ -116,35 +117,48 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
         return true;
     } else {
         const T one_dd{1.0, 0.0};
-        T *y_priv_all = static_cast<T *>(
-            std::calloc((std::size_t)nt * (std::size_t)n, sizeof(T)));
-        if (!y_priv_all) return false;
-        #pragma omp parallel num_threads(nt)
+        std::ptrdiff_t range[MTPMV_MAX_CPUS + 1];
+        /* per-column work ~j (upper) / ~(n-j) (lower) -> heavy_high=upper. */
+        int ncpu = mf_omp::tri_area_bounds(n, nt, 3, 4, upper,
+                                           MTPMV_MAX_CPUS, range);
+        if (ncpu <= 1) return false;
+        T *buf = static_cast<T *>(std::calloc((std::size_t)ncpu * n, sizeof(T)));
+        if (!buf) return false;
+        /* Each thread folds its disjoint column range's AXPY into a private slot,
+         * reading the ORIGINAL x (x is overwritten only in the reduction). */
+        #pragma omp parallel num_threads(ncpu)
         {
-            const std::ptrdiff_t tid = omp_get_thread_num();
-            T *y_priv = &y_priv_all[(std::size_t)tid * n];  /* calloc-zeroed */
-            #pragma omp for schedule(static, 1)
-            for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T xj = x[j];
-                if (upper) {
+            int t = omp_get_thread_num();
+            std::ptrdiff_t c_from = range[t], c_to = range[t + 1];
+            T *slot = buf + (std::size_t)t * n;
+            if (upper) {
+                for (std::ptrdiff_t j = c_from; j < c_to; ++j) {
+                    const T xj = x[j];
                     const T *aj = &ap[kk_upper(j)];
-                    if (!eq0(xj)) mf_kernels::axpy_add(j, &y_priv[0], &aj[0], xj);
-                    y_priv[j] = y_priv[j] + xj * (nounit ? aj[j] : one_dd);
-                } else {
+                    if (!eq0(xj)) mf_kernels::axpy_add(j, &slot[0], &aj[0], xj);
+                    slot[j] = slot[j] + xj * (nounit ? aj[j] : one_dd);
+                }
+            } else {
+                for (std::ptrdiff_t j = c_from; j < c_to; ++j) {
+                    const T xj = x[j];
                     const T *aj = &ap[kk_lower(j, n)];
-                    y_priv[j] = y_priv[j] + xj * (nounit ? aj[0] : one_dd);
-                    if (!eq0(xj)) mf_kernels::axpy_add(n - 1 - j, &y_priv[j + 1], &aj[1], xj);
+                    slot[j] = slot[j] + xj * (nounit ? aj[0] : one_dd);
+                    if (!eq0(xj)) mf_kernels::axpy_add(n - 1 - j, &slot[j + 1], &aj[1], xj);
                 }
             }
-            #pragma omp for schedule(static)
-            for (std::ptrdiff_t i = 0; i < n; ++i) {
-                T s = zero_dd;
-                for (std::ptrdiff_t t = 0; t < nt; ++t)
-                    s = s + y_priv_all[(std::size_t)t * n + i];
-                x[i] = s;
-            }
         }
-        std::free(y_priv_all);
+        /* Bounded reduction: x aliases the input, so sum the other slots' row
+         * windows into the widest slot (last for upper / first for lower, which
+         * spans all of [0,n)) and then overwrite x in one pass. */
+        T *target = buf + (std::size_t)(upper ? ncpu - 1 : 0) * n;
+        for (int i = upper ? 0 : 1; i < (upper ? ncpu - 1 : ncpu); ++i) {
+            const T *src = buf + (std::size_t)i * n;
+            std::ptrdiff_t from, to;
+            mf_omp::tri_row_window(i, upper, range, n, from, to);
+            for (std::ptrdiff_t k = from; k < to; ++k) target[k] = target[k] + src[k];
+        }
+        for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = target[i];
+        std::free(buf);
         return true;
     }
 }

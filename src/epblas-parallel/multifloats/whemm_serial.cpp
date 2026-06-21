@@ -18,6 +18,7 @@
 #include "whemm_kernel.h"
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "mf_kernels.h"
 #include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
@@ -47,11 +48,9 @@ const T zero_cdd{ rzero, rzero };
 const T one_cdd { R{1.0, 0.0}, rzero };
 
 
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -103,15 +102,7 @@ inline void unpack_4col_cdd(int count, int row_start,
 }
 
 /* Broadcast a complex DD scalar into 4 lane-wise ymm registers. */
-inline void broadcast_cdd(const T &v,
-                          __m256d &rh, __m256d &rl,
-                          __m256d &ih, __m256d &il)
-{
-    rh = _mm256_set1_pd(v.re.limbs[0]);
-    rl = _mm256_set1_pd(v.re.limbs[1]);
-    ih = _mm256_set1_pd(v.im.limbs[0]);
-    il = _mm256_set1_pd(v.im.limbs[1]);
-}
+using simd_exact::vbcast;
 
 /* SIDE='L' Hermitian diag-block kernel, 4 column lanes.
  *
@@ -128,7 +119,7 @@ inline void simd_hemm_diag_L(int ic, int ib, T alpha,
                              char UPLO)
 {
     __m256d a_rh, a_rl, a_ih, a_il;
-    broadcast_cdd(alpha, a_rh, a_rl, a_ih, a_il);
+    vbcast(alpha, a_rh, a_rl, a_ih, a_il);
     const __m256d zero_v = _mm256_setzero_pd();
 
     auto body = [&](int i) {
@@ -151,7 +142,7 @@ inline void simd_hemm_diag_L(int ic, int ib, T alpha,
         for (int k = k_lo; k < k_hi; ++k) {
             const int kr = k - ic;
             __m256d ak_rh, ak_rl, ak_ih, ak_il;
-            broadcast_cdd(A_(i, k), ak_rh, ak_rl, ak_ih, ak_il);
+            vbcast(A_(i, k), ak_rh, ak_rl, ak_ih, ak_il);
             /* Conjugated copy of A(i,k) for cj[k] update */
             __m256d akc_ih = _mm256_sub_pd(zero_v, ak_ih);
             __m256d akc_il = _mm256_sub_pd(zero_v, ak_il);

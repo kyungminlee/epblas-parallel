@@ -36,21 +36,7 @@ const T zero_dd{0.0, 0.0};
 #ifdef MBLAS_SIMD_DD
 using simd_exact::load_dd4;
 using simd_exact::store_dd4;
-static inline __attribute__((always_inline)) T
-hreduce_dd(__m256d s_h, __m256d s_l)
-{
-    __m256d sh_sw = _mm256_permute2f128_pd(s_h, s_h, 0x01);
-    __m256d sl_sw = _mm256_permute2f128_pd(s_l, s_l, 0x01);
-    __m256d p_h, p_l;
-    simd_fast::add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
-    __m256d ph_sw = _mm256_shuffle_pd(p_h, p_h, 0x5);
-    __m256d pl_sw = _mm256_shuffle_pd(p_l, p_l, 0x5);
-    __m256d r_h, r_l;
-    simd_fast::add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
-    double rh[4], rl[4];
-    _mm256_storeu_pd(rh, r_h); _mm256_storeu_pd(rl, r_l);
-    return T{rh[0], rl[0]};
-}
+using simd_fast::hreduce;
 /* Off-diagonal SIMD kernels for the blocked threaded solve.
  * msub:  x[k] -= xi * ai[k]  for k in [lo,hi)  (NoTrans axpy form).
  * dot :  returns sum_{k in [lo,hi)} ai[k] * x[k] (Trans dot form). */
@@ -90,7 +76,7 @@ mtrsv_dot_range(const T *ai, const T *x, int lo, int hi)
         simd_fast::mul(ah, al, xih, xil, ph, pl);
         simd_fast::add(sh, sl, ph, pl, sh, sl);
     }
-    T s = hreduce_dd(sh, sl);
+    T s = hreduce(sh, sl);
     for (; k < hi; ++k) s = s + ai[k] * x[k];
     return s;
 }
@@ -207,7 +193,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                         simd_fast::add(s_h, s_l, p_h, p_l, nsh, nsl);
                         s_h = nsh; s_l = nsl;
                     }
-                    T s_red = hreduce_dd(s_h, s_l);
+                    T s_red = hreduce(s_h, s_l);
                     t = t - s_red;
                     for (; k < N; ++k) {
                         T xk{x_hi[k], x_lo[k]};
@@ -234,7 +220,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                         simd_fast::add(s_h, s_l, p_h, p_l, nsh, nsl);
                         s_h = nsh; s_l = nsl;
                     }
-                    T s_red = hreduce_dd(s_h, s_l);
+                    T s_red = hreduce(s_h, s_l);
                     t = t - s_red;
                     for (; k < i; ++k) {
                         T xk{x_hi[k], x_lo[k]};

@@ -14,6 +14,7 @@
 #include "wsyr2k_kernel.h"
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "mf_kernels.h"
 #include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
@@ -21,6 +22,7 @@
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 
@@ -41,10 +43,8 @@ const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 const T one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
 
 
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
@@ -96,13 +96,7 @@ inline void unpack_4col_cdd_triangle(int jc, int jb, int j_start, int j_count,
     }
 }
 
-inline void broadcast_cdd(const T &v,
-                          __m256d &rh, __m256d &rl,
-                          __m256d &ih, __m256d &il)
-{
-    rh = _mm256_set1_pd(v.re.limbs[0]); rl = _mm256_set1_pd(v.re.limbs[1]);
-    ih = _mm256_set1_pd(v.im.limbs[0]); il = _mm256_set1_pd(v.im.limbs[1]);
-}
+using simd_exact::vbcast;
 
 /* TR='N' rank-2 update: t1 = α·A(j_panel..+4, l), t2 = α·B(j_panel..+4, l);
  * C[i, panel] += B(i,l)·t1 + A(i,l)·t2 across i ∈ diag block. */
@@ -113,7 +107,7 @@ inline void simd_syr2k_diag_tn(int jc, int jb, int K, T alpha,
                                double *cih, double *cil)
 {
     __m256d a_rh, a_rl, a_ih, a_il;
-    broadcast_cdd(alpha, a_rh, a_rl, a_ih, a_il);
+    vbcast(alpha, a_rh, a_rl, a_ih, a_il);
     alignas(32) double aj_rh[kSimdLane], aj_rl[kSimdLane], aj_ih[kSimdLane], aj_il[kSimdLane];
     alignas(32) double bj_rh[kSimdLane], bj_rl[kSimdLane], bj_ih[kSimdLane], bj_il[kSimdLane];
     for (int ll = 0; ll < K; ++ll) {
@@ -140,8 +134,8 @@ inline void simd_syr2k_diag_tn(int jc, int jb, int K, T alpha,
             const int ir = i - jc;
             __m256d aih, ail_, aiih, aiil;
             __m256d bih, bil_, biih, biil;
-            broadcast_cdd(A_(i, ll), aih, ail_, aiih, aiil);
-            broadcast_cdd(B_(i, ll), bih, bil_, biih, biil);
+            vbcast(A_(i, ll), aih, ail_, aiih, aiil);
+            vbcast(B_(i, ll), bih, bil_, biih, biil);
             __m256d p1rh, p1rl, p1ih, p1il, p2rh, p2rl, p2ih, p2il;
             simd_fast::cmul(bih, bil_, biih, biil, t1rh, t1rl, t1ih, t1il, p1rh, p1rl, p1ih, p1il);
             simd_fast::cmul(aih, ail_, aiih, aiil, t2rh, t2rl, t2ih, t2il, p2rh, p2rl, p2ih, p2il);
@@ -188,8 +182,8 @@ inline void simd_syr2k_diag_tt_chunk(int jc, int jb, int kc,
             const int l = l0 + ll;
             __m256d aih, ail_, aiih, aiil;
             __m256d bih, bil_, biih, biil;
-            broadcast_cdd(Ai[l], aih, ail_, aiih, aiil);
-            broadcast_cdd(Bi[l], bih, bil_, biih, biil);
+            vbcast(Ai[l], aih, ail_, aiih, aiil);
+            vbcast(Bi[l], bih, bil_, biih, biil);
             __m256d ajrv = _mm256_load_pd(&ajrh[ll * kSimdLane]);
             __m256d ajrlv = _mm256_load_pd(&ajrl[ll * kSimdLane]);
             __m256d ajiv = _mm256_load_pd(&ajih[ll * kSimdLane]);
@@ -278,7 +272,7 @@ inline void simd_syr2k_diag_panels(int jc, int jb, int K, T alpha,
             }
             /* Finalize: C[panel] += alpha · acc (single alpha-mul, as untiled). */
             __m256d a_rh, a_rl, a_ih, a_il;
-            broadcast_cdd(alpha, a_rh, a_rl, a_ih, a_il);
+            vbcast(alpha, a_rh, a_rl, a_ih, a_il);
             for (int i = jc; i < jc + jb; ++i) {
                 const int ir = i - jc;
                 __m256d srh = _mm256_load_pd(&acc_rh[ir * kSimdLane]);

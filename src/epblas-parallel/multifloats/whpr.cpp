@@ -32,7 +32,7 @@ const R rzero{0.0, 0.0};
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::cconj;
-inline T scale_r(R const &alpha, T const &b) { return T{ alpha * b.re, alpha * b.im }; }
+using mf_kernels::rcmul;
 }
 
 /* Contiguous (unit-stride x) core: packed Hermitian rank-1 A += alpha*x*x^H.
@@ -50,7 +50,7 @@ static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
         for (int j = 0; j < N; ++j) {
             const int kk = (j * (j + 1)) / 2;
             if (!ceq0(x[j])) {
-                const T tmp = scale_r(alpha, cconj(x[j]));
+                const T tmp = rcmul(alpha, cconj(x[j]));
                 mf_kernels::caxpy_add(j, &ap[kk], &x[0], tmp);
                 const R new_re = ap[kk + j].re + cmul(x[j], tmp).re;
                 ap[kk + j] = T{ new_re, rzero };
@@ -66,7 +66,7 @@ static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
         for (int j = 0; j < N; ++j) {
             const int kk = j * N - (j * (j - 1)) / 2;
             if (!ceq0(x[j])) {
-                const T tmp = scale_r(alpha, cconj(x[j]));
+                const T tmp = rcmul(alpha, cconj(x[j]));
                 const R new_re = ap[kk].re + cmul(tmp, x[j]).re;
                 ap[kk] = T{ new_re, rzero };
                 mf_kernels::caxpy_add(N - (j + 1), &ap[kk + 1], &x[j + 1], tmp);

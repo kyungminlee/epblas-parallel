@@ -3,6 +3,7 @@
  */
 #include <cstddef>
 #include <multifloats.h>
+#include "mf_kernels.h"
 #include "mf_pred.h"
 #ifdef _OPENMP
 #include <omp.h>
@@ -22,10 +23,8 @@ using T = mf::complex64x2;
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
 using mf_pred::ceq0;
 namespace {
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
 
 #ifdef MBLAS_SIMD_DD
 using simd_exact::cload4;

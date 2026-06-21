@@ -14,6 +14,7 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_kernels.h"
 #include "mf_util.h"
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
@@ -44,11 +45,9 @@ namespace {
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 
 
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 
 #ifdef MBLAS_SIMD_DD
 using simd_exact::cload4;

@@ -28,7 +28,7 @@ const R rzero{0.0, 0.0};
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::cconj;
-inline T rcmul(R const &r, T const &z) { return T{ r * z.re, r * z.im }; }
+using mf_kernels::rcmul;
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]

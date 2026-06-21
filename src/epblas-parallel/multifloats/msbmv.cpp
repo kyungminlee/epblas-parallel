@@ -15,6 +15,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define MSBMV_OMP_MIN 256
 #define MSBMV_MAX_CPUS 256
 #endif
@@ -75,34 +76,6 @@ void msbmv_contig(bool upper, int n, int k, const T *a, std::size_t lda,
 }
 
 #ifdef _OPENMP
-/* Equal-width contiguous column partition. Unlike the packed/triangular case,
- * band work per column is uniform (~2K entries) so columns split evenly; mask=3
- * rounds widths to multiples of 4 (min_width 4) to keep per-thread slot writes
- * off shared cache lines. */
-static int msbmv_partition(std::ptrdiff_t n, int nthreads, int mask,
-                           std::ptrdiff_t min_width, std::ptrdiff_t *range)
-{
-    int num_cpu = 0;
-    std::ptrdiff_t base = (n + nthreads - 1) / nthreads;
-    range[0] = 0;
-    std::ptrdiff_t i = 0;
-    while (i < n) {
-        std::ptrdiff_t width;
-        if (nthreads - num_cpu > 1) {
-            width = (base + mask) & ~(std::ptrdiff_t)mask;
-            if (width < min_width) width = min_width;
-            if (width > n - i)     width = n - i;
-        } else {
-            width = n - i;
-        }
-        range[num_cpu + 1] = range[num_cpu] + width;
-        num_cpu++;
-        i += width;
-        if (num_cpu >= MSBMV_MAX_CPUS) break;
-    }
-    return num_cpu;
-}
-
 /* Unit-stride threaded path. Threads own disjoint COLUMN ranges and accumulate
  * into a private slot[n]; one contiguous pass over each band column j does both
  * the reflected scatter (slot[i]+=x[j]*col[i]) and the symmetric dot
@@ -118,7 +91,9 @@ static bool msbmv_axpydot(bool upper, int n, int k, const T *a, std::size_t lda,
                           const T *x, T alpha, T *y, int nthreads)
 {
     std::ptrdiff_t range[MSBMV_MAX_CPUS + 1];
-    int num_cpu = msbmv_partition(n, nthreads, 3, 4, range);
+    /* equal-width column split: band work per column is uniform (mask3/min4 keep
+     * slot writes cache-line aligned). */
+    int num_cpu = mf_omp::band_bounds(n, nthreads, 3, 4, MSBMV_MAX_CPUS, range);
     if (num_cpu <= 1) return false;
 
     T *buf = static_cast<T *>(std::calloc((std::size_t)num_cpu * n, sizeof(T)));
@@ -162,13 +137,7 @@ static bool msbmv_axpydot(bool upper, int n, int k, const T *a, std::size_t lda,
     for (int t = 0; t < num_cpu; ++t) {
         const T *slot = buf + (std::size_t)t * n;
         std::ptrdiff_t lo, hi;
-        if (upper) {
-            lo = range[t] - k; if (lo < 0) lo = 0;
-            hi = range[t + 1];
-        } else {
-            lo = range[t];
-            hi = range[t + 1] + k; if (hi > n) hi = n;
-        }
+        mf_omp::band_row_window(t, upper, range, n, k, lo, hi);
         for (std::ptrdiff_t i = lo; i < hi; ++i) y[i] = y[i] + alpha * slot[i];
     }
     std::free(buf);

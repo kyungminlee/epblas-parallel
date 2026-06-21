@@ -12,6 +12,7 @@
 #include <cmath>
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define WTRMV_OMP_MIN 128
 #define WTRMV_MAX_CPUS 256
 #endif
@@ -66,51 +67,6 @@ static void wtrmv_serial_N_lower(bool nounit, int n,
 }
 
 #ifdef _OPENMP
-/* sqrt-balanced contiguous row-block partition (OpenBLAS trmv_thread.c). Each
- * thread owns a contiguous output-row range; widths shrink/grow so the per-thread
- * triangular work (≈ width·(rows above/below)) is equal. range[0..nt]. */
-static void wtrmv_partition(bool upper, std::ptrdiff_t n, int nthreads,
-                            std::ptrdiff_t *range)
-{
-    const std::ptrdiff_t mask = 7;
-    const double dnum = (double)n * (double)n / (double)nthreads;
-    if (!upper) {
-        range[0] = 0;
-        std::ptrdiff_t i = 0; int num_cpu = 0;
-        while (i < n && num_cpu < nthreads) {
-            std::ptrdiff_t width;
-            if (nthreads - num_cpu > 1) {
-                double di = (double)(n - i);
-                width = (di * di - dnum > 0.0)
-                    ? (((std::ptrdiff_t)(-std::sqrt(di * di - dnum) + di) + mask) & ~mask)
-                    : (n - i);
-                if (width < 16) width = 16;
-                if (width > n - i) width = n - i;
-            } else width = n - i;
-            range[num_cpu + 1] = range[num_cpu] + width;
-            num_cpu++; i += width;
-        }
-        for (int t = num_cpu + 1; t <= nthreads; ++t) range[t] = range[num_cpu];
-    } else {
-        range[nthreads] = n;
-        std::ptrdiff_t i = 0; int num_cpu = 0;
-        while (i < n && num_cpu < nthreads) {
-            std::ptrdiff_t width;
-            if (nthreads - num_cpu > 1) {
-                double di = (double)(n - i);
-                width = (di * di - dnum > 0.0)
-                    ? (((std::ptrdiff_t)(-std::sqrt(di * di - dnum) + di) + mask) & ~mask)
-                    : (n - i);
-                if (width < 16) width = 16;
-                if (width > n - i) width = n - i;
-            } else width = n - i;
-            range[nthreads - num_cpu - 1] = range[nthreads - num_cpu] - width;
-            num_cpu++; i += width;
-        }
-        for (int t = 0; t < nthreads - num_cpu; ++t) range[t] = range[nthreads - num_cpu];
-    }
-}
-
 /* NoTrans tiled column-AXPY kernel (OpenBLAS trmv_thread.c kernel_N). Reads only
  * the contiguous matrix column block [m_from,m_to); writes its own rows directly
  * plus the off-block "spill" rows into the thread's private y slot (merged by a
@@ -190,33 +146,38 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
          * its matrix column block (good cache locality vs cyclic) and merges its
          * bounded spill rows — beats the full per-thread accumulator + O(nt·n)
          * reduction at large n. */
-        T *buf_all = static_cast<T *>(
-            std::calloc((std::size_t)nt * (std::size_t)n, sizeof(T)));
-        if (!buf_all) return false;
         std::ptrdiff_t *range = static_cast<std::ptrdiff_t *>(
             std::malloc((std::size_t)(nt + 1) * sizeof(std::ptrdiff_t)));
-        if (!range) { std::free(buf_all); return false; }
-        wtrmv_partition(upper, n, nt, range);
-        #pragma omp parallel num_threads(nt)
+        if (!range) return false;
+        /* Same equal-area split as mspmv (proof in the simd-audit log): UPPER
+         * column work grows with the index ⇒ heavy_high=upper. The forward
+         * ascending slices are read REVERSED for upper so the thin top slice
+         * carries the heavy top rows. mask 7/min 16 are this routine's tuning. */
+        int ncpu = mf_omp::tri_area_bounds(n, nt, 7, 16, upper,
+                                           WTRMV_MAX_CPUS, range);
+        T *buf_all = static_cast<T *>(
+            std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(T)));
+        if (!buf_all) { std::free(range); return false; }
+        #pragma omp parallel num_threads(ncpu)
         {
             const int tid = omp_get_thread_num();
             T *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
             std::ptrdiff_t m_from, m_to;
-            if (upper) { m_from = range[nt - tid - 1]; m_to = range[nt - tid]; }
-            else       { m_from = range[tid];          m_to = range[tid + 1]; }
+            if (upper) { m_from = range[ncpu - tid - 1]; m_to = range[ncpu - tid]; }
+            else       { m_from = range[tid];            m_to = range[tid + 1]; }
             if (m_from < m_to)
                 wtrmv_kernel_N(upper, nounit, n, m_from, m_to, a, lda, x, y);
         }
         /* Bounded reduction: merge each thread's spill rows into slot 0. */
         if (upper) {
-            for (int t = 1; t < nt; ++t) {
-                std::ptrdiff_t m_to_t = range[nt - t];
+            for (int t = 1; t < ncpu; ++t) {
+                std::ptrdiff_t m_to_t = range[ncpu - t];
                 const T *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = 0; i < m_to_t; ++i)
                     buf_all[i] = cadd(buf_all[i], slot[i]);
             }
         } else {
-            for (int t = 1; t < nt; ++t) {
+            for (int t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_from_t = range[t];
                 const T *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = m_from_t; i < n; ++i)

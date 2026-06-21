@@ -154,6 +154,54 @@ horizontal_dd(__m256d h, __m256d l)
     return s;
 }
 
+/* FMA permute-tree finalizer: fold the 4 SoA lanes (h,l) into one DD scalar via
+ * two pairwise simd_fast::add steps. Distinct from horizontal_dd above (scalar
+ * left-fold over the faithful operator+, for the Bailey wide-acc path) and from
+ * simd_exact::hreduce (same tree but the faithful non-FMA add). The band/tri
+ * SoA-dot kernels (msymv/mtrsv and the complex twins below) accumulate in the
+ * fast vocabulary, so they finalize here. */
+static inline __attribute__((always_inline)) multifloats::float64x2
+hreduce(__m256d s_h, __m256d s_l)
+{
+    __m256d sh_sw = _mm256_permute2f128_pd(s_h, s_h, 0x01);
+    __m256d sl_sw = _mm256_permute2f128_pd(s_l, s_l, 0x01);
+    __m256d p_h, p_l;
+    add(s_h, s_l, sh_sw, sl_sw, p_h, p_l);
+    __m256d ph_sw = _mm256_shuffle_pd(p_h, p_h, 0x5);
+    __m256d pl_sw = _mm256_shuffle_pd(p_l, p_l, 0x5);
+    __m256d r_h, r_l;
+    add(p_h, p_l, ph_sw, pl_sw, r_h, r_l);
+    double rh[4], rl[4];
+    _mm256_storeu_pd(rh, r_h); _mm256_storeu_pd(rl, r_l);
+    return multifloats::float64x2{rh[0], rl[0]};
+}
+
+/* Complex twin of hreduce: the same FMA permute-tree over 4 SoA complex lanes
+ * (re/im each hi/lo), folded with simd_fast::cadd. Used by whemv/wtrsv. */
+static inline __attribute__((always_inline)) multifloats::complex64x2
+chreduce(__m256d s_rh, __m256d s_rl, __m256d s_ih, __m256d s_il)
+{
+    __m256d srh_sw = _mm256_permute2f128_pd(s_rh, s_rh, 0x01);
+    __m256d srl_sw = _mm256_permute2f128_pd(s_rl, s_rl, 0x01);
+    __m256d sih_sw = _mm256_permute2f128_pd(s_ih, s_ih, 0x01);
+    __m256d sil_sw = _mm256_permute2f128_pd(s_il, s_il, 0x01);
+    __m256d p_rh, p_rl, p_ih, p_il;
+    cadd(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
+         p_rh, p_rl, p_ih, p_il);
+    __m256d prh_sw = _mm256_shuffle_pd(p_rh, p_rh, 0x5);
+    __m256d prl_sw = _mm256_shuffle_pd(p_rl, p_rl, 0x5);
+    __m256d pih_sw = _mm256_shuffle_pd(p_ih, p_ih, 0x5);
+    __m256d pil_sw = _mm256_shuffle_pd(p_il, p_il, 0x5);
+    __m256d r_rh, r_rl, r_ih, r_il;
+    cadd(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
+         r_rh, r_rl, r_ih, r_il);
+    double rh[4], rl[4], ih[4], il[4];
+    _mm256_storeu_pd(rh, r_rh); _mm256_storeu_pd(rl, r_rl);
+    _mm256_storeu_pd(ih, r_ih); _mm256_storeu_pd(il, r_il);
+    return multifloats::complex64x2{ multifloats::float64x2{rh[0], rl[0]},
+                                     multifloats::float64x2{ih[0], il[0]} };
+}
+
 /* Absorb a DD product (ph, pl) into the wide acc (a0, a1, a2). */
 static inline __attribute__((always_inline)) void
 absorb(__m256d ph, __m256d pl, __m256d &a0, __m256d &a1, __m256d &a2)

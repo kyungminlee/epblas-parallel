@@ -11,9 +11,10 @@
 #include "mf_kernels.h"
 #ifdef _OPENMP
 #include <cstdlib>
-#include <cstring>
+#include <cmath>
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define WHBMV_OMP_MIN 256
 #define WHBMV_MAX_CPUS 256
 #endif
@@ -33,7 +34,7 @@ const R rzero{0.0, 0.0};
 const T czero{ rzero, rzero };
 using mf_kernels::cmul;
 using mf_kernels::cadd;
-inline T cmul_r(T const &a, R const &r) { return T{ a.re * r, a.im * r }; }
+using mf_kernels::rcmul;
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -53,13 +54,13 @@ static inline void whbmv_col_upper(int j, int K, const T *a, std::size_t lda,
     const int len = j - i_lo;
     mf_kernels::caxpy_add(len, &yacc[i_lo], &A_(L + i_lo, j), t1);
     const T t2 = mf_kernels::cdot(len, &A_(L + i_lo, j), &x[i_lo], true);
-    yacc[j] = cadd(yacc[j], cadd(cmul_r(t1, A_(K, j).re), cmul(alpha, t2)));
+    yacc[j] = cadd(yacc[j], cadd(rcmul(A_(K, j).re, t1), cmul(alpha, t2)));
 }
 
 static inline void whbmv_col_lower(int j, int N, int K, const T *a, std::size_t lda,
                                    const T *x, T alpha, T *yacc) {
     const T t1 = cmul(alpha, x[j]);
-    yacc[j] = cadd(yacc[j], cmul_r(t1, A_(0, j).re));
+    yacc[j] = cadd(yacc[j], rcmul(A_(0, j).re, t1));
     const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
     const int len = i_hi - (j + 1);
     mf_kernels::caxpy_add(len, &yacc[j + 1], &A_(1, j), t1);
@@ -68,12 +69,19 @@ static inline void whbmv_col_lower(int j, int N, int K, const T *a, std::size_t 
 }
 
 #ifdef _OPENMP
-/* Threaded Hermitian band matvec (contiguous x,y; y already beta-applied).
- * Private-accumulator column sweep mirroring whemv/whpmv: each thread folds a
- * cyclic subset of columns into its own zero buffer via the shared column
- * kernel, then the partials reduce onto y. Reusing the fully-SIMD column kernel
- * keeps both halves vectorized (the old row-gather left the reflected band
- * neighbours scalar -> omp4 near parity). Returns true if handled. */
+/* Unit-stride threaded Hermitian band matvec (contiguous x,y; y already
+ * beta-applied). Faithful port of the msbmv axpydot (the real symmetric-band
+ * twin): EQUAL-WIDTH contiguous column partition (band work per column is uniform
+ * ~2K entries, so an equal split balances load — a triangular sqrt split would
+ * skew it), each thread folding the RAW Hermitian product A*x (alpha deferred)
+ * into a private slot[N] via the same SIMD band kernels as the serial sweep
+ * (caxpy_add scatter + conj cdot reflected term + real diagonal). A WINDOWED
+ * bounded reduction then sums just each thread's band window ([range[t]-K, range
+ * [t+1]) upper / [range[t], range[t+1]+K) lower) and alpha-scales into y —
+ * adjacent windows overlap by K but each column's contribution lives in exactly
+ * one slot, so the overlap-sum is correct. Escapes the old cyclic scheme's
+ * O(nthreads*N) full fold. Reorders the per-row sum vs serial -> within DD fuzz
+ * tol. Returns true if handled. */
 __attribute__((noinline)) static bool whbmv_omp(
     bool upper, int N, int K, const T *a, std::size_t lda, const T *x, T alpha, T *y)
 {
@@ -81,24 +89,57 @@ __attribute__((noinline)) static bool whbmv_omp(
     if (nthreads <= 1 || omp_in_parallel()) return false;
     if (nthreads > WHBMV_MAX_CPUS) nthreads = WHBMV_MAX_CPUS;
 
-    T *pool = static_cast<T *>(
-        std::malloc(static_cast<std::size_t>(nthreads) * N * sizeof(T)));
-    if (!pool) return false;
-    std::memset(pool, 0, static_cast<std::size_t>(nthreads) * N * sizeof(T));
+    std::ptrdiff_t range[WHBMV_MAX_CPUS + 1];
+    int num_cpu = mf_omp::band_bounds(N, nthreads, 3, 4, WHBMV_MAX_CPUS, range);
+    if (num_cpu <= 1) return false;
 
-    #pragma omp parallel num_threads(nthreads)
+    T *buf = static_cast<T *>(std::calloc((std::size_t)num_cpu * N, sizeof(T)));
+    if (!buf) return false;
+
+    #pragma omp parallel num_threads(num_cpu)
     {
-        int tid = omp_get_thread_num();
-        T *yp = pool + static_cast<std::size_t>(tid) * N;
-        if (upper) for (int j = tid; j < N; j += nthreads) whbmv_col_upper(j, K, a, lda, x, alpha, yp);
-        else       for (int j = tid; j < N; j += nthreads) whbmv_col_lower(j, N, K, a, lda, x, alpha, yp);
+        int t = omp_get_thread_num();
+        std::ptrdiff_t m_from = range[t];
+        std::ptrdiff_t m_to   = range[t + 1];
+        T *slot = buf + (std::size_t)t * N;
+        if (upper) {
+            for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
+                const T temp1 = x[j];                          /* alpha deferred */
+                const int L = K - (int)j;
+                const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                const int len = (int)(j - i_lo);
+                const T *col = &A_(L + i_lo, j);               /* contiguous band run */
+                T temp2 = czero;
+                if (len > 0) {
+                    mf_kernels::caxpy_add(len, &slot[i_lo], col, temp1);
+                    temp2 = mf_kernels::cdot(len, col, &x[i_lo], true);
+                }
+                slot[j] = cadd(slot[j], cadd(rcmul(A_(K, j).re, temp1), temp2));
+            }
+        } else {
+            for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
+                const T temp1 = x[j];
+                slot[j] = cadd(slot[j], rcmul(A_(0, j).re, temp1));
+                const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                const int len = (int)(i_hi - (j + 1));
+                if (len > 0) {
+                    mf_kernels::caxpy_add(len, &slot[j + 1], &A_(1, j), temp1);
+                    slot[j] = cadd(slot[j],
+                                   mf_kernels::cdot(len, &A_(1, j), &x[j + 1], true));
+                }
+            }
+        }
     }
 
-    for (int t = 0; t < nthreads; ++t) {
-        const T *yp = pool + static_cast<std::size_t>(t) * N;
-        for (int k = 0; k < N; ++k) y[k] = cadd(y[k], yp[k]);
+    /* Windowed bounded reduction: each slot is touched only over a band window
+     * around its column range; sum just those windows, alpha-scaled, into y. */
+    for (int t = 0; t < num_cpu; ++t) {
+        const T *slot = buf + (std::size_t)t * N;
+        std::ptrdiff_t lo, hi;
+        mf_omp::band_row_window(t, upper, range, N, K, lo, hi);
+        for (std::ptrdiff_t i = lo; i < hi; ++i) y[i] = cadd(y[i], cmul(alpha, slot[i]));
     }
-    std::free(pool);
+    std::free(buf);
     return true;
 }
 #endif

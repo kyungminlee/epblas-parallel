@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-21 03:22 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-21 14:00 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -32,60 +32,60 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | mtbsv | 96 | 0.651 | 0.651 | ✅ |
 | msyr2k | 16 | 0.293 | 0.643 | ✅ |
 | mrotg | 1 | 0.623 | 0.626 | ✅ |
-| wgemm | 18 | 0.152 | 0.597 | ✅ |
+| wgemm | 18 | 0.152 | 0.605 | ✅ |
 | mgemm | 16 | 0.145 | 0.595 | ✅ |
-| wsyr2k | 12 | 0.253 | 0.589 | ✅ |
 | mspr | 24 | 0.321 | 0.588 | ✅ |
-| msbmv | 24 | 0.573 | 0.573 | ✅ |
-| wher2k | 12 | 0.241 | 0.565 | ✅ |
+| wsyr2k | 12 | 0.248 | 0.583 | ✅ |
+| msbmv | 24 | 0.573 | 0.574 | ✅ |
 | mgemv | 24 | 0.347 | 0.563 | ✅ |
+| wher2k | 12 | 0.254 | 0.561 | ✅ |
 | mrot | 3 | 0.212 | 0.553 | ✅ |
 | iwamax | 3 | 0.551 | 0.000 | ✅ |
 | mrotm | 3 | 0.213 | 0.542 | ✅ |
 | msyrk | 16 | 0.539 | 0.153 | ✅ |
-| wherk | 12 | 0.225 | 0.531 | ✅ |
+| wherk | 12 | 0.229 | 0.529 | ✅ |
 | mtbmv | 96 | 0.352 | 0.495 | ✅ |
 | mspmv | 24 | 0.463 | 0.467 | ✅ |
-| mtrmv | 96 | 0.402 | 0.450 | ✅ |
+| mtrmv | 96 | 0.404 | 0.426 | ✅ |
 | wrotg | 1 | 0.410 | 0.410 | ✅ |
 | mtpsv | 96 | 0.400 | 0.405 | ✅ |
-| wtbsv | 108 | 0.392 | 0.398 | ✅ |
-| mtpmv | 96 | 0.367 | 0.396 | ✅ |
-| whbmv | 18 | 0.310 | 0.395 | ✅ |
+| wtbsv | 108 | 0.394 | 0.395 | ✅ |
 | mgemmtr | 32 | 0.380 | 0.251 | ✅ |
-| wsymm | 12 | 0.341 | 0.202 | ✅ |
+| mtpmv | 96 | 0.367 | 0.375 | ✅ |
+| whbmv | 18 | 0.301 | 0.357 | ✅ |
+| wsymm | 12 | 0.340 | 0.203 | ✅ |
 | mtrsm | 64 | 0.336 | 0.339 | ✅ |
-| wtrmm | 72 | 0.338 | 0.295 | ✅ |
-| whemm | 12 | 0.336 | 0.203 | ✅ |
+| wtrmm | 72 | 0.338 | 0.294 | ✅ |
+| whemm | 12 | 0.337 | 0.200 | ✅ |
 | mdot | 3 | 0.193 | 0.329 | ✅ |
 | msyr2 | 24 | 0.265 | 0.326 | ✅ |
-| wher | 18 | 0.240 | 0.322 | ✅ |
-| wgemmtr | 54 | 0.319 | 0.190 | ✅ |
-| wtbmv | 108 | 0.260 | 0.318 | ✅ |
+| wher | 18 | 0.237 | 0.318 | ✅ |
 | mspr2 | 24 | 0.259 | 0.316 | ✅ |
+| wtbmv | 108 | 0.264 | 0.314 | ✅ |
 | wgbmv | 27 | 0.311 | 0.287 | ✅ |
-| wgemv | 27 | 0.141 | 0.309 | ✅ |
+| wgemmtr | 54 | 0.310 | 0.193 | ✅ |
+| wgemv | 27 | 0.141 | 0.306 | ✅ |
 | masum | 3 | 0.291 | 0.300 | ✅ |
 | msymm | 16 | 0.286 | 0.198 | ✅ |
-| wgeru | 9 | 0.160 | 0.284 | ✅ |
-| wgerc | 9 | 0.160 | 0.283 | ✅ |
+| wgerc | 9 | 0.161 | 0.279 | ✅ |
+| wgeru | 9 | 0.160 | 0.277 | ✅ |
 | mtrsv | 96 | 0.267 | 0.268 | ✅ |
 | wtpsv | 108 | 0.265 | 0.267 | ✅ |
-| wsyrk | 12 | 0.265 | 0.122 | ✅ |
+| msymv | 24 | 0.240 | 0.263 | ✅ |
 | mtrmm | 64 | 0.261 | 0.232 | ✅ |
-| wtrmv | 108 | 0.260 | 0.221 | ✅ |
+| wtrmv | 108 | 0.257 | 0.221 | ✅ |
 | wher2 | 18 | 0.226 | 0.247 | ✅ |
-| msymv | 24 | 0.241 | 0.245 | ✅ |
-| whpr | 18 | 0.224 | 0.245 | ✅ |
+| whpr | 18 | 0.224 | 0.246 | ✅ |
+| whpmv | 18 | 0.236 | 0.244 | ✅ |
 | wscal | 2 | 0.169 | 0.241 | ✅ |
-| whpmv | 18 | 0.237 | 0.238 | ✅ |
+| wsyrk | 12 | 0.231 | 0.124 | ✅ |
 | whpr2 | 18 | 0.225 | 0.217 | ✅ |
-| wtrsm | 72 | 0.220 | 0.222 | ✅ |
+| wtpmv | 108 | 0.223 | 0.206 | ✅ |
 | wmrot | 2 | 0.178 | 0.221 | ✅ |
-| wtpmv | 108 | 0.220 | 0.204 | ✅ |
-| wtrsv | 108 | 0.195 | 0.196 | ✅ |
+| wtrsm | 72 | 0.220 | 0.220 | ✅ |
+| wtrsv | 108 | 0.192 | 0.195 | ✅ |
+| whemv | 18 | 0.182 | 0.191 | ✅ |
 | mnrm2 | 3 | 0.184 | 0.138 | ✅ |
-| whemv | 18 | 0.182 | 0.183 | ✅ |
 | mwasum | 2 | 0.162 | 0.173 | ✅ |
 | waxpy | 2 | 0.155 | 0.173 | ✅ |
 | wdotu | 2 | 0.158 | 0.161 | ✅ |

@@ -13,6 +13,7 @@
 #include "wherk_kernel.h"
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "mf_kernels.h"
 #include "wgemm_kernel.h"
 #include <cstddef>
 #include <cstdlib>
@@ -20,6 +21,7 @@
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
+#include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
 
@@ -41,12 +43,10 @@ const R rzero{0.0, 0.0};
 const T czero{ rzero, rzero };
 
 
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
-inline T rcmul(R const &r, T const &z) { return T{ r * z.re, r * z.im }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
+using mf_kernels::rcmul;
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 #define C_(i, j)  c[static_cast<std::size_t>(j) * ldc + (i)]
@@ -104,13 +104,7 @@ inline void unpack_4col_herk_triangle(int jc, int jb, int j_start, int j_count,
     }
 }
 
-inline void broadcast_cdd(const T &v,
-                          __m256d &rh, __m256d &rl,
-                          __m256d &ih, __m256d &il)
-{
-    rh = _mm256_set1_pd(v.re.limbs[0]); rl = _mm256_set1_pd(v.re.limbs[1]);
-    ih = _mm256_set1_pd(v.im.limbs[0]); il = _mm256_set1_pd(v.im.limbs[1]);
-}
+using simd_exact::vbcast;
 
 /* TR='N' rank-1 with Hermitian-conjugated Aj panel and real alpha.
  * t = alpha · conj(A(j_panel..+4, l));
@@ -146,7 +140,7 @@ inline void simd_herk_diag_n(int jc, int jb, int K, R alpha,
         for (int i = jc; i < jc + jb; ++i) {
             const int ir = i - jc;
             __m256d aih, ail, aiih, aiil;
-            broadcast_cdd(A_(i, l), aih, ail, aiih, aiil);
+            vbcast(A_(i, l), aih, ail, aiih, aiil);
             __m256d prh, prl, pih, pil;
             simd_fast::cmul(trh, trl, tih, til,
                              aih, ail, aiih, aiil,

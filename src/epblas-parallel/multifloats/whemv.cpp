@@ -8,6 +8,7 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_kernels.h"
 #include "mf_util.h"
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define WHEMV_OMP_MIN 256
 #define WHEMV_MAX_CPUS 256
 #endif
@@ -37,37 +39,14 @@ namespace {
 const R rzero{0.0, 0.0};
 const T zero_cdd{ rzero, rzero };
 
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::cconj;
 
 #ifdef MBLAS_SIMD_DD
 using simd_exact::cload4;
 /* Horizontal-reduce 4-lane complex DD to scalar T (lane 0). */
-static inline __attribute__((always_inline)) T
-hreduce_cdd(__m256d s_rh, __m256d s_rl, __m256d s_ih, __m256d s_il)
-{
-    __m256d srh_sw = _mm256_permute2f128_pd(s_rh, s_rh, 0x01);
-    __m256d srl_sw = _mm256_permute2f128_pd(s_rl, s_rl, 0x01);
-    __m256d sih_sw = _mm256_permute2f128_pd(s_ih, s_ih, 0x01);
-    __m256d sil_sw = _mm256_permute2f128_pd(s_il, s_il, 0x01);
-    __m256d p_rh, p_rl, p_ih, p_il;
-    simd_fast::cadd(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
-                     p_rh, p_rl, p_ih, p_il);
-    __m256d prh_sw = _mm256_shuffle_pd(p_rh, p_rh, 0x5);
-    __m256d prl_sw = _mm256_shuffle_pd(p_rl, p_rl, 0x5);
-    __m256d pih_sw = _mm256_shuffle_pd(p_ih, p_ih, 0x5);
-    __m256d pil_sw = _mm256_shuffle_pd(p_il, p_il, 0x5);
-    __m256d r_rh, r_rl, r_ih, r_il;
-    simd_fast::cadd(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
-                     r_rh, r_rl, r_ih, r_il);
-    double rh[4], rl[4], ih[4], il[4];
-    _mm256_storeu_pd(rh, r_rh); _mm256_storeu_pd(rl, r_rl);
-    _mm256_storeu_pd(ih, r_ih); _mm256_storeu_pd(il, r_il);
-    return T{ R{rh[0], rl[0]}, R{ih[0], il[0]} };
-}
+using simd_fast::chreduce;
 #endif
 }
 
@@ -139,7 +118,7 @@ whemv_inner(int i, int k_lo, int k_hi, const T *a, std::size_t lda, T alpha,
                          nsrh, nsrl, nsih, nsil);
         s_rh = nsrh; s_rl = nsrl; s_ih = nsih; s_il = nsil;
     }
-    T temp2 = hreduce_cdd(s_rh, s_rl, s_ih, s_il);
+    T temp2 = chreduce(s_rh, s_rl, s_ih, s_il);
     temp2 = cadd(temp2, temp2_sc);
     for (; k < k_hi; ++k) {
         T aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
@@ -192,10 +171,15 @@ whemv_col(bool lower, int i, int N, const T *a, std::size_t lda, T alpha,
 #endif
 
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
-/* Threaded Hermitian matvec: private-y-accumulator. y_* enter holding beta*y.
- * Columns distributed cyclically (balances triangular work); each thread folds
- * its columns into a private zero buffer via whemv_col, then partials reduce
- * back onto y_*. Contiguous column access preserved. Returns true if handled. */
+/* Threaded Hermitian matvec. y_* enter holding beta*y. Columns are split into
+ * area-balanced CONTIGUOUS slices (per-column work ~ (N-i) lower / ~i upper ->
+ * tri_area_bounds, heavy_high=upper), each thread folding its slice into a
+ * private zero buffer via whemv_col (contiguous A + localized row writes). A
+ * BOUNDED reduction then sums just each thread's populated row window (lower:
+ * col i writes rows [i,N) -> thread window [range[t],N); upper: rows [0,i] ->
+ * [0,range[t+1])) onto y. Escapes the old cyclic scheme's O(nthreads*N) full
+ * fold. Reorders the per-row sum vs serial -> within DD fuzz tol. Returns true
+ * if handled. */
 __attribute__((noinline)) static bool whemv_omp(
     bool lower, int N, const T *a, std::size_t lda, T alpha,
     const double *x_rh, const double *x_rl, const double *x_ih, const double *x_il,
@@ -205,27 +189,35 @@ __attribute__((noinline)) static bool whemv_omp(
     if (nthreads <= 1 || omp_in_parallel()) return false;
     if (nthreads > WHEMV_MAX_CPUS) nthreads = WHEMV_MAX_CPUS;
 
+    std::ptrdiff_t range[WHEMV_MAX_CPUS + 1];
+    int ncpu = mf_omp::tri_area_bounds(N, nthreads, 3, 4, !lower,
+                                       WHEMV_MAX_CPUS, range);
+    if (ncpu <= 1) return false;
+
     const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
     const std::size_t per = 4 * N_pad;
     double *pool = static_cast<double *>(
-        std::aligned_alloc(32, static_cast<std::size_t>(nthreads) * per * sizeof(double)));
+        std::aligned_alloc(32, static_cast<std::size_t>(ncpu) * per * sizeof(double)));
     if (!pool) return false;
-    std::memset(pool, 0, static_cast<std::size_t>(nthreads) * per * sizeof(double));
+    std::memset(pool, 0, static_cast<std::size_t>(ncpu) * per * sizeof(double));
 
-    #pragma omp parallel num_threads(nthreads)
+    #pragma omp parallel num_threads(ncpu)
     {
         int tid = omp_get_thread_num();
         double *p = pool + static_cast<std::size_t>(tid) * per;
         double *yp_rh = p, *yp_rl = p + N_pad, *yp_ih = p + 2 * N_pad, *yp_il = p + 3 * N_pad;
-        for (int i = tid; i < N; i += nthreads)
+        for (int i = (int)range[tid]; i < (int)range[tid + 1]; ++i)
             whemv_col(lower, i, N, a, lda, alpha,
                       x_rh, x_rl, x_ih, x_il, yp_rh, yp_rl, yp_ih, yp_il);
     }
 
-    for (int t = 0; t < nthreads; ++t) {
+    /* Bounded reduction: fold each thread's populated row window onto y. */
+    for (int t = 0; t < ncpu; ++t) {
         const double *p = pool + static_cast<std::size_t>(t) * per;
         const double *yp_rh = p, *yp_rl = p + N_pad, *yp_ih = p + 2 * N_pad, *yp_il = p + 3 * N_pad;
-        for (int k = 0; k < N; ++k) {
+        std::ptrdiff_t k_from, k_to;
+        mf_omp::tri_row_window(t, !lower, range, N, k_from, k_to);
+        for (std::ptrdiff_t k = k_from; k < k_to; ++k) {
             T yk{ R{y_rh[k], y_rl[k]}, R{y_ih[k], y_il[k]} };
             yk = cadd(yk, T{ R{yp_rh[k], yp_rl[k]}, R{yp_ih[k], yp_il[k]} });
             y_rh[k] = yk.re.limbs[0]; y_rl[k] = yk.re.limbs[1];

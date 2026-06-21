@@ -8,6 +8,7 @@
 #include <cctype>
 #include <vector>
 #include <multifloats.h>
+#include "mf_kernels.h"
 #include "mf_util.h"
 #include "mf_pred.h"
 #ifdef MBLAS_SIMD_DD
@@ -34,12 +35,10 @@ using mf_pred::ceq0;
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
-inline T cadd(T const &a, T const &b) { return T{ a.re + b.re, a.im + b.im }; }
-inline T csub(T const &a, T const &b) { return T{ a.re - b.re, a.im - b.im }; }
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
+using mf_kernels::cmul;
+using mf_kernels::cadd;
+using mf_kernels::csub;
+using mf_kernels::cconj;
 inline T cdiv(T const &a, T const &b) {
     /* a / b = a·conj(b) / |b|², direct DD divide (canonical form shared with
      * wtbsv/wtpsv/wtrsm_serial — see F2, simd_audit). */
@@ -51,28 +50,7 @@ inline T cdiv(T const &a, T const &b) {
 #ifdef MBLAS_SIMD_DD
 using simd_exact::cload4;
 using simd_exact::cstore4;
-static inline __attribute__((always_inline)) T
-hreduce_cdd(__m256d s_rh, __m256d s_rl, __m256d s_ih, __m256d s_il)
-{
-    __m256d srh_sw = _mm256_permute2f128_pd(s_rh, s_rh, 0x01);
-    __m256d srl_sw = _mm256_permute2f128_pd(s_rl, s_rl, 0x01);
-    __m256d sih_sw = _mm256_permute2f128_pd(s_ih, s_ih, 0x01);
-    __m256d sil_sw = _mm256_permute2f128_pd(s_il, s_il, 0x01);
-    __m256d p_rh, p_rl, p_ih, p_il;
-    simd_fast::cadd(s_rh, s_rl, s_ih, s_il, srh_sw, srl_sw, sih_sw, sil_sw,
-                     p_rh, p_rl, p_ih, p_il);
-    __m256d prh_sw = _mm256_shuffle_pd(p_rh, p_rh, 0x5);
-    __m256d prl_sw = _mm256_shuffle_pd(p_rl, p_rl, 0x5);
-    __m256d pih_sw = _mm256_shuffle_pd(p_ih, p_ih, 0x5);
-    __m256d pil_sw = _mm256_shuffle_pd(p_il, p_il, 0x5);
-    __m256d r_rh, r_rl, r_ih, r_il;
-    simd_fast::cadd(p_rh, p_rl, p_ih, p_il, prh_sw, prl_sw, pih_sw, pil_sw,
-                     r_rh, r_rl, r_ih, r_il);
-    double rh[4], rl[4], ih[4], il[4];
-    _mm256_storeu_pd(rh, r_rh); _mm256_storeu_pd(rl, r_rl);
-    _mm256_storeu_pd(ih, r_ih); _mm256_storeu_pd(il, r_il);
-    return T{ R{rh[0], rl[0]}, R{ih[0], il[0]} };
-}
+using simd_fast::chreduce;
 /* Off-diagonal SIMD kernels for the blocked threaded solve.
  * msub: x[k] = csub(x[k], cmul(xi, ai[k]))  for k in [lo,hi)  (NoTrans).
  * dot : returns sum_{k in [lo,hi)} (conj?conj(ai[k]):ai[k]) * x[k]  (Trans). */
@@ -123,7 +101,7 @@ wtrsv_dot_range(const T *ai, const T *x, int lo, int hi, bool conj_a)
         simd_fast::cadd(srh, srl, sih, sil, prh, prl, pih, pil,
                          srh, srl, sih, sil);
     }
-    T s = hreduce_cdd(srh, srl, sih, sil);
+    T s = chreduce(srh, srl, sih, sil);
     for (; k < hi; ++k) {
         const T e = conj_a ? cconj(ai[k]) : ai[k];
         s = cadd(s, cmul(e, x[k]));
@@ -239,7 +217,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
                                      nsrh, nsrl, nsih, nsil);
                     s_rh = nsrh; s_rl = nsrl; s_ih = nsih; s_il = nsil;
                 }
-                T s_red = hreduce_cdd(s_rh, s_rl, s_ih, s_il);
+                T s_red = chreduce(s_rh, s_rl, s_ih, s_il);
                 t = csub(t, s_red);
                 for (; k < k_hi; ++k) {
                     T aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };

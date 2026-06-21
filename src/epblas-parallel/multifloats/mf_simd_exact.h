@@ -234,6 +234,22 @@ static inline cx4 vbcast(const cvec &v, int j)
     return cx4{ _mm256_set1_pd(v.reh[j]), _mm256_set1_pd(v.rel[j]),
                 _mm256_set1_pd(v.imh[j]), _mm256_set1_pd(v.iml[j]) };
 }
+/* Scalar-splat overloads: broadcast one complex64x2 to all 4 lanes. The single
+ * canonical complex splat (subsumes the old cbcast / broadcast_cdd / broadcast_c4
+ * file-local copies). Struct-return + out-ref forms; pure data movement. */
+static inline __attribute__((always_inline)) cx4
+vbcast(const multifloats::complex64x2 &t)
+{
+    return cx4{ _mm256_set1_pd(t.re.limbs[0]), _mm256_set1_pd(t.re.limbs[1]),
+                _mm256_set1_pd(t.im.limbs[0]), _mm256_set1_pd(t.im.limbs[1]) };
+}
+static inline __attribute__((always_inline)) void
+vbcast(const multifloats::complex64x2 &t,
+       __m256d &rh, __m256d &rl, __m256d &ih, __m256d &il)
+{
+    rh = _mm256_set1_pd(t.re.limbs[0]); rl = _mm256_set1_pd(t.re.limbs[1]);
+    ih = _mm256_set1_pd(t.im.limbs[0]); il = _mm256_set1_pd(t.im.limbs[1]);
+}
 static inline multifloats::complex64x2 vload1(const cvec &v, int i)
 {
     return multifloats::complex64x2{ multifloats::float64x2{v.reh[i], v.rel[i]},

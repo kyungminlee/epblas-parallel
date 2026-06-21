@@ -16,6 +16,7 @@
 #include <cmath>
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define MSPMV_OMP_MIN 256
 #define MSPMV_MAX_CPUS 256
 #endif
@@ -74,44 +75,6 @@ void mspmv_contig(bool upper, int n, const T *ap, const T *x, T alpha, T *y)
 }
 
 #ifdef _OPENMP
-/* Sqrt-balanced contiguous column partition (port of ob spmv_thread.c
- * symv_partition): triangular work per column j is ~j (upper) / ~(n-j) (lower),
- * so equal-width blocks would skew load ~2x. Widths solve a quadratic so each
- * block carries ~n*n/nthreads packed entries. mask=3 rounds widths to multiples
- * of 4 (min_width 4) to keep slot writes off shared cache lines. */
-static int mspmv_partition(bool upper, std::ptrdiff_t n, int nthreads,
-                           int mask, int min_width, std::ptrdiff_t *range)
-{
-    int num_cpu = 0;
-    double dnum = (double)n * (double)n / (double)nthreads;
-    range[0] = 0;
-    std::ptrdiff_t i = 0;
-    while (i < n) {
-        std::ptrdiff_t width;
-        if (nthreads - num_cpu > 1) {
-            if (upper) {
-                double di = (double)i;
-                width = (std::ptrdiff_t)(std::sqrt(di * di + dnum) - di);
-            } else {
-                double di = (double)(n - i);
-                double rad = di * di - dnum;
-                if (rad > 0.0) width = (std::ptrdiff_t)(-std::sqrt(rad) + di);
-                else           width = n - i;
-            }
-            width = (width + mask) & ~(std::ptrdiff_t)mask;
-            if (width < min_width) width = min_width;
-            if (width > n - i)     width = n - i;
-        } else {
-            width = n - i;
-        }
-        range[num_cpu + 1] = range[num_cpu] + width;
-        num_cpu++;
-        i += width;
-        if (num_cpu >= MSPMV_MAX_CPUS) break;
-    }
-    return num_cpu;
-}
-
 /* Unit-stride threaded path (port of ob mspmv axpydot). Threads own disjoint
  * COLUMN ranges and accumulate into a private slot[n]; a single contiguous pass
  * over column j does both the scatter (slot[i]+=x[j]*aj[i]) and the symmetric
@@ -124,7 +87,11 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
                           const T *x, T alpha, T *y, int nthreads)
 {
     std::ptrdiff_t range[MSPMV_MAX_CPUS + 1];
-    int num_cpu = mspmv_partition(upper, n, nthreads, 3, 4, range);
+    /* Area-balanced column partition: per-column triangular work is ~j (upper) /
+     * ~(n-j) (lower), so heavy_high=upper. mask 3/min 4 keep slot writes off
+     * shared cache lines. */
+    int num_cpu = mf_omp::tri_area_bounds(n, nthreads, 3, 4, upper,
+                                          MSPMV_MAX_CPUS, range);
     if (num_cpu <= 1) return false;
 
     T *buf = static_cast<T *>(std::calloc((std::size_t)num_cpu * n, sizeof(T)));
@@ -166,25 +133,13 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
         }
     }
 
-    /* AXPY-reduce the private slots, then alpha-scale into y. Each slot is only
-     * populated over the rows its column range touches (upper: [0,range[t+1]);
-     * lower: [range[t],n)), so the fold sums just those spans. */
-    if (upper) {
-        T *target = buf + (std::size_t)(num_cpu - 1) * n;
-        for (int i = 0; i < num_cpu - 1; ++i) {
-            const T *src = buf + (std::size_t)i * n;
-            std::ptrdiff_t len = range[i + 1];
-            for (std::ptrdiff_t k = 0; k < len; ++k) target[k] = target[k] + src[k];
-        }
-        for (std::ptrdiff_t k = 0; k < n; ++k) y[k] = y[k] + alpha * target[k];
-    } else {
-        T *target = buf;
-        for (int i = 1; i < num_cpu; ++i) {
-            const T *src = buf + (std::size_t)i * n;
-            std::ptrdiff_t m_from = range[i];
-            for (std::ptrdiff_t k = m_from; k < n; ++k) target[k] = target[k] + src[k];
-        }
-        for (std::ptrdiff_t k = 0; k < n; ++k) y[k] = y[k] + alpha * target[k];
+    /* Bounded reduction: fold each thread's populated row window (alpha deferred
+     * to here) straight onto y. */
+    for (int t = 0; t < num_cpu; ++t) {
+        const T *slot = buf + (std::size_t)t * n;
+        std::ptrdiff_t from, to;
+        mf_omp::tri_row_window(t, upper, range, n, from, to);
+        for (std::ptrdiff_t k = from; k < to; ++k) y[k] = y[k] + alpha * slot[k];
     }
     std::free(buf);
     return true;

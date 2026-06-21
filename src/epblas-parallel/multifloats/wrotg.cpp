@@ -5,6 +5,7 @@
  *   r = (a/|a|) · sqrt(|a|² + |b|²);  a := r
  */
 #include <multifloats.h>
+#include "mf_kernels.h"
 #include "mf_pred.h"
 #include <multifloats/float64x2.h>
 
@@ -14,10 +15,8 @@ using T = mf::complex64x2;
 
 namespace {
 using mf_pred::eq0;
-inline T cconj(T const &a) { return T{ a.re, R{-a.im.limbs[0], -a.im.limbs[1]} }; }
-inline T cmul(T const &a, T const &b) {
-    return T{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
-}
+using mf_kernels::cconj;
+using mf_kernels::cmul;
 inline T cdiv_real(T const &a, R const &r) { return T{ a.re / r, a.im / r }; }
 }
 
