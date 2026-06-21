@@ -8,6 +8,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #endif
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
@@ -65,8 +66,7 @@ __attribute__((noinline)) static int wscal_omp(int n, T alpha, T *x)
     {
         int tid = omp_get_thread_num();
         int nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) wscal_unit(hi - lo, alpha, x + lo);
     }
     return 1;

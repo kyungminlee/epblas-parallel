@@ -34,6 +34,16 @@ const T zero_dd{0.0, 0.0};
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
+/* A band column stores its in-band rows [i_lo,i_hi) contiguously at &A_(KU-j+i_lo,j),
+ * so per column NoTrans is a SIMD AXPY into y and Trans is a SIMD dot of the band run
+ * against x — the same stride-1 kernels used by the triangular twins. (The OMP paths
+ * thread over ptrdiff_t rows and clamp the band to the owned range inline, so they
+ * keep their own bounds.) */
+static inline void mgbmv_band(int j, int M, int KL, int KU, int &i_lo, int &i_hi) {
+    i_lo = (j - KU > 0) ? (j - KU) : 0;
+    i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+}
+
 namespace {
 /* Contiguous (incx==incy==1) cores. Each column's band segment A_(KU-j+i, j) is
  * stride-1 in the row index. NoTrans scatters that segment into y via SoA AXPY
@@ -45,8 +55,7 @@ void mgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
 {
     for (int j = 0; j < N; ++j) {
         const T tmp = alpha * x[j];
-        const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-        const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+        int i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
         const int k = KU - j;
         if (i_hi > i_lo) mf_kernels::axpy_add(i_hi - i_lo, &y[i_lo], &A_(k + i_lo, j), tmp);
     }
@@ -55,8 +64,7 @@ void mgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
                     const T *a, std::size_t lda, const T *x, T *y)
 {
     for (int j = 0; j < N; ++j) {
-        const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-        const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+        int i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
         const int k = KU - j;
         const T s = (i_hi > i_lo) ? mf_kernels::dot(i_hi - i_lo, &A_(k + i_lo, j), &x[i_lo]) : zero_dd;
         y[j] = y[j] + alpha * s;
@@ -228,8 +236,7 @@ extern "C" void mgbmv_(
             for (int j = 0; j < N; ++j) {
                 const T tmp = alpha * x[jx];
                 int iy = ky;
-                const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-                const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+                int i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
                 const int k = KU - j;
                 for (int i = i_lo; i < i_hi; ++i) {
                     y[iy] = y[iy] + tmp * A_(k + i, j);
@@ -275,8 +282,7 @@ extern "C" void mgbmv_(
             for (int j = 0; j < N; ++j) {
                 T s = zero_dd;
                 int ix = kx;
-                const int i_lo = (j - KU > 0) ? (j - KU) : 0;
-                const int i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+                int i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
                 const int k = KU - j;
                 for (int i = i_lo; i < i_hi; ++i) {
                     s = s + A_(k + i, j) * x[ix];

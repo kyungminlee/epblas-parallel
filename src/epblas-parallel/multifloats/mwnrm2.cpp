@@ -7,6 +7,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define MWNRM2_OMP_MIN 8192
 #define MWNRM2_MAX_CPUS 64
 #endif
@@ -131,8 +132,7 @@ __attribute__((noinline)) static bool mwnrm2_omp(int n, const T *x, R *out)
     #pragma omp parallel num_threads(nthreads) reduction(max:scale_hi)
     {
         int tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) {
             double local = mwnrm2_maxabs_unit(hi - lo, x + lo);
             if (local > scale_hi) scale_hi = local;
@@ -146,8 +146,7 @@ __attribute__((noinline)) static bool mwnrm2_omp(int n, const T *x, R *out)
     #pragma omp parallel num_threads(nthreads)
     {
         int tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) partial[tid] = mwnrm2_ssq_unit(hi - lo, x + lo, scale);
     }
     R s{0.0, 0.0};

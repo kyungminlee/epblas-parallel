@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define MTBMV_OMP_MIN 256
 #define MTBMV_MAX_CPUS 256
 #endif
@@ -493,8 +494,7 @@ __attribute__((noinline)) static bool mtbmv_omp(
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();
-                int lo = (int)((long long)n * tid / nthreads);
-                int hi = (int)((long long)n * (tid + 1) / nthreads);
+                int lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
                 if (!trans) mtbmv_colscatter_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
                 else        mtbmv_rowgather_t_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
                 #pragma omp barrier          /* all reads of x done before write-back */
@@ -523,8 +523,7 @@ __attribute__((noinline)) static bool mtbmv_omp(
     #pragma omp parallel num_threads(nthreads)
     {
         int tid = omp_get_thread_num();
-        int lo = (int)((long long)n * tid / nthreads);
-        int hi = (int)((long long)n * (tid + 1) / nthreads);
+        int lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
         if (!trans) mtbmv_colscatter(upper, nounit, n, k, lo, hi, a, lda, xptr, y);
         else        mtbmv_rowgather_t(upper, nounit, n, k, lo, hi, a, lda, xptr, y);
         #pragma omp barrier              /* all reads of x done before any write-back */

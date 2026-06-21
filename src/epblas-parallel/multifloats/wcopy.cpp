@@ -7,6 +7,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 /* Threaded unit-stride copy engages only in the CACHE-RESIDENT window. The
  * 32-byte complex element copies fastest as a compiler-vectorized typed loop
  * (~100 GB/s, clean 32B AVX moves) — that beats glibc memcpy's medium-copy
@@ -36,8 +37,7 @@ extern "C" void wcopy_(const int *n_,
             {
                 int tid = omp_get_thread_num();
                 int nth = omp_get_num_threads();
-                int lo = (int)((long long)n * tid / nth);
-                int hi = (int)((long long)n * (tid + 1) / nth);
+                int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
                 for (int i = lo; i < hi; ++i) y[i] = x[i];
             }
             return;

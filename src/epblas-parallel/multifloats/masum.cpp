@@ -9,6 +9,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #endif
 
 namespace mf = multifloats;
@@ -98,8 +99,7 @@ __attribute__((noinline)) static int masum_omp(int n, const T *x, T *out)
     {
         int tid = omp_get_thread_num();
         int nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         partial[tid] = (lo < hi) ? masum_unit(hi - lo, x + lo) : T{0.0, 0.0};
     }
     T s{0.0, 0.0};

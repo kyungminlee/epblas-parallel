@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #define WTBMV_OMP_MIN 256
 #define WTBMV_MAX_CPUS 256
 #endif
@@ -355,8 +356,7 @@ __attribute__((noinline)) static bool wtbmv_omp(
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();
-                int lo = (int)((long long)n * tid / nthreads);
-                int hi = (int)((long long)n * (tid + 1) / nthreads);
+                int lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
                 if (!trans) wtbmv_colscatter_soa(upper, nounit, n, k, lo, hi, a, lda, xv, yv);
                 else        wtbmv_rowgather_t_soa(upper, conj, nounit, n, k, lo, hi, a, lda, xv, yv);
                 #pragma omp barrier          /* all reads of x done before write-back */
@@ -378,8 +378,7 @@ __attribute__((noinline)) static bool wtbmv_omp(
     #pragma omp parallel num_threads(nthreads)
     {
         int tid = omp_get_thread_num();
-        int lo = (int)((long long)n * tid / nthreads);
-        int hi = (int)((long long)n * (tid + 1) / nthreads);
+        int lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
         wtbmv_rowgather(upper, trans, conj, nounit, n, k, lo, hi, a, lda, xbuf, xbase, incx);
     }
     std::free(xbuf);

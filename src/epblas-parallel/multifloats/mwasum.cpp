@@ -6,6 +6,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
+#include "mf_omp.h"
 #endif
 
 namespace mf = multifloats;
@@ -97,8 +98,7 @@ __attribute__((noinline)) static int mwasum_omp(int n, const T *x, R *out)
     {
         int tid = omp_get_thread_num();
         int nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         partial[tid] = (lo < hi) ? mwasum_unit(hi - lo, x + lo) : R{0.0, 0.0};
     }
     R s{0.0, 0.0};

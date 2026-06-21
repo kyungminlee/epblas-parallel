@@ -133,4 +133,16 @@ static inline void band_row_window(int t, bool upper, const std::ptrdiff_t *rang
     else       { from = range[t]; to = range[t + 1] + k; if (to > n) to = n; }
 }
 
+/* even_slice(): the flat EQUAL-COUNT partition of [0,n) used by every threaded L1
+ * / reduction sweep (copy/scal/axpy/rot/asum/dot/nrm2/argmax). Thread tid of nth
+ * gets [lo,hi) = [n*tid/nth, n*(tid+1)/nth); the long-long product avoids int
+ * overflow before the divide. Byte-identical math previously re-derived in ~20
+ * files — centralized here so the slice bounds (and their overflow guard) live
+ * once. */
+static inline void even_slice(int n, int tid, int nth, int &lo, int &hi)
+{
+    lo = (int)((long long)n * tid / nth);
+    hi = (int)((long long)n * (tid + 1) / nth);
+}
+
 }  // namespace mf_omp
