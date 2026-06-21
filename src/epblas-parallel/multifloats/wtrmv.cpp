@@ -196,7 +196,7 @@ __attribute__((noinline)) static bool wtrmv_omp(
     bool upper, bool trans, bool conj, bool nounit, int n,
     const T *a, std::size_t lda, T *x, int incx)
 {
-    if (n < WTRMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < WTRMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
     int nthreads = blas_omp_max_threads();
     if (nthreads > WTRMV_MAX_CPUS) nthreads = WTRMV_MAX_CPUS;
@@ -276,7 +276,7 @@ extern "C" void wtrmv_(
     if (N == 0) return;
 
 #ifdef _OPENMP
-    if (N >= WTRMV_OMP_MIN && blas_omp_max_threads() > 1
+    if (N >= WTRMV_OMP_MIN && blas_omp_available()
         && wtrmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, N, a, lda, x, incx))
         return;
 #endif

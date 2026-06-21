@@ -69,7 +69,7 @@ extern "C" void wherk_(
             return;
         }
 #ifdef _OPENMP
-        const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) wherk_scale_col(j, N, UPLO, beta, c, ldc);
@@ -79,7 +79,7 @@ extern "C" void wherk_(
     const int nb = wherk_block_nb();
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
     for (int jc = 0; jc < N; jc += nb) {

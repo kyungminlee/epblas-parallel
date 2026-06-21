@@ -95,7 +95,7 @@ extern "C" void mger_(
     const int jy0 = (incy < 0) ? -(N - 1) * incy : 0;
     const int ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
-    const int use_omp = (N >= MGER_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= MGER_OMP_MIN && blas_omp_available());
 #endif
 
 #ifdef MBLAS_SIMD_DD

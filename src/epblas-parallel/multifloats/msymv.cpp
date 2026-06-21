@@ -236,7 +236,7 @@ static void msymv_contig(bool lower, int N, const T *a, std::size_t lda,
     }
     bool done_omp = false;
 #if defined(_OPENMP)
-    if (N >= MSYMV_OMP_MIN && blas_omp_max_threads() > 1)
+    if (N >= MSYMV_OMP_MIN && blas_omp_available())
         done_omp = msymv_omp(lower, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
 #endif
     if (!done_omp)

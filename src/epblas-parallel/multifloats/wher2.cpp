@@ -92,7 +92,7 @@ extern "C" void wher2_(
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= WHER2_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= WHER2_OMP_MIN && blas_omp_available());
 #endif
     if (UPLO == 'L') {
 #ifdef _OPENMP

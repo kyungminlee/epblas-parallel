@@ -168,7 +168,7 @@ static void wtpsv_block(char UPLO, char TR, int noconj, int nounit,
 __attribute__((noinline)) static bool wtpsv_omp(
     char UPLO, char TR, int noconj, int nounit, int N, const T *ap, T *x)
 {
-    if (N < WTPSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (N < WTPSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
     int nthreads = blas_omp_max_threads();
     if (nthreads > WTPSV_MAX_CPUS) nthreads = WTPSV_MAX_CPUS;
@@ -273,7 +273,7 @@ extern "C" void wtpsv_(
     if (N == 0) return;
 
 #ifdef _OPENMP
-    if (incx == 1 && N >= WTPSV_OMP_MIN && blas_omp_max_threads() > 1
+    if (incx == 1 && N >= WTPSV_OMP_MIN && blas_omp_available()
         && wtpsv_omp(UPLO, TR, noconj, nounit, N, ap, x))
         return;
 #endif

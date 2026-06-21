@@ -70,7 +70,7 @@ extern "C" void mtrmm_(
     if (SIDE == 'L') {
         const int use_blocked = (M >= 2 * nb);
 #ifdef _OPENMP
-        const int use_omp = (N >= MTRMM_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= MTRMM_OMP_MIN && blas_omp_available());
         if (use_omp) {
             #pragma omp parallel
             {
@@ -92,7 +92,7 @@ extern "C" void mtrmm_(
          * thread absorbs the M&3 tail. */
         const int use_blocked = (N >= 2 * nb);
 #ifdef _OPENMP
-        const int use_omp = (M >= MTRMM_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (M >= MTRMM_OMP_MIN && blas_omp_available());
         #pragma omp parallel if(use_omp)
 #endif
         {

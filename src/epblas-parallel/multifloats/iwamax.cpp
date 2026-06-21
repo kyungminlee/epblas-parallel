@@ -147,7 +147,7 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
 #define IWAMAX_MAX_CPUS 64
 __attribute__((noinline)) static int iwamax_omp(int n, const T *x, int *out)
 {
-    if (n <= IWAMAX_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= IWAMAX_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     if (nthreads > IWAMAX_MAX_CPUS) nthreads = IWAMAX_MAX_CPUS;

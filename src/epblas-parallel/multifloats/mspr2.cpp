@@ -62,7 +62,7 @@ extern "C" void mspr2_(
     const double *yhp = yh.data(), *ylp = yl.data();
 
 #ifdef _OPENMP
-    const int use_omp = (N >= MSPR2_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= MSPR2_OMP_MIN && blas_omp_available());
     /* static,8: packed columns are contiguous in ap, so cyclic static,1 would
      * false-share cache lines; chunk-8 balances the triangular skew while
      * keeping each thread's run local (mirrors the mspr/espr2 twins). */

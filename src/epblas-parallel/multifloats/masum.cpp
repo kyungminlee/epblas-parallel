@@ -90,7 +90,7 @@ static T masum_unit(int n, const T *x)
 #define MASUM_MAX_CPUS 64
 __attribute__((noinline)) static int masum_omp(int n, const T *x, T *out)
 {
-    if (n <= MASUM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= MASUM_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     if (nthreads > MASUM_MAX_CPUS) nthreads = MASUM_MAX_CPUS;

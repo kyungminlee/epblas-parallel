@@ -67,7 +67,7 @@ extern "C" void whemm_(
         if (ceq1(beta)) return;
 #ifdef _OPENMP
         const int axis = (SIDE == 'L') ? M : N;
-        const bool use_omp = (axis >= WHEMM_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (axis >= WHEMM_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) whemm_scale_col(j, M, beta, c, ldc);

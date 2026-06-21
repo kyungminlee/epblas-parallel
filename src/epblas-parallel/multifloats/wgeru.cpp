@@ -58,7 +58,7 @@ static void wgeru_contig(int M, int N, T alpha, T *a, std::size_t lda,
             x_rh[i] = 0.0; x_rl[i] = 0.0; x_ih[i] = 0.0; x_il[i] = 0.0;
         }
 #ifdef _OPENMP
-        const int use_omp = (N >= WGERU_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= WGERU_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) {
@@ -92,7 +92,7 @@ static void wgeru_contig(int M, int N, T alpha, T *a, std::size_t lda,
         std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
 #else
 #ifdef _OPENMP
-        const int use_omp = (N >= WGERU_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= WGERU_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) {

@@ -63,7 +63,7 @@ extern "C" void msyrk_(
     if (eq0(alpha) || K == 0) {
         if (eq1(beta)) return;
 #ifdef _OPENMP
-        const bool use_omp = (N >= MSYRK_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (N >= MSYRK_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) msyrk_scale_col(j, N, UPLO, beta, c, ldc);

@@ -244,7 +244,7 @@ static void mtpsv_block(char UPLO, char TR, int nounit,
 __attribute__((noinline)) static bool mtpsv_omp(
     char UPLO, char TR, int nounit, int N, const T *ap, T *x)
 {
-    if (N < MTPSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (N < MTPSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
     int nthreads = blas_omp_max_threads();
     if (nthreads > MTPSV_MAX_CPUS) nthreads = MTPSV_MAX_CPUS;
@@ -353,7 +353,7 @@ extern "C" void mtpsv_(
     if (N == 0) return;
 
 #ifdef _OPENMP
-    if (incx == 1 && N >= MTPSV_OMP_MIN && blas_omp_max_threads() > 1
+    if (incx == 1 && N >= MTPSV_OMP_MIN && blas_omp_available()
         && mtpsv_omp(UPLO, TR, nounit, N, ap, x))
         return;
 #endif

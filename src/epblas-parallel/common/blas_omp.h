@@ -30,6 +30,13 @@ static inline int blas_omp_max_threads(void) {
 static inline int blas_omp_max_threads(void) { return 1; }
 #endif
 
+/* Whether threading is worth attempting at all: more than one thread is
+ * available. The canonical spelling of the `blas_omp_max_threads() > 1` capability
+ * check that gates every threaded dispatch — wrap it once so the "can we thread"
+ * policy lives in one place (re-entrant helpers still pair it with their own
+ * !omp_in_parallel() guard, which stays explicit at the call site). */
+static inline int blas_omp_available(void) { return blas_omp_max_threads() > 1; }
+
 #include <stddef.h>
 
 /* Outer panel width for a threaded L3 panel loop. The cache-tuned serial

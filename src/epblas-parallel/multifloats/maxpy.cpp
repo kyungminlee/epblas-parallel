@@ -62,7 +62,7 @@ static void maxpy_unit(int n, T alpha, const T *x, T *y)
 #define MAXPY_OMP_MIN 2048
 __attribute__((noinline)) static int maxpy_omp(int n, T alpha, const T *x, T *y)
 {
-    if (n <= MAXPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= MAXPY_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

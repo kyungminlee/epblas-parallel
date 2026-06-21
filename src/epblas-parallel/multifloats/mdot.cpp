@@ -101,7 +101,7 @@ static T mdot_unit(int n, const T *x, const T *y)
 #define MDOT_MAX_CPUS 64
 __attribute__((noinline)) static int mdot_omp(int n, const T *x, const T *y, T *out)
 {
-    if (n <= MDOT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= MDOT_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     if (nthreads > MDOT_MAX_CPUS) nthreads = MDOT_MAX_CPUS;

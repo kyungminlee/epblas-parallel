@@ -65,7 +65,7 @@ extern "C" void msyr_(
     const double *xlp = xl.data();
 
 #ifdef _OPENMP
-    const int use_omp = (N >= MSYR_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= MSYR_OMP_MIN && blas_omp_available());
     /* static,1 cyclic interleave balances the triangular column skew (column
      * j writes j+1 (U) / N-j (L) elems); full storage → columns lda apart, no
      * false sharing. The hot inner loop is mf_kernels::dd_axpy, so the per-

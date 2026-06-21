@@ -68,7 +68,7 @@ static void mrot_unit(int n, const T c, const T s, T *x, T *y)
 #define MROT_OMP_MIN 2048
 __attribute__((noinline)) static int mrot_omp(int n, T c, T s, T *x, T *y)
 {
-    if (n <= MROT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= MROT_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

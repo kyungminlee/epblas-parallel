@@ -47,7 +47,7 @@ extern "C" void mswap_(const int *n_,
 
 #ifdef _OPENMP
     /* Memory-bandwidth bound (2 reads + 2 writes); disjoint contiguous slices. */
-    if (n > MSWAP_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+    if (n > MSWAP_OMP_MIN && blas_omp_available() && !omp_in_parallel()) {
         int nthreads = blas_omp_max_threads();
         #pragma omp parallel num_threads(nthreads)
         {

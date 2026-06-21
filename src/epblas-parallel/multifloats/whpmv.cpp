@@ -141,7 +141,7 @@ __attribute__((noinline)) static bool whpmv_omp(
 static void whpmv_contig(bool upper, int N, const T *ap, const T *x, T alpha, T *y)
 {
 #ifdef _OPENMP
-    if (N >= WHPMV_OMP_MIN && blas_omp_max_threads() > 1
+    if (N >= WHPMV_OMP_MIN && blas_omp_available()
         && whpmv_omp(upper, N, ap, x, alpha, y))
         return;
 #endif

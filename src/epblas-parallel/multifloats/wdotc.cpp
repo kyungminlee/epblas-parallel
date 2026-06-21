@@ -93,7 +93,7 @@ mf_kernels::wdotc_unit(int n, const multifloats::complex64x2 *x,
 #define WDOTC_MAX_CPUS 64
 __attribute__((noinline)) static int wdotc_omp(int n, const T *x, const T *y, T *out)
 {
-    if (n <= WDOTC_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= WDOTC_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     if (nthreads > WDOTC_MAX_CPUS) nthreads = WDOTC_MAX_CPUS;

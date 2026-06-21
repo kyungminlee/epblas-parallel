@@ -56,7 +56,7 @@ static void mscal_unit(int n, T alpha, T *x)
 #define MSCAL_OMP_MIN 2048
 __attribute__((noinline)) static int mscal_omp(int n, T alpha, T *x)
 {
-    if (n <= MSCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= MSCAL_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

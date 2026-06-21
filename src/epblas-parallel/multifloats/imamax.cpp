@@ -152,7 +152,7 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
 #define IMAMAX_MAX_CPUS 64
 __attribute__((noinline)) static int imamax_omp(int n, const T *x, int *out)
 {
-    if (n <= IMAMAX_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= IMAMAX_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     if (nthreads > IMAMAX_MAX_CPUS) nthreads = IMAMAX_MAX_CPUS;

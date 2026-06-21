@@ -82,7 +82,7 @@ static void wgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
                            const T *a, std::size_t lda, const T *x, T *y)
 {
 #ifdef _OPENMP
-    if (M >= WGBMV_OMP_MIN && blas_omp_max_threads() > 1
+    if (M >= WGBMV_OMP_MIN && blas_omp_available()
         && wgbmv_n_omp(M, N, KL, KU, alpha, a, lda, x, y))
         return;
 #endif
@@ -101,7 +101,7 @@ static void wgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
                            const T *a, std::size_t lda, const T *x, T *y, bool conj)
 {
 #ifdef _OPENMP
-    const int use_omp = (N >= WGBMV_OMP_MIN && blas_omp_max_threads() > 1
+    const int use_omp = (N >= WGBMV_OMP_MIN && blas_omp_available()
                          && !omp_in_parallel());
     #pragma omp parallel for if(use_omp) schedule(static) num_threads(blas_omp_max_threads())
 #endif

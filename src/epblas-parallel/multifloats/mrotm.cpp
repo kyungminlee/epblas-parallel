@@ -129,7 +129,7 @@ void rotm_pos(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y, T h11, T h22) {
 void rotm_contig(bool neg, bool zero, std::ptrdiff_t n, T *x, T *y,
                  T h11, T h12, T h21, T h22) {
 #ifdef _OPENMP
-    if (n > MROTM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+    if (n > MROTM_OMP_MIN && blas_omp_available() && !omp_in_parallel()) {
         int nthreads = blas_omp_max_threads();
         #pragma omp parallel num_threads(nthreads)
         {

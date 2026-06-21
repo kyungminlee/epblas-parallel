@@ -35,7 +35,7 @@ extern "C" void mcopy_(const int *n_,
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if (n > MCOPY_OMP_MIN && n <= MCOPY_OMP_MAX &&
-            blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+            blas_omp_available() && !omp_in_parallel()) {
             int nthreads = blas_omp_max_threads();
             #pragma omp parallel num_threads(nthreads)
             {

@@ -85,7 +85,7 @@ static void wmrot_unit(int n, const R c, const R s, T *x, T *y)
 #define WMROT_OMP_MIN 2048
 __attribute__((noinline)) static int wmrot_omp(int n, R c, R s, T *x, T *y)
 {
-    if (n <= WMROT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= WMROT_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

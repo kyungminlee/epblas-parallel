@@ -64,7 +64,7 @@ static void waxpy_unit(int n, T alpha, const T *x, T *y)
 #define WAXPY_OMP_MIN 2048
 __attribute__((noinline)) static int waxpy_omp(int n, T alpha, const T *x, T *y)
 {
-    if (n <= WAXPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= WAXPY_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

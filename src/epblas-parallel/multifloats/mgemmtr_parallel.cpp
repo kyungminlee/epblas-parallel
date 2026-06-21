@@ -63,7 +63,7 @@ extern "C" void mgemmtr_(
     if (eq0(alpha) || K == 0) {
         if (eq1(beta)) return;
 #ifdef _OPENMP
-        const bool use_omp0 = (N >= MGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp0 = (N >= MGEMMTR_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp0) schedule(static)
 #endif
         for (int j = 0; j < N; ++j)
@@ -73,7 +73,7 @@ extern "C" void mgemmtr_(
 
     const int nb = mgemmtr_block_nb();
 #ifdef _OPENMP
-    const bool use_omp = (N >= MGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (N >= MGEMMTR_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
     for (int jc = 0; jc < N; jc += nb) {

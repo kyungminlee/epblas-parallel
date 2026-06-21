@@ -91,7 +91,7 @@ extern "C" void whpr2_(
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= WHPR2_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= WHPR2_OMP_MIN && blas_omp_available());
 #endif
     if (UPLO == 'U') {
 #ifdef _OPENMP

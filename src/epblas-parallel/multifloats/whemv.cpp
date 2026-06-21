@@ -259,7 +259,7 @@ static void whemv_contig(bool lower, int N, const T *a, std::size_t lda, T alpha
 
     bool done_omp = false;
 #if defined(_OPENMP)
-    if (N >= WHEMV_OMP_MIN && blas_omp_max_threads() > 1)
+    if (N >= WHEMV_OMP_MIN && blas_omp_available())
         done_omp = whemv_omp(lower, N, a, lda, alpha,
                              x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
 #endif

@@ -42,7 +42,7 @@ static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
 {
     if (UPLO == 'U') {
 #ifdef _OPENMP
-        const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_available());
         /* static,1: cyclic interleave balances the triangular packed-column skew;
          * complex DD rank-1 work per element dominates any false sharing. */
         #pragma omp parallel for if(use_omp) schedule(static, 1)
@@ -60,7 +60,7 @@ static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
         }
     } else {
 #ifdef _OPENMP
-        const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
         for (int j = 0; j < N; ++j) {

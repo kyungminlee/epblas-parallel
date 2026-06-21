@@ -150,7 +150,7 @@ __attribute__((noinline)) static bool msbmv_omp(
     bool upper, int n, int k, const T *a, std::size_t lda,
     const T *x, int incx, T alpha, T *y, int incy)
 {
-    if (n < MSBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < MSBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
     int nthreads = blas_omp_max_threads();
     if (nthreads > MSBMV_MAX_CPUS) nthreads = MSBMV_MAX_CPUS;
@@ -209,7 +209,7 @@ extern "C" void msbmv_(
     if (eq0(alpha)) return;
 
 #ifdef _OPENMP
-    if (N >= MSBMV_OMP_MIN && blas_omp_max_threads() > 1
+    if (N >= MSBMV_OMP_MIN && blas_omp_available()
         && msbmv_omp(UPLO == 'U', N, K, a, lda, x, incx, alpha, y, incy))
         return;
 #endif

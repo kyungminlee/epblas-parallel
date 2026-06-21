@@ -89,7 +89,7 @@ static R mwasum_unit(int n, const T *x)
 #define MWASUM_MAX_CPUS 64
 __attribute__((noinline)) static int mwasum_omp(int n, const T *x, R *out)
 {
-    if (n <= MWASUM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= MWASUM_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
     if (nthreads > MWASUM_MAX_CPUS) nthreads = MWASUM_MAX_CPUS;

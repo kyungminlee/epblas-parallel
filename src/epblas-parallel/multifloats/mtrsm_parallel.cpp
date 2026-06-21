@@ -68,7 +68,7 @@ extern "C" void mtrsm_(
         const int nb = mtrsm_block_nb();
         const int use_blocked = (M >= 2 * nb);
 #ifdef _OPENMP
-        const int use_omp = (N >= MTRSM_OMP_N_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (N >= MTRSM_OMP_N_MIN && blas_omp_available());
         if (use_omp) {
             #pragma omp parallel
             {
@@ -89,7 +89,7 @@ extern "C" void mtrsm_(
          * multiples of 4 so the SIMD 4-row chunks stay aligned; the last
          * thread absorbs the M&3 tail. */
 #ifdef _OPENMP
-        const int use_omp = (M >= MTRSM_OMP_N_MIN && blas_omp_max_threads() > 1);
+        const int use_omp = (M >= MTRSM_OMP_N_MIN && blas_omp_available());
         #pragma omp parallel if(use_omp)
 #endif
         {

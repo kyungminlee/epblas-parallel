@@ -151,7 +151,7 @@ static void whbmv_contig(bool upper, int N, int K, const T *a, std::size_t lda,
                          const T *x, T alpha, T *y)
 {
 #ifdef _OPENMP
-    if (N >= WHBMV_OMP_MIN && blas_omp_max_threads() > 1
+    if (N >= WHBMV_OMP_MIN && blas_omp_available()
         && whbmv_omp(upper, N, K, a, lda, x, alpha, y))
         return;
 #endif

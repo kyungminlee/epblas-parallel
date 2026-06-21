@@ -87,7 +87,7 @@ static bool mgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
                         const T *a, int lda,
                         const T *x, int incx, T *y, int incy)
 {
-    if (M < MGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (M < MGBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
     int nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
@@ -129,7 +129,7 @@ static bool mgbmv_t_omp(int M, int N, int KL, int KU, T alpha,
                         const T *a, int lda,
                         const T *x, int incx, T *y, int incy)
 {
-    if (N < MGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (N < MGBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
     int nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
@@ -203,7 +203,7 @@ extern "C" void mgbmv_(
 #ifdef _OPENMP
         /* NoTrans threads for contiguous AND strided x/y (the helper gathers strided
          * x and writes strided y); bit-identical to the serial scatter (ascending-j). */
-        if (M >= MGBMV_OMP_MIN && blas_omp_max_threads() > 1
+        if (M >= MGBMV_OMP_MIN && blas_omp_available()
             && mgbmv_n_omp(M, N, KL, KU, alpha, a, lda, x, incx, y, incy))
             return;
 #endif
@@ -250,7 +250,7 @@ extern "C" void mgbmv_(
 #ifdef _OPENMP
         /* Trans threads for contiguous AND strided x/y (the helper gathers strided
          * x and writes strided y). */
-        if (N >= MGBMV_OMP_MIN && blas_omp_max_threads() > 1
+        if (N >= MGBMV_OMP_MIN && blas_omp_available()
             && mgbmv_t_omp(M, N, KL, KU, alpha, a, lda, x, incx, y, incy))
             return;
 #endif

@@ -314,7 +314,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
 __attribute__((noinline)) static bool wtrsv_omp(
     char UPLO, char TR, bool nounit, int N, const T *a, int lda, T *x)
 {
-    if (N < WTRSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (N < WTRSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
     int nthreads = blas_omp_max_threads();
     if (nthreads > WTRSV_MAX_CPUS) nthreads = WTRSV_MAX_CPUS;
@@ -450,7 +450,7 @@ extern "C" void wtrsv_(
     if (N == 0) return;
 
 #ifdef _OPENMP
-    if (incx == 1 && N >= WTRSV_OMP_MIN && blas_omp_max_threads() > 1
+    if (incx == 1 && N >= WTRSV_OMP_MIN && blas_omp_available()
         && wtrsv_omp(UPLO, TR, nounit, N, a, lda, x))
         return;
 #endif

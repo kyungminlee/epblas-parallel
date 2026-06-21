@@ -73,7 +73,7 @@ extern "C" void wher2k_(
             return;
         }
 #ifdef _OPENMP
-        const bool use_omp = (N >= WHER2K_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (N >= WHER2K_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (int j = 0; j < N; ++j) wher2k_scale_col(j, N, UPLO, beta, c, ldc);
@@ -83,7 +83,7 @@ extern "C" void wher2k_(
     const int nb = wher2k_block_nb();
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= WHER2K_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (N >= WHER2K_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
     for (int jc = 0; jc < N; jc += nb) {

@@ -127,7 +127,7 @@ static void wgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
         y_rh[i] = 0.0; y_rl[i] = 0.0; y_ih[i] = 0.0; y_il[i] = 0.0;
     }
 #ifdef _OPENMP
-    const int use_omp = (M >= WGEMV_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (M >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel if(use_omp)
     {
         int tid = 0, nt = 1;
@@ -151,7 +151,7 @@ static void wgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
     std::free(y_rh); std::free(y_rl); std::free(y_ih); std::free(y_il);
 #else
 #ifdef _OPENMP
-    const int use_omp = (M >= WGEMV_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (M >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel if(use_omp)
     {
         int tid = 0, nt = 1;
@@ -204,7 +204,7 @@ static void wgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
     const __m256d zerov = _mm256_setzero_pd();
     /* Each output column j is independent (reads shared x SoA, writes y[j]). */
 #ifdef _OPENMP
-    const int use_omp = (N >= WGEMV_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (int j = 0; j < N; ++j) {
@@ -258,7 +258,7 @@ static void wgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
     std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
 #else
 #ifdef _OPENMP
-    const int use_omp = (N >= WGEMV_OMP_MIN && blas_omp_max_threads() > 1);
+    const int use_omp = (N >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (int j = 0; j < N; ++j) {
