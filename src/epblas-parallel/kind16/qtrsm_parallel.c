@@ -39,9 +39,9 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <quadmath.h>
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 /* Column-parallel gate: lowered from 32 to 2 once the qtrsv-loop fast
@@ -266,11 +266,7 @@ static void qtrsm_blocked_core(
     const T neg_one = -1.0Q;
     const T one_v = 1.0Q;
 
-#ifdef _OPENMP
     const bool use_omp = (N >= 2 && blas_omp_should_thread());
-#else
-    const bool use_omp = 0;
-#endif
 
 #ifdef _OPENMP
     #pragma omp parallel if(use_omp)

@@ -8,9 +8,9 @@
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 /* RECALIBRATED 2026-06-07 (was 64): the old break-even predates iomp5 (libgomp
@@ -43,11 +43,7 @@ static void yher_core(
     if (N == 0 || alpha == rzero) return;
 
     if (incx == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= YHER_OMP_MIN && blas_omp_should_thread());
-#else
-        const bool use_omp = 0;
-#endif
         /* Branch on use_omp at C source level (Add-16). schedule(static, 1)
          * for triangular load balance (Rule 49). */
 #define YHER_BODY                                                            \

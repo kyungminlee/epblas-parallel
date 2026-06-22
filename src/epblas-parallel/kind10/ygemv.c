@@ -18,9 +18,9 @@
 #include <stddef.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
 
@@ -79,11 +79,7 @@ void ygemv_core(
 
     if (TR == 'N') {
         if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
             const bool use_omp = (M >= YGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
              * still outlines the body into a `._omp_fn` function and pays
              * GOMP_parallel + omp_get_* overhead per call (Addendum 16).
@@ -149,11 +145,7 @@ void ygemv_core(
              * is written by one thread in the same j-order as serial →
              * race-free and bit-exact. jx is thread-local (recomputed). */
             const ptrdiff_t iy0 = (incy < 0) ? -(M - 1) * incy : 0;
-#ifdef _OPENMP
             const bool use_omp = (M >= YGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
 #define YGEMV_N_STRIDED_BODY(i_lo, i_hi) do {                                \
             ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;                 \
             ptrdiff_t j = 0;                                                 \
@@ -221,11 +213,7 @@ void ygemv_core(
          * in ygemm — keep single accumulator). */
         const bool conj_a = (TR == 'C');
         if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
             const bool use_omp = (N >= YGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
              * still outlines (see Addendum 16). */
 #define YGEMV_T_BODY                                                         \
@@ -253,11 +241,7 @@ void ygemv_core(
              * is race-free and bit-exact (jy recomputed as jy0 + j*incy). */
             const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
             const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
-#ifdef _OPENMP
             const bool use_omp = (N >= YGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
 #define YGEMV_T_STRIDED_BODY                                                  \
             for (ptrdiff_t j = 0; j < N; ++j) {                              \
                 T s = ZERO;                                                  \

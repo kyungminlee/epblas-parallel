@@ -7,9 +7,9 @@
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
 
@@ -34,11 +34,7 @@ void qsyr_core(
     if (N == 0 || alpha == zero) return;
 
     if (incx == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= QSYR_OMP_MIN && blas_omp_max_threads() > 1);
-#else
-        const bool use_omp = 0;
-#endif
         /* Branch on use_omp at C source level — `#pragma omp parallel for
          * if(use_omp)` outlines unconditionally. */
 #define QSYR_BODY                                                            \

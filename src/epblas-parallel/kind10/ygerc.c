@@ -5,9 +5,9 @@
 
 #include <stddef.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 /* RECALIBRATED 2026-06-07 (was 64): stale libgomp-era break-even; iomp5 hot-team
@@ -36,11 +36,7 @@ static void ygerc_core(
     if (M == 0 || N == 0 || alpha == ZERO) return;
 
     if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= YGERC_OMP_MIN && blas_omp_should_thread());
-#else
-        const bool use_omp = 0;
-#endif
         /* C-source branch on use_omp (Add-16). */
 #define YGERC_BODY                                                           \
         for (ptrdiff_t j = 0; j < N; ++j) {                                        \
@@ -65,11 +61,7 @@ static void ygerc_core(
          * bit-exact (jy recomputed as jy0 + j*incy, same as carried add). */
         const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
         const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
-#ifdef _OPENMP
         const bool use_omp = (N >= YGERC_OMP_MIN && blas_omp_should_thread());
-#else
-        const bool use_omp = 0;
-#endif
 #define YGERC_STRIDED_BODY                                                   \
         for (ptrdiff_t j = 0; j < N; ++j) {                                  \
             const T yj = cconj(y[jy0 + j * incy]);                           \

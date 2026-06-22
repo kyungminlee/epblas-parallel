@@ -9,9 +9,9 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 #define EGER_OMP_MIN 64
@@ -58,11 +58,7 @@ static void eger_core(
     if (M == 0 || N == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= EGER_OMP_MIN && blas_omp_should_thread());
-#else
-        const bool use_omp = 0;
-#endif
         /* C-source branch on use_omp to dodge Add-16 outlining tax. */
 #define EGER_BODY                                                            \
         for (ptrdiff_t j = 0; j < N; ++j) {                                  \
@@ -85,11 +81,7 @@ static void eger_core(
          * identical to the carried `jy += incy` but parallelizable. */
         const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
         const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
-#ifdef _OPENMP
         const bool use_omp = (N >= EGER_OMP_MIN && blas_omp_should_thread());
-#else
-        const bool use_omp = 0;
-#endif
         /* Threaded + strided x: copy x once to a unit-stride buffer so every
          * thread streams x[] at stride 1 (mirrors ob ger_thread.c). Bit-exact —
          * same values copied in order, same per-column accumulation. Serial keeps

@@ -7,9 +7,9 @@
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 #define ESPR_OMP_MIN 64
@@ -31,11 +31,7 @@ static void espr_core(
     if (N == 0 || alpha == zero) return;
 
     if (incx == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= ESPR_OMP_MIN && blas_omp_max_threads() > 1);
-#else
-        const bool use_omp = 0;
-#endif
         /* Branching on use_omp at the outer level — gcc with -fopenmp
          * still outlines the loop body into a `._omp_fn.0` function
          * even with `if(use_omp)` clause on the pragma, and the runtime

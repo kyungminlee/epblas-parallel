@@ -34,10 +34,10 @@
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <stdlib.h>
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 /* Thread-entry threshold = measured break-even where par4 < par1. Shared by the
@@ -136,11 +136,7 @@ static void ygbmv_core(
             }
         }
     } else if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= YGBMV_OMP_MIN && blas_omp_max_threads() > 1);
-#else
-        const bool use_omp = 0;
-#endif
         /* Branch on use_omp in C source — `if(use_omp)` on the pragma still
          * outlines the loop body (egbmv Addendum 16), so duplicate it instead. */
 #define YGBMV_T_BODY                                                          \

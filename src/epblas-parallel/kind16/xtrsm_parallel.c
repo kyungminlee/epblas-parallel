@@ -28,9 +28,9 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <quadmath.h>
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 /* Column-parallel gate: when N (= nrhs for SIDE='L') reaches this many
@@ -326,11 +326,7 @@ static void xtrsm_blocked_core(
     const char TTc = (TR == 'C') ? 'C' : 'T';
     const T one_v = ONE;
 
-#ifdef _OPENMP
     const bool use_omp = (N >= 2 && blas_omp_should_thread());
-#else
-    const bool use_omp = 0;
-#endif
 
 #ifdef _OPENMP
     #pragma omp parallel if(use_omp)

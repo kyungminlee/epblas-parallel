@@ -22,10 +22,10 @@
 #include <ctype.h>
 #include <quadmath.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <stdlib.h>
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 #ifndef XGBMV_OMP_MIN
@@ -108,11 +108,7 @@ void xgbmv_core(
             }
         }
     } else if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= XGBMV_OMP_MIN && blas_omp_max_threads() > 1);
-#else
-        const bool use_omp = 0;
-#endif
 #define XGBMV_T_BODY                                                          \
         for (ptrdiff_t j = 0; j < N; ++j) {                                         \
             T s = zero;                                                       \

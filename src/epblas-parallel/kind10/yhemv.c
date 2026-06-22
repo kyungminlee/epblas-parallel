@@ -12,9 +12,9 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 /* RECALIBRATED 2026-06-07 (was 128): old break-even predates iomp5 hot-team reuse
@@ -63,13 +63,8 @@ static void yhemv_core(
     if (alpha == ZERO) return;
 
     if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
         const ptrdiff_t nt = blas_omp_max_threads();
         const bool use_omp = (N >= YHEMV_OMP_MIN && blas_omp_should_thread());
-#else
-        const bool use_omp = 0;
-        const ptrdiff_t nt = 1;
-#endif
         if (use_omp) {
             /* Parallel column-walk with per-thread private y, then reduce.
              * Same pattern as esymv (Addendum 36). Hermitian conjugation

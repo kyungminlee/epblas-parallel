@@ -18,9 +18,9 @@
 #include <stddef.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
 
@@ -112,11 +112,7 @@ void egemv_core(
                     for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) y[i] += t * aj[i];\
                 }                                                           \
             } while (0)
-#ifdef _OPENMP
             const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel
@@ -160,11 +156,7 @@ void egemv_core(
                     jx += incx;                                             \
                 }                                                           \
             } while (0)
-#ifdef _OPENMP
             const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel
@@ -217,11 +209,7 @@ void egemv_core(
                     jx += incx;                                             \
                 }                                                           \
             } while (0)
-#ifdef _OPENMP
             const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel
@@ -257,11 +245,7 @@ void egemv_core(
                     y[j] += alpha * s;                                      \
                 }                                                           \
             } while (0)
-#ifdef _OPENMP
             const bool use_omp = (N >= EGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel for schedule(static)
@@ -287,11 +271,7 @@ void egemv_core(
              * is race-free and bit-exact (jy recomputed as jy0 + j*incy). */
             const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
             const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
-#ifdef _OPENMP
             const bool use_omp = (N >= EGEMV_OMP_MIN && blas_omp_should_thread());
-#else
-            const bool use_omp = 0;
-#endif
 #define EGEMV_T_STRIDED_BODY                                                 \
             for (ptrdiff_t j = 0; j < N; ++j) {                              \
                 T s = zero;                                                  \

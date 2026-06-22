@@ -7,9 +7,9 @@
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 #define ESYR2_OMP_MIN 64
@@ -34,11 +34,7 @@ static void esyr2_core(
     if (N == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= ESYR2_OMP_MIN && blas_omp_max_threads() > 1);
-#else
-        const bool use_omp = 0;
-#endif
         /* Branch on use_omp at C source level — `#pragma omp parallel for
          * if(use_omp)` outlines unconditionally; at OMP=1 the GOMP_parallel
          * + omp_get_* overhead is a visible fraction of the per-call cost

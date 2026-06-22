@@ -15,9 +15,9 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 #define ESYMV_OMP_MIN 128
@@ -125,13 +125,8 @@ static void esymv_core(
 
     /* The unit-stride path: stride-1 column walks of A. */
     if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
         const ptrdiff_t nt = blas_omp_max_threads();
         const bool use_omp = (N >= ESYMV_OMP_MIN && blas_omp_should_thread());
-#else
-        const bool use_omp = 0;
-        const ptrdiff_t nt = 1;
-#endif
         if (use_omp) {
             /* Parallel two-pass with per-thread private y accumulator.
              *

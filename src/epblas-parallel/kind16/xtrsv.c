@@ -23,9 +23,9 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <quadmath.h>
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
 
@@ -242,11 +242,7 @@ void xtrsv_blocked_(
     const char TT[1] = {(TR == 'C') ? 'C' : 'T'};
     const ptrdiff_t one_i = 1;
 
-#ifdef _OPENMP
     const bool use_omp = (blas_omp_should_thread());
-#else
-    const bool use_omp = 0;
-#endif
 
 #ifdef _OPENMP
     #pragma omp parallel if(use_omp)

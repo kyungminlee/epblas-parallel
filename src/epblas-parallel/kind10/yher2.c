@@ -8,9 +8,9 @@
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
+#include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
 /* RECALIBRATED 2026-06-07 (was 64): stale libgomp-era break-even; iomp5 hot-team
@@ -109,11 +109,7 @@ static void yher2_core(
     if (N == 0 || alpha == ZERO) return;
 
     if (incx == 1 && incy == 1) {
-#ifdef _OPENMP
         const bool use_omp = (N >= YHER2_OMP_MIN && blas_omp_should_thread());
-#else
-        const bool use_omp = 0;
-#endif
         /* All column work runs through yher2_contig_{U,L}().  The serial path
          * issues ONE call over [0,N) — the hot loop is inlined there with no
          * per-column overhead.  The OMP path round-robins single columns:
