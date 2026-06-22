@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -17,9 +18,6 @@
 
 typedef long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #ifdef _OPENMP
 /* Column base offsets into the packed array (column-major triangle).
@@ -35,7 +33,7 @@ static inline size_t cbU(ptrdiff_t j) {
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
  * incx!=1 fallback. TR is already normalized ('C' folded to 'T' by the caller). */
-static void etpsv_serial(char UPLO, char TR, ptrdiff_t nounit,
+static void etpsv_serial(char UPLO, char TR, bool nounit,
                          ptrdiff_t N, const T *restrict ap, T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0L;
@@ -172,12 +170,12 @@ static void etpsv_serial(char UPLO, char TR, ptrdiff_t nounit,
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within fp80 fuzz tol. */
-static void etpsv_block(char UPLO, char TR, ptrdiff_t nounit,
+static void etpsv_block(char UPLO, char TR, bool nounit,
                         ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N,
                         const T *restrict ap, T *restrict x)
 {
     const T zero = 0.0L;
-    const int lower = (UPLO == 'L');
+    const bool lower = (UPLO == 'L');
     if (TR == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (ptrdiff_t j = j1 - 1; j >= j0; --j) {
@@ -221,16 +219,16 @@ static void etpsv_block(char UPLO, char TR, ptrdiff_t nounit,
  * to small ETPSV_BLK diagonal blocks (solved serially); the bulk O(N^2)
  * off-diagonal coupling is threaded over disjoint output rows. Returns 1 if it
  * handled the call. */
-__attribute__((noinline)) static int etpsv_omp(
-    char UPLO, char TR, ptrdiff_t nounit, ptrdiff_t N, const T *restrict ap, T *restrict x)
+__attribute__((noinline)) static bool etpsv_omp(
+    char UPLO, char TR, bool nounit, ptrdiff_t N, const T *restrict ap, T *restrict x)
 {
-    if (N < ETPSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (N < ETPSV_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > ETPSV_MAX_CPUS) nthreads = ETPSV_MAX_CPUS;
     const T zero = 0.0L;
-    const int lower = (UPLO == 'L');
-    const int trans = (TR != 'N');
+    const bool lower = (UPLO == 'L');
+    const bool trans = (TR != 'N');
 
     if (!trans) {
         if (lower) {
@@ -240,7 +238,7 @@ __attribute__((noinline)) static int etpsv_omp(
                 if (j1 >= N) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
-                    int tid = omp_get_thread_num();
+                    ptrdiff_t tid = omp_get_thread_num();
                     ptrdiff_t rlo = j1 + blas_part_bound((N - j1), tid, nthreads);
                     ptrdiff_t rhi = j1 + blas_part_bound((N - j1), tid + 1, nthreads);
                     for (ptrdiff_t i = j0; i < j1; ++i) {
@@ -258,7 +256,7 @@ __attribute__((noinline)) static int etpsv_omp(
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
-                    int tid = omp_get_thread_num();
+                    ptrdiff_t tid = omp_get_thread_num();
                     ptrdiff_t rlo = blas_part_bound(j0, tid, nthreads);
                     ptrdiff_t rhi = blas_part_bound(j0, tid + 1, nthreads);
                     for (ptrdiff_t i = j0; i < j1; ++i) {
@@ -277,7 +275,7 @@ __attribute__((noinline)) static int etpsv_omp(
                 if (j1 < N) {
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
+                        ptrdiff_t tid = omp_get_thread_num();
                         ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, nthreads);
                         ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, nthreads);
                         for (ptrdiff_t i = ilo; i < ihi; ++i) {
@@ -296,7 +294,7 @@ __attribute__((noinline)) static int etpsv_omp(
                 if (j0 > 0) {
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
+                        ptrdiff_t tid = omp_get_thread_num();
                         ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, nthreads);
                         ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, nthreads);
                         for (ptrdiff_t i = ilo; i < ihi; ++i) {
@@ -321,10 +319,10 @@ static void etpsv_core(
     const T *restrict ap,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(uplo);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 

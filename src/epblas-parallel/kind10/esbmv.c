@@ -37,6 +37,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -47,9 +48,6 @@
 
 typedef long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 
@@ -73,7 +71,7 @@ static inline char up(char c) {
 #define ESBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
-static ptrdiff_t esbmv_omp(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
+static ptrdiff_t esbmv_omp(bool upper, ptrdiff_t n, ptrdiff_t k,
                      const T *restrict a, ptrdiff_t lda,
                      const T *restrict x, ptrdiff_t incx,
                      T alpha, T *restrict y, ptrdiff_t incy);
@@ -90,7 +88,7 @@ static void esbmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L, one = 1.0L;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || (alpha == zero && beta == one)) return;
 
@@ -181,7 +179,7 @@ static void esbmv_core(
  * no zero-fill, no reduction, no barrier (x and y distinct). Branch hoisted out
  * of the i-loop; lda-1 anti-diagonal stride for same-triangle neighbours,
  * contiguous for the reflected ones. */
-static void sbmv_rowgather(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
+static void sbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
                            ptrdiff_t lo, ptrdiff_t hi,
                            const T *restrict a, ptrdiff_t lda,
                            const T *restrict x, T alpha,
@@ -217,12 +215,12 @@ static void sbmv_rowgather(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
  * Returns 1 if handled, 0 to fall back. Carved out (noinline) so its bookkeeping
  * does not pressure the serial gather's x87 allocation. */
 __attribute__((noinline)) static ptrdiff_t esbmv_omp(
-    ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
+    bool upper, ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
-    if (n < ESBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < ESBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > ESBMV_MAX_CPUS) nthreads = ESBMV_MAX_CPUS;

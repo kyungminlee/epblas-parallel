@@ -39,28 +39,28 @@ ptrdiff_t ytrmm_nb(void);
 /* ── SIDE='L' column-range cores: serial work over columns
  *    [j_start, j_end) of B; A is M×M. ──────────────────────────── */
 void ytrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ytrmm_T alpha,
-                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, ptrdiff_t nounit);
+                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
 void ytrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ytrmm_T alpha,
-                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, ptrdiff_t nounit);
+                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
 void ytrmm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ytrmm_T alpha,
                      const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
-                     ptrdiff_t nounit, ptrdiff_t conj_flag);
+                     bool nounit, bool conj_flag);
 void ytrmm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ytrmm_T alpha,
                      const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
-                     ptrdiff_t nounit, ptrdiff_t conj_flag);
+                     bool nounit, bool conj_flag);
 
 /* ── SIDE='R' row-range cores: serial work over rows [i_start, i_end)
  *    of B; A is N×N. ────────────────────────────────────────────── */
 void ytrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrmm_T alpha,
-                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, ptrdiff_t nounit);
+                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
 void ytrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrmm_T alpha,
-                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, ptrdiff_t nounit);
+                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
 void ytrmm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrmm_T alpha,
                      const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
-                     ptrdiff_t nounit, ptrdiff_t conj_flag);
+                     bool nounit, bool conj_flag);
 void ytrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrmm_T alpha,
                      const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
-                     ptrdiff_t nounit, ptrdiff_t conj_flag);
+                     bool nounit, bool conj_flag);
 
 /* Per-thread serial blocked-TRMM workers. SIDE='L' partitions B's columns
  * [j_start, j_end); SIDE='R' partitions B's rows [i_start, i_end).
@@ -68,11 +68,11 @@ void ytrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ytrmm_T al
 void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t j_end,
                            ptrdiff_t M, ptrdiff_t nb, ytrmm_T alpha,
                            const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
-                           ptrdiff_t nounit);
+                           bool nounit);
 void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t i_end,
                            ptrdiff_t N, ptrdiff_t nb, ytrmm_T alpha,
                            const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
-                           ptrdiff_t nounit);
+                           bool nounit);
 
 /* Pure-serial by-value core (no OpenMP). */
 void ytrmm_serial(

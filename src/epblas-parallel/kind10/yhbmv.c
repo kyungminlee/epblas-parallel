@@ -44,6 +44,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -56,9 +57,6 @@ typedef _Complex long double T;
 typedef long double TR;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 
@@ -85,7 +83,7 @@ static inline char up(char c) {
 #define YHBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
-static ptrdiff_t yhbmv_omp(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
+static ptrdiff_t yhbmv_omp(bool upper, ptrdiff_t n, ptrdiff_t k,
                      const T *restrict a, ptrdiff_t lda,
                      const T *restrict x, ptrdiff_t incx,
                      T alpha, T *restrict y, ptrdiff_t incy);
@@ -102,7 +100,7 @@ static void yhbmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || (alpha == zero && beta == one)) return;
 
@@ -191,7 +189,7 @@ static void yhbmv_core(
  * CONJUGATED reflected neighbour (contiguous). Output rows partition across
  * threads with no cross-thread write dependence -- no scratch, no zero-fill,
  * no reduction, no barrier (x and y distinct). Branch hoisted out of i-loop. */
-static void hbmv_rowgather(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
+static void hbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
                            ptrdiff_t lo, ptrdiff_t hi,
                            const T *restrict a, ptrdiff_t lda,
                            const T *restrict x, T alpha,
@@ -227,12 +225,12 @@ static void hbmv_rowgather(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
  * Returns 1 if handled, 0 to fall back. Carved out (noinline) so its bookkeeping
  * does not pressure the serial gather's x87 allocation. */
 __attribute__((noinline)) static ptrdiff_t yhbmv_omp(
-    ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
+    bool upper, ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
-    if (n < YHBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < YHBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > YHBMV_MAX_CPUS) nthreads = YHBMV_MAX_CPUS;

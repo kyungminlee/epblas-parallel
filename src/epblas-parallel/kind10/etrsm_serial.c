@@ -21,6 +21,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 
@@ -34,7 +35,7 @@ typedef etrsm_T T;
 #define MR 2
 #define NR 2
 
-static inline void pack_trsm_a_lside_forward(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+static inline void pack_trsm_a_lside_forward(bool upper, bool trans, bool unit,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -48,7 +49,7 @@ static inline void pack_trsm_a_lside_forward(ptrdiff_t upper, ptrdiff_t trans, p
     }
 }
 
-static inline void pack_trsm_a_lside_backward(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+static inline void pack_trsm_a_lside_backward(bool upper, bool trans, bool unit,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -61,7 +62,7 @@ static inline void pack_trsm_a_lside_backward(ptrdiff_t upper, ptrdiff_t trans, 
     }
 }
 
-static inline void pack_trsm_a_rside_forward(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+static inline void pack_trsm_a_rside_forward(bool upper, bool trans, bool unit,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -75,7 +76,7 @@ static inline void pack_trsm_a_rside_forward(ptrdiff_t upper, ptrdiff_t trans, p
     }
 }
 
-static inline void pack_trsm_a_rside_backward(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+static inline void pack_trsm_a_rside_backward(bool upper, bool trans, bool unit,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -90,7 +91,7 @@ static inline void pack_trsm_a_rside_backward(ptrdiff_t upper, ptrdiff_t trans, 
 }
 
 /* ── SIDE='L' driver: port of trsm_L.c for one N-band [js0..js1) ───── */
-void etrsm_L_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+void etrsm_L_band(bool upper, bool trans, bool unit,
                         ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                         const T *a, ptrdiff_t lda,
@@ -249,7 +250,7 @@ void etrsm_L_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
 }
 
 /* ── SIDE='R' driver: port of trsm_R.c for one M-band [m_lo..m_hi) ──── */
-void etrsm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+void etrsm_R_band(bool upper, bool trans, bool unit,
                         ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                         const T *a, ptrdiff_t lda,
@@ -507,11 +508,11 @@ void etrsm_serial(
 {
     const T alpha = *alpha_;
 
-    const ptrdiff_t lside = (toupper((unsigned char)side)   == 'L');
-    const ptrdiff_t upper = (toupper((unsigned char)uplo)   == 'U');
-    const char trc  = (char)toupper((unsigned char)transa);
-    const ptrdiff_t trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
-    const ptrdiff_t unit  = (toupper((unsigned char)diag) == 'U');
+    const bool lside = (blas_up(side)   == 'L');
+    const bool upper = (blas_up(uplo)   == 'U');
+    const char trc  = blas_up(transa);
+    const bool trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
+    const bool unit  = (blas_up(diag) == 'U');
 
     if (M == 0 || N == 0) return;
 

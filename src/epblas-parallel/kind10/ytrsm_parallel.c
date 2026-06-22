@@ -20,6 +20,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -35,9 +36,6 @@ typedef ytrsm_T T;
  * worth the parallel-region setup. */
 #define YTRSM_OMP_N_MIN 32
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
 
 static const T ZERO = 0.0L + 0.0Li;
 
@@ -49,7 +47,7 @@ static const T ZERO = 0.0L + 0.0Li;
 #ifdef _OPENMP
 #define YTRSM_OMP_WRAP_LLN_LUN(name, core)                                  \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)        \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)        \
     {                                                                       \
         if (N >= YTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {            \
             _Pragma("omp parallel") {                                       \
@@ -63,7 +61,7 @@ static const T ZERO = 0.0L + 0.0Li;
     }
 #define YTRSM_OMP_WRAP_TC(name, core, cflag)                                \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)        \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)        \
     {                                                                       \
         if (N >= YTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {            \
             _Pragma("omp parallel") {                                       \
@@ -78,12 +76,12 @@ static const T ZERO = 0.0L + 0.0Li;
 #else
 #define YTRSM_OMP_WRAP_LLN_LUN(name, core)                                  \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
         core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define YTRSM_OMP_WRAP_TC(name, core, cflag)                                \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
         core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #endif
@@ -99,7 +97,7 @@ YTRSM_OMP_WRAP_TC(ytrsm_luc, ytrsm_luTC_core, 1)
  *    across threads; each thread runs the serial blocked worker on its
  *    own column chunk. ─────────────────────────────────────────── */
 static void blocked_dispatch(enum ytrsm_variant V, ptrdiff_t M, ptrdiff_t N, T alpha,
-                             const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                             const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t nb = ytrsm_nb();
 #ifdef _OPENMP
@@ -121,9 +119,9 @@ static void blocked_dispatch(enum ytrsm_variant V, ptrdiff_t M, ptrdiff_t N, T a
 /* ── Blocked SIDE='R': one outer `omp parallel` partitions B's rows
  *    across threads; each thread runs the serial blocked R worker on its
  *    own row band. Mirrors blocked_dispatch (SIDE='L'). ──────────── */
-static void blocked_dispatch_R(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj,
+static void blocked_dispatch_R(bool upper, bool trans, bool conj,
                                ptrdiff_t M, ptrdiff_t N, T alpha,
-                               const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                               const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t nb = ytrsm_nb();
 #ifdef _OPENMP
@@ -150,7 +148,7 @@ static void blocked_dispatch_R(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj,
 #ifdef _OPENMP
 #define YTRSM_OMP_WRAP_R(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         if (M >= YTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {            \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -163,7 +161,7 @@ static void blocked_dispatch_R(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj,
     }
 #define YTRSM_OMP_WRAP_R_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         if (M >= YTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {            \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -177,12 +175,12 @@ static void blocked_dispatch_R(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj,
 #else
 #define YTRSM_OMP_WRAP_R(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define YTRSM_OMP_WRAP_R_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #endif
@@ -212,10 +210,10 @@ static void ytrsm_core(
     }
 #endif
     const T alpha = *alpha_;
-    const char SIDE = up(&side);
-    const char UPLO = up(&uplo);
-    const char TR = up(&transa);
-    const ptrdiff_t nounit = (up(&diag) != 'U');
+    const char SIDE = blas_up(side);
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(transa);
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

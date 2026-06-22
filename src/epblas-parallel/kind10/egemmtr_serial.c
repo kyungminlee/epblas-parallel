@@ -12,6 +12,7 @@
  */
 
 #include "egemmtr_kernel.h"
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -29,7 +30,7 @@ void egemmtr_block_sizes(ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC) {
 }
 
 ptrdiff_t egemmtr_trans_code(const char *p) {
-    char c = (char)toupper((unsigned char)*p);
+    char c = blas_up(*p);
     return (c == 'C') ? 'T' : c;
 }
 
@@ -42,7 +43,7 @@ static inline ptrdiff_t imin(ptrdiff_t a, ptrdiff_t b) { return a < b ? a : b; }
 
 void egemmtr_pack_A(const T *restrict A, ptrdiff_t lda,
                     ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
-                    ptrdiff_t ta, T *restrict Ap)
+                    char ta, T *restrict Ap)
 {
     const ptrdiff_t npanel = (ib + MR - 1) / MR;
     for (ptrdiff_t q = 0; q < npanel; ++q) {
@@ -71,7 +72,7 @@ void egemmtr_pack_A(const T *restrict A, ptrdiff_t lda,
 
 void egemmtr_pack_B(const T *restrict B, ptrdiff_t ldb,
                     ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
-                    ptrdiff_t tb, T *restrict Bp)
+                    char tb, T *restrict Bp)
 {
     const ptrdiff_t npanel = (jb + NR - 1) / NR;
     for (ptrdiff_t q = 0; q < npanel; ++q) {
@@ -230,7 +231,7 @@ void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, char UP
     }
 }
 
-void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, ptrdiff_t ta, ptrdiff_t tb,
+void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, char ta, char tb,
                              T alpha,
                              const T *a, ptrdiff_t lda,
                              const T *b, ptrdiff_t ldb,
@@ -274,9 +275,9 @@ void egemmtr_serial(char uplo, char transa, char transb,
                     T *restrict c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)uplo);
-    const ptrdiff_t ta = egemmtr_trans_code(&transa);
-    const ptrdiff_t tb = egemmtr_trans_code(&transb);
+    const char UPLO = blas_up(uplo);
+    const char ta = egemmtr_trans_code(&transa);
+    const char tb = egemmtr_trans_code(&transb);
 
     if (N <= 0) return;
     const T zero = 0.0L, one = 1.0L;

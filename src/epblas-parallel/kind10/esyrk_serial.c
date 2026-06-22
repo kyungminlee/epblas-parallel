@@ -29,6 +29,7 @@
  */
 
 #include "esyrk_kernel.h"
+#include "../common/blas_char.h"
 #include "etri_kernel.h"
 #include "egemm_kernel.h"
 #include <stddef.h>
@@ -221,8 +222,8 @@ void esyrk_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO  = (char)toupper((unsigned char)uplo);
-    const char TRANS = (char)toupper((unsigned char)trans);
+    const char UPLO  = blas_up(uplo);
+    const char TRANS = blas_up(trans);
 
     if (N <= 0) return;
 

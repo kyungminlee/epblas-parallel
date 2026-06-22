@@ -34,7 +34,7 @@ static ptrdiff_t iyamax_kernel(ptrdiff_t n, const T *x, R *bv_out)
 #define IYAMAX_MAX_CPUS 64
 __attribute__((noinline)) static ptrdiff_t iyamax_omp(ptrdiff_t n, const T *x, ptrdiff_t *out)
 {
-    if (n <= IYAMAX_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= IYAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > IYAMAX_MAX_CPUS) nthreads = IYAMAX_MAX_CPUS;

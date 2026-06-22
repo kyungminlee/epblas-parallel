@@ -34,11 +34,11 @@ static void erotm_unit(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T 
  * keeps rotm serial at small N). Measured under iomp5: par4/ob4 1.09@1024, then
  * 0.95@1536 — break-even ~1536, stay serial through 1024. */
 #define EROTM_OMP_MIN 1024
-static int erotm_omp(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y)
+static bool erotm_omp(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y)
 {
-    if (n <= EROTM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= EROTM_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

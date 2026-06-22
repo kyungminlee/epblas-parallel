@@ -16,6 +16,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -27,9 +28,6 @@
 
 typedef long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -45,7 +43,7 @@ void egemv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    char TR = up(trans);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
 
     if (M == 0 || N == 0) return;
@@ -115,10 +113,9 @@ void egemv_core(
                 }                                                           \
             } while (0)
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (M >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
             if (use_omp) {
 #ifdef _OPENMP
@@ -164,10 +161,9 @@ void egemv_core(
                 }                                                           \
             } while (0)
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (M >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
             if (use_omp) {
 #ifdef _OPENMP
@@ -222,10 +218,9 @@ void egemv_core(
                 }                                                           \
             } while (0)
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (M >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
             if (use_omp) {
 #ifdef _OPENMP
@@ -263,10 +258,9 @@ void egemv_core(
                 }                                                           \
             } while (0)
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (N >= EGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
             if (use_omp) {
 #ifdef _OPENMP
@@ -294,10 +288,9 @@ void egemv_core(
             const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
             const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= EGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (N >= EGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
 #define EGEMV_T_STRIDED_BODY                                                 \
             for (ptrdiff_t j = 0; j < N; ++j) {                              \

@@ -20,15 +20,13 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 
 typedef _Complex long double T;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define CONJIF(z) (noconj ? (z) : cconj(z))
@@ -40,10 +38,10 @@ static void ytbsv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0L + 0.0Li;
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 

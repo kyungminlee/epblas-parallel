@@ -48,11 +48,11 @@ static void yerot_unit(ptrdiff_t n, R c, R s, R *px, R *py)
  * N=128, 0.76 at 192, <1.0 to 4M (~0.60), no upper bound. Break-even ~N=130;
  * 256 keeps margin. */
 #define YEROT_OMP_MIN 256
-static int yerot_omp(ptrdiff_t n, R c, R s, R *px, R *py)
+static bool yerot_omp(ptrdiff_t n, R c, R s, R *px, R *py)
 {
-    if (n <= YEROT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= YEROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

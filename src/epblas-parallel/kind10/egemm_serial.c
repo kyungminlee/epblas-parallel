@@ -37,6 +37,7 @@
  */
 
 #include "egemm_kernel.h"
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <unistd.h>
@@ -66,7 +67,7 @@ static void init_blocks(void) {
 }
 
 ptrdiff_t egemm_trans_code(char c) {
-    c = (char)toupper((unsigned char)c);
+    c = blas_up(c);
     return (c == 'C') ? 'T' : c;  /* real: 'C' ≡ 'T' */
 }
 
@@ -111,7 +112,7 @@ void egemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, T beta, T *c, ptrdiff_t ldc) {
  */
 void egemm_pack_A(const T *restrict A, ptrdiff_t lda,
                   ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
-                  ptrdiff_t ta, T *restrict Ap)
+                  char ta, T *restrict Ap)
 {
     const ptrdiff_t npanel = (ib + MR - 1) / MR;
     for (ptrdiff_t q = 0; q < npanel; ++q) {
@@ -144,7 +145,7 @@ void egemm_pack_A(const T *restrict A, ptrdiff_t lda,
  */
 void egemm_pack_B(const T *restrict B, ptrdiff_t ldb,
                   ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
-                  ptrdiff_t tb, T *restrict Bp)
+                  char tb, T *restrict Bp)
 {
     const ptrdiff_t npanel = (jb + NR - 1) / NR;
     for (ptrdiff_t q = 0; q < npanel; ++q) {
@@ -292,8 +293,8 @@ void egemm_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = egemm_trans_code(transa);
-    const ptrdiff_t tb = egemm_trans_code(transb);
+    const char ta = egemm_trans_code(transa);
+    const char tb = egemm_trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 

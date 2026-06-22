@@ -37,10 +37,9 @@ static void ygerc_core(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= YGERC_OMP_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
+        const bool use_omp = (N >= YGERC_OMP_MIN && blas_omp_should_thread());
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
         /* C-source branch on use_omp (Add-16). */
 #define YGERC_BODY                                                           \
@@ -67,10 +66,9 @@ static void ygerc_core(
         const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
         const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= YGERC_OMP_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
+        const bool use_omp = (N >= YGERC_OMP_MIN && blas_omp_should_thread());
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
 #define YGERC_STRIDED_BODY                                                   \
         for (ptrdiff_t j = 0; j < N; ++j) {                                  \

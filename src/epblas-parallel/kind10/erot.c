@@ -50,11 +50,11 @@ static void erot_unit(ptrdiff_t n, T c, T s, T *x, T *y)
  * 1.15@1024, then 1.009@1536 and 0.95@3072 — break-even ~1536, stay serial
  * through 1024. */
 #define EROT_OMP_MIN 1024
-static int erot_omp(ptrdiff_t n, T c, T s, T *x, T *y)
+static bool erot_omp(ptrdiff_t n, T c, T s, T *x, T *y)
 {
-    if (n <= EROT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= EROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

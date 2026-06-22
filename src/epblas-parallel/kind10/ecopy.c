@@ -19,12 +19,12 @@ typedef long double T;
  * thread memcpy's its own slice. */
 #define ECOPY_OMP_MIN 2048
 #define ECOPY_OMP_MAX 524288
-static int ecopy_omp(ptrdiff_t n, const T *x, T *y)
+static bool ecopy_omp(ptrdiff_t n, const T *x, T *y)
 {
     if (n <= ECOPY_OMP_MIN || n > ECOPY_OMP_MAX ||
-        blas_omp_max_threads() <= 1 || omp_in_parallel())
+        !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

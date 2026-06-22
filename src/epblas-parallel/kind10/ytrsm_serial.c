@@ -19,6 +19,7 @@
  */
 
 #include "ytrsm_kernel.h"
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -31,9 +32,6 @@ ptrdiff_t ytrsm_nb(void) {
     return g_nb_trsm;
 }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
 
 static const T ZERO = 0.0L + 0.0Li;
 static const T ONE  = 1.0L + 0.0Li;
@@ -55,14 +53,14 @@ extern void ygemm_serial(
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
-static inline T A_op(const T *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, ptrdiff_t conj_flag) {
+static inline T A_op(const T *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, bool conj_flag) {
     return conj_flag ? cconj(A_(row, col)) : A_(row, col);
 }
 
 /* ── Scalar column-range cores ───────────────────────────────── */
 
 void ytrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
@@ -78,7 +76,7 @@ void ytrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 }
 
 void ytrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
@@ -96,7 +94,7 @@ void ytrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 /* (L, L, T or C): inner-product form on op(A)ᵀ where op may conj. */
 void ytrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
-                     ptrdiff_t nounit, ptrdiff_t conj_flag)
+                     bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = M - 1; i >= 0; --i) {
@@ -111,7 +109,7 @@ void ytrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 /* (L, U, T or C). */
 void ytrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
-                     ptrdiff_t nounit, ptrdiff_t conj_flag)
+                     bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = 0; i < M; ++i) {
@@ -131,7 +129,7 @@ void ytrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
  * of B and reads shared A read-only — race-free, no barriers needed. */
 
 void ytrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = N - 1; j >= 0; --j) {
         if (alpha != ONE) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
@@ -149,7 +147,7 @@ void ytrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 }
 
 void ytrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = 0; j < N; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
@@ -168,7 +166,7 @@ void ytrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 
 void ytrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
-                     ptrdiff_t nounit, ptrdiff_t conj_flag)
+                     bool nounit, bool conj_flag)
 {
     for (ptrdiff_t k = 0; k < N; ++k) {
         if (nounit) {
@@ -187,7 +185,7 @@ void ytrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 
 void ytrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
-                     ptrdiff_t nounit, ptrdiff_t conj_flag)
+                     bool nounit, bool conj_flag)
 {
     for (ptrdiff_t k = N - 1; k >= 0; --k) {
         if (nounit) {
@@ -220,7 +218,7 @@ static void prescale_chunk(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T al
 
 void ytrsm_blocked_chunk(enum ytrsm_variant V, ptrdiff_t j_start, ptrdiff_t j_end,
                          ptrdiff_t M, ptrdiff_t nb, T alpha,
-                         const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                         const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t my_N = j_end - j_start;
     if (my_N <= 0) return;
@@ -257,7 +255,7 @@ void ytrsm_blocked_chunk(enum ytrsm_variant V, ptrdiff_t j_start, ptrdiff_t j_en
             ic -= nb;
         }
     } else if (V == YLLT || V == YLLC) {
-        const ptrdiff_t conj_flag = (V == YLLC) ? 1 : 0;
+        const bool conj_flag = (V == YLLC) ? 1 : 0;
         const char trans_gemm = conj_flag ? 'C' : 'T';
         ptrdiff_t ic = ((M - 1) / nb) * nb;
         while (ic >= 0) {
@@ -276,7 +274,7 @@ void ytrsm_blocked_chunk(enum ytrsm_variant V, ptrdiff_t j_start, ptrdiff_t j_en
             ic -= nb;
         }
     } else { /* YLUT or YLUC */
-        const ptrdiff_t conj_flag = (V == YLUC) ? 1 : 0;
+        const bool conj_flag = (V == YLUC) ? 1 : 0;
         const char trans_gemm = conj_flag ? 'C' : 'T';
         for (ptrdiff_t ic = 0; ic < M; ic += nb) {
             const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
@@ -306,9 +304,9 @@ void ytrsm_blocked_chunk(enum ytrsm_variant V, ptrdiff_t j_start, ptrdiff_t j_en
  * Direction (matches OpenBLAS trsm_R): forward (column blocks ascending,
  * each solved from the already-solved blocks to its left) for the
  * upper-NoTrans and lower-Trans shapes; backward otherwise. */
-void ytrsm_R_blocked_chunk(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj,
+void ytrsm_R_blocked_chunk(bool upper, bool trans, bool conj,
                            ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, ptrdiff_t nb, T alpha,
-                           const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                           const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     if (i_end <= i_start) return;
     /* Prescale this row band by alpha once; the cores then run alpha=ONE. */
@@ -369,10 +367,10 @@ void ytrsm_serial(
     T *b, ptrdiff_t ldb)
 {
     const T alpha = *alpha_;
-    const char SIDE = up(&side);
-    const char UPLO = up(&uplo);
-    const char TR = up(&transa);
-    const ptrdiff_t nounit = (up(&diag) != 'U');
+    const char SIDE = blas_up(side);
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(transa);
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -413,9 +411,9 @@ void ytrsm_serial(
     } else {
         const ptrdiff_t use_blocked = (N >= 2 * ytrsm_nb());
         const ptrdiff_t nb = ytrsm_nb();
-        const ptrdiff_t upper = (UPLO == 'U');
-        const ptrdiff_t trans = (TR != 'N');
-        const ptrdiff_t conj  = (TR == 'C');
+        const bool upper = (UPLO == 'U');
+        const bool trans = (TR != 'N');
+        const bool conj  = (TR == 'C');
         if (use_blocked) {
             ytrsm_R_blocked_chunk(upper, trans, conj, 0, M, N, nb, alpha,
                                   a, lda, b, ldb, nounit);

@@ -19,6 +19,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -32,9 +33,6 @@ typedef ytrmm_T T;
 
 #define YTRMM_OMP_MIN 32
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
 
 static const T ZERO = 0.0L + 0.0Li;
 
@@ -43,7 +41,7 @@ static const T ZERO = 0.0L + 0.0Li;
 /* ── Blocked dispatchers: one outer `omp parallel` partitions B's
  *    columns (SIDE='L') or rows (SIDE='R') across the team. ──────── */
 static void blocked_dispatch_L(enum ytrmm_variant_L V, ptrdiff_t M, ptrdiff_t N, T alpha,
-                               const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                               const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t nb = ytrmm_nb();
 #ifdef _OPENMP
@@ -63,7 +61,7 @@ static void blocked_dispatch_L(enum ytrmm_variant_L V, ptrdiff_t M, ptrdiff_t N,
 }
 
 static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N, T alpha,
-                               const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
+                               const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t nb = ytrmm_nb();
 #ifdef _OPENMP
@@ -87,7 +85,7 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
 #ifdef _OPENMP
 #define YTRMM_OMP_WRAP_L(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         if (N >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -100,7 +98,7 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
     }
 #define YTRMM_OMP_WRAP_L_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         if (N >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -113,7 +111,7 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
     }
 #define YTRMM_OMP_WRAP_R(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         if (M >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -126,7 +124,7 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
     }
 #define YTRMM_OMP_WRAP_R_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         if (M >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -140,22 +138,22 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
 #else
 #define YTRMM_OMP_WRAP_L(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define YTRMM_OMP_WRAP_L_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #define YTRMM_OMP_WRAP_R(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define YTRMM_OMP_WRAP_R_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit) {      \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
         core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #endif
@@ -189,10 +187,10 @@ static void ytrmm_core(
     }
 #endif
     const T alpha = *alpha_;
-    const char SIDE = up(&side);
-    const char UPLO = up(&uplo);
-    const char TR = up(&transa);
-    const ptrdiff_t nounit = (up(&diag) != 'U');
+    const char SIDE = blas_up(side);
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(transa);
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

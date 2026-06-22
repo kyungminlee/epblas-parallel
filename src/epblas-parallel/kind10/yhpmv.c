@@ -15,6 +15,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -39,14 +40,11 @@ static inline T cconj(T z) { return ~z; }
 #define YHPMV_OMP_MIN 575  /* N>=24 */
 #define YHPMV_MAX_CPUS 256
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #ifdef _OPENMP
 /* Sqrt-balanced contiguous column partition (OpenBLAS symv_partition, mask=3,
  * min_width=4): per-column work grows with j for UPPER, shrinks for LOWER. */
-static ptrdiff_t yhpmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
+static ptrdiff_t yhpmv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
 {
     const ptrdiff_t mask = 3, min_width = 4;
     const double dnum = (double)n * (double)n / (double)nthreads;
@@ -90,7 +88,7 @@ static void yhpmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || (alpha == zero && beta == one)) return;
 
@@ -105,7 +103,7 @@ static void yhpmv_core(
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if ((size_t)N * (size_t)N > YHPMV_OMP_MIN
-            && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+            && blas_omp_should_thread()) {
             ptrdiff_t nthreads = blas_omp_max_threads();
             if (nthreads > YHPMV_MAX_CPUS) nthreads = YHPMV_MAX_CPUS;
             ptrdiff_t range[YHPMV_MAX_CPUS + 1];

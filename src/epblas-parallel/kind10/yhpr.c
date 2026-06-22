@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -22,9 +23,6 @@ typedef _Complex long double T;
 typedef long double TR;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 static void yhpr_core(
     char uplo,
@@ -36,7 +34,7 @@ static void yhpr_core(
     const TR alpha = *alpha_;
     const TR rzero = 0.0L;
     const T czero = 0.0L + 0.0Li;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || alpha == rzero) return;
 
@@ -53,7 +51,7 @@ static void yhpr_core(
          * noinline carve-out is needed (unlike yhpr2). */
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {
@@ -68,7 +66,7 @@ static void yhpr_core(
             }
         } else {
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {

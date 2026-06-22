@@ -18,6 +18,7 @@
  */
 
 #include "esymm_kernel.h"
+#include "../common/blas_char.h"
 #include "egemm_kernel.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
@@ -49,8 +50,8 @@ static void esymm_core(
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)side);
-    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char SIDE = blas_up(side);
+    const char UPLO = blas_up(uplo);
 
     if (M <= 0 || N <= 0) return;
 

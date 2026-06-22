@@ -11,6 +11,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP
@@ -23,9 +24,6 @@
 
 typedef long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -36,7 +34,7 @@ static inline char up(char c) {
  * TR='N' uses per-thread y_priv + reduction (esymv pattern, Add-36 — matches
  * ref within tolerance, not bit-exact). Returns 1 on success, 0 if the
  * scratch alloc failed (caller falls back to serial). */
-static int etrmv_omp_contig(char UPLO, char TR, ptrdiff_t nounit,
+static bool etrmv_omp_contig(char UPLO, char TR, bool nounit,
                             ptrdiff_t N, const T *restrict a, ptrdiff_t lda,
                             T *restrict x, ptrdiff_t nt)
 {
@@ -131,11 +129,11 @@ static void etrmv_core(
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(uplo);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
-    const char DIAG = up(diag);
-    const ptrdiff_t nounit = (DIAG != 'U');
+    const char DIAG = blas_up(diag);
+    const bool nounit = (DIAG != 'U');
 
     if (N == 0) return;
     const T zero = 0.0L;
@@ -143,7 +141,7 @@ static void etrmv_core(
     if (incx == 1) {
 #ifdef _OPENMP
         const ptrdiff_t nt = blas_omp_max_threads();
-        if (N >= ETRMV_OMP_MIN && nt > 1 && !omp_in_parallel()
+        if (N >= ETRMV_OMP_MIN && blas_omp_should_thread()
             && etrmv_omp_contig(UPLO, TR, nounit, N, a, lda, x, nt))
             return;
 #endif
@@ -268,7 +266,7 @@ static void etrmv_core(
          * threading lives in one place (etrmv_omp_contig) and the tuned
          * serial strided code below stays byte-for-byte unchanged. */
         const ptrdiff_t ntS = blas_omp_max_threads();
-        if (N >= ETRMV_OMP_MIN && ntS > 1 && !omp_in_parallel()) {
+        if (N >= ETRMV_OMP_MIN && blas_omp_should_thread()) {
             T *xc = (T *)malloc((size_t)N * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < N; ++i) xc[i] = x[kx + i * incx];

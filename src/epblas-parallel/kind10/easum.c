@@ -43,7 +43,7 @@ static T easum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
 #define EASUM_MAX_CPUS 64
 __attribute__((noinline)) static ptrdiff_t easum_omp(ptrdiff_t n, const T *x, T *out)
 {
-    if (n <= EASUM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= EASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EASUM_MAX_CPUS) nthreads = EASUM_MAX_CPUS;

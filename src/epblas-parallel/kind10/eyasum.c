@@ -36,7 +36,7 @@ static R eyasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
 #define EYASUM_MAX_CPUS 64
 __attribute__((noinline)) static ptrdiff_t eyasum_omp(ptrdiff_t n, const T *x, R *out)
 {
-    if (n <= EYASUM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= EYASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EYASUM_MAX_CPUS) nthreads = EYASUM_MAX_CPUS;

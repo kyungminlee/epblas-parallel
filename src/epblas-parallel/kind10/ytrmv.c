@@ -6,6 +6,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include "../common/epblas_facade.h"
@@ -27,9 +28,6 @@ static const T ZERO = 0.0L + 0.0Li;
 static const T ONE_C = 1.0L + 0.0Li;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -40,7 +38,7 @@ static inline char up(char c) {
  * bit-exact); TR='T'/'C' writes a single shared y_buf (each j owns its output
  * → bit-exact). Returns 1 on success, 0 if a scratch alloc failed (caller
  * falls back to serial). */
-static int ytrmv_omp_contig(char UPLO, char TR, ptrdiff_t nounit,
+static bool ytrmv_omp_contig(char UPLO, char TR, bool nounit,
                             ptrdiff_t N, const T *restrict a, ptrdiff_t lda,
                             T *restrict x, ptrdiff_t nt)
 {
@@ -82,7 +80,7 @@ static int ytrmv_omp_contig(char UPLO, char TR, ptrdiff_t nounit,
         free(y_priv_all);
         return 1;
     } else {
-        const ptrdiff_t conj_a = (TR == 'C');
+        const bool conj_a = (TR == 'C');
         T *y_buf = (T *)aligned_alloc(64,
             (((size_t)N * sizeof(T)) + 63) & ~(size_t)63);
         if (!y_buf) return 0;
@@ -130,17 +128,17 @@ static void ytrmv_core(
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    const char TR   = up(trans);
-    const char DIAG = up(diag);
-    const ptrdiff_t nounit = (DIAG != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR   = blas_up(trans);
+    const char DIAG = blas_up(diag);
+    const bool nounit = (DIAG != 'U');
 
     if (N == 0) return;
 
     if (incx == 1) {
 #ifdef _OPENMP
         const ptrdiff_t nt = blas_omp_max_threads();
-        if (N >= YTRMV_OMP_MIN && nt > 1 && !omp_in_parallel()
+        if (N >= YTRMV_OMP_MIN && blas_omp_should_thread()
             && ytrmv_omp_contig(UPLO, TR, nounit, N, a, lda, x, nt))
             return;
 #endif
@@ -167,7 +165,7 @@ static void ytrmv_core(
                 }
             }
         } else {
-            const ptrdiff_t conj_a = (TR == 'C');
+            const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[j];
@@ -204,7 +202,7 @@ static void ytrmv_core(
          * lives in one place and the serial strided code below stays
          * byte-for-byte unchanged. */
         const ptrdiff_t ntS = blas_omp_max_threads();
-        if (N >= YTRMV_OMP_MIN && ntS > 1 && !omp_in_parallel()) {
+        if (N >= YTRMV_OMP_MIN && blas_omp_should_thread()) {
             T *xc = (T *)malloc((size_t)N * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < N; ++i) xc[i] = x[kx + i * incx];
@@ -238,7 +236,7 @@ static void ytrmv_core(
                 }
             }
         } else {
-            const ptrdiff_t conj_a = (TR == 'C');
+            const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[kx + j * incx];

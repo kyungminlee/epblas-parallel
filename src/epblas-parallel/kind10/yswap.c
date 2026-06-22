@@ -34,11 +34,11 @@ static void yswap_unit(ptrdiff_t n, T *x, T *y)
  * thread from 2048 — par's serial is already fastest below break-even (par/ref
  * ~0.94), so threading there would only regress it. */
 #define YSWAP_OMP_MIN 1536
-static int yswap_omp(ptrdiff_t n, T *x, T *y)
+static bool yswap_omp(ptrdiff_t n, T *x, T *y)
 {
-    if (n <= YSWAP_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= YSWAP_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

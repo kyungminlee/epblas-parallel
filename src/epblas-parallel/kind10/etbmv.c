@@ -25,6 +25,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <stdlib.h>
@@ -35,9 +36,6 @@
 
 typedef long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 
@@ -54,7 +52,7 @@ static inline char up(char c) {
 #define ETBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
-static ptrdiff_t etbmv_omp(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit, ptrdiff_t n, ptrdiff_t k,
+static ptrdiff_t etbmv_omp(bool upper, bool trans, bool nounit, ptrdiff_t n, ptrdiff_t k,
                      const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
 #endif
 
@@ -64,10 +62,10 @@ static void etbmv_core(
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(uplo);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 
@@ -203,7 +201,7 @@ static void etbmv_core(
  * dependence — no per-thread buffer beyond the shared y, no zero-fill, no
  * reduction. Branch hoisted out of the i-loop; lda-1 (NoTrans anti-diagonal
  * stride) vs contiguous (Trans). */
-static void tbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit,
+static void tbmv_rowgather(bool upper, bool trans, bool nounit,
                            ptrdiff_t n, ptrdiff_t k, ptrdiff_t lo, ptrdiff_t hi,
                            const T *restrict a, ptrdiff_t lda,
                            const T *restrict x, T *restrict y)
@@ -253,11 +251,11 @@ static void tbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit,
  * back to x. No cross-thread data dependence beyond the single read/write
  * barrier — near-linear scaling. Returns 1 if handled, 0 to fall back. */
 __attribute__((noinline)) static ptrdiff_t etbmv_omp(
-    ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit, ptrdiff_t n, ptrdiff_t k,
+    bool upper, bool trans, bool nounit, ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx)
 {
     ptrdiff_t omp_min = trans ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
-    if (n < omp_min || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < omp_min || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > ETBMV_MAX_CPUS) nthreads = ETBMV_MAX_CPUS;

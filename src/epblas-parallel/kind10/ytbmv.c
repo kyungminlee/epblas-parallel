@@ -26,6 +26,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -37,9 +38,6 @@
 typedef _Complex long double T;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 
@@ -65,7 +63,7 @@ static inline char up(char c) {
 #define YTBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
-static ptrdiff_t ytbmv_omp(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, ptrdiff_t nounit,
+static ptrdiff_t ytbmv_omp(bool upper, bool trans, bool conj, bool nounit,
                      ptrdiff_t n, ptrdiff_t k,
                      const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
 #endif
@@ -76,10 +74,10 @@ static void ytbmv_core(
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 
@@ -219,7 +217,7 @@ static void ytbmv_core(
  * — no per-thread buffer beyond the shared y, no zero-fill, no reduction.
  * Branch hoisted out of the i-loop; lda-1 (NoTrans anti-diagonal stride) vs
  * contiguous (Trans). ConjTrans conjugates the band and diagonal entries. */
-static void tbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, ptrdiff_t nounit,
+static void tbmv_rowgather(bool upper, bool trans, bool conj, bool nounit,
                            ptrdiff_t n, ptrdiff_t k, ptrdiff_t lo, ptrdiff_t hi,
                            const T *restrict a, ptrdiff_t lda,
                            const T *restrict x, T *restrict y)
@@ -271,10 +269,10 @@ static void tbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, ptr
  * back to x. No cross-thread data dependence beyond the single read/write
  * barrier — near-linear scaling. Returns 1 if handled, 0 to fall back. */
 __attribute__((noinline)) static ptrdiff_t ytbmv_omp(
-    ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, ptrdiff_t nounit, ptrdiff_t n, ptrdiff_t k,
+    bool upper, bool trans, bool conj, bool nounit, ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx)
 {
-    if (n < YTBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < YTBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > YTBMV_MAX_CPUS) nthreads = YTBMV_MAX_CPUS;

@@ -79,7 +79,7 @@ static T enrm2_finalize(T abig, T amed, T asml)
 static void enrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
 {
     T abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    ptrdiff_t notbig = 1;
+    bool notbig = 1;
     for (ptrdiff_t i = 0; i < n; ++i) {
         T ax = fabsl(x[i]);
         if (ax > btbig) { abig += sq(ax * bsbig); notbig = 0; }
@@ -92,23 +92,23 @@ static void enrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
 /* Threaded reduction for large unit-stride X. Each thread buckets its own chunk;
  * the three partial sums combine exactly as analysed above. Reduction order
  * differs from serial (not bit-identical), but within fuzz tolerance. */
-__attribute__((noinline)) static int enrm2_omp(ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static bool enrm2_omp(ptrdiff_t n, const T *x, T *out)
 {
-    if (n <= ENRM2_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= ENRM2_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > ENRM2_MAX_CPUS) nthreads = ENRM2_MAX_CPUS;
     T pbig[ENRM2_MAX_CPUS] = {0}, pmed[ENRM2_MAX_CPUS] = {0}, psml[ENRM2_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
         ptrdiff_t lo = blas_part_bound(n, tid, nth);
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) enrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
     }
     T abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    for (int i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
+    for (ptrdiff_t i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
     *out = enrm2_finalize(abig, amed, asml);
     return 1;
 }
@@ -127,7 +127,7 @@ static T enrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 #endif
 
     T abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    ptrdiff_t notbig = 1;
+    bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
     for (ptrdiff_t i = 0; i < n; ++i) {
         T ax = fabsl(x[ix]);

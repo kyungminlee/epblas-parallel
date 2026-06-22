@@ -11,6 +11,7 @@
  */
 
 #include "ysyrk_kernel.h"
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -131,8 +132,8 @@ void ysyrk_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)uplo);
-    const char TR   = (char)toupper((unsigned char)trans);
+    const char UPLO = blas_up(uplo);
+    const char TR   = blas_up(trans);
 
     if (N == 0) return;
 

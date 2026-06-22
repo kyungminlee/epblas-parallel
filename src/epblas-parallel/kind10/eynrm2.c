@@ -70,7 +70,7 @@ static R eynrm2_finalize(R abig, R amed, R asml)
 static void eynrm2_bucket(ptrdiff_t nel, const T *x, R *abig_, R *amed_, R *asml_)
 {
     R abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    ptrdiff_t notbig = 1;
+    bool notbig = 1;
     for (ptrdiff_t i = 0; i < nel; ++i) {
         const R *p = (const R *)&x[i];
         for (ptrdiff_t c = 0; c < 2; ++c) {
@@ -95,23 +95,23 @@ static void eynrm2_bucket(ptrdiff_t nel, const T *x, R *abig_, R *amed_, R *asml
 /* Threaded reduction for large unit-stride X. Each thread buckets its own chunk
  * of complex elements; partial sums combine exactly. Reduction order differs
  * from serial (not bit-identical), but within fuzz tolerance. */
-__attribute__((noinline)) static int eynrm2_omp(ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static bool eynrm2_omp(ptrdiff_t n, const T *x, R *out)
 {
-    if (n <= EYNRM2_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= EYNRM2_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EYNRM2_MAX_CPUS) nthreads = EYNRM2_MAX_CPUS;
     R pbig[EYNRM2_MAX_CPUS] = {0}, pmed[EYNRM2_MAX_CPUS] = {0}, psml[EYNRM2_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
         ptrdiff_t lo = blas_part_bound(n, tid, nth);
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) eynrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
     }
     R abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    for (int i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
+    for (ptrdiff_t i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
     *out = eynrm2_finalize(abig, amed, asml);
     return 1;
 }
@@ -130,7 +130,7 @@ static R eynrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 #endif
 
     R abig = 0.0L, amed = 0.0L, asml = 0.0L;
-    ptrdiff_t notbig = 1;
+    bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
     /* Hot loop transcribed from the epblas-openblas port: a complex element
      * is two reals read through `p[c]`, and the three-way Blue bucketing is

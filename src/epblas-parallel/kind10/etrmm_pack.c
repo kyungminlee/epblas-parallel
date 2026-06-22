@@ -25,7 +25,7 @@ typedef etrmm_T T;
 void etrmm_iutcopy(ptrdiff_t m, ptrdiff_t n,
                          const T *a, ptrdiff_t lda,
                          ptrdiff_t posX, ptrdiff_t posY,
-                         T *b, ptrdiff_t unit)
+                         T *b, bool unit)
 {
     ptrdiff_t i, js;
     ptrdiff_t X;
@@ -167,7 +167,7 @@ void etrmm_iutcopy(ptrdiff_t m, ptrdiff_t n,
 void etrmm_iuncopy(ptrdiff_t m, ptrdiff_t n,
                          const T *a, ptrdiff_t lda,
                          ptrdiff_t posX, ptrdiff_t posY,
-                         T *b, ptrdiff_t unit)
+                         T *b, bool unit)
 {
     ptrdiff_t i, js;
     ptrdiff_t X;
@@ -307,7 +307,7 @@ void etrmm_iuncopy(ptrdiff_t m, ptrdiff_t n,
 void etrmm_iltcopy(ptrdiff_t m, ptrdiff_t n,
                          const T *a, ptrdiff_t lda,
                          ptrdiff_t posX, ptrdiff_t posY,
-                         T *b, ptrdiff_t unit)
+                         T *b, bool unit)
 {
     ptrdiff_t i, js;
     ptrdiff_t X;
@@ -451,7 +451,7 @@ void etrmm_iltcopy(ptrdiff_t m, ptrdiff_t n,
 void etrmm_ilncopy(ptrdiff_t m, ptrdiff_t n,
                          const T *a, ptrdiff_t lda,
                          ptrdiff_t posX, ptrdiff_t posY,
-                         T *b, ptrdiff_t unit)
+                         T *b, bool unit)
 {
     ptrdiff_t i, js;
     ptrdiff_t X;

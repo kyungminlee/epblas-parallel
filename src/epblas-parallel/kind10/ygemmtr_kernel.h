@@ -30,17 +30,17 @@ typedef _Complex long double ygemmtr_T;
 
 /* C := beta*C over the triangle of columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. `upper` selects the stored triangle. */
-void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, ptrdiff_t upper,
+void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, bool upper,
                         ygemmtr_T beta, ygemmtr_T *c, ptrdiff_t ldc);
 
 /* One triangle column j of C := alpha·op(A)·op(B) + beta·C. The resolved
  * transpose/conjugate flags are passed in (computed once by the entry). */
-void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, ptrdiff_t upper,
+void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
                  ygemmtr_T alpha, ygemmtr_T beta,
                  const ygemmtr_T *a, ptrdiff_t lda,
                  const ygemmtr_T *b, ptrdiff_t ldb,
                  ygemmtr_T *c, ptrdiff_t ldc,
-                 ptrdiff_t trans_a, ptrdiff_t conj_a, ptrdiff_t trans_b, ptrdiff_t conj_b);
+                 bool trans_a, bool conj_a, bool trans_b, bool conj_b);
 
 /* Pure-serial by-value core (no OpenMP). */
 void ygemmtr_serial(char uplo, char transa, char transb,

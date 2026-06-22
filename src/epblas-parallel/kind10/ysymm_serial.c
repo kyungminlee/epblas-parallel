@@ -10,6 +10,7 @@
  */
 
 #include "ysymm_kernel.h"
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -242,8 +243,8 @@ void ysymm_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)side);
-    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char SIDE = blas_up(side);
+    const char UPLO = blas_up(uplo);
 
     if (M == 0 || N == 0) return;
 

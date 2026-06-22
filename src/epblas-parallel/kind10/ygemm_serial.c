@@ -25,6 +25,7 @@
  */
 
 #include "ygemm_kernel.h"
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <stddef.h>
 
@@ -34,7 +35,7 @@ static const T zero = 0.0L + 0.0iL;
 static const T one  = 1.0L + 0.0iL;
 
 static ptrdiff_t trans_code(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 /* ── beta pre-pass ────────────────────────────────────────────── */
@@ -100,7 +101,7 @@ void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
  * NOT bit-exact — it reorders the dot.) See `ygemm_tn_core` disasm. */
 void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, T alpha,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, ptrdiff_t conj_a)
+                   T *c, ptrdiff_t ldc, bool conj_a)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
         T *cj = &c[(size_t)j2 * ldc];
@@ -132,7 +133,7 @@ void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
  * over l, K-unrolled. */
 void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, T alpha,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, ptrdiff_t conj_b)
+                   T *c, ptrdiff_t ldc, bool conj_b)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
         T *cj = &c[(size_t)j2 * ldc];
@@ -161,7 +162,7 @@ void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
  * conj_a/conj_b inside an unrolled hot loop wrecks codegen). */
 void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, T alpha,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, ptrdiff_t conj_a, ptrdiff_t conj_b)
+                   T *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
         T *cj = &c[(size_t)j2 * ldc];
@@ -190,16 +191,16 @@ void ygemm_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = trans_code(transa);
-    const ptrdiff_t tb = trans_code(transb);
+    const char ta = trans_code(transa);
+    const char tb = trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 
     ygemm_beta_prepass(M, N, beta, c, ldc);
     if (alpha == zero || K == 0) return;
 
-    const ptrdiff_t conj_a = (ta == 'C');
-    const ptrdiff_t conj_b = (tb == 'C');
+    const bool conj_a = (ta == 'C');
+    const bool conj_b = (tb == 'C');
 
     if (ta == 'N' && tb == 'N') {
         ygemm_nn_core(0, N, M, K, alpha, a, lda, b, ldb, c, ldc);

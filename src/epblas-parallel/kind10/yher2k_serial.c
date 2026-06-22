@@ -13,6 +13,7 @@
  */
 
 #include "yher2k_kernel.h"
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -167,8 +168,8 @@ void yher2k_serial(
 {
     const TC alpha = *alpha_;
     const TR beta  = *beta_;
-    const char UPLO = (char)toupper((unsigned char)uplo);
-    const char TR_c = (char)toupper((unsigned char)trans);
+    const char UPLO = blas_up(uplo);
+    const char TR_c = blas_up(trans);
 
     if (N == 0) return;
 

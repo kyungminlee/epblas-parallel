@@ -14,6 +14,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -44,23 +45,23 @@ static void ygemmtr_core(char uplo, char transa, char transb,
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t upper = ((char)toupper((unsigned char)uplo) == 'U');
-    const ptrdiff_t ta = (char)toupper((unsigned char)transa);
-    const ptrdiff_t tb = (char)toupper((unsigned char)transb);
+    const bool upper = (blas_up(uplo) == 'U');
+    const char ta = blas_up(transa);
+    const char tb = blas_up(transb);
 
     if (N <= 0) return;
     const T zero = 0.0L + 0.0iL;
     const T one  = 1.0L + 0.0iL;
 
-    const ptrdiff_t conj_a = (ta == 'C');
-    const ptrdiff_t conj_b = (tb == 'C');
-    const ptrdiff_t trans_a = (ta != 'N');
-    const ptrdiff_t trans_b = (tb != 'N');
+    const bool conj_a = (ta == 'C');
+    const bool conj_b = (tb == 'C');
+    const bool trans_a = (ta != 'N');
+    const bool trans_b = (tb != 'N');
 
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const ptrdiff_t use_omp0 = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp0 = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j)
@@ -69,7 +70,7 @@ static void ygemmtr_core(char uplo, char transa, char transb,
     }
 
 #ifdef _OPENMP
-    const ptrdiff_t use_omp = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
     for (ptrdiff_t j = 0; j < N; ++j)

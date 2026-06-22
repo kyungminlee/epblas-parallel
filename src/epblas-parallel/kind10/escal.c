@@ -37,11 +37,11 @@ static void escal_unit(ptrdiff_t n, T alpha, T *x)
  * 1.68@1536, 1.23@3072, 1.08@6144, then 1.006@8192 — break-even ~8192, stay
  * serial through 6144. */
 #define ESCAL_OMP_MIN 6144
-static int escal_omp(ptrdiff_t n, T alpha, T *x)
+static bool escal_omp(ptrdiff_t n, T alpha, T *x)
 {
-    if (n <= ESCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= ESCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

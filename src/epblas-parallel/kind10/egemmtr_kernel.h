@@ -43,10 +43,10 @@ void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, char UP
 
 /* Packers (egemm-style, take separate A and B). */
 void egemmtr_pack_A(const egemmtr_T *restrict A, ptrdiff_t lda,
-                    ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb, ptrdiff_t ta,
+                    ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb, char ta,
                     egemmtr_T *restrict Ap);
 void egemmtr_pack_B(const egemmtr_T *restrict B, ptrdiff_t ldb,
-                    ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, ptrdiff_t tb,
+                    ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, char tb,
                     egemmtr_T *restrict Bp);
 
 /* Rectangular macro-tile (entirely inside the stored triangle). */
@@ -63,7 +63,7 @@ void egemmtr_macro_kernel_tri(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_
                               ptrdiff_t row_base, ptrdiff_t col_base, char UPLO);
 
 /* O(N²·K) scalar fallback (alloc failure path). */
-void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, ptrdiff_t ta, ptrdiff_t tb,
+void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, char ta, char tb,
                              egemmtr_T alpha,
                              const egemmtr_T *a, ptrdiff_t lda,
                              const egemmtr_T *b, ptrdiff_t ldb,

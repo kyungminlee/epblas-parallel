@@ -59,10 +59,9 @@ static void eger_core(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= EGER_OMP_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
+        const bool use_omp = (N >= EGER_OMP_MIN && blas_omp_should_thread());
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
         /* C-source branch on use_omp to dodge Add-16 outlining tax. */
 #define EGER_BODY                                                            \
@@ -87,10 +86,9 @@ static void eger_core(
         const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
         const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= EGER_OMP_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
+        const bool use_omp = (N >= EGER_OMP_MIN && blas_omp_should_thread());
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
         /* Threaded + strided x: copy x once to a unit-stride buffer so every
          * thread streams x[] at stride 1 (mirrors ob ger_thread.c). Bit-exact —
@@ -107,7 +105,7 @@ static void eger_core(
                 xp = x_buf;
             }
         }
-        const int x_unit = (incx == 1) || (x_buf != NULL);
+        const bool x_unit = (incx == 1) || (x_buf != NULL);
 #define EGER_STRIDED_BODY                                                    \
         for (ptrdiff_t j = 0; j < N; ++j) {                                  \
             const T yj = y[jy0 + j * incy];                                  \

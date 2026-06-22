@@ -12,6 +12,7 @@
  */
 
 #include "yherk_kernel.h"
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -156,8 +157,8 @@ void yherk_serial(
     TC *c, ptrdiff_t ldc)
 {
     const TR alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)uplo);
-    const char TR_c = (char)toupper((unsigned char)trans);
+    const char UPLO = blas_up(uplo);
+    const char TR_c = blas_up(trans);
 
     if (N == 0) return;
 

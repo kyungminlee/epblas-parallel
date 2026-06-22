@@ -23,6 +23,7 @@
  */
 
 #include "esyrk_kernel.h"
+#include "../common/blas_char.h"
 #include "etri_kernel.h"
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_round_up */
 #include "../common/epblas_facade.h"
@@ -54,8 +55,8 @@ static void esyrk_core(
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO  = (char)toupper((unsigned char)uplo);
-    const char TRANS = (char)toupper((unsigned char)trans);
+    const char UPLO  = blas_up(uplo);
+    const char TRANS = blas_up(trans);
 
     if (N <= 0) return;
 

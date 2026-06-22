@@ -23,11 +23,11 @@ static void yaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
  * proto4/par1 ~0.92 at N=192, ~0.76 at 256, and <1.0 out to 4M (~0.65), so no
  * upper bound. Break-even ~N=180; 256 keeps margin. */
 #define YAXPY_OMP_MIN 256
-static int yaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
+static bool yaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
 {
-    if (n <= YAXPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= YAXPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

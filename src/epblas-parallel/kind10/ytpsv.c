@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -17,12 +18,9 @@
 typedef _Complex long double T;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 /* Matrix element with optional conjugation ('C' ⇒ conjugate, 'T' ⇒ as-is). */
-static inline T yelem(T a, ptrdiff_t noconj) {
+static inline T yelem(T a, bool noconj) {
     return noconj ? a : cconj(a);
 }
 
@@ -40,7 +38,7 @@ static inline size_t cbU(ptrdiff_t j) {
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
  * incx!=1 fallback. noconj = (TR=='T'); NoTrans never conjugates. */
-static void ytpsv_serial(char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit,
+static void ytpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
                          ptrdiff_t N, const T *restrict ap, T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0L + 0.0Li;
@@ -170,12 +168,12 @@ static void ytpsv_serial(char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit,
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within fp80 fuzz tol. */
-static void ytpsv_block(char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit,
+static void ytpsv_block(char UPLO, char TR, bool noconj, bool nounit,
                         ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N,
                         const T *restrict ap, T *restrict x)
 {
     const T zero = 0.0L + 0.0Li;
-    const int lower = (UPLO == 'L');
+    const bool lower = (UPLO == 'L');
     if (TR == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (ptrdiff_t j = j1 - 1; j >= j0; --j) {
@@ -219,17 +217,17 @@ static void ytpsv_block(char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit,
  * to small YTPSV_BLK diagonal blocks (solved serially); the bulk O(N^2)
  * off-diagonal coupling is threaded over disjoint output rows. Returns 1 if it
  * handled the call. */
-__attribute__((noinline)) static int ytpsv_omp(
-    char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit, ptrdiff_t N,
+__attribute__((noinline)) static bool ytpsv_omp(
+    char UPLO, char TR, bool noconj, bool nounit, ptrdiff_t N,
     const T *restrict ap, T *restrict x)
 {
-    if (N < YTPSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (N < YTPSV_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > YTPSV_MAX_CPUS) nthreads = YTPSV_MAX_CPUS;
     const T zero = 0.0L + 0.0Li;
-    const int lower = (UPLO == 'L');
-    const int trans = (TR != 'N');
+    const bool lower = (UPLO == 'L');
+    const bool trans = (TR != 'N');
 
     if (!trans) {
         if (lower) {
@@ -239,7 +237,7 @@ __attribute__((noinline)) static int ytpsv_omp(
                 if (j1 >= N) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
-                    int tid = omp_get_thread_num();
+                    ptrdiff_t tid = omp_get_thread_num();
                     ptrdiff_t rlo = j1 + blas_part_bound((N - j1), tid, nthreads);
                     ptrdiff_t rhi = j1 + blas_part_bound((N - j1), tid + 1, nthreads);
                     for (ptrdiff_t i = j0; i < j1; ++i) {
@@ -257,7 +255,7 @@ __attribute__((noinline)) static int ytpsv_omp(
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
-                    int tid = omp_get_thread_num();
+                    ptrdiff_t tid = omp_get_thread_num();
                     ptrdiff_t rlo = blas_part_bound(j0, tid, nthreads);
                     ptrdiff_t rhi = blas_part_bound(j0, tid + 1, nthreads);
                     for (ptrdiff_t i = j0; i < j1; ++i) {
@@ -276,7 +274,7 @@ __attribute__((noinline)) static int ytpsv_omp(
                 if (j1 < N) {
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
+                        ptrdiff_t tid = omp_get_thread_num();
                         ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, nthreads);
                         ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, nthreads);
                         for (ptrdiff_t i = ilo; i < ihi; ++i) {
@@ -295,7 +293,7 @@ __attribute__((noinline)) static int ytpsv_omp(
                 if (j0 > 0) {
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
+                        ptrdiff_t tid = omp_get_thread_num();
                         ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, nthreads);
                         ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, nthreads);
                         for (ptrdiff_t i = ilo; i < ihi; ++i) {
@@ -320,10 +318,10 @@ static void ytpsv_core(
     const T *restrict ap,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 

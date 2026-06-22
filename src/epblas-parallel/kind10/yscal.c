@@ -55,11 +55,11 @@ static void yscal_unit(ptrdiff_t n, long double ar, long double ai, long double 
  * (ob keeps scal serial at small N). Measured under iomp5: par4/ob4 1.15@1024,
  * 1.04@1536, then 0.99@2048 — break-even ~2048, stay serial through 1536. */
 #define YSCAL_OMP_MIN 1536
-static int yscal_omp(ptrdiff_t n, long double ar, long double ai, long double *base)
+static bool yscal_omp(ptrdiff_t n, long double ar, long double ai, long double *base)
 {
-    if (n <= YSCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= YSCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

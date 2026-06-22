@@ -121,7 +121,7 @@ static inline void solve_RT(ptrdiff_t m, ptrdiff_t n,
     }
 }
 
-void etrsm_solve_kernel(ptrdiff_t left, ptrdiff_t trans,
+void etrsm_solve_kernel(bool left, bool trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         const T *ba, const T *bb,
                         T *C, ptrdiff_t ldc,

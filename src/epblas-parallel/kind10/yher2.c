@@ -5,6 +5,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -24,9 +25,6 @@ typedef long double R;
 static const T ZERO = 0.0L + 0.0Li;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -106,16 +104,15 @@ static void yher2_core(
     T *restrict a, ptrdiff_t lda)
 {
     const T alpha = *alpha_;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || alpha == ZERO) return;
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= YHER2_OMP_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
+        const bool use_omp = (N >= YHER2_OMP_MIN && blas_omp_should_thread());
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
         /* All column work runs through yher2_contig_{U,L}().  The serial path
          * issues ONE call over [0,N) — the hot loop is inlined there with no

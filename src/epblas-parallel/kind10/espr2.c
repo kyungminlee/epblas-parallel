@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -15,9 +16,6 @@
 
 typedef long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 /* Per-column rank-2 updates, carved out as their own functions so the inner
  * loop compiles with clean x87 register allocation. Inlined into the
@@ -49,7 +47,7 @@ static void espr2_core(
 {
     const T alpha = *alpha_;
     const T zero = 0.0L;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || alpha == zero) return;
 
@@ -67,7 +65,7 @@ static void espr2_core(
          * uses static,8. */
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {
@@ -76,7 +74,7 @@ static void espr2_core(
             }
         } else {
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {

@@ -27,6 +27,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP
@@ -37,9 +38,6 @@
 
 typedef long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -72,9 +70,9 @@ void etrsv_core(
     if (N == 0) return;
 
 #ifdef _OPENMP
-    const ptrdiff_t in_par = omp_in_parallel();
+    const bool in_par = omp_in_parallel();
 #else
-    const ptrdiff_t in_par = 0;
+    const bool in_par = 0;
 #endif
     const char uplo_c = uplo, trans_c = trans, diag_c = diag;
     /* Threshold `N >= 3*NB` (not the usual 2*NB) — etrsv's per-op cost
@@ -108,11 +106,11 @@ void etrsv_serial_(
     (void)uplo_len; (void)trans_len; (void)diag_len;
     const ptrdiff_t N = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(*uplo);
+    char TR = blas_up(*trans);
     if (TR == 'C') TR = 'T';
-    const char DIAG = up(diag);
-    const ptrdiff_t nounit = (DIAG != 'U');
+    const char DIAG = blas_up(*diag);
+    const bool nounit = (DIAG != 'U');
 
     if (N == 0) return;
 
@@ -345,8 +343,8 @@ void etrsv_blocked_(
     const ptrdiff_t N = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = etrsv_blocked_nb();
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(*uplo);
+    char TR = blas_up(*trans);
     if (TR == 'C') TR = 'T';
 
     if (N == 0) return;
@@ -364,9 +362,9 @@ void etrsv_blocked_(
     const ptrdiff_t one_i = 1;
 
 #ifdef _OPENMP
-    const ptrdiff_t use_omp = (blas_omp_max_threads() > 1 && !omp_in_parallel());
+    const bool use_omp = (blas_omp_should_thread());
 #else
-    const ptrdiff_t use_omp = 0;
+    const bool use_omp = 0;
 #endif
 
 #ifdef _OPENMP

@@ -28,6 +28,7 @@
  */
 
 #include "esyr2k_kernel.h"
+#include "../common/blas_char.h"
 #include "esyrk_kernel.h"   /* esyrk_beta_{u,l} — shared triangular β pre-pass */
 #include "etri_kernel.h"
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_round_up */
@@ -192,8 +193,8 @@ void esyr2k_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO  = (char)toupper((unsigned char)uplo);
-    const char TRANS = (char)toupper((unsigned char)trans);
+    const char UPLO  = blas_up(uplo);
+    const char TRANS = blas_up(trans);
 
     if (N <= 0) return;
 

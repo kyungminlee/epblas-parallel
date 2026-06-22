@@ -31,11 +31,11 @@ static void yescal_unit(ptrdiff_t n, R alpha, long double *p)
  * small N). Measured under iomp5: par4/ob4 1.23@1024, 1.05@2048, then 1.003@3072
  * and 0.92@4096 — break-even ~3072, stay serial through 2048. */
 #define YESCAL_OMP_MIN 2048
-static int yescal_omp(ptrdiff_t n, R alpha, long double *base)
+static bool yescal_omp(ptrdiff_t n, R alpha, long double *base)
 {
-    if (n <= YESCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= YESCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

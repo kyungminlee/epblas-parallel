@@ -11,6 +11,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include "../common/epblas_facade.h"
@@ -23,9 +24,6 @@
 
 typedef long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -103,7 +101,7 @@ static void esymv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0) return;
 
@@ -129,9 +127,9 @@ static void esymv_core(
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         const ptrdiff_t nt = blas_omp_max_threads();
-        const ptrdiff_t use_omp = (N >= ESYMV_OMP_MIN && nt > 1 && !omp_in_parallel());
+        const bool use_omp = (N >= ESYMV_OMP_MIN && blas_omp_should_thread());
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
         const ptrdiff_t nt = 1;
 #endif
         if (use_omp) {

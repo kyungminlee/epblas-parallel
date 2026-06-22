@@ -48,17 +48,17 @@ void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
 /* TA in {'T','C'}, TB='N': dot of A col i and B col j. */
 void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, ygemm_T alpha,
                    const ygemm_T *a, ptrdiff_t lda, const ygemm_T *b, ptrdiff_t ldb,
-                   ygemm_T *c, ptrdiff_t ldc, ptrdiff_t conj_a);
+                   ygemm_T *c, ptrdiff_t ldc, bool conj_a);
 
 /* TA='N', TB in {'T','C'}: rank-1 update over l, K-unrolled by 2. */
 void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, ygemm_T alpha,
                    const ygemm_T *a, ptrdiff_t lda, const ygemm_T *b, ptrdiff_t ldb,
-                   ygemm_T *c, ptrdiff_t ldc, ptrdiff_t conj_b);
+                   ygemm_T *c, ptrdiff_t ldc, bool conj_b);
 
 /* Both transposed: A col i × B row j, dot-product form. */
 void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, ygemm_T alpha,
                    const ygemm_T *a, ptrdiff_t lda, const ygemm_T *b, ptrdiff_t ldb,
-                   ygemm_T *c, ptrdiff_t ldc, ptrdiff_t conj_a, ptrdiff_t conj_b);
+                   ygemm_T *c, ptrdiff_t ldc, bool conj_a, bool conj_b);
 
 /* Pure-serial by-value core (no OpenMP). Same math as ygemm_. */
 void ygemm_serial(

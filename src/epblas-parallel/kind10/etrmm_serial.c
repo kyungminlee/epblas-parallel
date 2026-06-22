@@ -19,6 +19,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 
@@ -32,7 +33,7 @@ typedef etrmm_T T;
 #define MR 2
 #define NR 2
 
-static inline void pack_trmm_a(ptrdiff_t side_l, ptrdiff_t uplo_upper, ptrdiff_t trans, ptrdiff_t unit,
+static inline void pack_trmm_a(bool side_l, bool uplo_upper, bool trans, bool unit,
                                ptrdiff_t m, ptrdiff_t n,
                                const T *a, ptrdiff_t lda,
                                ptrdiff_t posX, ptrdiff_t posY,
@@ -60,7 +61,7 @@ static inline void pack_trmm_a(ptrdiff_t side_l, ptrdiff_t uplo_upper, ptrdiff_t
  * source uses a single shared sa/sb per call site; for our per-thread-
  * over-N-slice partitioning, each thread has its own (Ap, Bp).
  */
-void etrmm_L_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+void etrmm_L_band(bool upper, bool trans, bool unit,
                         ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                         const T *a, ptrdiff_t lda,
@@ -317,7 +318,7 @@ void etrmm_L_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
  * (!UPPER && !TRANS) || (UPPER && TRANS) branch, and 244-382 for the
  * opposite.
  */
-void etrmm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+void etrmm_R_band(bool upper, bool trans, bool unit,
                         ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                         const T *a, ptrdiff_t lda,
@@ -596,11 +597,11 @@ void etrmm_serial(
 {
     const T alpha = *alpha_;
 
-    const ptrdiff_t lside = (toupper((unsigned char)side)   == 'L');
-    const ptrdiff_t upper = (toupper((unsigned char)uplo)   == 'U');
-    const char trc  = (char)toupper((unsigned char)transa);
-    const ptrdiff_t trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
-    const ptrdiff_t unit  = (toupper((unsigned char)diag) == 'U');
+    const bool lside = (blas_up(side)   == 'L');
+    const bool upper = (blas_up(uplo)   == 'U');
+    const char trc  = blas_up(transa);
+    const bool trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
+    const bool unit  = (blas_up(diag) == 'U');
 
     if (M == 0 || N == 0) return;
 

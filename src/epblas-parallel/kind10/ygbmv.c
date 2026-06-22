@@ -31,6 +31,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -58,9 +59,6 @@
 typedef _Complex long double T;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -72,7 +70,7 @@ static ptrdiff_t ygbmv_n_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t k
 static ptrdiff_t ygbmv_t_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
                        const T *restrict a, ptrdiff_t lda,
                        const T *restrict x, ptrdiff_t incx,
-                       T alpha, T *restrict y, ptrdiff_t incy, ptrdiff_t noconj);
+                       T alpha, T *restrict y, ptrdiff_t incy, bool noconj);
 #endif
 
 static void ygbmv_core(
@@ -87,8 +85,8 @@ static void ygbmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
 
     if (M == 0 || N == 0 || (alpha == zero && beta == one)) return;
 
@@ -139,9 +137,9 @@ static void ygbmv_core(
         }
     } else if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= YGBMV_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (N >= YGBMV_OMP_MIN && blas_omp_max_threads() > 1);
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
         /* Branch on use_omp in C source — `if(use_omp)` on the pragma still
          * outlines the loop body (egbmv Addendum 16), so duplicate it instead. */
@@ -230,7 +228,7 @@ __attribute__((noinline)) static ptrdiff_t ygbmv_n_omp(
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
-    if (m < YGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (m < YGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > YGBMV_MAX_CPUS) nthreads = YGBMV_MAX_CPUS;
@@ -272,7 +270,7 @@ static void gbmv_t_colgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t k
                              ptrdiff_t lo, ptrdiff_t hi,
                              const T *restrict a, ptrdiff_t lda,
                              const T *restrict x, T alpha,
-                             T *restrict y, ptrdiff_t incy, ptrdiff_t noconj)
+                             T *restrict y, ptrdiff_t incy, bool noconj)
 {
     for (ptrdiff_t j = lo; j < hi; ++j) {
         const ptrdiff_t i_lo = (j - ku > 0) ? (j - ku) : 0;
@@ -295,9 +293,9 @@ __attribute__((noinline)) static ptrdiff_t ygbmv_t_omp(
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy, ptrdiff_t noconj)
+    T alpha, T *restrict y, ptrdiff_t incy, bool noconj)
 {
-    if (n < YGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < YGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > YGBMV_MAX_CPUS) nthreads = YGBMV_MAX_CPUS;

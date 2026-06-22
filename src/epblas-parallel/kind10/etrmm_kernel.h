@@ -42,20 +42,20 @@ typedef long double etrmm_T;
  * buffer `b` in the ob contiguous-odd-tail convention. `posX`/`posY`
  * position the diagonal; `unit` selects unit-diagonal. */
 void etrmm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
-                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, ptrdiff_t unit);
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, bool unit);
 void etrmm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
-                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, ptrdiff_t unit);
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, bool unit);
 void etrmm_iltcopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
-                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, ptrdiff_t unit);
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, bool unit);
 void etrmm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
-                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, ptrdiff_t unit);
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, bool unit);
 
 /* ── Diagonal-aware TRMM micro-kernel (etrmm_kernel.c) ───────────────
  * C := alpha · ba · bb (overwrite) over one packed (bm,bn,bk) tile; the
  * (left, trans) flags select TRMM_KERNEL_{LN,LT,RN,RT}. `offset` positions
  * the diagonal within the tile. Self-consistent with the etrmm_i*copy
  * packers and the etri_kernel.c substrate (contiguous-odd-tail). */
-void etrmm_kernel(ptrdiff_t left, ptrdiff_t trans,
+void etrmm_kernel(bool left, bool trans,
                   ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etrmm_T alpha,
                   const etrmm_T *ba, const etrmm_T *bb,
                   etrmm_T *C, ptrdiff_t ldc, ptrdiff_t offset);
@@ -64,12 +64,12 @@ void etrmm_kernel(ptrdiff_t left, ptrdiff_t trans,
  * Run the full L3 nest for one slice of the partition axis: a column band
  * [js0, js1) of B for SIDE='L', or a row band [m_lo, m_hi) for SIDE='R'.
  * Ap/Bp are caller-owned per-thread scratch. */
-void etrmm_L_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+void etrmm_L_band(bool upper, bool trans, bool unit,
                   ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                   const etrmm_T *a, ptrdiff_t lda, etrmm_T *b, ptrdiff_t ldb,
                   etrmm_T *Ap, etrmm_T *Bp);
-void etrmm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+void etrmm_R_band(bool upper, bool trans, bool unit,
                   ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                   const etrmm_T *a, ptrdiff_t lda, etrmm_T *b, ptrdiff_t ldb,

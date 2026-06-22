@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -22,9 +23,6 @@ typedef _Complex long double T;
 typedef long double TR;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 /* Per-column rank-2 updates, carved out as their own functions so the inner
  * loop compiles with clean x87 register allocation. Inlined into the
@@ -68,7 +66,7 @@ static void yhpr2_core(
 {
     const T alpha = *alpha_;
     const T zero = 0.0L + 0.0Li;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || alpha == zero) return;
 
@@ -82,7 +80,7 @@ static void yhpr2_core(
          * skipped (x[j]==y[j]==0) ones — so the else branch still writes it. */
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {
@@ -95,7 +93,7 @@ static void yhpr2_core(
             }
         } else {
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {

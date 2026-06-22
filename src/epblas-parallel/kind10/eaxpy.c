@@ -50,11 +50,11 @@ static void eaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
  * 1.57@1024, 1.19@2048, 1.05@3072, then 0.99@4096 and 0.85@6144 — break-even
  * ~4096, so stay serial through 3072. Strided cases stay serial (rare). */
 #define EAXPY_OMP_MIN 3072
-static int eaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
+static bool eaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
 {
-    if (n <= EAXPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= EAXPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

@@ -14,6 +14,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include "../common/epblas_facade.h"
@@ -31,9 +32,6 @@ typedef long double T;
 #define ESPMV_OMP_MIN 16384
 #define ESPMV_MAX_CPUS 256
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 /* Contiguous (stride-1) two-pass run shared by the serial and threaded
  * paths: y[i] += t1·ap[i] for i in [0, cnt), returning sum ap[i]·x[i].
@@ -103,7 +101,7 @@ void espmv_serial_core(char UPLO, ptrdiff_t N, T alpha,
 /* Sqrt-balanced contiguous column partition (OpenBLAS symv_partition, mask=3,
  * min_width=4). Per-column work grows with j for UPPER (length j+1) and shrinks
  * for LOWER (length n-j), so widths shrink / grow to equalize triangle area. */
-static ptrdiff_t espmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
+static ptrdiff_t espmv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
 {
     const ptrdiff_t mask = 3, min_width = 4;
     const double dnum = (double)n * (double)n / (double)nthreads;
@@ -147,7 +145,7 @@ static void espmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L, one = 1.0L;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || (alpha == zero && beta == one)) return;
 
@@ -165,7 +163,7 @@ static void espmv_core(
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if ((size_t)N * (size_t)N > ESPMV_OMP_MIN
-            && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+            && blas_omp_should_thread()) {
             ptrdiff_t nthreads = blas_omp_max_threads();
             if (nthreads > ESPMV_MAX_CPUS) nthreads = ESPMV_MAX_CPUS;
             ptrdiff_t range[ESPMV_MAX_CPUS + 1];

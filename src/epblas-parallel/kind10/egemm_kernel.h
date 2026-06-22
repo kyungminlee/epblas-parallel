@@ -47,10 +47,10 @@ void egemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, egemm_T beta, egemm_T *c, ptrd
 
 /* Packers (panel-packed, OpenBLAS-style). */
 void egemm_pack_A(const egemm_T *restrict A, ptrdiff_t lda,
-                  ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb, ptrdiff_t ta,
+                  ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb, char ta,
                   egemm_T *restrict Ap);
 void egemm_pack_B(const egemm_T *restrict B, ptrdiff_t ldb,
-                  ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, ptrdiff_t tb,
+                  ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, char tb,
                   egemm_T *restrict Bp);
 
 /* Drive one packed (ib,jb,pb) macro-tile via MR×NR sub-tiles. */

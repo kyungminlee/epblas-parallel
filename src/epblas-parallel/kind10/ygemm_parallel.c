@@ -20,6 +20,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -38,7 +39,7 @@ static const T zero = 0.0L + 0.0iL;
 #define YGEMM_OMP_N_MIN 32
 
 static ptrdiff_t trans_code(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 /* Orientation selector — chosen once from (TRANSA, TRANSB), dispatched
@@ -48,7 +49,7 @@ enum ygemm_klass { Y_NN, Y_TN, Y_NT, Y_TT };
 static inline void ygemm_dispatch(enum ygemm_klass klass, ptrdiff_t js, ptrdiff_t je,
                                   ptrdiff_t M, ptrdiff_t K, T alpha,
                                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                                  T *c, ptrdiff_t ldc, ptrdiff_t conj_a, ptrdiff_t conj_b)
+                                  T *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
 {
     switch (klass) {
     case Y_NN: ygemm_nn_core(js, je, M, K, alpha, a, lda, b, ldb, c, ldc); break;
@@ -78,16 +79,16 @@ static void ygemm_core(
 #endif
 
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = trans_code(transa);
-    const ptrdiff_t tb = trans_code(transb);
+    const char ta = trans_code(transa);
+    const char tb = trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 
     ygemm_beta_prepass(M, N, beta, c, ldc);
     if (alpha == zero || K == 0) return;
 
-    const ptrdiff_t conj_a = (ta == 'C');
-    const ptrdiff_t conj_b = (tb == 'C');
+    const bool conj_a = (ta == 'C');
+    const bool conj_b = (tb == 'C');
     enum ygemm_klass klass;
     if (ta == 'N' && tb == 'N')                       klass = Y_NN;
     else if ((ta == 'T' || ta == 'C') && tb == 'N')   klass = Y_TN;

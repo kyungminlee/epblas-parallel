@@ -47,13 +47,13 @@ typedef long double etrsm_T;
  * 1/diag on the diagonal register-block and reading only the relevant
  * triangle. `offset` positions the diagonal; `unit` selects unit-diag. */
 void etrsm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, ptrdiff_t unit);
+                   ptrdiff_t offset, etrsm_T *b, bool unit);
 void etrsm_iltcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, ptrdiff_t unit);
+                   ptrdiff_t offset, etrsm_T *b, bool unit);
 void etrsm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, ptrdiff_t unit);
+                   ptrdiff_t offset, etrsm_T *b, bool unit);
 void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, ptrdiff_t unit);
+                   ptrdiff_t offset, etrsm_T *b, bool unit);
 
 /* ── Diagonal-aware TRSM micro-kernel (etrsm_kernel.c) ───────────────
  * Pairs the shared ob-convention GEMM substrate (etri_kernel.h) with the
@@ -61,7 +61,7 @@ void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
  * diagonal-inverting packers above (OpenBLAS contiguous-odd-tail
  * convention); see the header note on why the substrate is NOT par's
  * egemm. */
-void etrsm_solve_kernel(ptrdiff_t left, ptrdiff_t trans,
+void etrsm_solve_kernel(bool left, bool trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         const etrsm_T *ba, const etrsm_T *bb,
                         etrsm_T *C, ptrdiff_t ldc, ptrdiff_t offset);
@@ -70,12 +70,12 @@ void etrsm_solve_kernel(ptrdiff_t left, ptrdiff_t trans,
  * Run the full L3 nest for one slice of the partition axis: a column
  * band [js0, js1) of B for SIDE='L', or a row band [m_lo, m_hi) for
  * SIDE='R'. Ap/Bp are caller-owned per-thread scratch. */
-void etrsm_L_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+void etrsm_L_band(bool upper, bool trans, bool unit,
                   ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                   const etrsm_T *a, ptrdiff_t lda, etrsm_T *b, ptrdiff_t ldb,
                   etrsm_T *Ap, etrsm_T *Bp);
-void etrsm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
+void etrsm_R_band(bool upper, bool trans, bool unit,
                   ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                   const etrsm_T *a, ptrdiff_t lda, etrsm_T *b, ptrdiff_t ldb,

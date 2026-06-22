@@ -16,6 +16,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -33,9 +34,6 @@
 
 typedef _Complex long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 static inline T cconj(T z) { return ~z; }
 
@@ -56,7 +54,7 @@ void ygemv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char TR = up(trans);
+    const char TR = blas_up(trans);
 
     if (M == 0 || N == 0) return;
 
@@ -82,10 +80,9 @@ void ygemv_core(
     if (TR == 'N') {
         if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (M >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (M >= YGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
              * still outlines the body into a `._omp_fn` function and pays
@@ -153,10 +150,9 @@ void ygemv_core(
              * race-free and bit-exact. jx is thread-local (recomputed). */
             const ptrdiff_t iy0 = (incy < 0) ? -(M - 1) * incy : 0;
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (M >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (M >= YGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
 #define YGEMV_N_STRIDED_BODY(i_lo, i_hi) do {                                \
             ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;                 \
@@ -223,13 +219,12 @@ void ygemv_core(
          * Single-acc dot product (complex inner-loop is x87-stack-heavy;
          * K-unroll with split accumulators regressed on similar paths
          * in ygemm — keep single accumulator). */
-        const ptrdiff_t conj_a = (TR == 'C');
+        const bool conj_a = (TR == 'C');
         if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (N >= YGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
              * still outlines (see Addendum 16). */
@@ -259,10 +254,9 @@ void ygemv_core(
             const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
             const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
-            const ptrdiff_t use_omp = (N >= YGEMV_OMP_MIN && blas_omp_max_threads() > 1
-                                 && !omp_in_parallel());
+            const bool use_omp = (N >= YGEMV_OMP_MIN && blas_omp_should_thread());
 #else
-            const ptrdiff_t use_omp = 0;
+            const bool use_omp = 0;
 #endif
 #define YGEMV_T_STRIDED_BODY                                                  \
             for (ptrdiff_t j = 0; j < N; ++j) {                              \

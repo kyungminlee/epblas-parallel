@@ -18,6 +18,7 @@
  */
 
 #include "egemmtr_kernel.h"
+#include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include <stdlib.h>
 #include <ctype.h>
@@ -55,9 +56,9 @@ static void egemmtr_core(char uplo, char transa, char transb,
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)uplo);
-    const ptrdiff_t ta = egemmtr_trans_code(&transa);
-    const ptrdiff_t tb = egemmtr_trans_code(&transb);
+    const char UPLO = blas_up(uplo);
+    const char ta = egemmtr_trans_code(&transa);
+    const char tb = egemmtr_trans_code(&transb);
 
     if (N <= 0) return;
     const T zero = 0.0L, one = 1.0L;
@@ -65,7 +66,7 @@ static void egemmtr_core(char uplo, char transa, char transb,
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const ptrdiff_t use_omp0 = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp0 = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j)
@@ -77,7 +78,7 @@ static void egemmtr_core(char uplo, char transa, char transb,
      * always assume beta=1. */
     if (beta != one) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp_beta = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp_beta = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp_beta) schedule(static, 1)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j)
@@ -121,7 +122,7 @@ static void egemmtr_core(char uplo, char transa, char transb,
     }
 
 #ifdef _OPENMP
-    const ptrdiff_t use_omp = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (N >= EGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel if(use_omp)
 #endif
     {

@@ -9,6 +9,7 @@
  */
 
 #include "ygemmtr_kernel.h"
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <stddef.h>
 
@@ -21,7 +22,7 @@ typedef ygemmtr_T T;
 static const T zero = 0.0L + 0.0iL;
 static const T one  = 1.0L + 0.0iL;
 
-void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, ptrdiff_t upper,
+void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, bool upper,
                         T beta, T *c, ptrdiff_t ldc)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
@@ -33,11 +34,11 @@ void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, ptrdiff
     }
 }
 
-void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, ptrdiff_t upper,
+void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
                  T alpha, T beta,
                  const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                  T *c, ptrdiff_t ldc,
-                 ptrdiff_t trans_a, ptrdiff_t conj_a, ptrdiff_t trans_b, ptrdiff_t conj_b)
+                 bool trans_a, bool conj_a, bool trans_b, bool conj_b)
 {
     const ptrdiff_t is = upper ? 0 : j;
     const ptrdiff_t ie = upper ? (j + 1) : N;
@@ -115,16 +116,16 @@ void ygemmtr_serial(char uplo, char transa, char transb,
                     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t upper = ((char)toupper((unsigned char)uplo) == 'U');
-    const ptrdiff_t ta = (char)toupper((unsigned char)transa);
-    const ptrdiff_t tb = (char)toupper((unsigned char)transb);
+    const bool upper = (blas_up(uplo) == 'U');
+    const char ta = blas_up(transa);
+    const char tb = blas_up(transb);
 
     if (N <= 0) return;
 
-    const ptrdiff_t conj_a = (ta == 'C');
-    const ptrdiff_t conj_b = (tb == 'C');
-    const ptrdiff_t trans_a = (ta != 'N');
-    const ptrdiff_t trans_b = (tb != 'N');
+    const bool conj_a = (ta == 'C');
+    const bool conj_b = (tb == 'C');
+    const bool trans_a = (ta != 'N');
+    const bool trans_b = (tb != 'N');
 
     if (alpha == zero || K == 0) {
         if (beta == one) return;

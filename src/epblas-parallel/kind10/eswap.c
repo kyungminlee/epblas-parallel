@@ -53,11 +53,11 @@ static void eswap_slice(ptrdiff_t n, T *x, T *y)
  * 1.12@2048, 1.03@3072, then 0.96@4096 and 0.77@6144 — break-even ~4096, stay
  * serial through 3072. */
 #define ESWAP_OMP_MIN 3072
-static int eswap_omp(ptrdiff_t n, T *x, T *y)
+static bool eswap_omp(ptrdiff_t n, T *x, T *y)
 {
-    if (n <= ESWAP_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= ESWAP_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

@@ -27,6 +27,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP
@@ -39,9 +40,6 @@ typedef _Complex long double T;
 static const T ZERO = 0.0L + 0.0Li;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -74,9 +72,9 @@ void ytrsv_core(
     if (N == 0) return;
 
 #ifdef _OPENMP
-    const ptrdiff_t in_par = omp_in_parallel();
+    const bool in_par = omp_in_parallel();
 #else
-    const ptrdiff_t in_par = 0;
+    const bool in_par = 0;
 #endif
     const char uplo_c = uplo, trans_c = trans, diag_c = diag;
     if (incx == 1 && N >= 2 * ytrsv_blocked_nb() && !in_par
@@ -100,10 +98,10 @@ void ytrsv_serial_(
     (void)uplo_len; (void)trans_len; (void)diag_len;
     const ptrdiff_t N = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
-    const char UPLO = up(uplo);
-    const char TR   = up(trans);
-    const char DIAG = up(diag);
-    const ptrdiff_t nounit = (DIAG != 'U');
+    const char UPLO = blas_up(*uplo);
+    const char TR   = blas_up(*trans);
+    const char DIAG = blas_up(*diag);
+    const bool nounit = (DIAG != 'U');
 
     if (N == 0) return;
 
@@ -158,7 +156,7 @@ void ytrsv_serial_(
                 }
             }
         } else {
-            const ptrdiff_t conj_a = (TR == 'C');
+            const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
                 /* Inner walk backward to match the outer's descent — under
                  * memory pressure the forward variant collapses to ~0.3×
@@ -250,7 +248,7 @@ void ytrsv_serial_(
                 }
             }
         } else {
-            const ptrdiff_t conj_a = (TR == 'C');
+            const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
                 /* Inner walks backward to match Fortran reference; same
                  * cache-direction reasoning as the incx=1 LT/LC path
@@ -316,8 +314,8 @@ void ytrsv_blocked_(
     const ptrdiff_t N = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = ytrsv_blocked_nb();
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
+    const char UPLO = blas_up(*uplo);
+    const char TR = blas_up(*trans);
 
     if (N == 0) return;
     if (incx != 1 || N < 2 * nb) {
@@ -336,9 +334,9 @@ void ytrsv_blocked_(
     const ptrdiff_t one_i = 1;
 
 #ifdef _OPENMP
-    const ptrdiff_t use_omp = (blas_omp_max_threads() > 1 && !omp_in_parallel());
+    const bool use_omp = (blas_omp_should_thread());
 #else
-    const ptrdiff_t use_omp = 0;
+    const bool use_omp = 0;
 #endif
 
 #ifdef _OPENMP

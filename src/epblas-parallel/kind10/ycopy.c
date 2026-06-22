@@ -19,12 +19,12 @@ typedef _Complex long double T;
  * Each thread memcpy's its own slice. */
 #define YCOPY_OMP_MIN 1024
 #define YCOPY_OMP_MAX 131072
-static int ycopy_omp(ptrdiff_t n, const T *x, T *y)
+static bool ycopy_omp(ptrdiff_t n, const T *x, T *y)
 {
     if (n <= YCOPY_OMP_MIN || n > YCOPY_OMP_MAX ||
-        blas_omp_max_threads() <= 1 || omp_in_parallel())
+        !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

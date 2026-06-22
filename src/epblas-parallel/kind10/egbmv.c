@@ -31,6 +31,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -54,9 +55,6 @@
 
 typedef long double T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -83,7 +81,7 @@ static void egbmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L, one = 1.0L;
-    char TR = up(trans);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
 
     if (M == 0 || N == 0 || (alpha == zero && beta == one)) return;
@@ -138,9 +136,9 @@ static void egbmv_core(
         }
     } else if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (N >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1);
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
         /* Branch on use_omp in C source — `if(use_omp)` on the pragma
          * still outlines (see Addendum 16). */
@@ -231,7 +229,7 @@ __attribute__((noinline)) static ptrdiff_t egbmv_n_omp(
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
-    if (m < EGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (m < EGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EGBMV_MAX_CPUS) nthreads = EGBMV_MAX_CPUS;
@@ -295,7 +293,7 @@ __attribute__((noinline)) static ptrdiff_t egbmv_t_omp(
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
-    if (n < EGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < EGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EGBMV_MAX_CPUS) nthreads = EGBMV_MAX_CPUS;

@@ -5,6 +5,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -24,9 +25,6 @@ typedef _Complex long double TC;
 typedef long double          TR;
 static inline TC cconj(TC z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -40,16 +38,15 @@ static void yher_core(
     const TR alpha = *alpha_;
     const TR rzero = 0.0L;
     const TC czero = 0.0L + 0.0Li;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || alpha == rzero) return;
 
     if (incx == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= YHER_OMP_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
+        const bool use_omp = (N >= YHER_OMP_MIN && blas_omp_should_thread());
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
         /* Branch on use_omp at C source level (Add-16). schedule(static, 1)
          * for triangular load balance (Rule 49). */

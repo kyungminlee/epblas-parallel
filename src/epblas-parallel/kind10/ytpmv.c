@@ -16,6 +16,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #ifdef _OPENMP
@@ -28,9 +29,6 @@
 typedef _Complex long double T;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #ifdef _OPENMP
 static inline size_t col_start_U(ptrdiff_t j) { return (size_t)j * (size_t)(j + 1) / 2; }
@@ -40,7 +38,7 @@ static inline size_t col_start_L(ptrdiff_t j, ptrdiff_t n) {
 
 /* Sqrt-balanced contiguous column partition (OpenBLAS tpmv_partition, mask=7,
  * min-width 16); UPPER reversed so thread 0 takes the heaviest columns. */
-static void tpmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
+static void tpmv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
 {
     const ptrdiff_t mask = 7;
     const double dnum = (double)n * (double)n / (double)nthreads;
@@ -81,7 +79,7 @@ static void tpmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthreads, ptr
     }
 }
 
-static void tpmv_kernel_N(ptrdiff_t upper, ptrdiff_t nounit, ptrdiff_t n,
+static void tpmv_kernel_N(bool upper, bool nounit, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
                           const T *ap, const T *x, T *y)
 {
@@ -102,7 +100,7 @@ static void tpmv_kernel_N(ptrdiff_t upper, ptrdiff_t nounit, ptrdiff_t n,
     }
 }
 
-static void tpmv_kernel_T(ptrdiff_t upper, ptrdiff_t nounit, ptrdiff_t conj, ptrdiff_t n,
+static void tpmv_kernel_T(bool upper, bool nounit, bool conj, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
                           const T *ap, const T *x, T *y)
 {
@@ -132,7 +130,7 @@ static void tpmv_kernel_T(ptrdiff_t upper, ptrdiff_t nounit, ptrdiff_t conj, ptr
  * to the serial reference. Kept noinline so the in-place serial loops below
  * compile in a clean x87 register context. */
 __attribute__((noinline))
-static ptrdiff_t ytpmv_omp(ptrdiff_t upper, ptrdiff_t is_t, ptrdiff_t conj, ptrdiff_t nounit, ptrdiff_t N, ptrdiff_t incx,
+static ptrdiff_t ytpmv_omp(bool upper, bool is_t, bool conj, bool nounit, ptrdiff_t N, ptrdiff_t incx,
                      const T *restrict ap, T *restrict x)
 {
     ptrdiff_t nthreads = 1;
@@ -202,10 +200,10 @@ static void ytpmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0L + 0.0Li;
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 
