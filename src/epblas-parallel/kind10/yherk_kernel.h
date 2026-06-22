@@ -49,14 +49,13 @@ void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, yherk_TR 
 void yherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, yherk_TR beta,
                       yherk_TC *c, ptrdiff_t ldc, char UPLO);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as yherk_. */
+/* Pure-serial by-value core (no OpenMP). */
 void yherk_serial(
-    const char *uplo, const char *trans,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const yherk_TR *alpha_,
-    const yherk_TC *a, const ptrdiff_t *lda_,
+    const yherk_TC *a, ptrdiff_t lda,
     const yherk_TR *beta_,
-    yherk_TC *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len);
+    yherk_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YHERK_KERNEL_H */

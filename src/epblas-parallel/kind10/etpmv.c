@@ -24,11 +24,12 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 typedef long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #ifdef _OPENMP
@@ -197,16 +198,12 @@ static ptrdiff_t etpmv_omp(ptrdiff_t upper, ptrdiff_t is_t, ptrdiff_t nounit, pt
 }
 #endif /* _OPENMP */
 
-void etpmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
+static void etpmv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
     const T *restrict ap,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t incx = *incx_;
     const T zero = 0.0L;
     const char UPLO = up(uplo);
     char TR = up(trans);
@@ -339,3 +336,5 @@ void etpmv_(
         }
     }
 }
+
+EPBLAS_FACADE_TPMV(etpmv, T)

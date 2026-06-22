@@ -25,41 +25,35 @@
 
 #include "etrsm_kernel.h"
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
+#include "../common/epblas_facade.h"
 
 typedef etrsm_T T;
 
 #define MR 2
 #define NR 2
 
-void etrsm_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+static void etrsm_core(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    const T *a, ptrdiff_t lda,
+    T *b, ptrdiff_t ldb)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        const ptrdiff_t m_pt = *m_, n_pt = *n_, lda_pt = *lda_, ldb_pt = *ldb_;
-        etrsm_serial(side, uplo, transa, diag, &m_pt, &n_pt, alpha_, a, &lda_pt,
-                     b, &ldb_pt, side_len, uplo_len, transa_len, diag_len);
+        etrsm_serial(side, uplo, transa, diag, M, N, alpha_, a, lda, b, ldb);
         return;
     }
 #endif
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
 
-    const ptrdiff_t lside = (toupper((unsigned char)*side)   == 'L');
-    const ptrdiff_t upper = (toupper((unsigned char)*uplo)   == 'U');
-    const char trc  = (char)toupper((unsigned char)*transa);
+    const ptrdiff_t lside = (toupper((unsigned char)side)   == 'L');
+    const ptrdiff_t upper = (toupper((unsigned char)uplo)   == 'U');
+    const char trc  = (char)toupper((unsigned char)transa);
     const ptrdiff_t trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
-    const ptrdiff_t unit  = (toupper((unsigned char)*diag) == 'U');
+    const ptrdiff_t unit  = (toupper((unsigned char)diag) == 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -153,3 +147,5 @@ void etrsm_(
     free(Ap_arr);
     free(Bp_arr);
 }
+
+EPBLAS_FACADE_TRMM(etrsm, T)

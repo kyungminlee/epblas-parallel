@@ -81,13 +81,13 @@ void etrsm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
                   const etrsm_T *a, ptrdiff_t lda, etrsm_T *b, ptrdiff_t ldb,
                   etrsm_T *Ap, etrsm_T *Bp);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as etrsm_. */
+/* Pure-serial by-value core (no OpenMP). Shares the ptrdiff_t signature
+ * with etrsm_core in etrsm_parallel.c. */
 void etrsm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const etrsm_T *alpha_,
-    const etrsm_T *a, const ptrdiff_t *lda_,
-    etrsm_T *b, const ptrdiff_t *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
+    const etrsm_T *a, ptrdiff_t lda,
+    etrsm_T *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ETRSM_KERNEL_H */

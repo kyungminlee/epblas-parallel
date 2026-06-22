@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -26,8 +27,8 @@ static const T ZERO = 0.0L + 0.0Li;
 static const T ONE_C = 1.0L + 0.0Li;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -123,16 +124,12 @@ static int ytrmv_omp_contig(char UPLO, char TR, ptrdiff_t nounit,
 }
 #endif
 
-void ytrmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+static void ytrmv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     const char TR   = up(trans);
     const char DIAG = up(diag);
@@ -268,5 +265,7 @@ void ytrmv_(
         }
     }
 }
+
+EPBLAS_FACADE_TRMV(ytrmv, T)
 
 #undef A_

@@ -50,15 +50,14 @@ void esymm_pack_b_sym(const esymm_T *a, ptrdiff_t lda,
                       ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
                       char uplo, esymm_T *Bp);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as esymm_. */
+/* Pure-serial by-value core (no OpenMP). Same math as esymm_. */
 void esymm_serial(
-    const char *side, const char *uplo,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo,
+    ptrdiff_t M, ptrdiff_t N,
     const esymm_T *alpha_,
-    const esymm_T *a, const ptrdiff_t *lda_,
-    const esymm_T *b, const ptrdiff_t *ldb_,
+    const esymm_T *a, ptrdiff_t lda,
+    const esymm_T *b, ptrdiff_t ldb,
     const esymm_T *beta_,
-    esymm_T *c, const ptrdiff_t *ldc_,
-    size_t side_len, size_t uplo_len);
+    esymm_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ESYMM_KERNEL_H */

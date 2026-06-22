@@ -16,6 +16,7 @@
 
 #include <stddef.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <stdlib.h>
 #include <math.h>
@@ -38,8 +39,8 @@ static inline T cconj(T z) { return ~z; }
 #define YHPMV_OMP_MIN 575  /* N>=24 */
 #define YHPMV_MAX_CPUS 256
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #ifdef _OPENMP
@@ -78,19 +79,15 @@ static ptrdiff_t yhpmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthread
 }
 #endif
 
-void yhpmv_(
-    const char *uplo,
-    const int *n_,
+static void yhpmv_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
     const T *restrict ap,
-    const T *restrict x, const int *incx_,
+    const T *restrict x, ptrdiff_t incx,
     const T *beta_,
-    T *restrict y, const int *incy_,
-    size_t uplo_len)
+    T *restrict y, ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
     const char UPLO = up(uplo);
@@ -236,3 +233,5 @@ void yhpmv_(
         }
     }
 }
+
+EPBLAS_FACADE_SPMV(yhpmv, T)

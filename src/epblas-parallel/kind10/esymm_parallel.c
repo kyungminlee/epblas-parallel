@@ -19,6 +19,7 @@
 
 #include "esymm_kernel.h"
 #include "egemm_kernel.h"
+#include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -31,31 +32,25 @@ typedef esymm_T T;
 #define MR EGEMM_MR
 #define NR EGEMM_NR
 
-void esymm_(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+static void esymm_core(
+    char side, char uplo,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict b, const int *ldb_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict b, ptrdiff_t ldb,
     const T *beta_,
-    T *restrict c, const int *ldc_,
-    size_t side_len, size_t uplo_len)
+    T *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        const ptrdiff_t m_pt = *m_, n_pt = *n_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
-        esymm_serial(side, uplo, &m_pt, &n_pt, alpha_, a, &lda_pt, b, &ldb_pt, beta_,
-                     c, &ldc_pt, side_len, uplo_len);
+        esymm_serial(side, uplo, M, N, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
-    (void)side_len; (void)uplo_len;
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)*side);
-    const char UPLO = (char)toupper((unsigned char)*uplo);
+    const char SIDE = (char)toupper((unsigned char)side);
+    const char UPLO = (char)toupper((unsigned char)uplo);
 
     if (M <= 0 || N <= 0) return;
 
@@ -157,3 +152,5 @@ void esymm_(
     free(Ap_arr);
     free(Bp);
 }
+
+EPBLAS_FACADE_SYMM(esymm, T)

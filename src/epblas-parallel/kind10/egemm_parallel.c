@@ -29,6 +29,7 @@
  */
 
 #include "egemm_kernel.h"
+#include "../common/epblas_facade.h"
 #include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -40,15 +41,14 @@ typedef egemm_T T;
 #define MR EGEMM_MR
 #define NR EGEMM_NR
 
-void egemm_(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+static void egemm_core(
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t transa_len, size_t transb_len)
+    T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Already inside a team → run serially in this thread, no nested
@@ -56,18 +56,15 @@ void egemm_(
      * the wedge; it is also slightly faster (no per-call team setup) and
      * hardens egemm against oversubscription if OMP_NESTED is ever set. */
     if (omp_in_parallel()) {
-        const ptrdiff_t m_pt = *m_, n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
-        egemm_serial(transa, transb, &m_pt, &n_pt, &k_pt, alpha_, a, &lda_pt,
-                     b, &ldb_pt, beta_, c, &ldc_pt, transa_len, transb_len);
+        egemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+                     b, ldb, beta_, c, ldc);
         return;
     }
 #endif
 
-    const ptrdiff_t M = *m_, N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = egemm_trans_code(transa, transa_len);
-    const ptrdiff_t tb = egemm_trans_code(transb, transb_len);
+    const ptrdiff_t ta = egemm_trans_code(transa);
+    const ptrdiff_t tb = egemm_trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 
@@ -155,3 +152,5 @@ void egemm_(
     }
     free(Bp);
 }
+
+EPBLAS_FACADE_GEMM(egemm, T)

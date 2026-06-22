@@ -34,7 +34,7 @@ typedef long double egemm_T;
 #define EGEMM_NR 2
 
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-ptrdiff_t egemm_trans_code(const char *p, size_t len);
+ptrdiff_t egemm_trans_code(char c);
 
 ptrdiff_t egemm_round_up(ptrdiff_t v, ptrdiff_t m);
 
@@ -83,15 +83,14 @@ static inline ptrdiff_t egemm_tn_use_fast(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K)
     return mn <= 8 || (long)M * (long)N * (long)K <= 32L * 32L * 32L;
 }
 
-/* Pure single-thread GEMM. Same signature as egemm_ — no OpenMP. */
+/* Pure single-thread GEMM (by-value core). Same math as egemm_ — no OpenMP. */
 void egemm_serial(
-    const char *transa, const char *transb,
-    const ptrdiff_t *m_, const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const egemm_T *alpha_,
-    const egemm_T *a, const ptrdiff_t *lda_,
-    const egemm_T *b, const ptrdiff_t *ldb_,
+    const egemm_T *a, ptrdiff_t lda,
+    const egemm_T *b, ptrdiff_t ldb,
     const egemm_T *beta_,
-    egemm_T *c, const ptrdiff_t *ldc_,
-    size_t transa_len, size_t transb_len);
+    egemm_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_EGEMM_KERNEL_H */

@@ -213,24 +213,20 @@ void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * whole output (rows ∈ [0, N]). The js-band UPLO clip bounds the active row
  * range so the kernel only ever writes the requested triangle. */
 void esyrk_serial(
-    const char *uplo_p, const char *trans_p,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
+    const T *a, ptrdiff_t lda,
     const T *beta_,
-    T *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
-    const ptrdiff_t uplo  = (char)toupper((unsigned char)*uplo_p);
-    const ptrdiff_t trans = (char)toupper((unsigned char)*trans_p);
+    const char UPLO  = (char)toupper((unsigned char)uplo);
+    const char TRANS = (char)toupper((unsigned char)trans);
 
     if (N <= 0) return;
 
-    if (uplo == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    if (UPLO == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
     else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
     if (K == 0 || alpha == 0.0L) return;
@@ -249,15 +245,15 @@ void esyrk_serial(
             /* UPLO clip of the [0, N] row range for this js-band:
              *   UPPER: only rows up to js+jb contribute.
              *   LOWER: only rows from js onwards. */
-            ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
-            ptrdiff_t m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            ptrdiff_t m_lo_eff = (UPLO == 'L') ? js : 0;
+            ptrdiff_t m_hi_eff = (UPLO == 'U' && N > js + jb) ? (js + jb) : N;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
             for (ptrdiff_t ls = 0; ls < K; ls += KC) {
                 const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
 
                 /* Pack Bp = the same A in OCOPY shape (A doubles as B). */
-                if (trans == 'N')
+                if (TRANS == 'N')
                     etri_tcopy(pb, jb, &a[(size_t)ls * lda + js], lda, Bp);
                 else
                     etri_ncopy(pb, jb, &a[(size_t)js * lda + ls], lda, Bp);
@@ -265,12 +261,12 @@ void esyrk_serial(
                 for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
                     const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
-                    if (trans == 'N')
+                    if (TRANS == 'N')
                         etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap);
                     else
                         etri_ncopy(pb, min_i, &a[(size_t)is * lda + ls], lda, Ap);
 
-                    if (uplo == 'U')
+                    if (UPLO == 'U')
                         esyrk_kernel_u(min_i, jb, pb, alpha, Ap, Bp,
                                        &c[(size_t)js * ldc + is], ldc,
                                        (ptrdiff_t)(is - js));

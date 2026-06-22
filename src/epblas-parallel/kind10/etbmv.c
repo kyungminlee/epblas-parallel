@@ -31,11 +31,12 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 typedef long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
@@ -57,16 +58,12 @@ static ptrdiff_t etbmv_omp(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit, p
                      const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
 #endif
 
-void etbmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_, const int *k_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+static void etbmv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N, ptrdiff_t K,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
@@ -295,5 +292,7 @@ __attribute__((noinline)) static ptrdiff_t etbmv_omp(
     return 1;
 }
 #endif /* _OPENMP */
+
+EPBLAS_FACADE_TBMV(etbmv, T)
 
 #undef A_

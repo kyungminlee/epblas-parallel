@@ -3,6 +3,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 /* yerot — kind10: complex Givens with real c, s. */
 typedef _Complex long double T;
 typedef long double R;
@@ -63,10 +64,9 @@ static int yerot_omp(ptrdiff_t n, R c, R s, R *px, R *py)
 }
 #endif
 
-void yerot_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
-            const R *c_, const R *s_)
+static void yerot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
+                       const R *c_, const R *s_)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const R c = *c_, s = *s_;
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
@@ -87,3 +87,5 @@ void yerot_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
         }
     }
 }
+
+EPBLAS_FACADE_ROT(yerot, R, T)

@@ -3,6 +3,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 /* yswap — kind10 complex: swap X ↔ Y. */
 typedef _Complex long double T;
 
@@ -49,9 +50,8 @@ static int yswap_omp(ptrdiff_t n, T *x, T *y)
 }
 #endif
 
-void yswap_(const int *n_, T *x, const int *incx_, T *y, const int *incy_)
+static void yswap_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
@@ -64,3 +64,5 @@ void yswap_(const int *n_, T *x, const int *incx_, T *y, const int *incy_)
         for (ptrdiff_t i = 0; i < n; ++i) { T t = x[ix]; x[ix] = y[iy]; y[iy] = t; ix += incx; iy += incy; }
     }
 }
+
+EPBLAS_FACADE_SWAP(yswap, T)

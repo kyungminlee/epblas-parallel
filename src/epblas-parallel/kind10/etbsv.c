@@ -5,11 +5,12 @@
 
 #include <stddef.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 
 typedef long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -30,16 +31,12 @@ static inline void band_msub(T *restrict x, const T *restrict cb, T tmp,
     for (; i < hi; ++i) x[i] -= tmp * cb[i];
 }
 
-void etbsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_, const int *k_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+static void etbsv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N, ptrdiff_t K,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, incx = *incx_;
     const T zero = 0.0L;
     const char UPLO = up(uplo);
     char TR = up(trans);
@@ -247,5 +244,7 @@ void etbsv_(
         }
     }
 }
+
+EPBLAS_FACADE_TBMV(etbsv, T)
 
 #undef A_

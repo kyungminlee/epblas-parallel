@@ -31,14 +31,13 @@ ptrdiff_t ytrmm_nb(void) {
 }
 
 extern void ygemm_serial(
-    const char *transa, const char *transb,
-    const ptrdiff_t *m, const ptrdiff_t *n, const ptrdiff_t *k,
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const T *alpha,
-    const T *a, const ptrdiff_t *lda,
-    const T *b, const ptrdiff_t *ldb,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta,
-    T *c, const ptrdiff_t *ldc,
-    size_t transa_len, size_t transb_len);
+    T *c, ptrdiff_t ldc);
 
 static inline char up(const char *p) {
     return (char)toupper((unsigned char)*p);
@@ -207,9 +206,6 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t 
     const ptrdiff_t my_N = j_end - j_start;
     if (my_N <= 0) return;
 
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-    const char CN[1] = {'C'};
     T *B_chunk = &B_(0, j_start);
 
     if (V == YLLN) {
@@ -219,10 +215,10 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t 
             ytrmm_lln_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
-                ygemm_serial(NN, NN, &ib, &my_N, &ic, &alpha,
-                             &A_(ic, 0), &lda,
-                             B_chunk, &ldb, &ONE,
-                             &B_chunk[ic], &ldb, 1, 1);
+                ygemm_serial('N', 'N', ib, my_N, ic, &alpha,
+                             &A_(ic, 0), lda,
+                             B_chunk, ldb, &ONE,
+                             &B_chunk[ic], ldb);
             }
             ic -= nb;
         }
@@ -234,15 +230,15 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t 
             const ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
                 const ptrdiff_t j0 = ic + ib;
-                ygemm_serial(NN, NN, &ib, &my_N, &trailing, &alpha,
-                             &A_(ic, j0), &lda,
-                             &B_chunk[j0], &ldb, &ONE,
-                             &B_chunk[ic], &ldb, 1, 1);
+                ygemm_serial('N', 'N', ib, my_N, trailing, &alpha,
+                             &A_(ic, j0), lda,
+                             &B_chunk[j0], ldb, &ONE,
+                             &B_chunk[ic], ldb);
             }
         }
     } else if (V == YLLT || V == YLLC) {
         const ptrdiff_t conj_flag = (V == YLLC) ? 1 : 0;
-        const char *gemm_trans = conj_flag ? CN : TN;
+        const char gemm_trans = conj_flag ? 'C' : 'T';
         for (ptrdiff_t ic = 0; ic < M; ic += nb) {
             const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             ytrmm_llTC_core(j_start, j_end, ib, alpha,
@@ -250,25 +246,25 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t 
             const ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
                 const ptrdiff_t i0 = ic + ib;
-                ygemm_serial(gemm_trans, NN, &ib, &my_N, &trailing, &alpha,
-                             &A_(i0, ic), &lda,
-                             &B_chunk[i0], &ldb, &ONE,
-                             &B_chunk[ic], &ldb, 1, 1);
+                ygemm_serial(gemm_trans, 'N', ib, my_N, trailing, &alpha,
+                             &A_(i0, ic), lda,
+                             &B_chunk[i0], ldb, &ONE,
+                             &B_chunk[ic], ldb);
             }
         }
     } else { /* YLUT or YLUC */
         const ptrdiff_t conj_flag = (V == YLUC) ? 1 : 0;
-        const char *gemm_trans = conj_flag ? CN : TN;
+        const char gemm_trans = conj_flag ? 'C' : 'T';
         ptrdiff_t ic = ((M - 1) / nb) * nb;
         while (ic >= 0) {
             const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             ytrmm_luTC_core(j_start, j_end, ib, alpha,
                             &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, conj_flag);
             if (ic > 0) {
-                ygemm_serial(gemm_trans, NN, &ib, &my_N, &ic, &alpha,
-                             &A_(0, ic), &lda,
-                             B_chunk, &ldb, &ONE,
-                             &B_chunk[ic], &ldb, 1, 1);
+                ygemm_serial(gemm_trans, 'N', ib, my_N, ic, &alpha,
+                             &A_(0, ic), lda,
+                             B_chunk, ldb, &ONE,
+                             &B_chunk[ic], ldb);
             }
             ic -= nb;
         }
@@ -281,9 +277,6 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t 
                            ptrdiff_t N, ptrdiff_t nb, T alpha,
                            const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, ptrdiff_t nounit)
 {
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-    const char CN[1] = {'C'};
     const ptrdiff_t my_M = i_end - i_start;
     if (my_M <= 0) return;
     T *B_chunk = &B_(i_start, 0);
@@ -296,10 +289,10 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t 
             const ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
                 const ptrdiff_t k0 = jc + jb;
-                ygemm_serial(NN, NN, &my_M, &jb, &trailing, &alpha,
-                             &B_chunk[(size_t)k0 * ldb], &ldb,
-                             &A_(k0, jc), &lda, &ONE,
-                             &B_chunk[(size_t)jc * ldb], &ldb, 1, 1);
+                ygemm_serial('N', 'N', my_M, jb, trailing, &alpha,
+                             &B_chunk[(size_t)k0 * ldb], ldb,
+                             &A_(k0, jc), lda, &ONE,
+                             &B_chunk[(size_t)jc * ldb], ldb);
             }
         }
     } else if (V == YRUN) {
@@ -309,32 +302,32 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t 
             ytrmm_run_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
             if (jc > 0) {
-                ygemm_serial(NN, NN, &my_M, &jb, &jc, &alpha,
-                             B_chunk, &ldb,
-                             &A_(0, jc), &lda, &ONE,
-                             &B_chunk[(size_t)jc * ldb], &ldb, 1, 1);
+                ygemm_serial('N', 'N', my_M, jb, jc, &alpha,
+                             B_chunk, ldb,
+                             &A_(0, jc), lda, &ONE,
+                             &B_chunk[(size_t)jc * ldb], ldb);
             }
             jc -= nb;
         }
     } else if (V == YRLT || V == YRLC) {
         const ptrdiff_t conj_flag = (V == YRLC) ? 1 : 0;
-        const char *gemm_trans = conj_flag ? CN : TN;
+        const char gemm_trans = conj_flag ? 'C' : 'T';
         ptrdiff_t jc = ((N - 1) / nb) * nb;
         while (jc >= 0) {
             const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
             ytrmm_rlTC_core(i_start, i_end, jb, alpha,
                             &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj_flag);
             if (jc > 0) {
-                ygemm_serial(NN, gemm_trans, &my_M, &jb, &jc, &alpha,
-                             B_chunk, &ldb,
-                             &A_(jc, 0), &lda, &ONE,
-                             &B_chunk[(size_t)jc * ldb], &ldb, 1, 1);
+                ygemm_serial('N', gemm_trans, my_M, jb, jc, &alpha,
+                             B_chunk, ldb,
+                             &A_(jc, 0), lda, &ONE,
+                             &B_chunk[(size_t)jc * ldb], ldb);
             }
             jc -= nb;
         }
     } else { /* YRUT or YRUC */
         const ptrdiff_t conj_flag = (V == YRUC) ? 1 : 0;
-        const char *gemm_trans = conj_flag ? CN : TN;
+        const char gemm_trans = conj_flag ? 'C' : 'T';
         for (ptrdiff_t jc = 0; jc < N; jc += nb) {
             const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
             ytrmm_ruTC_core(i_start, i_end, jb, alpha,
@@ -342,10 +335,10 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t 
             const ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
                 const ptrdiff_t k0 = jc + jb;
-                ygemm_serial(NN, gemm_trans, &my_M, &jb, &trailing, &alpha,
-                             &B_chunk[(size_t)k0 * ldb], &ldb,
-                             &A_(jc, k0), &lda, &ONE,
-                             &B_chunk[(size_t)jc * ldb], &ldb, 1, 1);
+                ygemm_serial('N', gemm_trans, my_M, jb, trailing, &alpha,
+                             &B_chunk[(size_t)k0 * ldb], ldb,
+                             &A_(jc, k0), lda, &ONE,
+                             &B_chunk[(size_t)jc * ldb], ldb);
             }
         }
     }
@@ -354,21 +347,17 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t 
 /* ── Single-thread entry ──────────────────────────────────────── */
 
 void ytrmm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
-    T *b, const ptrdiff_t *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    const T *a, ptrdiff_t lda,
+    T *b, ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    const char TR = up(transa);
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char SIDE = up(&side);
+    const char UPLO = up(&uplo);
+    const char TR = up(&transa);
+    const ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

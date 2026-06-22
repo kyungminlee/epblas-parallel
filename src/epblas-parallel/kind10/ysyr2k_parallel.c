@@ -22,6 +22,7 @@
 #endif
 
 #include "ysyr2k_kernel.h"
+#include "../common/epblas_facade.h"
 
 typedef ysyr2k_T T;
 
@@ -30,32 +31,26 @@ typedef ysyr2k_T T;
 static const T ZERO = 0.0L + 0.0Li;
 static const T ONE  = 1.0L + 0.0Li;
 
-void ysyr2k_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+static void ysyr2k_core(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict b, const int *ldb_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict b, ptrdiff_t ldb,
     const T *beta_,
-    T *restrict c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
-        ysyr2k_serial(uplo, trans, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt, beta_,
-                      c, &ldc_pt, uplo_len, trans_len);
+        ysyr2k_serial(uplo, trans, N, K, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    char TR = (char)toupper((unsigned char)*trans);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    char TR = (char)toupper((unsigned char)trans);
     if (TR == 'C') TR = 'T';
 
     if (N == 0) return;
@@ -88,3 +83,5 @@ void ysyr2k_(
         ysyr2k_block(jc, jb, N, K, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
     }
 }
+
+EPBLAS_FACADE_SYR2K(ysyr2k, T, T, T)

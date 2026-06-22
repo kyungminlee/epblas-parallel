@@ -3,6 +3,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 /* yaxpy — kind10 complex: Y := α·X + Y. */
 typedef _Complex long double T;
 
@@ -38,11 +39,10 @@ static int yaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
 }
 #endif
 
-void yaxpy_(const int *n_, const T *alpha_,
-            const T *x, const int *incx_,
-            T *y, const int *incy_)
+static void yaxpy_core(ptrdiff_t n, const T *alpha_,
+                       const T *x, ptrdiff_t incx,
+                       T *y, ptrdiff_t incy)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
     if (n <= 0) return;
     if (alpha == (T)0.0L) return;
@@ -57,3 +57,5 @@ void yaxpy_(const int *n_, const T *alpha_,
         for (ptrdiff_t i = 0; i < n; ++i) { y[iy] += alpha * x[ix]; ix += incx; iy += incy; }
     }
 }
+
+EPBLAS_FACADE_AXPY(yaxpy, T, T)

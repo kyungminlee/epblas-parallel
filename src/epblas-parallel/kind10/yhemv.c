@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -27,25 +28,21 @@ static const T ZERO = 0.0L + 0.0Li;
 static const T ONE  = 1.0L + 0.0Li;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void yhemv_(
-    const char *uplo,
-    const int *n_,
+static void yhemv_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict x, const int *incx_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict x, ptrdiff_t incx,
     const T *beta_,
-    T *restrict y, const int *incy_,
-    size_t uplo_len)
+    T *restrict y, ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 
@@ -190,5 +187,7 @@ void yhemv_(
         }
     }
 }
+
+EPBLAS_FACADE_SYMV(yhemv, T)
 
 #undef A_

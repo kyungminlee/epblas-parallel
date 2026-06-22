@@ -27,6 +27,7 @@
 #endif
 
 #include "ygemm_kernel.h"
+#include "../common/epblas_facade.h"
 
 typedef ygemm_T T;
 
@@ -36,9 +37,8 @@ static const T zero = 0.0L + 0.0iL;
  * the parallel-region setup. */
 #define YGEMM_OMP_N_MIN 32
 
-static ptrdiff_t trans_code(const char *p, size_t len) {
-    (void)len;
-    return (char)toupper((unsigned char)*p);
+static ptrdiff_t trans_code(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 /* Orientation selector — chosen once from (TRANSA, TRANSB), dispatched
@@ -58,32 +58,28 @@ static inline void ygemm_dispatch(enum ygemm_klass klass, ptrdiff_t js, ptrdiff_
     }
 }
 
-void ygemm_(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+static void ygemm_core(
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t transa_len, size_t transb_len)
+    T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        const ptrdiff_t m_pt = *m_, n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
-        ygemm_serial(transa, transb, &m_pt, &n_pt, &k_pt, alpha_, a, &lda_pt,
-                     b, &ldb_pt, beta_, c, &ldc_pt, transa_len, transb_len);
+        ygemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+                     b, ldb, beta_, c, ldc);
         return;
     }
 #endif
 
-    const ptrdiff_t M = *m_, N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = trans_code(transa, transa_len);
-    const ptrdiff_t tb = trans_code(transb, transb_len);
+    const ptrdiff_t ta = trans_code(transa);
+    const ptrdiff_t tb = trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 
@@ -115,3 +111,5 @@ void ygemm_(
     ygemm_dispatch(klass, 0, N, M, K, alpha, a, lda, b, ldb,
                    c, ldc, conj_a, conj_b);
 }
+
+EPBLAS_FACADE_GEMM(ygemm, T)

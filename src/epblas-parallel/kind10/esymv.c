@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -22,8 +23,8 @@
 
 typedef long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -92,19 +93,15 @@ void esymv_serial_core(char UPLO, ptrdiff_t N, ptrdiff_t lda, T alpha,
     }
 }
 
-void esymv_(
-    const char *uplo,
-    const int *n_,
+static void esymv_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict x, const int *incx_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict x, ptrdiff_t incx,
     const T *beta_,
-    T *restrict y, const int *incy_,
-    size_t uplo_len)
+    T *restrict y, ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 
@@ -253,5 +250,7 @@ void esymv_(
         }
     }
 }
+
+EPBLAS_FACADE_SYMV(esymv, T)
 
 #undef A_

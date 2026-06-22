@@ -133,21 +133,17 @@ void esymm_pack_b_sym(const T *a, ptrdiff_t lda,
 }
 
 void esymm_serial(
-    const char *side, const char *uplo,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
-    const T *b, const ptrdiff_t *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const ptrdiff_t *ldc_,
-    size_t side_len, size_t uplo_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)side_len; (void)uplo_len;
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)*side);
-    const char UPLO = (char)toupper((unsigned char)*uplo);
+    const char SIDE = (char)toupper((unsigned char)side);
+    const char UPLO = (char)toupper((unsigned char)uplo);
 
     if (M <= 0 || N <= 0) return;
 

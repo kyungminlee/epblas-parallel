@@ -106,22 +106,18 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, ptrdiff_t upper,
     }
 }
 
-void ygemmtr_serial(const char *uplo, const char *transa, const char *transb,
-                    const ptrdiff_t *n_, const ptrdiff_t *k_,
+void ygemmtr_serial(char uplo, char transa, char transb,
+                    ptrdiff_t N, ptrdiff_t K,
                     const T *alpha_,
-                    const T *a, const ptrdiff_t *lda_,
-                    const T *b, const ptrdiff_t *ldb_,
+                    const T *a, ptrdiff_t lda,
+                    const T *b, ptrdiff_t ldb,
                     const T *beta_,
-                    T *c, const ptrdiff_t *ldc_,
-                    size_t uplo_len, size_t ta_len, size_t tb_len)
+                    T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)ta_len; (void)tb_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t upper = ((char)toupper((unsigned char)*uplo) == 'U');
-    const ptrdiff_t ta = (char)toupper((unsigned char)*transa);
-    const ptrdiff_t tb = (char)toupper((unsigned char)*transb);
+    const ptrdiff_t upper = ((char)toupper((unsigned char)uplo) == 'U');
+    const ptrdiff_t ta = (char)toupper((unsigned char)transa);
+    const ptrdiff_t tb = (char)toupper((unsigned char)transb);
 
     if (N <= 0) return;
 

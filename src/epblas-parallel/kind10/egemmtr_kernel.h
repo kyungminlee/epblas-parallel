@@ -69,14 +69,13 @@ void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, ptrdiff_t ta, 
                              const egemmtr_T *b, ptrdiff_t ldb,
                              egemmtr_T *c, ptrdiff_t ldc);
 
-/* Pure single-thread entry. Same signature as egemmtr_ — no OpenMP. */
-void egemmtr_serial(const char *uplo, const char *transa, const char *transb,
-                    const ptrdiff_t *n_, const ptrdiff_t *k_,
+/* Pure single-thread entry (by-value core). No OpenMP. */
+void egemmtr_serial(char uplo, char transa, char transb,
+                    ptrdiff_t N, ptrdiff_t K,
                     const egemmtr_T *alpha_,
-                    const egemmtr_T *a, const ptrdiff_t *lda_,
-                    const egemmtr_T *b, const ptrdiff_t *ldb_,
+                    const egemmtr_T *restrict a, ptrdiff_t lda,
+                    const egemmtr_T *restrict b, ptrdiff_t ldb,
                     const egemmtr_T *beta_,
-                    egemmtr_T *c, const ptrdiff_t *ldc_,
-                    size_t uplo_len, size_t ta_len, size_t tb_len);
+                    egemmtr_T *restrict c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_EGEMMTR_KERNEL_H */

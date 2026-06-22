@@ -65,9 +65,8 @@ static void init_blocks(void) {
     g_mc = 64;  /* set last: g_mc!=0 is the init flag */
 }
 
-ptrdiff_t egemm_trans_code(const char *p, size_t len) {
-    (void)len;
-    char c = (char)toupper((unsigned char)*p);
+ptrdiff_t egemm_trans_code(char c) {
+    c = (char)toupper((unsigned char)c);
     return (c == 'C') ? 'T' : c;  /* real: 'C' ≡ 'T' */
 }
 
@@ -284,20 +283,17 @@ void egemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, T alpha,
 /* ── Single-thread entry ──────────────────────────────────────── */
 
 void egemm_serial(
-    const char *transa, const char *transb,
-    const ptrdiff_t *m_, const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
-    const T *b, const ptrdiff_t *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const ptrdiff_t *ldc_,
-    size_t transa_len, size_t transb_len)
+    T *c, ptrdiff_t ldc)
 {
-    const ptrdiff_t M = *m_, N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = egemm_trans_code(transa, transa_len);
-    const ptrdiff_t tb = egemm_trans_code(transb, transb_len);
+    const ptrdiff_t ta = egemm_trans_code(transa);
+    const ptrdiff_t tb = egemm_trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 

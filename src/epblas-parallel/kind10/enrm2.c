@@ -17,6 +17,7 @@
 #define ENRM2_OMP_MIN  10000   /* below this, run the serial path */
 #define ENRM2_MAX_CPUS 64
 #endif
+#include "../common/epblas_facade.h"
 typedef long double T;
 
 static T btsml, btbig, bssml, bsbig, maxN;
@@ -113,9 +114,8 @@ __attribute__((noinline)) static int enrm2_omp(ptrdiff_t n, const T *x, T *out)
 }
 #endif
 
-T enrm2_(const int *n_, const T *x, const int *incx_)
+static T enrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
-    const ptrdiff_t n = *n_, incx = *incx_;
     if (n <= 0) return 0.0L;
     if (!blue_inited) blue_init();
 
@@ -144,3 +144,5 @@ T enrm2_(const int *n_, const T *x, const int *incx_)
 
     return enrm2_finalize(abig, amed, asml);
 }
+
+EPBLAS_FACADE_ASUM(enrm2, T, T)

@@ -13,10 +13,12 @@
 #define ETPSV_MAX_CPUS 256
 #endif
 
+#include "../common/epblas_facade.h"
+
 typedef long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #ifdef _OPENMP
@@ -313,16 +315,12 @@ __attribute__((noinline)) static int etpsv_omp(
 }
 #endif
 
-void etpsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
+static void etpsv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
     const T *restrict ap,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
@@ -338,3 +336,5 @@ void etpsv_(
 
     etpsv_serial(UPLO, TR, nounit, N, ap, x, incx);
 }
+
+EPBLAS_FACADE_TPMV(etpsv, T)

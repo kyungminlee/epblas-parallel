@@ -3,6 +3,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 /* escal — kind10 real: X := α · X. x87 fp80, no SIMD path. */
 typedef long double T;
 
@@ -52,9 +53,10 @@ static int escal_omp(ptrdiff_t n, T alpha, T *x)
 }
 #endif
 
-void escal_(const int *n_, const T *alpha_, T *x, const int *incx_)
+/* core: ints by value, alpha forwarded as `const T*` (facade derefs nothing
+ * but the integers). Body verbatim from the old escal_ past the deref lines. */
+static void escal_core(ptrdiff_t n, const T *alpha_, T *x, ptrdiff_t incx)
 {
-    const ptrdiff_t n = *n_, incx = *incx_;
     const T alpha = *alpha_;
     if (n <= 0 || alpha == 1.0L) return;
     if (incx == 1) {
@@ -67,3 +69,5 @@ void escal_(const int *n_, const T *alpha_, T *x, const int *incx_)
         for (ptrdiff_t i = 0; i < n; ++i) { x[ix] *= alpha; ix += incx; }
     }
 }
+
+EPBLAS_FACADE_SCAL(escal, T, T)

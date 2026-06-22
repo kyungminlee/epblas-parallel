@@ -42,14 +42,13 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, ptrdiff_t upper,
                  ygemmtr_T *c, ptrdiff_t ldc,
                  ptrdiff_t trans_a, ptrdiff_t conj_a, ptrdiff_t trans_b, ptrdiff_t conj_b);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ygemmtr_. */
-void ygemmtr_serial(const char *uplo, const char *transa, const char *transb,
-                    const ptrdiff_t *n_, const ptrdiff_t *k_,
+/* Pure-serial by-value core (no OpenMP). */
+void ygemmtr_serial(char uplo, char transa, char transb,
+                    ptrdiff_t N, ptrdiff_t K,
                     const ygemmtr_T *alpha_,
-                    const ygemmtr_T *a, const ptrdiff_t *lda_,
-                    const ygemmtr_T *b, const ptrdiff_t *ldb_,
+                    const ygemmtr_T *a, ptrdiff_t lda,
+                    const ygemmtr_T *b, ptrdiff_t ldb,
                     const ygemmtr_T *beta_,
-                    ygemmtr_T *c, const ptrdiff_t *ldc_,
-                    size_t uplo_len, size_t ta_len, size_t tb_len);
+                    ygemmtr_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YGEMMTR_KERNEL_H */

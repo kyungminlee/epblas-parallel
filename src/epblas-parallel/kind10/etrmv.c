@@ -17,13 +17,14 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 #define ETRMV_OMP_MIN 128
 
 typedef long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -124,16 +125,12 @@ static int etrmv_omp_contig(char UPLO, char TR, ptrdiff_t nounit,
 }
 #endif
 
-void etrmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+static void etrmv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
@@ -358,5 +355,7 @@ void etrmv_(
         }
     }
 }
+
+EPBLAS_FACADE_TRMV(etrmv, T)
 
 #undef A_

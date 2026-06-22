@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -21,8 +22,8 @@ typedef _Complex long double T;
 typedef long double TR;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 /* Per-column rank-2 updates, carved out as their own functions so the inner
@@ -57,18 +58,14 @@ static void yhpr2_col_lower(ptrdiff_t j, ptrdiff_t N, T t1, T t2,
     c0[0] = (TR)__real__ c0[0] + (TR)__real__ (x[j] * t1 + y[j] * t2);
 }
 
-void yhpr2_(
-    const char *uplo,
-    const int *n_,
+static void yhpr2_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
-    const T *restrict x, const int *incx_,
-    const T *restrict y, const int *incy_,
-    T *restrict ap,
-    size_t uplo_len)
+    const T *restrict x, ptrdiff_t incx,
+    const T *restrict y, ptrdiff_t incy,
+    T *restrict ap)
 {
-    (void)uplo_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
     const T zero = 0.0L + 0.0Li;
     const char UPLO = up(uplo);
@@ -161,3 +158,5 @@ void yhpr2_(
         }
     }
 }
+
+EPBLAS_FACADE_SPR2(yhpr2, T)

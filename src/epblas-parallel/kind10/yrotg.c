@@ -44,3 +44,6 @@ void yrotg_(T *a_, const T *b_, R *c, T *s)
     const T conjb = br - bi * 1.0iL;
     *s = conjb * (a / d);
 }
+
+/* No integer arguments -> LP64/ILP64 ABIs identical; _64_ twin tail-calls. */
+void yrotg_64_(T *a_, const T *b_, R *c, T *s) { yrotg_(a_, b_, c, s); }

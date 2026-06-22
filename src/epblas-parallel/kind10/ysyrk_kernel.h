@@ -44,14 +44,13 @@ void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, ysyrk_T a
 void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, ysyrk_T beta,
                       ysyrk_T *c, ptrdiff_t ldc, char UPLO);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ysyrk_. */
+/* Pure-serial by-value core (no OpenMP). */
 void ysyrk_serial(
-    const char *uplo, const char *trans,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const ysyrk_T *alpha_,
-    const ysyrk_T *a, const ptrdiff_t *lda_,
+    const ysyrk_T *a, ptrdiff_t lda,
     const ysyrk_T *beta_,
-    ysyrk_T *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len);
+    ysyrk_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YSYRK_KERNEL_H */
