@@ -13,6 +13,7 @@
 #include "../common/blas_omp.h"
 #define MSWAP_OMP_MIN 8192
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -36,11 +37,10 @@ static void mswap_kernel(std::ptrdiff_t n, T *x, std::ptrdiff_t incx,
     }
 }
 
-extern "C" void mswap_(const int *n_,
-                       T *x, const int *incx_,
-                       T *y, const int *incy_)
+static void mswap_core(std::ptrdiff_t n,
+                       T *x, std::ptrdiff_t incx,
+                       T *y, std::ptrdiff_t incy)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return;
     if (incx < 0) x -= (n - 1) * incx;
     if (incy < 0) y -= (n - 1) * incy;
@@ -66,3 +66,5 @@ extern "C" void mswap_(const int *n_,
 #endif
     mswap_kernel(n, x, incx, y, incy);
 }
+
+extern "C" { EPBLAS_FACADE_SWAP(mswap, T) }

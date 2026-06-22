@@ -48,3 +48,5 @@ extern "C" void wrotg_(T *a_, const T *b_, R *c, T *s)
     const R d = sqrtdd(f2 * h2);
     *s = cdiv_real(cmul(cconj(b), a), d);       /* conj(b)·a/sqrt(|a|²·(|a|²+|b|²)) */
 }
+/* ILP64 twin — no integer args, so the ABI is identical to LP64. */
+extern "C" void wrotg_64_(T *a_, const T *b_, R *c, T *s) { wrotg_(a_, b_, c, s); }

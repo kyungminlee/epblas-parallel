@@ -24,6 +24,7 @@
 #include <multifloats.h>
 #include "mf_util.h"
 #include "mf_kernels.h"
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -177,25 +178,21 @@ void mtbsv_strided(std::ptrdiff_t upper, std::ptrdiff_t trans_, std::ptrdiff_t n
 }
 }  // namespace
 
-extern "C" void mtbsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_, const int *k_,
-    const T *a, const int *lda_,
-    T *x, const int *incx_,
-    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+static void mtbsv_core(
+    char uplo, char trans, char diag,
+    std::ptrdiff_t N, std::ptrdiff_t K,
+    const T *a, std::ptrdiff_t lda,
+    T *x, std::ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const std::ptrdiff_t n    = static_cast<std::ptrdiff_t>(*n_);
-    const std::ptrdiff_t k    = static_cast<std::ptrdiff_t>(*k_);
-    const std::ptrdiff_t lda  = static_cast<std::ptrdiff_t>(*lda_);
-    const std::ptrdiff_t incx = static_cast<std::ptrdiff_t>(*incx_);
+    const std::ptrdiff_t n    = N;
+    const std::ptrdiff_t k    = K;
 
     if (n == 0) return;
 
-    const std::ptrdiff_t upper  = (up(uplo) == 'U');
-    const char trc   = up(trans);
+    const std::ptrdiff_t upper  = (up(&uplo) == 'U');
+    const char trc   = up(&trans);
     const std::ptrdiff_t trans_ = (trc == 'T' || trc == 'C') ? 1 : 0;
-    const std::ptrdiff_t nounit = (up(diag) == 'N');
+    const std::ptrdiff_t nounit = (up(&diag) == 'N');
 
     if (incx == 1) {
         mtbsv_contig(upper, trans_, nounit, n, k, a, lda, x);
@@ -215,4 +212,8 @@ extern "C" void mtbsv_(
     }
 
     mtbsv_strided(upper, trans_, nounit, n, k, a, lda, x, incx);  /* alloc-failure fallback */
+}
+
+extern "C" {
+EPBLAS_FACADE_TBMV(mtbsv, T)
 }

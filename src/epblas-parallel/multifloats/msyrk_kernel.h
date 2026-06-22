@@ -57,14 +57,13 @@ void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
                  msyrk_T alpha, msyrk_T beta,
                  const msyrk_T *a, std::ptrdiff_t lda, msyrk_T *c, std::ptrdiff_t ldc);
 
-/* Pure-serial Fortran entry. No OpenMP on this path; same ABI as msyrk_. */
+/* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void msyrk_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const msyrk_T *alpha_,
-    const msyrk_T *a, const int *lda_,
+    const msyrk_T *a, std::ptrdiff_t lda,
     const msyrk_T *beta_,
-    msyrk_T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len);
+    msyrk_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_MSYRK_KERNEL_H */

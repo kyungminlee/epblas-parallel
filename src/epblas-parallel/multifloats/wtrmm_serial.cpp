@@ -709,10 +709,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
             wtrmm_lln_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
-                wgemm_serial_pd(NN, NN, &ib, &my_N, &ic, &alpha,
-                             &A_(ic, 0), &lda,
-                             B_chunk, &ldb, &one_cdd,
-                             &B_chunk[ic], &ldb, 1, 1);
+                wgemm_serial(NN[0], NN[0], ib, my_N, ic, &alpha, &A_(ic, 0), lda, B_chunk, ldb, &one_cdd, &B_chunk[ic], ldb);
             }
             ic -= nb;
         }
@@ -730,10 +727,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
             const std::ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
                 const std::ptrdiff_t j0 = ic + ib;
-                wgemm_serial_pd(NN, NN, &ib, &my_N, &trailing, &alpha,
-                             &A_(ic, j0), &lda,
-                             &B_chunk[j0], &ldb, &one_cdd,
-                             &B_chunk[ic], &ldb, 1, 1);
+                wgemm_serial(NN[0], NN[0], ib, my_N, trailing, &alpha, &A_(ic, j0), lda, &B_chunk[j0], ldb, &one_cdd, &B_chunk[ic], ldb);
             }
         }
     } else if (V == WLLT || V == WLLC) {
@@ -752,10 +746,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
             const std::ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
                 const std::ptrdiff_t i0 = ic + ib;
-                wgemm_serial_pd(gemm_trans, NN, &ib, &my_N, &trailing, &alpha,
-                             &A_(i0, ic), &lda,
-                             &B_chunk[i0], &ldb, &one_cdd,
-                             &B_chunk[ic], &ldb, 1, 1);
+                wgemm_serial(gemm_trans[0], NN[0], ib, my_N, trailing, &alpha, &A_(i0, ic), lda, &B_chunk[i0], ldb, &one_cdd, &B_chunk[ic], ldb);
             }
         }
     } else { /* WLUT or WLUC */
@@ -773,10 +764,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
             wtrmm_luTC_core(j_start, j_end, ib, alpha,
                             &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, conj_flag);
             if (ic > 0) {
-                wgemm_serial_pd(gemm_trans, NN, &ib, &my_N, &ic, &alpha,
-                             &A_(0, ic), &lda,
-                             B_chunk, &ldb, &one_cdd,
-                             &B_chunk[ic], &ldb, 1, 1);
+                wgemm_serial(gemm_trans[0], NN[0], ib, my_N, ic, &alpha, &A_(0, ic), lda, B_chunk, ldb, &one_cdd, &B_chunk[ic], ldb);
             }
             ic -= nb;
         }
@@ -812,10 +800,7 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
             const std::ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
                 const std::ptrdiff_t k0 = jc + jb;
-                wgemm_serial_pd(NN, NN, &my_M, &jb, &trailing, &alpha,
-                             &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
-                             &A_(k0, jc), &lda, &one_cdd,
-                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                wgemm_serial(NN[0], NN[0], my_M, jb, trailing, &alpha, &B_chunk[static_cast<std::size_t>(k0) * ldb], ldb, &A_(k0, jc), lda, &one_cdd, &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
         }
     } else if (V == WRUN) {
@@ -830,10 +815,7 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
             if (jc > 0) {
-                wgemm_serial_pd(NN, NN, &my_M, &jb, &jc, &alpha,
-                             B_chunk, &ldb,
-                             &A_(0, jc), &lda, &one_cdd,
-                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                wgemm_serial(NN[0], NN[0], my_M, jb, jc, &alpha, B_chunk, ldb, &A_(0, jc), lda, &one_cdd, &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
             jc -= nb;
         }
@@ -851,10 +833,7 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
                             &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj_flag);
 #endif
             if (jc > 0) {
-                wgemm_serial_pd(NN, gemm_trans, &my_M, &jb, &jc, &alpha,
-                             B_chunk, &ldb,
-                             &A_(jc, 0), &lda, &one_cdd,
-                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                wgemm_serial(NN[0], gemm_trans[0], my_M, jb, jc, &alpha, B_chunk, ldb, &A_(jc, 0), lda, &one_cdd, &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
             jc -= nb;
         }
@@ -873,10 +852,7 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
             const std::ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
                 const std::ptrdiff_t k0 = jc + jb;
-                wgemm_serial_pd(NN, gemm_trans, &my_M, &jb, &trailing, &alpha,
-                             &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
-                             &A_(jc, k0), &lda, &one_cdd,
-                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                wgemm_serial(NN[0], gemm_trans[0], my_M, jb, trailing, &alpha, &B_chunk[static_cast<std::size_t>(k0) * ldb], ldb, &A_(jc, k0), lda, &one_cdd, &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
         }
     }
@@ -967,23 +943,18 @@ void wtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
 }
 
 extern "C" void wtrmm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    char side, char uplo, char transa, char diag,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    std::size_t side_len, std::size_t uplo_len,
-    std::size_t transa_len, std::size_t diag_len)
+    const T *a, std::ptrdiff_t lda,
+    T *b, std::ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    const char TR = up(transa);   /* complex: N/T/C kept distinct */
-    const std::ptrdiff_t nounit = (up(diag) != 'U');
+    const char SIDE = up(&side);
+    const char UPLO = up(&uplo);
+    const char TR = up(&transa);   /* complex: N/T/C kept distinct */
+    const std::ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

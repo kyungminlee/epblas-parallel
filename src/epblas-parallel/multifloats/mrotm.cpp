@@ -24,6 +24,7 @@
 #include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -154,12 +155,11 @@ void rotm_contig(bool neg, bool zero, std::ptrdiff_t n, T *x, T *y,
 }
 }
 
-extern "C" void mrotm_(const int *n_,
-                       T *x, const int *incx_,
-                       T *y, const int *incy_,
+static void mrotm_core(std::ptrdiff_t n,
+                       T *x, std::ptrdiff_t incx,
+                       T *y, std::ptrdiff_t incy,
                        const T *dparam)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T flag = dparam[0];
     /* flag == -2: identity, do nothing */
     if (n <= 0 || eq0(flag + T{2.0, 0.0})) return;
@@ -181,3 +181,5 @@ extern "C" void mrotm_(const int *n_,
     rotm_contig(neg, zero, n, xs.data(), ys.data(), h11, h12, h21, h22);
     for (std::ptrdiff_t i = 0; i < n; ++i) { xbase[i * incx] = xs[i]; ybase[i * incy] = ys[i]; }
 }
+
+extern "C" { EPBLAS_FACADE_ROTM(mrotm, T) }

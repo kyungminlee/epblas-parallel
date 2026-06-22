@@ -16,6 +16,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -106,15 +107,13 @@ static void wgerc_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, T *a, std:
 #endif
 }
 
-extern "C" void wgerc_(
-    const int *m_, const int *n_,
+static void wgerc_core(
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *x, const int *incx_,
-    const T *y, const int *incy_,
-    T *a, const int *lda_)
+    const T *x, std::ptrdiff_t incx,
+    const T *y, std::ptrdiff_t incy,
+    T *a, std::ptrdiff_t lda)
 {
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
 
     if (M == 0 || N == 0 || ceq0(alpha)) return;
@@ -131,6 +130,10 @@ extern "C" void wgerc_(
     for (std::ptrdiff_t i = 0; i < M; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
     for (std::ptrdiff_t j = 0; j < N; ++j) ys[j] = ybase[static_cast<std::ptrdiff_t>(j) * incy];
     wgerc_contig(M, N, alpha, a, lda, xs.data(), ys.data());
+}
+
+extern "C" {
+EPBLAS_FACADE_GER(wgerc, T)
 }
 
 #undef A_

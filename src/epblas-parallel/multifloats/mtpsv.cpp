@@ -16,6 +16,7 @@
 #define MTPSV_BLK      128   /* diagonal-block size for the blocked solve */
 #define MTPSV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -262,8 +263,8 @@ __attribute__((noinline)) static bool mtpsv_omp(
                 #pragma omp parallel num_threads(nthreads)
                 {
                     std::ptrdiff_t tid = omp_get_thread_num();
-                    std::ptrdiff_t rlo = j1 + (std::ptrdiff_t)((long long)(N - j1) * tid / nthreads);
-                    std::ptrdiff_t rhi = j1 + (std::ptrdiff_t)((long long)(N - j1) * (tid + 1) / nthreads);
+                    std::ptrdiff_t rlo = j1 + (std::ptrdiff_t)((__int128)(N - j1) * tid / nthreads);
+                    std::ptrdiff_t rhi = j1 + (std::ptrdiff_t)((__int128)(N - j1) * (tid + 1) / nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const T xi = x[i];
                         if (eq0(xi)) continue;
@@ -280,8 +281,8 @@ __attribute__((noinline)) static bool mtpsv_omp(
                 #pragma omp parallel num_threads(nthreads)
                 {
                     std::ptrdiff_t tid = omp_get_thread_num();
-                    std::ptrdiff_t rlo = (std::ptrdiff_t)((long long)j0 * tid / nthreads);
-                    std::ptrdiff_t rhi = (std::ptrdiff_t)((long long)j0 * (tid + 1) / nthreads);
+                    std::ptrdiff_t rlo = (std::ptrdiff_t)((__int128)j0 * tid / nthreads);
+                    std::ptrdiff_t rhi = (std::ptrdiff_t)((__int128)j0 * (tid + 1) / nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const T xi = x[i];
                         if (eq0(xi)) continue;
@@ -302,8 +303,8 @@ __attribute__((noinline)) static bool mtpsv_omp(
                     #pragma omp parallel num_threads(nthreads)
                     {
                         std::ptrdiff_t tid = omp_get_thread_num();
-                        std::ptrdiff_t ilo = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * tid / nthreads);
-                        std::ptrdiff_t ihi = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        std::ptrdiff_t ilo = j0 + (std::ptrdiff_t)((__int128)(j1 - j0) * tid / nthreads);
+                        std::ptrdiff_t ihi = j0 + (std::ptrdiff_t)((__int128)(j1 - j0) * (tid + 1) / nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbL(i, N)];
                             x[i] = x[i] - mf_kernels::dot(N - j1, &col[j1 - i], &x[j1]);
@@ -319,8 +320,8 @@ __attribute__((noinline)) static bool mtpsv_omp(
                     #pragma omp parallel num_threads(nthreads)
                     {
                         std::ptrdiff_t tid = omp_get_thread_num();
-                        std::ptrdiff_t ilo = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * tid / nthreads);
-                        std::ptrdiff_t ihi = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        std::ptrdiff_t ilo = j0 + (std::ptrdiff_t)((__int128)(j1 - j0) * tid / nthreads);
+                        std::ptrdiff_t ihi = j0 + (std::ptrdiff_t)((__int128)(j1 - j0) * (tid + 1) / nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbU(i)];
                             x[i] = x[i] - mf_kernels::dot(j0, &col[0], &x[0]);
@@ -335,20 +336,16 @@ __attribute__((noinline)) static bool mtpsv_omp(
 }
 #endif
 
-extern "C" void mtpsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
+static void mtpsv_core(
+    char uplo, char trans, char diag,
+    std::ptrdiff_t N,
     const T *ap,
-    T *x, const int *incx_,
-    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+    T *x, std::ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = up(&uplo);
+    char TR = up(&trans);
     if (TR == 'C') TR = 'T';
-    const std::ptrdiff_t nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 
@@ -359,4 +356,8 @@ extern "C" void mtpsv_(
 #endif
 
     mtpsv_serial(UPLO, TR, nounit, N, ap, x, incx);
+}
+
+extern "C" {
+EPBLAS_FACADE_TPMV(mtpsv, T)
 }

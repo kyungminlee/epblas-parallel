@@ -26,6 +26,7 @@
 #define MSYMV_OMP_MIN 256
 #define MSYMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -275,22 +276,18 @@ static void msymv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t l
 #endif
 }
 
-extern "C" void msymv_(
-    const char *uplo,
-    const int *n_,
+static void msymv_core(
+    char uplo,
+    std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *x, const int *incx_,
+    const T *a, std::ptrdiff_t lda_,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t uplo_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::size_t lda = static_cast<std::size_t>(*lda_);
-    const std::ptrdiff_t incx = *incx_, incy = *incy_;
+    const std::size_t lda = static_cast<std::size_t>(lda_);
     const T alpha = *alpha_, beta = *beta_;
-    const bool lower = (up(uplo) == 'L');
+    const bool lower = (up(&uplo) == 'L');
 
     if (N == 0) return;
 
@@ -309,6 +306,10 @@ extern "C" void msymv_(
     mf_kernels::gather_strided(N, y, incy, ys.data());
     msymv_contig(lower, N, a, lda, xs.data(), ys.data(), alpha);
     mf_kernels::scatter_strided(N, y, incy, ys.data());
+}
+
+extern "C" {
+EPBLAS_FACADE_SYMV(msymv, T)
 }
 
 #undef A_

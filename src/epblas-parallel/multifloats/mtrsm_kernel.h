@@ -57,14 +57,12 @@ void mtrsm_R_slice(char UPLO, char TR, std::ptrdiff_t row_lo, std::ptrdiff_t row
                    std::ptrdiff_t N, mtrsm_T alpha,
                    const mtrsm_T *a, std::ptrdiff_t lda, mtrsm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
 
-/* Pure-serial Fortran entry. No OpenMP on this path; same ABI as mtrsm_. */
+/* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void mtrsm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    char side, char uplo, char transa, char diag,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const mtrsm_T *alpha_,
-    const mtrsm_T *a, const int *lda_,
-    mtrsm_T *b, const int *ldb_,
-    std::size_t side_len, std::size_t uplo_len,
-    std::size_t transa_len, std::size_t diag_len);
+    const mtrsm_T *a, std::ptrdiff_t lda,
+    mtrsm_T *b, std::ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_MTRSM_KERNEL_H */

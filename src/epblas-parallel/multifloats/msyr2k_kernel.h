@@ -58,15 +58,14 @@ void msyr2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::p
                   const msyr2k_T *a, std::ptrdiff_t lda, const msyr2k_T *b, std::ptrdiff_t ldb,
                   msyr2k_T *c, std::ptrdiff_t ldc);
 
-/* Pure-serial Fortran entry. No OpenMP on this path; same ABI as msyr2k_. */
+/* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void msyr2k_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const msyr2k_T *alpha_,
-    const msyr2k_T *a, const int *lda_,
-    const msyr2k_T *b, const int *ldb_,
+    const msyr2k_T *a, std::ptrdiff_t lda,
+    const msyr2k_T *b, std::ptrdiff_t ldb,
     const msyr2k_T *beta_,
-    msyr2k_T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len);
+    msyr2k_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_MSYR2K_KERNEL_H */

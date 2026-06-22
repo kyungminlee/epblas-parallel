@@ -731,8 +731,6 @@ void blocked_chunk(trsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end,
 
     const T m_one = T{-1.0, 0.0};
     const T one   = T{ 1.0, 0.0};
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
     T *B_chunk = &B_(0, j_start);
 
 /* Diagonal-solve helper: SIMD path if available, scalar otherwise. */
@@ -756,10 +754,10 @@ void blocked_chunk(trsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end,
         for (std::ptrdiff_t ic = 0; ic < M; ic += nb) {
             const std::ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             if (ic > 0) {
-                mgemm_serial_pd(NN, NN, &ib, &my_N, &ic, &m_one,
-                             &A_(ic, 0), &lda,
-                             B_chunk, &ldb, &one,
-                             &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial('N', 'N', ib, my_N, ic, &m_one,
+                             &A_(ic, 0), lda,
+                             B_chunk, ldb, &one,
+                             &B_chunk[ic], ldb);
             }
             DIAG_SOLVE(SLLN, mtrsm_lln_core, ib, one_dd);
         }
@@ -770,10 +768,10 @@ void blocked_chunk(trsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end,
             const std::ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
                 const std::ptrdiff_t j0 = ic + ib;
-                mgemm_serial_pd(NN, NN, &ib, &my_N, &trailing, &m_one,
-                             &A_(ic, j0), &lda,
-                             &B_chunk[j0], &ldb, &one,
-                             &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial('N', 'N', ib, my_N, trailing, &m_one,
+                             &A_(ic, j0), lda,
+                             &B_chunk[j0], ldb, &one,
+                             &B_chunk[ic], ldb);
             }
             DIAG_SOLVE(SLUN, mtrsm_lun_core, ib, one_dd);
             ic -= nb;
@@ -785,10 +783,10 @@ void blocked_chunk(trsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end,
             const std::ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
                 const std::ptrdiff_t i0 = ic + ib;
-                mgemm_serial_pd(TN, NN, &ib, &my_N, &trailing, &m_one,
-                             &A_(i0, ic), &lda,
-                             &B_chunk[i0], &ldb, &one,
-                             &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial('T', 'N', ib, my_N, trailing, &m_one,
+                             &A_(i0, ic), lda,
+                             &B_chunk[i0], ldb, &one,
+                             &B_chunk[ic], ldb);
             }
             DIAG_SOLVE(SLLT, mtrsm_llt_core, ib, one_dd);
             ic -= nb;
@@ -797,10 +795,10 @@ void blocked_chunk(trsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end,
         for (std::ptrdiff_t ic = 0; ic < M; ic += nb) {
             const std::ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             if (ic > 0) {
-                mgemm_serial_pd(TN, NN, &ib, &my_N, &ic, &m_one,
-                             &A_(0, ic), &lda,
-                             B_chunk, &ldb, &one,
-                             &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial('T', 'N', ib, my_N, ic, &m_one,
+                             &A_(0, ic), lda,
+                             B_chunk, ldb, &one,
+                             &B_chunk[ic], ldb);
             }
             DIAG_SOLVE(SLUT, mtrsm_lut_core, ib, one_dd);
         }
@@ -883,24 +881,19 @@ void mtrsm_R_slice(char UPLO, char TR, std::ptrdiff_t row_lo, std::ptrdiff_t row
 }
 
 extern "C" void mtrsm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    char side, char uplo, char transa, char diag,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    std::size_t side_len, std::size_t uplo_len,
-    std::size_t transa_len, std::size_t diag_len)
+    const T *a, std::ptrdiff_t lda,
+    T *b, std::ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    char TR = up(transa);
+    const char SIDE = up(&side);
+    const char UPLO = up(&uplo);
+    char TR = up(&transa);
     if (TR == 'C') TR = 'T';
-    const std::ptrdiff_t nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

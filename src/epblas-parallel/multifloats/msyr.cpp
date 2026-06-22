@@ -19,6 +19,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -34,19 +35,15 @@ namespace {
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
-extern "C" void msyr_(
-    const char *uplo,
-    const int *n_,
+static void msyr_core(
+    char uplo,
+    std::ptrdiff_t N,
     const T *alpha_,
-    const T *x, const int *incx_,
-    T *a, const int *lda_,
-    std::size_t uplo_len)
+    const T *x, std::ptrdiff_t incx,
+    T *a, std::ptrdiff_t lda)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_, lda = *lda_;
     const T alpha = *alpha_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
 
@@ -91,6 +88,10 @@ extern "C" void msyr_(
             mf_kernels::dd_axpy(j + 1, xhp, xlp, t.limbs[0], t.limbs[1], &A_(0, j));
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SYR(msyr, T, T)
 }
 
 #undef A_

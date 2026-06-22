@@ -368,45 +368,33 @@ void wsyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
             if (TR == 'N') {
-                wgemm_serial_pd(NN, TN, &trailing, &jb, &K, &alpha,
-                             &A_(j0, 0), &lda, &A_(jc, 0), &lda,
-                             &one_cdd, &C_(j0, jc), &ldc, 1, 1);
+                wgemm_serial(NN[0], TN[0], trailing, jb, K, &alpha, &A_(j0, 0), lda, &A_(jc, 0), lda, &one_cdd, &C_(j0, jc), ldc);
             } else {
-                wgemm_serial_pd(TN, NN, &trailing, &jb, &K, &alpha,
-                             &A_(0, j0), &lda, &A_(0, jc), &lda,
-                             &one_cdd, &C_(j0, jc), &ldc, 1, 1);
+                wgemm_serial(TN[0], NN[0], trailing, jb, K, &alpha, &A_(0, j0), lda, &A_(0, jc), lda, &one_cdd, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR == 'N') {
-                wgemm_serial_pd(NN, TN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &A_(jc, 0), &lda,
-                             &one_cdd, &C_(0, jc), &ldc, 1, 1);
+                wgemm_serial(NN[0], TN[0], jc, jb, K, &alpha, &A_(0, 0), lda, &A_(jc, 0), lda, &one_cdd, &C_(0, jc), ldc);
             } else {
-                wgemm_serial_pd(TN, NN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &A_(0, jc), &lda,
-                             &one_cdd, &C_(0, jc), &ldc, 1, 1);
+                wgemm_serial(TN[0], NN[0], jc, jb, K, &alpha, &A_(0, 0), lda, &A_(0, jc), lda, &one_cdd, &C_(0, jc), ldc);
             }
         }
     }
 }
 
 extern "C" void wsyrk_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
+    const T *a, std::ptrdiff_t lda,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len)
+    T *c, std::ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
+    const char UPLO = up(&uplo);
+    const char TR = up(&trans);
 
     if (N == 0) return;
 

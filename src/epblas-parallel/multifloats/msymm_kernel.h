@@ -62,15 +62,14 @@ void msymm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::
                    const msymm_T *a, std::ptrdiff_t lda, const msymm_T *b, std::ptrdiff_t ldb,
                    msymm_T *c, std::ptrdiff_t ldc);
 
-/* Pure-serial Fortran entry. No OpenMP on this path; same ABI as msymm_. */
+/* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void msymm_serial(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+    char side, char uplo,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const msymm_T *alpha_,
-    const msymm_T *a, const int *lda_,
-    const msymm_T *b, const int *ldb_,
+    const msymm_T *a, std::ptrdiff_t lda,
+    const msymm_T *b, std::ptrdiff_t ldb,
     const msymm_T *beta_,
-    msymm_T *c, const int *ldc_,
-    std::size_t side_len, std::size_t uplo_len);
+    msymm_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_MSYMM_KERNEL_H */

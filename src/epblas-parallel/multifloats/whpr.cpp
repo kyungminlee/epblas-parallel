@@ -15,6 +15,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -77,19 +78,15 @@ static void whpr_contig(char UPLO, std::ptrdiff_t N, R alpha, T *ap, const T *x)
     }
 }
 
-extern "C" void whpr_(
-    const char *uplo,
-    const int *n_,
+static void whpr_core(
+    char uplo,
+    std::ptrdiff_t N,
     const R *alpha_,
-    const T *x, const int *incx_,
-    T *ap,
-    std::size_t uplo_len)
+    const T *x, std::ptrdiff_t incx,
+    T *ap)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_;
     const R alpha = *alpha_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || eq0(alpha)) return;
 
@@ -102,4 +99,8 @@ extern "C" void whpr_(
     std::vector<T> xs(static_cast<std::size_t>(N));
     for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
     whpr_contig(UPLO, N, alpha, ap, xs.data());
+}
+
+extern "C" {
+EPBLAS_FACADE_SPR(whpr, R, T)
 }

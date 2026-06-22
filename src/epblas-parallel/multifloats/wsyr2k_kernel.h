@@ -56,13 +56,12 @@ void wsyr2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::p
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wsyr2k_. */
 extern "C" void wsyr2k_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const wsyr2k_T *alpha_,
-    const wsyr2k_T *a, const int *lda_,
-    const wsyr2k_T *b, const int *ldb_,
+    const wsyr2k_T *a, std::ptrdiff_t lda,
+    const wsyr2k_T *b, std::ptrdiff_t ldb,
     const wsyr2k_T *beta_,
-    wsyr2k_T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len);
+    wsyr2k_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WSYR2K_KERNEL_H */

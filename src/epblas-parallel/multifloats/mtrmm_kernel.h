@@ -66,14 +66,12 @@ void mtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t row_lo, std::ptrdiff_t row_hi, std::ptrdiff_t N, std::ptrdiff_t nb, mtrmm_T alpha,
                    const mtrmm_T *a, std::ptrdiff_t lda, mtrmm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
 
-/* Pure-serial Fortran entry. No OpenMP on this path; same ABI as mtrmm_. */
+/* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void mtrmm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    char side, char uplo, char transa, char diag,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const mtrmm_T *alpha_,
-    const mtrmm_T *a, const int *lda_,
-    mtrmm_T *b, const int *ldb_,
-    std::size_t side_len, std::size_t uplo_len,
-    std::size_t transa_len, std::size_t diag_len);
+    const mtrmm_T *a, std::ptrdiff_t lda,
+    mtrmm_T *b, std::ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_MTRMM_KERNEL_H */

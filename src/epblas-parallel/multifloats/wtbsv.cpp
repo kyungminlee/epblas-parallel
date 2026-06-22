@@ -7,6 +7,7 @@
 #include "mf_util.h"
 #include "mf_pred.h"
 #include "mf_kernels.h"
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -79,20 +80,17 @@ static void wtbsv_serial_contig(char UPLO, char TR, std::ptrdiff_t noconj, std::
     }
 }
 
-extern "C" void wtbsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_, const int *k_,
-    const T *a, const int *lda_,
-    T *x, const int *incx_,
-    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+static void wtbsv_core(
+    char uplo, char trans, char diag,
+    std::ptrdiff_t N, std::ptrdiff_t k,
+    const T *a, std::ptrdiff_t lda,
+    T *x, std::ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, incx = *incx_;
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
+    const std::ptrdiff_t K = k;
+    const char UPLO = up(&uplo);
+    const char TR = up(&trans);
     const std::ptrdiff_t noconj = (TR == 'T');
-    const std::ptrdiff_t nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 
@@ -107,6 +105,10 @@ extern "C" void wtbsv_(
     for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
     wtbsv_serial_contig(UPLO, TR, noconj, nounit, N, K, a, lda, xs.data());
     for (std::ptrdiff_t i = 0; i < N; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
+}
+
+extern "C" {
+EPBLAS_FACADE_TBMV(wtbsv, T)
 }
 
 #undef A_

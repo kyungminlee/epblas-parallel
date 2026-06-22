@@ -12,6 +12,7 @@
 #include <immintrin.h>
 #include "mf_simd_exact.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -179,9 +180,8 @@ __attribute__((noinline)) static std::ptrdiff_t iwamax_omp(std::ptrdiff_t n, con
 }
 #endif
 
-extern "C" int iwamax_(const int *n_, const T *x, const int *incx_)
+static std::ptrdiff_t iwamax_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_;
     if (n < 1 || incx <= 0) return 0;
     if (n == 1) return 1;
 #ifdef _OPENMP
@@ -203,4 +203,8 @@ extern "C" int iwamax_(const int *n_, const T *x, const int *incx_)
         ix += incx;
     }
     return best;
+}
+
+extern "C" {
+EPBLAS_FACADE_IAMAX(iwamax, T)
 }

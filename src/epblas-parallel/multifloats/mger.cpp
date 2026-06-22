@@ -15,6 +15,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -79,15 +80,13 @@ mger_col(std::ptrdiff_t M, const double *x_hi, const double *x_lo, T t, T *ajT)
 }
 #endif
 
-extern "C" void mger_(
-    const int *m_, const int *n_,
+static void mger_core(
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *x, const int *incx_,
-    const T *y, const int *incy_,
-    T *a, const int *lda_)
+    const T *x, std::ptrdiff_t incx,
+    const T *y, std::ptrdiff_t incy,
+    T *a, std::ptrdiff_t lda)
 {
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
 
     if (M == 0 || N == 0 || eq0(alpha)) return;
@@ -140,6 +139,10 @@ extern "C" void mger_(
     }
     std::free(x_buf);
 #endif
+}
+
+extern "C" {
+EPBLAS_FACADE_GER(mger, T)
 }
 
 #undef A_

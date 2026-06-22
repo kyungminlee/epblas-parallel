@@ -15,6 +15,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -73,9 +74,8 @@ __attribute__((noinline)) static std::ptrdiff_t wscal_omp(std::ptrdiff_t n, T al
 }
 #endif
 
-extern "C" void wscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
+static void wscal_core(std::ptrdiff_t n, const T *alpha_, T *x, std::ptrdiff_t incx)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_;
     const T alpha = *alpha_;
     if (n <= 0 || ceq1(alpha)) return;
 
@@ -88,4 +88,8 @@ extern "C" void wscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
         std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         for (std::ptrdiff_t i = 0; i < n; ++i) { x[ix] = cmul(x[ix], alpha); ix += incx; }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SCAL(wscal, T, T)
 }

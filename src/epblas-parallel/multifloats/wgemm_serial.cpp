@@ -370,20 +370,17 @@ void wgemm_inner_kernel_simd_complex(std::ptrdiff_t ib, std::ptrdiff_t jb, std::
 #endif /* WBLAS_SIMD_DD */
 
 extern "C" void wgemm_serial(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+    char transa, char transb,
+    std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t transa_len, std::size_t transb_len)
+    T *c, std::ptrdiff_t ldc)
 {
-    const std::ptrdiff_t M = *m_, N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const std::ptrdiff_t ta = wgemm_trans_code(transa, transa_len);
-    const std::ptrdiff_t tb = wgemm_trans_code(transb, transb_len);
+    const std::ptrdiff_t ta = wgemm_trans_code(&transa, 1);
+    const std::ptrdiff_t tb = wgemm_trans_code(&transb, 1);
 
     if (M <= 0 || N <= 0) return;
 

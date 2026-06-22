@@ -11,6 +11,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -62,19 +63,15 @@ static void wher_contig(char UPLO, std::ptrdiff_t N, R alpha, T *a, std::size_t 
     }
 }
 
-extern "C" void wher_(
-    const char *uplo,
-    const int *n_,
+static void wher_core(
+    char uplo,
+    std::ptrdiff_t N,
     const R *alpha_,
-    const T *x, const int *incx_,
-    T *a, const int *lda_,
-    std::size_t uplo_len)
+    const T *x, std::ptrdiff_t incx,
+    T *a, std::ptrdiff_t lda)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_, lda = *lda_;
     const R alpha = *alpha_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || eq0(alpha)) return;
 
@@ -88,6 +85,10 @@ extern "C" void wher_(
     std::vector<T> xs(static_cast<std::size_t>(N));
     for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
     wher_contig(UPLO, N, alpha, a, lda, xs.data());
+}
+
+extern "C" {
+EPBLAS_FACADE_SYR(wher, R, T)
 }
 
 #undef A_

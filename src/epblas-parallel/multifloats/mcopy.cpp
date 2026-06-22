@@ -22,15 +22,15 @@
 #define MCOPY_OMP_MIN 8192
 #define MCOPY_OMP_MAX 262144
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
 
-extern "C" void mcopy_(const int *n_,
-                       const T *x, const int *incx_,
-                       T *y, const int *incy_)
+static void mcopy_core(std::ptrdiff_t n,
+                       const T *x, std::ptrdiff_t incx,
+                       T *y, std::ptrdiff_t incy)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
@@ -54,3 +54,5 @@ extern "C" void mcopy_(const int *n_,
         for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = x[ix]; ix += incx; iy += incy; }
     }
 }
+
+extern "C" { EPBLAS_FACADE_COPY(mcopy, T) }

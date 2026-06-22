@@ -135,14 +135,15 @@ static inline void band_row_window(std::ptrdiff_t t, bool upper, const std::ptrd
 
 /* even_slice(): the flat EQUAL-COUNT partition of [0,n) used by every threaded L1
  * / reduction sweep (copy/scal/axpy/rot/asum/dot/nrm2/argmax). Thread tid of nth
- * gets [lo,hi) = [n*tid/nth, n*(tid+1)/nth); the long-long product avoids std::ptrdiff_t
- * overflow before the divide. Byte-identical math previously re-derived in ~20
- * files — centralized here so the slice bounds (and their overflow guard) live
- * once. */
+ * gets [lo,hi) = [n*tid/nth, n*(tid+1)/nth); the product is formed in __int128
+ * so the multiply cannot overflow std::ptrdiff_t before the divide (ILP64-safe —
+ * the same guard as common/blas_omp.h's blas_part_bound). Byte-identical math
+ * previously re-derived in ~20 files — centralized here so the slice bounds (and
+ * their overflow guard) live once. */
 static inline void even_slice(std::ptrdiff_t n, std::ptrdiff_t tid, std::ptrdiff_t nth, std::ptrdiff_t &lo, std::ptrdiff_t &hi)
 {
-    lo = (std::ptrdiff_t)((long long)n * tid / nth);
-    hi = (std::ptrdiff_t)((long long)n * (tid + 1) / nth);
+    lo = (std::ptrdiff_t)((__int128)n * tid / nth);
+    hi = (std::ptrdiff_t)((__int128)n * (tid + 1) / nth);
 }
 
 }  // namespace mf_omp

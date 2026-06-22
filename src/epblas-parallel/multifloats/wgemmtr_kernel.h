@@ -50,13 +50,12 @@ void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wgemmtr_. */
 extern "C" void wgemmtr_serial(
-    const char *uplo, const char *transa, const char *transb,
-    const int *n_, const int *k_,
+    char uplo, char transa, char transb,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const wgemmtr_T *alpha_,
-    const wgemmtr_T *a, const int *lda_,
-    const wgemmtr_T *b, const int *ldb_,
+    const wgemmtr_T *a, std::ptrdiff_t lda,
+    const wgemmtr_T *b, std::ptrdiff_t ldb,
     const wgemmtr_T *beta_,
-    wgemmtr_T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t ta_len, std::size_t tb_len);
+    wgemmtr_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WGEMMTR_KERNEL_H */

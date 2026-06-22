@@ -60,12 +60,11 @@ void wsyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wsyrk_. */
 extern "C" void wsyrk_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const wsyrk_T *alpha_,
-    const wsyrk_T *a, const int *lda_,
+    const wsyrk_T *a, std::ptrdiff_t lda,
     const wsyrk_T *beta_,
-    wsyrk_T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len);
+    wsyrk_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WSYRK_KERNEL_H */

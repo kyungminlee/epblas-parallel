@@ -16,6 +16,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -99,12 +100,11 @@ __attribute__((noinline)) static std::ptrdiff_t wmrot_omp(std::ptrdiff_t n, R c,
 }
 #endif
 
-extern "C" void wmrot_(const int *n_,
-                       T *x, const int *incx_,
-                       T *y, const int *incy_,
+static void wmrot_core(std::ptrdiff_t n,
+                       T *x, std::ptrdiff_t incx,
+                       T *y, std::ptrdiff_t incy,
                        const R *c_, const R *s_)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const R c = *c_, s = *s_;
     if (n <= 0) return;
 
@@ -126,4 +126,8 @@ extern "C" void wmrot_(const int *n_,
             ix += incx; iy += incy;
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_ROT(wmrot, R, T)
 }

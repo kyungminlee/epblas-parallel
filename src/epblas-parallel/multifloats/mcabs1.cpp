@@ -21,3 +21,5 @@ extern "C" R mcabs1_(const T *z_)
     const T z = *z_;
     return mag(z.re) + mag(z.im);
 }
+/* ILP64 twin — no integer args, so the ABI is identical to LP64. */
+extern "C" R mcabs1_64_(const T *z_) { return mcabs1_(z_); }

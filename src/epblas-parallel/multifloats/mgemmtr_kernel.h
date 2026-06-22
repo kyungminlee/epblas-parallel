@@ -52,15 +52,14 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
                         mgemmtr_T *c, std::ptrdiff_t ldc,
                         bool upper, char ta, char tb);
 
-/* Pure-serial Fortran entry. No OpenMP on this path; same ABI as mgemmtr_. */
+/* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void mgemmtr_serial(
-    const char *uplo, const char *transa, const char *transb,
-    const int *n_, const int *k_,
+    char uplo, char transa, char transb,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const mgemmtr_T *alpha_,
-    const mgemmtr_T *a, const int *lda_,
-    const mgemmtr_T *b, const int *ldb_,
+    const mgemmtr_T *a, std::ptrdiff_t lda,
+    const mgemmtr_T *b, std::ptrdiff_t ldb,
     const mgemmtr_T *beta_,
-    mgemmtr_T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t ta_len, std::size_t tb_len);
+    mgemmtr_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_MGEMMTR_KERNEL_H */

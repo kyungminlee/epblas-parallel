@@ -19,6 +19,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -32,19 +33,15 @@ namespace {
 #define MSPR_OMP_MIN 64
 }
 
-extern "C" void mspr_(
-    const char *uplo,
-    const int *n_,
+static void mspr_core(
+    char uplo,
+    std::ptrdiff_t N,
     const T *alpha_,
-    const T *x, const int *incx_,
-    T *ap,
-    std::size_t uplo_len)
+    const T *x, std::ptrdiff_t incx,
+    T *ap)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_;
     const T alpha = *alpha_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
 
@@ -92,4 +89,8 @@ extern "C" void mspr_(
             mf_kernels::dd_axpy(N - j, xhp + j, xlp + j, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SPR(mspr, T, T)
 }

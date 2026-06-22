@@ -21,6 +21,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -55,20 +56,16 @@ inline void wher2_col_lower(std::ptrdiff_t j, std::ptrdiff_t N, T t1, T t2, cons
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
-extern "C" void wher2_(
-    const char *uplo,
-    const int *n_,
+static void wher2_core(
+    char uplo,
+    std::ptrdiff_t N,
     const T *alpha_,
-    const T *x, const int *incx_,
-    const T *y, const int *incy_,
-    T *a, const int *lda_,
-    std::size_t uplo_len)
+    const T *x, std::ptrdiff_t incx,
+    const T *y, std::ptrdiff_t incy,
+    T *a, std::ptrdiff_t lda)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || ceq0(alpha)) return;
 
@@ -121,6 +118,10 @@ extern "C" void wher2_(
             }
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SYR2(wher2, T)
 }
 
 #undef A_

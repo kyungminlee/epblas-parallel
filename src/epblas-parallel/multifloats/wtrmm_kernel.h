@@ -68,12 +68,10 @@ void wtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wtrmm_. */
 extern "C" void wtrmm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    char side, char uplo, char transa, char diag,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const wtrmm_T *alpha_,
-    const wtrmm_T *a, const int *lda_,
-    wtrmm_T *b, const int *ldb_,
-    std::size_t side_len, std::size_t uplo_len,
-    std::size_t transa_len, std::size_t diag_len);
+    const wtrmm_T *a, std::ptrdiff_t lda,
+    wtrmm_T *b, std::ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WTRMM_KERNEL_H */

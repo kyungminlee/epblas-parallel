@@ -18,6 +18,7 @@
 #define WHBMV_OMP_MIN 256
 #define WHBMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -159,21 +160,17 @@ static void whbmv_contig(bool upper, std::ptrdiff_t N, std::ptrdiff_t K, const T
     else       for (std::ptrdiff_t j = 0; j < N; ++j) whbmv_col_lower(j, N, K, a, lda, x, alpha, y);
 }
 
-extern "C" void whbmv_(
-    const char *uplo,
-    const int *n_, const int *k_,
+static void whbmv_core(
+    char uplo,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *x, const int *incx_,
+    const T *a, std::ptrdiff_t lda,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t uplo_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || (ceq0(alpha) && ceq1(beta))) return;
 
@@ -192,6 +189,10 @@ extern "C" void whbmv_(
     mf_kernels::gather_strided(N, y, incy, ys.data());
     whbmv_contig(UPLO == 'U', N, K, a, lda, xs.data(), alpha, ys.data());
     mf_kernels::scatter_strided(N, y, incy, ys.data());
+}
+
+extern "C" {
+EPBLAS_FACADE_SBMV(whbmv, T)
 }
 
 #undef A_

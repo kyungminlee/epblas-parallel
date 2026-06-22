@@ -15,6 +15,7 @@
  * when nested.
  */
 #include "msyr2k_kernel.h"
+#include "../common/epblas_facade.h"
 #include "mf_util.h"
 #include "mf_pred.h"
 #include <cstddef>
@@ -36,29 +37,25 @@ using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 }  // namespace
 
-extern "C" void msyr2k_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+static void msyr2k_core(
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len)
+    T *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        msyr2k_serial(uplo, trans, n_, k_, alpha_, a, lda_, b, ldb_, beta_,
-                      c, ldc_, uplo_len, trans_len);
+        msyr2k_serial(uplo, trans, N, K, alpha_, a, lda, b, ldb, beta_,
+                      c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = up(&uplo);
+    char TR = up(&trans);
     if (TR == 'C') TR = 'T';
     (void)lda; (void)ldb;
 
@@ -84,4 +81,8 @@ extern "C" void msyr2k_(
         const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
         msyr2k_block(jc, jb, N, K, UPLO, TR, alpha, beta, a, lda, b, ldb, c, ldc);
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SYR2K(msyr2k, T, T, T)
 }

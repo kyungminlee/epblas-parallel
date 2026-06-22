@@ -28,6 +28,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -85,8 +86,8 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const std::ptrdiff_t lo = (std::ptrdiff_t)((std::ptrdiff_t)M * tid / nt);
-        const std::ptrdiff_t hi = (std::ptrdiff_t)((std::ptrdiff_t)M * (tid + 1) / nt);
+        const std::ptrdiff_t lo = (std::ptrdiff_t)((__int128)M * tid / nt);
+        const std::ptrdiff_t hi = (std::ptrdiff_t)((__int128)M * (tid + 1) / nt);
         for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;
@@ -125,8 +126,8 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const std::ptrdiff_t lo = (std::ptrdiff_t)((std::ptrdiff_t)M * tid / nt);
-        const std::ptrdiff_t hi = (std::ptrdiff_t)((std::ptrdiff_t)M * (tid + 1) / nt);
+        const std::ptrdiff_t lo = (std::ptrdiff_t)((__int128)M * tid / nt);
+        const std::ptrdiff_t hi = (std::ptrdiff_t)((__int128)M * (tid + 1) / nt);
         for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;
@@ -205,22 +206,18 @@ static void mgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #endif
 }
 
-extern "C" void mgemv_(
-    const char *trans,
-    const int *m_, const int *n_,
+static void mgemv_core(
+    char trans,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *x, const int *incx_,
+    const T *a, std::ptrdiff_t lda_,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t trans_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)trans_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::size_t lda = static_cast<std::size_t>(*lda_);
-    const std::ptrdiff_t incx = *incx_, incy = *incy_;
+    const std::size_t lda = static_cast<std::size_t>(lda_);
     const T alpha = *alpha_, beta = *beta_;
-    char TR = up(trans);
+    char TR = up(&trans);
     if (TR == 'C') TR = 'T';
     const bool notrans = (TR == 'N');
 
@@ -246,6 +243,10 @@ extern "C" void mgemv_(
     if (notrans) mgemv_n_contig(M, N, alpha, a, lda, xs.data(), ys.data());
     else         mgemv_t_contig(M, N, alpha, a, lda, xs.data(), ys.data());
     mf_kernels::scatter_strided(leny, y, incy, ys.data());
+}
+
+extern "C" {
+EPBLAS_FACADE_GEMV(mgemv, T)
 }
 
 #undef A_

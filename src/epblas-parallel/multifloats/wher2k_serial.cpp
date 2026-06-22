@@ -477,59 +477,39 @@ void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::p
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
             if (TR == 'N') {
-                wgemm_serial_pd(NN, CN, &trailing, &jb, &K, &alpha,
-                             &A_(j0, 0), &lda, &B_(jc, 0), &ldb,
-                             &cone, &C_(j0, jc), &ldc, 1, 1);
-                wgemm_serial_pd(NN, CN, &trailing, &jb, &K, &alpha_conj,
-                             &B_(j0, 0), &ldb, &A_(jc, 0), &lda,
-                             &cone, &C_(j0, jc), &ldc, 1, 1);
+                wgemm_serial(NN[0], CN[0], trailing, jb, K, &alpha, &A_(j0, 0), lda, &B_(jc, 0), ldb, &cone, &C_(j0, jc), ldc);
+                wgemm_serial(NN[0], CN[0], trailing, jb, K, &alpha_conj, &B_(j0, 0), ldb, &A_(jc, 0), lda, &cone, &C_(j0, jc), ldc);
             } else {
-                wgemm_serial_pd(CN, NN, &trailing, &jb, &K, &alpha,
-                             &A_(0, j0), &lda, &B_(0, jc), &ldb,
-                             &cone, &C_(j0, jc), &ldc, 1, 1);
-                wgemm_serial_pd(CN, NN, &trailing, &jb, &K, &alpha_conj,
-                             &B_(0, j0), &ldb, &A_(0, jc), &lda,
-                             &cone, &C_(j0, jc), &ldc, 1, 1);
+                wgemm_serial(CN[0], NN[0], trailing, jb, K, &alpha, &A_(0, j0), lda, &B_(0, jc), ldb, &cone, &C_(j0, jc), ldc);
+                wgemm_serial(CN[0], NN[0], trailing, jb, K, &alpha_conj, &B_(0, j0), ldb, &A_(0, jc), lda, &cone, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR == 'N') {
-                wgemm_serial_pd(NN, CN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &B_(jc, 0), &ldb,
-                             &cone, &C_(0, jc), &ldc, 1, 1);
-                wgemm_serial_pd(NN, CN, &jc, &jb, &K, &alpha_conj,
-                             &B_(0, 0), &ldb, &A_(jc, 0), &lda,
-                             &cone, &C_(0, jc), &ldc, 1, 1);
+                wgemm_serial(NN[0], CN[0], jc, jb, K, &alpha, &A_(0, 0), lda, &B_(jc, 0), ldb, &cone, &C_(0, jc), ldc);
+                wgemm_serial(NN[0], CN[0], jc, jb, K, &alpha_conj, &B_(0, 0), ldb, &A_(jc, 0), lda, &cone, &C_(0, jc), ldc);
             } else {
-                wgemm_serial_pd(CN, NN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &B_(0, jc), &ldb,
-                             &cone, &C_(0, jc), &ldc, 1, 1);
-                wgemm_serial_pd(CN, NN, &jc, &jb, &K, &alpha_conj,
-                             &B_(0, 0), &ldb, &A_(0, jc), &lda,
-                             &cone, &C_(0, jc), &ldc, 1, 1);
+                wgemm_serial(CN[0], NN[0], jc, jb, K, &alpha, &A_(0, 0), lda, &B_(0, jc), ldb, &cone, &C_(0, jc), ldc);
+                wgemm_serial(CN[0], NN[0], jc, jb, K, &alpha_conj, &B_(0, 0), ldb, &A_(0, jc), lda, &cone, &C_(0, jc), ldc);
             }
         }
     }
 }
 
 extern "C" void wher2k_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const R *beta_,
-    T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len)
+    T *c, std::ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_;
     const R beta  = *beta_;
-    const char UPLO = up(uplo);
-    const char TR_c = up(trans);
+    const char UPLO = up(&uplo);
+    const char TR_c = up(&trans);
 
     if (N == 0) return;
 

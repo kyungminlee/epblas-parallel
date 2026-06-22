@@ -8,6 +8,7 @@
 #include "../common/blas_omp.h"
 #include "mf_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -108,9 +109,8 @@ __attribute__((noinline)) static std::ptrdiff_t mwasum_omp(std::ptrdiff_t n, con
 }
 #endif
 
-extern "C" R mwasum_(const int *n_, const T *x, const int *incx_)
+static R mwasum_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_;
     R s{0.0, 0.0};
     if (n < 1 || incx < 1) return s;
 
@@ -125,3 +125,5 @@ extern "C" R mwasum_(const int *n_, const T *x, const int *incx_)
         s = s + fabsdd(x[ix].re) + fabsdd(x[ix].im);
     return s;
 }
+
+extern "C" { EPBLAS_FACADE_ASUM(mwasum, R, T) }

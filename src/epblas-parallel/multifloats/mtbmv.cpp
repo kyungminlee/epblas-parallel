@@ -28,6 +28,7 @@
 #define MTBMV_OMP_MIN 256
 #define MTBMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -535,20 +536,16 @@ __attribute__((noinline)) static bool mtbmv_omp(
 }
 #endif
 
-extern "C" void mtbmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_, const int *k_,
-    const T *a, const int *lda_,
-    T *x, const int *incx_,
-    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+static void mtbmv_core(
+    char uplo, char trans, char diag,
+    std::ptrdiff_t N, std::ptrdiff_t K,
+    const T *a, std::ptrdiff_t lda,
+    T *x, std::ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, incx = *incx_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = up(&uplo);
+    char TR = up(&trans);
     if (TR == 'C') TR = 'T';
-    const std::ptrdiff_t nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 
@@ -574,6 +571,10 @@ extern "C" void mtbmv_(
 
     mtbmv_serial(UPLO == 'U', TR != 'N', nounit != 0,
                  N, K, a, lda, xp, incx);
+}
+
+extern "C" {
+EPBLAS_FACADE_TBMV(mtbmv, T)
 }
 
 #undef A_

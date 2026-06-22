@@ -16,6 +16,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -98,8 +99,8 @@ static bool mgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t lo = (static_cast<std::ptrdiff_t>(M) * tid) / nthreads;
-        std::ptrdiff_t hi = (static_cast<std::ptrdiff_t>(M) * (tid + 1)) / nthreads;
+        std::ptrdiff_t lo = (std::ptrdiff_t)((__int128)M * tid / nthreads);
+        std::ptrdiff_t hi = (std::ptrdiff_t)((__int128)M * (tid + 1) / nthreads);
         /* columns whose band [j-KU, j+KL] intersects owned rows [lo,hi) */
         std::ptrdiff_t jlo = (lo - KL > 0) ? (lo - KL) : 0;
         std::ptrdiff_t jhi = (hi - 1 + KU + 1 < N) ? (hi + KU) : N;
@@ -148,8 +149,8 @@ static bool mgbmv_t_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t lo = (static_cast<std::ptrdiff_t>(N) * tid) / nthreads;
-        std::ptrdiff_t hi = (static_cast<std::ptrdiff_t>(N) * (tid + 1)) / nthreads;
+        std::ptrdiff_t lo = (std::ptrdiff_t)((__int128)N * tid / nthreads);
+        std::ptrdiff_t hi = (std::ptrdiff_t)((__int128)N * (tid + 1) / nthreads);
         for (std::ptrdiff_t j = lo; j < hi; ++j) {
             std::ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
             std::ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
@@ -164,23 +165,18 @@ static bool mgbmv_t_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
 }
 #endif /* _OPENMP */
 
-extern "C" void mgbmv_(
-    const char *trans,
-    const int *m_, const int *n_,
-    const int *kl_, const int *ku_,
+static void mgbmv_core(
+    char trans,
+    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t KL, std::ptrdiff_t KU,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *x, const int *incx_,
+    const T *a, std::ptrdiff_t lda,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t trans_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)trans_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t KL = *kl_, KU = *ku_;
-    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    char TR = up(trans);
+    char TR = up(&trans);
     if (TR == 'C') TR = 'T';
 
     if (M == 0 || N == 0 || (eq0(alpha) && eq1(beta))) return;
@@ -282,6 +278,10 @@ extern "C" void mgbmv_(
             }
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_GBMV(mgbmv, T)
 }
 
 #undef A_

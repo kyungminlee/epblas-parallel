@@ -15,6 +15,7 @@
 #define WGBMV_OMP_MIN 64
 #define WGBMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -56,8 +57,8 @@ static bool wgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
     #pragma omp parallel num_threads(nthreads)
     {
         const std::ptrdiff_t tid = omp_get_thread_num();
-        const std::ptrdiff_t r0 = (std::ptrdiff_t)((std::ptrdiff_t)M * tid / nthreads);
-        const std::ptrdiff_t r1 = (std::ptrdiff_t)((std::ptrdiff_t)M * (tid + 1) / nthreads);
+        const std::ptrdiff_t r0 = blas_part_bound(M, tid, nthreads);
+        const std::ptrdiff_t r1 = blas_part_bound(M, tid + 1, nthreads);
         const std::ptrdiff_t j0 = (r0 - KL > 0) ? (r0 - KL) : 0;
         const std::ptrdiff_t j1 = (r1 + KU < N) ? (r1 + KU) : N;
         for (std::ptrdiff_t j = j0; j < j1; ++j) {
@@ -110,24 +111,18 @@ static void wgbmv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL
     }
 }
 
-extern "C" void wgbmv_(
-    const char *trans,
-    const int *m_, const int *n_,
-    const int *kl_, const int *ku_,
+static void wgbmv_core(
+    char trans,
+    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t KL, std::ptrdiff_t KU,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *x, const int *incx_,
+    const T *a, std::ptrdiff_t lda,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t trans_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)trans_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t KL = *kl_, KU = *ku_;
-    const std::size_t lda = static_cast<std::size_t>(*lda_);
-    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    const char TR = up(trans);
+    const char TR = up(&trans);
     const bool notrans = (TR == 'N');
     const bool conj = (TR == 'C');
 
@@ -155,6 +150,10 @@ extern "C" void wgbmv_(
     if (notrans) wgbmv_n_contig(M, N, KL, KU, alpha, a, lda, xs.data(), ys.data());
     else         wgbmv_t_contig(M, N, KL, KU, alpha, a, lda, xs.data(), ys.data(), conj);
     for (std::ptrdiff_t i = 0; i < leny; ++i) ybase[(std::ptrdiff_t)i * incy] = ys[i];
+}
+
+extern "C" {
+EPBLAS_FACADE_GBMV(wgbmv, T)
 }
 
 #undef A_

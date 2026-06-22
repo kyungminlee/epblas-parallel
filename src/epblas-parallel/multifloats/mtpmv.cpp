@@ -20,6 +20,7 @@
 #define MTPMV_OMP_MIN 128
 #define MTPMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -189,20 +190,16 @@ __attribute__((noinline)) static bool mtpmv_omp(
 }
 #endif
 
-extern "C" void mtpmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
+static void mtpmv_core(
+    char uplo, char trans, char diag,
+    std::ptrdiff_t N,
     const T *ap,
-    T *x, const int *incx_,
-    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+    T *x, std::ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = up(&uplo);
+    char TR = up(&trans);
     if (TR == 'C') TR = 'T';
-    const std::ptrdiff_t nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 
@@ -320,4 +317,8 @@ extern "C" void mtpmv_(
             }
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_TPMV(mtpmv, T)
 }

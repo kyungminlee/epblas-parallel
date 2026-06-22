@@ -20,6 +20,7 @@
 #include "wgemm_kernel.h"
 #include "mf_kernels.h"
 #include "mf_pred.h"
+#include "../common/epblas_facade.h"
 #include <cstddef>
 #include <cstdlib>
 #ifdef _OPENMP
@@ -37,30 +38,27 @@ using mf_pred::ceq1;
 const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 }  // namespace
 
-extern "C" void wgemm_(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+static void wgemm_core(
+    char transa, char transb,
+    std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t transa_len, std::size_t transb_len)
+    T *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Already inside a team → run serially in this thread, no nested region. */
     if (omp_in_parallel()) {
-        wgemm_serial(transa, transb, m_, n_, k_, alpha_, a, lda_,
-                     b, ldb_, beta_, c, ldc_, transa_len, transb_len);
+        wgemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+                     b, ldb, beta_, c, ldc);
         return;
     }
 #endif
 
-    const std::ptrdiff_t M = *m_, N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const std::ptrdiff_t ta = wgemm_trans_code(transa, transa_len);
-    const std::ptrdiff_t tb = wgemm_trans_code(transb, transb_len);
+    const std::ptrdiff_t ta = wgemm_trans_code(&transa, 1);
+    const std::ptrdiff_t tb = wgemm_trans_code(&transb, 1);
 
     if (M <= 0 || N <= 0) return;
 
@@ -148,4 +146,8 @@ extern "C" void wgemm_(
         std::free(Bp);
 #endif /* WBLAS_SIMD_DD */
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_GEMM(wgemm, T)
 }

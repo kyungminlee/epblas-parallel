@@ -71,15 +71,15 @@ void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::p
                   const wher2k_T *a, std::ptrdiff_t lda, const wher2k_T *b, std::ptrdiff_t ldb,
                   wher2k_T *c, std::ptrdiff_t ldc);
 
-/* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wher2k_. */
+/* Pure-serial by-value entry. No OpenMP on this path; shares the ptrdiff_t
+ * core ABI of wher2k_core. */
 extern "C" void wher2k_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const wher2k_T *alpha_,
-    const wher2k_T *a, const int *lda_,
-    const wher2k_T *b, const int *ldb_,
+    const wher2k_T *a, std::ptrdiff_t lda,
+    const wher2k_T *b, std::ptrdiff_t ldb,
     const wher2k_R *beta_,
-    wher2k_T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len);
+    wher2k_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WHER2K_KERNEL_H */

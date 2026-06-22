@@ -329,66 +329,59 @@ void msyr2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::p
 
     diag_dispatch(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR);
 
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-
     if (UPLO == 'L') {
         const std::ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
             if (TR == 'N') {
-                mgemm_serial_pd(NN, TN, &trailing, &jb, &K, &alpha,
-                             &A_(j0, 0), &lda, &B_(jc, 0), &ldb,
-                             &one_dd, &C_(j0, jc), &ldc, 1, 1);
-                mgemm_serial_pd(NN, TN, &trailing, &jb, &K, &alpha,
-                             &B_(j0, 0), &ldb, &A_(jc, 0), &lda,
-                             &one_dd, &C_(j0, jc), &ldc, 1, 1);
+                mgemm_serial('N', 'T', trailing, jb, K, &alpha,
+                             &A_(j0, 0), lda, &B_(jc, 0), ldb,
+                             &one_dd, &C_(j0, jc), ldc);
+                mgemm_serial('N', 'T', trailing, jb, K, &alpha,
+                             &B_(j0, 0), ldb, &A_(jc, 0), lda,
+                             &one_dd, &C_(j0, jc), ldc);
             } else {
-                mgemm_serial_pd(TN, NN, &trailing, &jb, &K, &alpha,
-                             &A_(0, j0), &lda, &B_(0, jc), &ldb,
-                             &one_dd, &C_(j0, jc), &ldc, 1, 1);
-                mgemm_serial_pd(TN, NN, &trailing, &jb, &K, &alpha,
-                             &B_(0, j0), &ldb, &A_(0, jc), &lda,
-                             &one_dd, &C_(j0, jc), &ldc, 1, 1);
+                mgemm_serial('T', 'N', trailing, jb, K, &alpha,
+                             &A_(0, j0), lda, &B_(0, jc), ldb,
+                             &one_dd, &C_(j0, jc), ldc);
+                mgemm_serial('T', 'N', trailing, jb, K, &alpha,
+                             &B_(0, j0), ldb, &A_(0, jc), lda,
+                             &one_dd, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR == 'N') {
-                mgemm_serial_pd(NN, TN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &B_(jc, 0), &ldb,
-                             &one_dd, &C_(0, jc), &ldc, 1, 1);
-                mgemm_serial_pd(NN, TN, &jc, &jb, &K, &alpha,
-                             &B_(0, 0), &ldb, &A_(jc, 0), &lda,
-                             &one_dd, &C_(0, jc), &ldc, 1, 1);
+                mgemm_serial('N', 'T', jc, jb, K, &alpha,
+                             &A_(0, 0), lda, &B_(jc, 0), ldb,
+                             &one_dd, &C_(0, jc), ldc);
+                mgemm_serial('N', 'T', jc, jb, K, &alpha,
+                             &B_(0, 0), ldb, &A_(jc, 0), lda,
+                             &one_dd, &C_(0, jc), ldc);
             } else {
-                mgemm_serial_pd(TN, NN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &B_(0, jc), &ldb,
-                             &one_dd, &C_(0, jc), &ldc, 1, 1);
-                mgemm_serial_pd(TN, NN, &jc, &jb, &K, &alpha,
-                             &B_(0, 0), &ldb, &A_(0, jc), &lda,
-                             &one_dd, &C_(0, jc), &ldc, 1, 1);
+                mgemm_serial('T', 'N', jc, jb, K, &alpha,
+                             &A_(0, 0), lda, &B_(0, jc), ldb,
+                             &one_dd, &C_(0, jc), ldc);
+                mgemm_serial('T', 'N', jc, jb, K, &alpha,
+                             &B_(0, 0), ldb, &A_(0, jc), lda,
+                             &one_dd, &C_(0, jc), ldc);
             }
         }
     }
 }
 
 extern "C" void msyr2k_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len)
+    T *c, std::ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = up(&uplo);
+    char TR = up(&trans);
     if (TR == 'C') TR = 'T';
 
     if (N == 0) return;

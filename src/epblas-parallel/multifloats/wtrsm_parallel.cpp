@@ -19,6 +19,7 @@
 #include "wtrsm_kernel.h"
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "../common/epblas_facade.h"
 #include <cstddef>
 #include <cctype>
 #ifdef _OPENMP
@@ -37,30 +38,24 @@ using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 }  // namespace
 
-extern "C" void wtrsm_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+static void wtrsm_core(
+    char side, char uplo, char transa, char diag,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    std::size_t side_len, std::size_t uplo_len,
-    std::size_t transa_len, std::size_t diag_len)
+    const T *a, std::ptrdiff_t lda,
+    T *b, std::ptrdiff_t ldb)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        wtrsm_serial(side, uplo, transa, diag, m_, n_, alpha_, a, lda_,
-                     b, ldb_, side_len, uplo_len, transa_len, diag_len);
+        wtrsm_serial(side, uplo, transa, diag, M, N, alpha_, a, lda, b, ldb);
         return;
     }
 #endif
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    const char TR = up(transa);
-    const std::ptrdiff_t nounit = (up(diag) != 'U');
+    const char SIDE = up(&side);
+    const char UPLO = up(&uplo);
+    const char TR = up(&transa);
+    const std::ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -76,8 +71,8 @@ extern "C" void wtrsm_(
             {
                 std::ptrdiff_t tid = omp_get_thread_num();
                 std::ptrdiff_t nt  = omp_get_num_threads();
-                std::ptrdiff_t js  = static_cast<std::ptrdiff_t>((long long)N * tid / nt);
-                std::ptrdiff_t je  = static_cast<std::ptrdiff_t>((long long)N * (tid + 1) / nt);
+                std::ptrdiff_t js  = blas_part_bound(N, tid, nt);
+                std::ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);
                 wtrsm_L_slice(UPLO, TR, use_blocked, js, je, M, nb, alpha,
                               a, lda, b, ldb, nounit);
             }
@@ -99,11 +94,15 @@ extern "C" void wtrsm_(
 #ifdef _OPENMP
             if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
 #endif
-            std::ptrdiff_t i_lo = (std::ptrdiff_t)((long long)M * tid / nt);
-            std::ptrdiff_t i_hi = (std::ptrdiff_t)((long long)M * (tid + 1) / nt);
+            std::ptrdiff_t i_lo = (std::ptrdiff_t)((__int128)M * tid / nt);
+            std::ptrdiff_t i_hi = (std::ptrdiff_t)((__int128)M * (tid + 1) / nt);
             if (tid > 0)      i_lo &= ~3;
             if (tid < nt - 1) i_hi &= ~3;
             wtrsm_R_slice(UPLO, TR, i_lo, i_hi, N, alpha, a, lda, b, ldb, nounit);
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_TRMM(wtrsm, T)
 }

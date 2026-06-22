@@ -67,13 +67,12 @@ void whemm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as whemm_. */
 extern "C" void whemm_serial(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+    char side, char uplo,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const whemm_T *alpha_,
-    const whemm_T *a, const int *lda_,
-    const whemm_T *b, const int *ldb_,
+    const whemm_T *a, std::ptrdiff_t lda,
+    const whemm_T *b, std::ptrdiff_t ldb,
     const whemm_T *beta_,
-    whemm_T *c, const int *ldc_,
-    std::size_t side_len, std::size_t uplo_len);
+    whemm_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WHEMM_KERNEL_H */

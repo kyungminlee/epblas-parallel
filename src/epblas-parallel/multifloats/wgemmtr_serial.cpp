@@ -150,9 +150,7 @@ void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
             const std::ptrdiff_t m = jc;
             const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            wgemm_serial_pd(ta_s, tb_s, &m, &jb, &K, &alpha,
-                         ablk, &lda, bblk, &ldb,
-                         &one_cdd, &C_(0, jc), &ldc, 1, 1);
+            wgemm_serial(ta_s[0], tb_s[0], m, jb, K, &alpha, ablk, lda, bblk, ldb, &one_cdd, &C_(0, jc), ldc);
         }
     } else {
         const std::ptrdiff_t trailing = N - jc - jb;
@@ -160,30 +158,24 @@ void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
             const std::ptrdiff_t r0 = jc + jb;
             const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            wgemm_serial_pd(ta_s, tb_s, &trailing, &jb, &K, &alpha,
-                         ablk, &lda, bblk, &ldb,
-                         &one_cdd, &C_(r0, jc), &ldc, 1, 1);
+            wgemm_serial(ta_s[0], tb_s[0], trailing, jb, K, &alpha, ablk, lda, bblk, ldb, &one_cdd, &C_(r0, jc), ldc);
         }
     }
 }
 
 extern "C" void wgemmtr_serial(
-    const char *uplo, const char *transa, const char *transb,
-    const int *n_, const int *k_,
+    char uplo, char transa, char transb,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t ta_len, std::size_t tb_len)
+    T *c, std::ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)ta_len; (void)tb_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const bool upper = (up(uplo) == 'U');
-    const char ta = up(transa);
-    const char tb = up(transb);
+    const bool upper = (up(&uplo) == 'U');
+    const char ta = up(&transa);
+    const char tb = up(&transb);
 
     if (N <= 0) return;
 

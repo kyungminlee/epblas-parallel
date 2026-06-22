@@ -24,6 +24,7 @@
 #define WHEMV_OMP_MIN 256
 #define WHEMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -304,21 +305,17 @@ static void whemv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t l
 #endif
 }
 
-extern "C" void whemv_(
-    const char *uplo,
-    const int *n_,
+static void whemv_core(
+    char uplo,
+    std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *x, const int *incx_,
+    const T *a, std::ptrdiff_t lda,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t uplo_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0) return;
 
@@ -337,6 +334,10 @@ extern "C" void whemv_(
     mf_kernels::gather_strided(N, y, incy, ys.data());
     whemv_contig(UPLO == 'L', N, a, lda, alpha, xs.data(), ys.data());
     mf_kernels::scatter_strided(N, y, incy, ys.data());
+}
+
+extern "C" {
+EPBLAS_FACADE_SYMV(whemv, T)
 }
 
 #undef A_

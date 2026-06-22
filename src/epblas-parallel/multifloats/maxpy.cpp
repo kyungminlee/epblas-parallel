@@ -16,6 +16,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -76,11 +77,10 @@ __attribute__((noinline)) static std::ptrdiff_t maxpy_omp(std::ptrdiff_t n, T al
 }
 #endif
 
-extern "C" void maxpy_(const int *n_, const T *alpha_,
-                       const T *x, const int *incx_,
-                       T *y, const int *incy_)
+static void maxpy_core(std::ptrdiff_t n, const T *alpha_,
+                       const T *x, std::ptrdiff_t incx,
+                       T *y, std::ptrdiff_t incy)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
     if (n <= 0 || eq0(alpha)) return;
 
@@ -95,3 +95,5 @@ extern "C" void maxpy_(const int *n_, const T *alpha_,
         for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = y[iy] + alpha * x[ix]; ix += incx; iy += incy; }
     }
 }
+
+extern "C" { EPBLAS_FACADE_AXPY(maxpy, T, T) }

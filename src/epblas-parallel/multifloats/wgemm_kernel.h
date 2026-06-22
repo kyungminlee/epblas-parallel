@@ -58,38 +58,16 @@ void wgemm_inner_kernel_simd_complex(std::ptrdiff_t ib, std::ptrdiff_t jb, std::
                                      wgemm_T *C, std::ptrdiff_t ldc);
 #endif /* WBLAS_SIMD_DD */
 
-/* Pure single-thread GEMM. Same Fortran-ABI signature as wgemm_ — no OpenMP. */
+/* Pure single-thread GEMM, by-value ptrdiff_t core (no OpenMP). Shares the
+ * ABI of wgemm_core so callers already inside a parallel region (e.g. wtrsm)
+ * swap the symbol name only. */
 extern "C" void wgemm_serial(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+    char transa, char transb,
+    std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t K,
     const wgemm_T *alpha_,
-    const wgemm_T *a, const int *lda_,
-    const wgemm_T *b, const int *ldb_,
+    const wgemm_T *a, std::ptrdiff_t lda,
+    const wgemm_T *b, std::ptrdiff_t ldb,
     const wgemm_T *beta_,
-    wgemm_T *c, const int *ldc_,
-    std::size_t transa_len, std::size_t transb_len);
-
-/* ptrdiff_t-by-reference forwarder to the Fortran-ABI wgemm_serial entry. The
- * internal L3 callers carry block dimensions as ptrdiff_t; this marshals them to
- * the int* ABI in one place so call sites stay identical apart from the name.
- *
- * TODO(core/facade split): remove this forwarder once wgemm_serial is split into
- * a ptrdiff_t-by-value core and a thin Fortran-ABI facade. The internal callers
- * then call the core directly and these *_pd renames revert to wgemm_serial. */
-static inline void wgemm_serial_pd(
-    const char *transa, const char *transb,
-    const std::ptrdiff_t *m_, const std::ptrdiff_t *n_, const std::ptrdiff_t *k_,
-    const wgemm_T *alpha_,
-    const wgemm_T *a, const std::ptrdiff_t *lda_,
-    const wgemm_T *b, const std::ptrdiff_t *ldb_,
-    const wgemm_T *beta_,
-    wgemm_T *c, const std::ptrdiff_t *ldc_,
-    std::size_t transa_len, std::size_t transb_len)
-{
-    const int m = (int)*m_, n = (int)*n_, k = (int)*k_;
-    const int lda = (int)*lda_, ldb = (int)*ldb_, ldc = (int)*ldc_;
-    wgemm_serial(transa, transb, &m, &n, &k, alpha_, a, &lda, b, &ldb,
-                 beta_, c, &ldc, transa_len, transb_len);
-}
+    wgemm_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WGEMM_KERNEL_H */

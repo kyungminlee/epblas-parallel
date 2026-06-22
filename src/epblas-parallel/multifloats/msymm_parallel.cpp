@@ -14,6 +14,7 @@
  * beta scale (schedule(static)). Delegates to msymm_serial when nested.
  */
 #include "msymm_kernel.h"
+#include "../common/epblas_facade.h"
 #include "mf_util.h"
 #include "mf_pred.h"
 #include <cstddef>
@@ -35,29 +36,25 @@ using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 }  // namespace
 
-extern "C" void msymm_(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+static void msymm_core(
+    char side, char uplo,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t side_len, std::size_t uplo_len)
+    T *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        msymm_serial(side, uplo, m_, n_, alpha_, a, lda_, b, ldb_, beta_,
-                     c, ldc_, side_len, uplo_len);
+        msymm_serial(side, uplo, M, N, alpha_, a, lda, b, ldb, beta_,
+                     c, ldc);
         return;
     }
 #endif
-    (void)side_len; (void)uplo_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
+    const char SIDE = up(&side);
+    const char UPLO = up(&uplo);
     (void)lda; (void)ldb;
 
     if (M == 0 || N == 0) return;
@@ -103,4 +100,8 @@ extern "C" void msymm_(
             msymm_block_R(jc, jb, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SYMM(msymm, T)
 }

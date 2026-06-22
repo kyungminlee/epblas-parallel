@@ -13,6 +13,7 @@
 #define MNRM2_OMP_MIN 8192
 #define MNRM2_MAX_CPUS 64
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -157,9 +158,8 @@ __attribute__((noinline)) static bool mnrm2_omp(std::ptrdiff_t n, const T *x, T 
 }
 #endif
 
-extern "C" T mnrm2_(const int *n_, const T *x, const int *incx_)
+static T mnrm2_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_;
     T zero{0.0, 0.0};
     if (n < 1 || incx < 1) return zero;
     if (n == 1) return fabsdd(x[0]);
@@ -194,3 +194,5 @@ extern "C" T mnrm2_(const int *n_, const T *x, const int *incx_)
     }
     return scale * sqrtdd(s);
 }
+
+extern "C" { EPBLAS_FACADE_ASUM(mnrm2, T, T) }

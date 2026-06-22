@@ -373,9 +373,6 @@ void msymm_block_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t M, std::
                    T alpha, T beta, const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
                    T *c, std::ptrdiff_t ldc)
 {
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-
     /* beta-scale this block's rows across all columns */
     for (std::ptrdiff_t j = 0; j < N; ++j) {
         T *cj = c + static_cast<std::size_t>(j) * ldc;
@@ -384,29 +381,29 @@ void msymm_block_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t M, std::
     }
     if (UPLO == 'L') {
         if (ic > 0) {
-            mgemm_serial_pd(NN, NN, &ib, &N, &ic, &alpha,
-                         &A_(ic, 0), &lda, &B_(0, 0), &ldb,
-                         &one_dd, &C_(ic, 0), &ldc, 1, 1);
+            mgemm_serial('N', 'N', ib, N, ic, &alpha,
+                         &A_(ic, 0), lda, &B_(0, 0), ldb,
+                         &one_dd, &C_(ic, 0), ldc);
         }
         diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
         const std::ptrdiff_t trailing = M - ic - ib;
         if (trailing > 0) {
-            mgemm_serial_pd(TN, NN, &ib, &N, &trailing, &alpha,
-                         &A_(ic + ib, ic), &lda, &B_(ic + ib, 0), &ldb,
-                         &one_dd, &C_(ic, 0), &ldc, 1, 1);
+            mgemm_serial('T', 'N', ib, N, trailing, &alpha,
+                         &A_(ic + ib, ic), lda, &B_(ic + ib, 0), ldb,
+                         &one_dd, &C_(ic, 0), ldc);
         }
     } else {
         if (ic > 0) {
-            mgemm_serial_pd(TN, NN, &ib, &N, &ic, &alpha,
-                         &A_(0, ic), &lda, &B_(0, 0), &ldb,
-                         &one_dd, &C_(ic, 0), &ldc, 1, 1);
+            mgemm_serial('T', 'N', ib, N, ic, &alpha,
+                         &A_(0, ic), lda, &B_(0, 0), ldb,
+                         &one_dd, &C_(ic, 0), ldc);
         }
         diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
         const std::ptrdiff_t trailing = M - ic - ib;
         if (trailing > 0) {
-            mgemm_serial_pd(NN, NN, &ib, &N, &trailing, &alpha,
-                         &A_(ic, ic + ib), &lda, &B_(ic + ib, 0), &ldb,
-                         &one_dd, &C_(ic, 0), &ldc, 1, 1);
+            mgemm_serial('N', 'N', ib, N, trailing, &alpha,
+                         &A_(ic, ic + ib), lda, &B_(ic + ib, 0), ldb,
+                         &one_dd, &C_(ic, 0), ldc);
         }
     }
 }
@@ -415,9 +412,6 @@ void msymm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::
                    T alpha, T beta, const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
                    T *c, std::ptrdiff_t ldc)
 {
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-
     /* beta-scale this block's columns over all rows */
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         T *cj = c + static_cast<std::size_t>(j) * ldc;
@@ -426,49 +420,45 @@ void msymm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::
     }
     if (UPLO == 'L') {
         if (jc > 0) {
-            mgemm_serial_pd(NN, TN, &M, &jb, &jc, &alpha,
-                         &B_(0, 0), &ldb, &A_(jc, 0), &lda,
-                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+            mgemm_serial('N', 'T', M, jb, jc, &alpha,
+                         &B_(0, 0), ldb, &A_(jc, 0), lda,
+                         &one_dd, &C_(0, jc), ldc);
         }
         diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
         const std::ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
-            mgemm_serial_pd(NN, NN, &M, &jb, &trailing, &alpha,
-                         &B_(0, jc + jb), &ldb, &A_(jc + jb, jc), &lda,
-                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+            mgemm_serial('N', 'N', M, jb, trailing, &alpha,
+                         &B_(0, jc + jb), ldb, &A_(jc + jb, jc), lda,
+                         &one_dd, &C_(0, jc), ldc);
         }
     } else {
         if (jc > 0) {
-            mgemm_serial_pd(NN, NN, &M, &jb, &jc, &alpha,
-                         &B_(0, 0), &ldb, &A_(0, jc), &lda,
-                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+            mgemm_serial('N', 'N', M, jb, jc, &alpha,
+                         &B_(0, 0), ldb, &A_(0, jc), lda,
+                         &one_dd, &C_(0, jc), ldc);
         }
         diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
         const std::ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
-            mgemm_serial_pd(NN, TN, &M, &jb, &trailing, &alpha,
-                         &B_(0, jc + jb), &ldb, &A_(jc, jc + jb), &lda,
-                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+            mgemm_serial('N', 'T', M, jb, trailing, &alpha,
+                         &B_(0, jc + jb), ldb, &A_(jc, jc + jb), lda,
+                         &one_dd, &C_(0, jc), ldc);
         }
     }
 }
 
 extern "C" void msymm_serial(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+    char side, char uplo,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t side_len, std::size_t uplo_len)
+    T *c, std::ptrdiff_t ldc)
 {
-    (void)side_len; (void)uplo_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
+    const char SIDE = up(&side);
+    const char UPLO = up(&uplo);
 
     if (M == 0 || N == 0) return;
 

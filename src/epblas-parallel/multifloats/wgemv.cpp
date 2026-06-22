@@ -26,6 +26,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -134,10 +135,10 @@ static void wgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
         if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
         /* Disjoint row slices, boundaries floored to a multiple of 4 so the
          * vector blocks stay within one thread; the last thread owns the tail. */
-        const std::ptrdiff_t i_lo = static_cast<std::ptrdiff_t>((static_cast<long long>(M) * tid) / nt) & ~3;
+        const std::ptrdiff_t i_lo = blas_part_bound(M, tid, nt) & ~static_cast<std::ptrdiff_t>(3);
         const std::ptrdiff_t i_hi = (tid == nt - 1)
             ? M
-            : (static_cast<std::ptrdiff_t>((static_cast<long long>(M) * (tid + 1)) / nt) & ~3);
+            : (blas_part_bound(M, tid + 1, nt) & ~static_cast<std::ptrdiff_t>(3));
         wgemv_n_simd_rows(i_lo, i_hi, N, alpha, a, lda, x,
                           y_rh, y_rl, y_ih, y_il);
     }
@@ -156,8 +157,8 @@ static void wgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
     {
         std::ptrdiff_t tid = 0, nt = 1;
         if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
-        const std::ptrdiff_t i_lo = (static_cast<long long>(M) * tid) / nt;
-        const std::ptrdiff_t i_hi = (static_cast<long long>(M) * (tid + 1)) / nt;
+        const std::ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
+        const std::ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
         for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (!ceq0(xj)) {
@@ -274,21 +275,17 @@ static void wgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #endif
 }
 
-extern "C" void wgemv_(
-    const char *trans,
-    const int *m_, const int *n_,
+static void wgemv_core(
+    char trans,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *x, const int *incx_,
+    const T *a, std::ptrdiff_t lda,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t trans_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)trans_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    const char TR = up(trans);
+    const char TR = up(&trans);
 
     if (M == 0 || N == 0) return;
 
@@ -323,6 +320,10 @@ extern "C" void wgemv_(
         wgemv_t_contig(M, N, alpha, a, lda, xs.data(), ys.data(), conj_a);
         mf_kernels::scatter_strided(N, y, incy, ys.data());
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_GEMV(wgemv, T)
 }
 
 #undef A_

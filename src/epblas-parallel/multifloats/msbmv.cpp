@@ -19,6 +19,7 @@
 #define MSBMV_OMP_MIN 256
 #define MSBMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -175,21 +176,17 @@ __attribute__((noinline)) static bool msbmv_omp(
 }
 #endif
 
-extern "C" void msbmv_(
-    const char *uplo,
-    const int *n_, const int *k_,
+static void msbmv_core(
+    char uplo,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *x, const int *incx_,
+    const T *a, std::ptrdiff_t lda,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t uplo_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || (eq0(alpha) && eq1(beta))) return;
 
@@ -258,6 +255,10 @@ extern "C" void msbmv_(
             jx += incx; jy += incy;
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SBMV(msbmv, T)
 }
 
 #undef A_

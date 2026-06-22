@@ -16,6 +16,7 @@
 #define WTRMV_OMP_MIN 128
 #define WTRMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -258,19 +259,15 @@ static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
     }
 }
 
-extern "C" void wtrmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *a, const int *lda_,
-    T *x, const int *incx_,
-    std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
+static void wtrmv_core(
+    char uplo, char trans, char diag,
+    std::ptrdiff_t N,
+    const T *a, std::ptrdiff_t lda,
+    T *x, std::ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t lda = *lda_, incx = *incx_;
-    const char UPLO = up(uplo);
-    const char TR   = up(trans);
-    const char DIAG = up(diag);
+    const char UPLO = up(&uplo);
+    const char TR   = up(&trans);
+    const char DIAG = up(&diag);
     const bool nounit = (DIAG != 'U');
 
     if (N == 0) return;
@@ -343,6 +340,10 @@ extern "C" void wtrmv_(
             }
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_TRMV(wtrmv, T)
 }
 
 #undef A_

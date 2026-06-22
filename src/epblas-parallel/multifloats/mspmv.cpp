@@ -20,6 +20,7 @@
 #define MSPMV_OMP_MIN 256
 #define MSPMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -180,21 +181,17 @@ __attribute__((noinline)) static bool mspmv_omp(
 }
 #endif
 
-extern "C" void mspmv_(
-    const char *uplo,
-    const int *n_,
+static void mspmv_core(
+    char uplo,
+    std::ptrdiff_t N,
     const T *alpha_,
     const T *ap,
-    const T *x, const int *incx_,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t uplo_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || (eq0(alpha) && eq1(beta))) return;
 
@@ -266,4 +263,8 @@ extern "C" void mspmv_(
             }
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SPMV(mspmv, T)
 }

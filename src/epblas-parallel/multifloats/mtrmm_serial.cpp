@@ -590,8 +590,6 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
     const std::ptrdiff_t my_N = j_end - j_start;
     if (my_N <= 0) return;
 
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
     T *B_chunk = &B_(0, j_start);
 
     if (V == LLN) {
@@ -607,10 +605,10 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
             mtrmm_lln_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
-                mgemm_serial_pd(NN, NN, &ib, &my_N, &ic, &alpha,
-                             &A_(ic, 0), &lda,
-                             B_chunk, &ldb, &one_dd,
-                             &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial('N', 'N', ib, my_N, ic, &alpha,
+                             &A_(ic, 0), lda,
+                             B_chunk, ldb, &one_dd,
+                             &B_chunk[ic], ldb);
             }
             ic -= nb;
         }
@@ -628,10 +626,10 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
             const std::ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
                 const std::ptrdiff_t j0 = ic + ib;
-                mgemm_serial_pd(NN, NN, &ib, &my_N, &trailing, &alpha,
-                             &A_(ic, j0), &lda,
-                             &B_chunk[j0], &ldb, &one_dd,
-                             &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial('N', 'N', ib, my_N, trailing, &alpha,
+                             &A_(ic, j0), lda,
+                             &B_chunk[j0], ldb, &one_dd,
+                             &B_chunk[ic], ldb);
             }
         }
     } else if (V == LLT) {
@@ -648,10 +646,10 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
             const std::ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
                 const std::ptrdiff_t i0 = ic + ib;
-                mgemm_serial_pd(TN, NN, &ib, &my_N, &trailing, &alpha,
-                             &A_(i0, ic), &lda,
-                             &B_chunk[i0], &ldb, &one_dd,
-                             &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial('T', 'N', ib, my_N, trailing, &alpha,
+                             &A_(i0, ic), lda,
+                             &B_chunk[i0], ldb, &one_dd,
+                             &B_chunk[ic], ldb);
             }
         }
     } else { /* LUT */
@@ -667,10 +665,10 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
             mtrmm_lut_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
-                mgemm_serial_pd(TN, NN, &ib, &my_N, &ic, &alpha,
-                             &A_(0, ic), &lda,
-                             B_chunk, &ldb, &one_dd,
-                             &B_chunk[ic], &ldb, 1, 1);
+                mgemm_serial('T', 'N', ib, my_N, ic, &alpha,
+                             &A_(0, ic), lda,
+                             B_chunk, ldb, &one_dd,
+                             &B_chunk[ic], ldb);
             }
             ic -= nb;
         }
@@ -686,8 +684,6 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
                      std::ptrdiff_t N, std::ptrdiff_t nb, T alpha,
                      const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
     const std::ptrdiff_t my_M = i_end - i_start;
     if (my_M <= 0) return;
     T *B_chunk = &B_(i_start, 0);
@@ -705,10 +701,10 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
             const std::ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
                 const std::ptrdiff_t k0 = jc + jb;
-                mgemm_serial_pd(NN, NN, &my_M, &jb, &trailing, &alpha,
-                             &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
-                             &A_(k0, jc), &lda, &one_dd,
-                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                mgemm_serial('N', 'N', my_M, jb, trailing, &alpha,
+                             &B_chunk[static_cast<std::size_t>(k0) * ldb], ldb,
+                             &A_(k0, jc), lda, &one_dd,
+                             &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
         }
     } else if (V == RUN) {
@@ -723,10 +719,10 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
             if (jc > 0) {
-                mgemm_serial_pd(NN, NN, &my_M, &jb, &jc, &alpha,
-                             B_chunk, &ldb,
-                             &A_(0, jc), &lda, &one_dd,
-                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                mgemm_serial('N', 'N', my_M, jb, jc, &alpha,
+                             B_chunk, ldb,
+                             &A_(0, jc), lda, &one_dd,
+                             &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
             jc -= nb;
         }
@@ -742,10 +738,10 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
             if (jc > 0) {
-                mgemm_serial_pd(NN, TN, &my_M, &jb, &jc, &alpha,
-                             B_chunk, &ldb,
-                             &A_(jc, 0), &lda, &one_dd,
-                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                mgemm_serial('N', 'T', my_M, jb, jc, &alpha,
+                             B_chunk, ldb,
+                             &A_(jc, 0), lda, &one_dd,
+                             &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
             jc -= nb;
         }
@@ -762,10 +758,10 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
             const std::ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
                 const std::ptrdiff_t k0 = jc + jb;
-                mgemm_serial_pd(NN, TN, &my_M, &jb, &trailing, &alpha,
-                             &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
-                             &A_(jc, k0), &lda, &one_dd,
-                             &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
+                mgemm_serial('N', 'T', my_M, jb, trailing, &alpha,
+                             &B_chunk[static_cast<std::size_t>(k0) * ldb], ldb,
+                             &A_(jc, k0), lda, &one_dd,
+                             &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
         }
     }
@@ -848,24 +844,19 @@ void mtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
 }
 
 extern "C" void mtrmm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+    char side, char uplo, char transa, char diag,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    std::size_t side_len, std::size_t uplo_len,
-    std::size_t transa_len, std::size_t diag_len)
+    const T *a, std::ptrdiff_t lda,
+    T *b, std::ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const std::ptrdiff_t M = *m_, N = *n_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    char TR = up(transa);
+    const char SIDE = up(&side);
+    const char UPLO = up(&uplo);
+    char TR = up(&transa);
     if (TR == 'C') TR = 'T';   /* real DD: conj-trans ≡ trans */
-    const std::ptrdiff_t nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

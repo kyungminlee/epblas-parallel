@@ -130,11 +130,6 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
                         T *c, std::ptrdiff_t ldc,
                         bool upper, char ta, char tb)
 {
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-    const char *ta_s = (ta == 'N') ? NN : TN;
-    const char *tb_s = (tb == 'N') ? NN : TN;
-
     /* Beta-scale the triangle slice for cols [jc, jc+jb). */
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t is = upper ? 0 : j;
@@ -153,9 +148,9 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
             const std::ptrdiff_t m = jc;
             const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            mgemm_serial_pd(ta_s, tb_s, &m, &jb, &K, &alpha,
-                         ablk, &lda, bblk, &ldb,
-                         &one_dd, &C_(0, jc), &ldc, 1, 1);
+            mgemm_serial(ta, tb, m, jb, K, &alpha,
+                         ablk, lda, bblk, ldb,
+                         &one_dd, &C_(0, jc), ldc);
         }
     } else {
         const std::ptrdiff_t trailing = N - jc - jb;
@@ -163,30 +158,26 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
             const std::ptrdiff_t r0 = jc + jb;
             const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            mgemm_serial_pd(ta_s, tb_s, &trailing, &jb, &K, &alpha,
-                         ablk, &lda, bblk, &ldb,
-                         &one_dd, &C_(r0, jc), &ldc, 1, 1);
+            mgemm_serial(ta, tb, trailing, jb, K, &alpha,
+                         ablk, lda, bblk, ldb,
+                         &one_dd, &C_(r0, jc), ldc);
         }
     }
 }
 
 extern "C" void mgemmtr_serial(
-    const char *uplo, const char *transa, const char *transb,
-    const int *n_, const int *k_,
+    char uplo, char transa, char transb,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, std::ptrdiff_t lda,
+    const T *b, std::ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t ta_len, std::size_t tb_len)
+    T *c, std::ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)ta_len; (void)tb_len;
-    const std::ptrdiff_t N = *n_, K = *k_;
-    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const bool upper = (up(uplo) == 'U');
-    char ta = up(transa); if (ta == 'C') ta = 'T';
-    char tb = up(transb); if (tb == 'C') tb = 'T';
+    const bool upper = (up(&uplo) == 'U');
+    char ta = up(&transa); if (ta == 'C') ta = 'T';
+    char tb = up(&transb); if (tb == 'C') tb = 'T';
 
     if (N <= 0) return;
 

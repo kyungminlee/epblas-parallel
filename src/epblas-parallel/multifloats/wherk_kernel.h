@@ -70,12 +70,11 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wherk_. */
 extern "C" void wherk_serial(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+    char uplo, char trans,
+    std::ptrdiff_t N, std::ptrdiff_t K,
     const wherk_R *alpha_,
-    const wherk_T *a, const int *lda_,
+    const wherk_T *a, std::ptrdiff_t lda,
     const wherk_R *beta_,
-    wherk_T *c, const int *ldc_,
-    std::size_t uplo_len, std::size_t trans_len);
+    wherk_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WHERK_KERNEL_H */

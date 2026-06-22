@@ -8,6 +8,7 @@
 #include "../common/blas_omp.h"
 #include "mf_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -113,11 +114,10 @@ __attribute__((noinline)) static std::ptrdiff_t wdotc_omp(std::ptrdiff_t n, cons
 }
 #endif
 
-extern "C" T wdotc_(const int *n_,
-                    const T *x, const int *incx_,
-                    const T *y, const int *incy_)
+static T wdotc_core(std::ptrdiff_t n,
+                    const T *x, std::ptrdiff_t incx,
+                    const T *y, std::ptrdiff_t incy)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     T s{R{0.0, 0.0}, R{0.0, 0.0}};
     if (n <= 0) return s;
 
@@ -132,4 +132,8 @@ extern "C" T wdotc_(const int *n_,
     std::ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
     for (std::ptrdiff_t i = 0; i < n; ++i) { s = cadd(s, cmul(cconj(x[ix]), y[iy])); ix += incx; iy += incy; }
     return s;
+}
+
+extern "C" {
+EPBLAS_FACADE_DOT(wdotc, T, T)
 }

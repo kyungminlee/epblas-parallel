@@ -64,13 +64,12 @@ void wsymm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wsymm_. */
 extern "C" void wsymm_serial(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+    char side, char uplo,
+    std::ptrdiff_t M, std::ptrdiff_t N,
     const wsymm_T *alpha_,
-    const wsymm_T *a, const int *lda_,
-    const wsymm_T *b, const int *ldb_,
+    const wsymm_T *a, std::ptrdiff_t lda,
+    const wsymm_T *b, std::ptrdiff_t ldb,
     const wsymm_T *beta_,
-    wsymm_T *c, const int *ldc_,
-    std::size_t side_len, std::size_t uplo_len);
+    wsymm_T *c, std::ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_MULTIFLOATS_WSYMM_KERNEL_H */

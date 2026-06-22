@@ -16,6 +16,7 @@
 #define WHPMV_OMP_MIN 256
 #define WHPMV_MAX_CPUS 256
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -149,21 +150,17 @@ static void whpmv_contig(bool upper, std::ptrdiff_t N, const T *ap, const T *x, 
     else       for (std::ptrdiff_t j = 0; j < N; ++j) whpmv_col_lower(j, N, ap, x, alpha, y);
 }
 
-extern "C" void whpmv_(
-    const char *uplo,
-    const int *n_,
+static void whpmv_core(
+    char uplo,
+    std::ptrdiff_t N,
     const T *alpha_,
     const T *ap,
-    const T *x, const int *incx_,
+    const T *x, std::ptrdiff_t incx,
     const T *beta_,
-    T *y, const int *incy_,
-    std::size_t uplo_len)
+    T *y, std::ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || (ceq0(alpha) && ceq1(beta))) return;
 
@@ -181,4 +178,8 @@ extern "C" void whpmv_(
     mf_kernels::gather_strided(N, y, incy, ys.data());
     whpmv_contig(UPLO == 'U', N, ap, xs.data(), alpha, ys.data());
     mf_kernels::scatter_strided(N, y, incy, ys.data());
+}
+
+extern "C" {
+EPBLAS_FACADE_SPMV(whpmv, T)
 }

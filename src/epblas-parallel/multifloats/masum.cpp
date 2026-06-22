@@ -11,6 +11,7 @@
 #include "../common/blas_omp.h"
 #include "mf_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using T = mf::float64x2;
@@ -109,9 +110,8 @@ __attribute__((noinline)) static std::ptrdiff_t masum_omp(std::ptrdiff_t n, cons
 }
 #endif
 
-extern "C" T masum_(const int *n_, const T *x, const int *incx_)
+static T masum_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
 {
-    const std::ptrdiff_t n = *n_, incx = *incx_;
     T s{0.0, 0.0};
     if (n < 1 || incx < 1) return s;
 
@@ -127,3 +127,5 @@ extern "C" T masum_(const int *n_, const T *x, const int *incx_)
         s0 = s0 + fabsdd(x[ix]);
     return s0 + s1;
 }
+
+extern "C" { EPBLAS_FACADE_ASUM(masum, T, T) }

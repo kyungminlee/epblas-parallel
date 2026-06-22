@@ -21,6 +21,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -55,20 +56,16 @@ inline void whpr2_col_lower(std::ptrdiff_t j, std::ptrdiff_t N, T t1, T t2, cons
 }
 }
 
-extern "C" void whpr2_(
-    const char *uplo,
-    const int *n_,
+static void whpr2_core(
+    char uplo,
+    std::ptrdiff_t N,
     const T *alpha_,
-    const T *x, const int *incx_,
-    const T *y, const int *incy_,
-    T *ap,
-    std::size_t uplo_len)
+    const T *x, std::ptrdiff_t incx,
+    const T *y, std::ptrdiff_t incy,
+    T *ap)
 {
-    (void)uplo_len;
-    const std::ptrdiff_t N = *n_;
-    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
-    const char UPLO = up(uplo);
+    const char UPLO = up(&uplo);
 
     if (N == 0 || ceq0(alpha)) return;
 
@@ -121,4 +118,8 @@ extern "C" void whpr2_(
             }
         }
     }
+}
+
+extern "C" {
+EPBLAS_FACADE_SPR2(whpr2, T)
 }
