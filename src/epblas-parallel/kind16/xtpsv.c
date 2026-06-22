@@ -37,13 +37,13 @@ static inline size_t cbU(ptrdiff_t j) {
 #endif
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
- * incx!=1 fallback. noconj = (TR=='T'); NoTrans never conjugates. */
-static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
+ * incx!=1 fallback. noconj = (TRANS=='T'); NoTrans never conjugates. */
+static void xtpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                          ptrdiff_t n, const T *restrict ap, T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0Q + 0.0Qi;
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
@@ -94,7 +94,7 @@ static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
         }
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 ptrdiff_t jx = kx + (n - 1) * incx;
@@ -168,12 +168,12 @@ static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within fp128 fuzz tol. */
-static void xtpsv_block(char UPLO, char TR, bool noconj, bool nounit,
+static void xtpsv_block(char UPLO, char TRANS, bool noconj, bool nounit,
                         ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, const T *restrict ap, T *restrict x)
 {
     const T zero = 0.0Q + 0.0Qi;
     const bool lower = (UPLO == 'L');
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 if (x[j] == zero) continue;
@@ -217,7 +217,7 @@ static void xtpsv_block(char UPLO, char TR, bool noconj, bool nounit,
  * off-diagonal coupling is threaded over disjoint output rows. Returns 1 if it
  * handled the call. */
 __attribute__((noinline)) static bool xtpsv_omp(
-    char UPLO, char TR, bool noconj, bool nounit, ptrdiff_t n,
+    char UPLO, char TRANS, bool noconj, bool nounit, ptrdiff_t n,
     const T *restrict ap, T *restrict x)
 {
     if (n < XTPSV_OMP_MIN || !blas_omp_should_thread())
@@ -226,13 +226,13 @@ __attribute__((noinline)) static bool xtpsv_omp(
     if (nthreads > XTPSV_MAX_CPUS) nthreads = XTPSV_MAX_CPUS;
     const T zero = 0.0Q + 0.0Qi;
     const bool lower = (UPLO == 'L');
-    const bool trans = (TR != 'N');
+    const bool trans = (TRANS != 'N');
 
     if (!trans) {
         if (lower) {
             for (ptrdiff_t j0 = 0; j0 < n; j0 += XTPSV_BLK) {
                 ptrdiff_t j1 = j0 + XTPSV_BLK; if (j1 > n) j1 = n;
-                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                xtpsv_block(UPLO, TRANS, noconj, nounit, j0, j1, n, ap, x);
                 if (j1 >= n) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -250,7 +250,7 @@ __attribute__((noinline)) static bool xtpsv_omp(
         } else {
             for (ptrdiff_t j1 = n; j1 > 0; j1 -= XTPSV_BLK) {
                 ptrdiff_t j0 = j1 - XTPSV_BLK; if (j0 < 0) j0 = 0;
-                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                xtpsv_block(UPLO, TRANS, noconj, nounit, j0, j1, n, ap, x);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -284,7 +284,7 @@ __attribute__((noinline)) static bool xtpsv_omp(
                         }
                     }
                 }
-                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                xtpsv_block(UPLO, TRANS, noconj, nounit, j0, j1, n, ap, x);
             }
         } else {                                           /* forward, k < j */
             for (ptrdiff_t j0 = 0; j0 < n; j0 += XTPSV_BLK) {
@@ -303,7 +303,7 @@ __attribute__((noinline)) static bool xtpsv_omp(
                         }
                     }
                 }
-                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                xtpsv_block(UPLO, TRANS, noconj, nounit, j0, j1, n, ap, x);
             }
         }
     }
@@ -318,19 +318,19 @@ void xtpsv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = blas_up(trans);
+    const bool noconj = (TRANS == 'T');
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (incx == 1 && n >= XTPSV_OMP_MIN && blas_omp_max_threads() > 1
-        && xtpsv_omp(UPLO, TR, noconj, nounit, n, ap, x))
+        && xtpsv_omp(UPLO, TRANS, noconj, nounit, n, ap, x))
         return;
 #endif
 
-    xtpsv_serial(UPLO, TR, noconj, nounit, n, ap, x, incx);
+    xtpsv_serial(UPLO, TRANS, noconj, nounit, n, ap, x, incx);
 }
 
 EPBLAS_FACADE_TPMV(xtpsv, T)

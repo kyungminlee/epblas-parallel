@@ -108,27 +108,27 @@ static void qsymm_pack_l(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
 
 void qsymm_pack_a_sym(const T *a, ptrdiff_t lda,
                       ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
-                      char uplo, T *Ap)
+                      char UPLO, T *Ap)
 {
     /* SIDE=L: A is the M×K symmetric operand. Rows (ib) form the panel/strip
      * axis (posX), the K depth (pb) streams (m, posY). */
-    if (uplo == 'U') qsymm_pack_u(pb, ib, a, lda, ic, pc, Ap);
+    if (UPLO == 'U') qsymm_pack_u(pb, ib, a, lda, ic, pc, Ap);
     else             qsymm_pack_l(pb, ib, a, lda, ic, pc, Ap);
 }
 
 void qsymm_pack_b_sym(const T *a, ptrdiff_t lda,
                       ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
-                      char uplo, T *Bp)
+                      char UPLO, T *Bp)
 {
     /* SIDE=R: A is the K×N symmetric operand in the B slot. Columns (jb) form
      * the panel/strip axis (posX), the K depth (pb) streams (m, posY). By
      * symmetry this is the identical walk to the A pack. */
-    if (uplo == 'U') qsymm_pack_u(pb, jb, a, lda, jc, pc, Bp);
+    if (UPLO == 'U') qsymm_pack_u(pb, jb, a, lda, jc, pc, Bp);
     else             qsymm_pack_l(pb, jb, a, lda, jc, pc, Bp);
 }
 
 void qsymm_serial(
-    char side_c, char uplo_c,
+    char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
@@ -137,8 +137,8 @@ void qsymm_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = blas_up(side_c);
-    const char UPLO = blas_up(uplo_c);
+    const char SIDE = blas_up(side);
+    const char UPLO = blas_up(uplo);
 
     if (m <= 0 || n <= 0) return;
 

@@ -141,7 +141,7 @@ static void xtrmm_core(
     const T alpha = *alpha_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(transa);
+    const char TRANS = blas_up(transa);
     const bool nounit = (blas_up(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -153,10 +153,10 @@ static void xtrmm_core(
     }
 
     if (SIDE == 'L') {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') xtrmm_lln(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrmm_lun(m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') xtrmm_llt(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrmm_lut(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
@@ -164,10 +164,10 @@ static void xtrmm_core(
             else             xtrmm_luc(m, n, alpha, a, lda, b, ldb, nounit);
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') xtrmm_rln(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrmm_run(m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') xtrmm_rlt(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrmm_rut(m, n, alpha, a, lda, b, ldb, nounit);
         } else {

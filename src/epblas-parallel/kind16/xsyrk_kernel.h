@@ -45,7 +45,7 @@ ptrdiff_t xsyrk_nb(void);
 void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k,
                  xsyrk_T alpha, xsyrk_T beta,
                  const xsyrk_T *a, ptrdiff_t lda, xsyrk_T *c, ptrdiff_t ldc,
-                 char UPLO, char TR);
+                 char UPLO, char TRANS);
 
 /* C := beta*C over the columns [j_start, j_end) — the alpha==0 / K==0 quick
  * path (and the per-block pre-scale). */

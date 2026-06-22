@@ -5,9 +5,9 @@
  * Serial reference is the in-place Netlib column sweep (sequential). The
  * threaded path (incx==1, large N) dissolves the in-place dependency with an
  * external output buffer, mirroring kind10 ytrmv (Addendum 36):
- *   - TR='N': column j scatters into x[i] (overlapping across threads) ->
+ *   - TRANS='N': column j scatters into x[i] (overlapping across threads) ->
  *     per-thread y_priv + reduce.
- *   - TR='T'/'C': y[j] = dot(op(column j), x), disjoint per thread -> shared
+ *   - TRANS='T'/'C': y[j] = dot(op(column j), x), disjoint per thread -> shared
  *     buffer, no reduce, copy back. ConjTrans conjugates band + diagonal.
  * Quad complex arithmetic is heavy under libquadmath, so per-column work
  * amortizes the fork/buffer almost immediately. Serial reference byte-for-byte. */
@@ -35,7 +35,7 @@ typedef __complex128 T;
 #ifdef _OPENMP
 /* Threaded out-of-place path (incx==1). Returns 1 if handled, 0 to fall back to
  * the serial reference. noinline so the serial loops compile in a clean register
- * context. trans_t = (TR != 'N'), conj_a = (TR == 'C'). */
+ * context. trans_t = (TRANS != 'N'), conj_a = (TRANS == 'C'). */
 __attribute__((noinline))
 static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdiff_t n, ptrdiff_t lda,
                      const T *restrict a, T *restrict x)
@@ -46,7 +46,7 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
     const T one  = 1.0Q + 0.0Qi;
 
     if (!trans_t) {
-        /* TR='N': per-thread y_priv + reduction (cross-thread overlapping writes). */
+        /* TRANS='N': per-thread y_priv + reduction (cross-thread overlapping writes). */
         T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
         if (!y_priv_all) return 0;
         #pragma omp parallel num_threads(nthreads)
@@ -80,7 +80,7 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
         free(y_priv_all);
         return 1;
     } else {
-        /* TR='T'/'C': each j writes its own output slot. */
+        /* TRANS='T'/'C': each j writes its own output slot. */
         T *y_buf = (T *)malloc((size_t)n * sizeof(T));
         if (!y_buf) return 0;
         #pragma omp parallel num_threads(nthreads)
@@ -122,7 +122,7 @@ void xtrmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    const char TR   = blas_up(trans);
+    const char TRANS   = blas_up(trans);
     const char DIAG = blas_up(diag);
     const bool nounit = (DIAG != 'U');
 
@@ -131,9 +131,9 @@ void xtrmv_core(
 
     if (incx == 1) {
 #ifdef _OPENMP
-        if (xtrmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, lda, a, x)) return;
+        if (xtrmv_omp(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit, n, lda, a, x)) return;
 #endif
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     const T temp = x[j];
@@ -154,7 +154,7 @@ void xtrmv_core(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     T temp = x[j];
@@ -192,7 +192,7 @@ void xtrmv_core(
             T *xc = (T *)malloc((size_t)n * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < n; ++i) xc[i] = x[kx + i * incx];
-                if (xtrmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, lda, a, xc)) {
+                if (xtrmv_omp(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit, n, lda, a, xc)) {
                     for (ptrdiff_t i = 0; i < n; ++i) x[kx + i * incx] = xc[i];
                     free(xc);
                     return;
@@ -201,7 +201,7 @@ void xtrmv_core(
             }
         }
 #endif
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     const T temp = x[kx + j * incx];
@@ -218,7 +218,7 @@ void xtrmv_core(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     T temp = x[kx + j * incx];

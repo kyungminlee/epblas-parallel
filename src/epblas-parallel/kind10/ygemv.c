@@ -54,11 +54,11 @@ void ygemv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char TR = blas_up(trans);
+    const char TRANS = blas_up(trans);
 
     if (m == 0 || n == 0) return;
 
-    const ptrdiff_t leny = (TR == 'N') ? m : n;
+    const ptrdiff_t leny = (TRANS == 'N') ? m : n;
 
     /* β-scale y. */
     if (beta != ONE) {
@@ -77,7 +77,7 @@ void ygemv_core(
 
     if (alpha == ZERO) return;
 
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (incx == 1 && incy == 1) {
             const bool use_omp = (m >= YGEMV_OMP_MIN && blas_omp_should_thread());
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
@@ -211,7 +211,7 @@ void ygemv_core(
          * Single-acc dot product (complex inner-loop is x87-stack-heavy;
          * K-unroll with split accumulators regressed on similar paths
          * in ygemm — keep single accumulator). */
-        const bool conj_a = (TR == 'C');
+        const bool conj_a = (TRANS == 'C');
         if (incx == 1 && incy == 1) {
             const bool use_omp = (n >= YGEMV_OMP_MIN && blas_omp_should_thread());
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause

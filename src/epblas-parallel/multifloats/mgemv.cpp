@@ -216,9 +216,9 @@ static void mgemv_core(
 {
     const std::size_t lda = static_cast<std::size_t>(lda_);
     const T alpha = *alpha_, beta = *beta_;
-    char TR = up(&trans);
-    if (TR == 'C') TR = 'T';
-    const bool notrans = (TR == 'N');
+    char TRANS = up(&trans);
+    if (TRANS == 'C') TRANS = 'T';
+    const bool notrans = (TRANS == 'N');
 
     if (m == 0 || n == 0) return;
 

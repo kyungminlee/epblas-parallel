@@ -37,13 +37,13 @@ static inline size_t cbU(ptrdiff_t j) {
 #endif
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
- * incx!=1 fallback. noconj = (TR=='T'); NoTrans never conjugates. */
-static void ytpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
+ * incx!=1 fallback. noconj = (TRANS=='T'); NoTrans never conjugates. */
+static void ytpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                          ptrdiff_t n, const T *restrict ap, T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0L + 0.0Li;
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
@@ -94,7 +94,7 @@ static void ytpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
         }
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 ptrdiff_t jx = kx + (n - 1) * incx;
@@ -168,13 +168,13 @@ static void ytpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within fp80 fuzz tol. */
-static void ytpsv_block(char UPLO, char TR, bool noconj, bool nounit,
+static void ytpsv_block(char UPLO, char TRANS, bool noconj, bool nounit,
                         ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n,
                         const T *restrict ap, T *restrict x)
 {
     const T zero = 0.0L + 0.0Li;
     const bool lower = (UPLO == 'L');
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 if (x[j] == zero) continue;
@@ -218,7 +218,7 @@ static void ytpsv_block(char UPLO, char TR, bool noconj, bool nounit,
  * off-diagonal coupling is threaded over disjoint output rows. Returns 1 if it
  * handled the call. */
 __attribute__((noinline)) static bool ytpsv_omp(
-    char UPLO, char TR, bool noconj, bool nounit, ptrdiff_t n,
+    char UPLO, char TRANS, bool noconj, bool nounit, ptrdiff_t n,
     const T *restrict ap, T *restrict x)
 {
     if (n < YTPSV_OMP_MIN || !blas_omp_should_thread())
@@ -227,13 +227,13 @@ __attribute__((noinline)) static bool ytpsv_omp(
     if (nthreads > YTPSV_MAX_CPUS) nthreads = YTPSV_MAX_CPUS;
     const T zero = 0.0L + 0.0Li;
     const bool lower = (UPLO == 'L');
-    const bool trans = (TR != 'N');
+    const bool trans = (TRANS != 'N');
 
     if (!trans) {
         if (lower) {
             for (ptrdiff_t j0 = 0; j0 < n; j0 += YTPSV_BLK) {
                 ptrdiff_t j1 = j0 + YTPSV_BLK; if (j1 > n) j1 = n;
-                ytpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                ytpsv_block(UPLO, TRANS, noconj, nounit, j0, j1, n, ap, x);
                 if (j1 >= n) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -251,7 +251,7 @@ __attribute__((noinline)) static bool ytpsv_omp(
         } else {
             for (ptrdiff_t j1 = n; j1 > 0; j1 -= YTPSV_BLK) {
                 ptrdiff_t j0 = j1 - YTPSV_BLK; if (j0 < 0) j0 = 0;
-                ytpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                ytpsv_block(UPLO, TRANS, noconj, nounit, j0, j1, n, ap, x);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -285,7 +285,7 @@ __attribute__((noinline)) static bool ytpsv_omp(
                         }
                     }
                 }
-                ytpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                ytpsv_block(UPLO, TRANS, noconj, nounit, j0, j1, n, ap, x);
             }
         } else {                                           /* forward, k < j */
             for (ptrdiff_t j0 = 0; j0 < n; j0 += YTPSV_BLK) {
@@ -304,7 +304,7 @@ __attribute__((noinline)) static bool ytpsv_omp(
                         }
                     }
                 }
-                ytpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                ytpsv_block(UPLO, TRANS, noconj, nounit, j0, j1, n, ap, x);
             }
         }
     }
@@ -319,19 +319,19 @@ static void ytpsv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = blas_up(trans);
+    const bool noconj = (TRANS == 'T');
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (incx == 1 && n >= YTPSV_OMP_MIN && blas_omp_max_threads() > 1
-        && ytpsv_omp(UPLO, TR, noconj, nounit, n, ap, x))
+        && ytpsv_omp(UPLO, TRANS, noconj, nounit, n, ap, x))
         return;
 #endif
 
-    ytpsv_serial(UPLO, TR, noconj, nounit, n, ap, x, incx);
+    ytpsv_serial(UPLO, TRANS, noconj, nounit, n, ap, x, incx);
 }
 
 EPBLAS_FACADE_TPMV(ytpsv, T)

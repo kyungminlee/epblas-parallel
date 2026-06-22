@@ -188,7 +188,7 @@ void xtrmm_serial(
     const T alpha = *alpha_;
     const char SIDE = xtrmm_uplo(side);
     const char UPLO = xtrmm_uplo(uplo);
-    const char TR = xtrmm_uplo(transa);
+    const char TRANS = xtrmm_uplo(transa);
     const bool nounit = (xtrmm_uplo(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -200,10 +200,10 @@ void xtrmm_serial(
     }
 
     if (SIDE == 'L') {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') xtrmm_lln_core(0, n, m, alpha, a, lda, b, ldb, nounit);
             else             xtrmm_lun_core(0, n, m, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') xtrmm_llTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, 0);
             else             xtrmm_luTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, 0);
         } else {
@@ -211,10 +211,10 @@ void xtrmm_serial(
             else             xtrmm_luTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, 1);
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') xtrmm_rln_core(0, m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrmm_run_core(0, m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') xtrmm_rlTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, 0);
             else             xtrmm_ruTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, 0);
         } else {

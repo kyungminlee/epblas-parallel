@@ -45,20 +45,20 @@ void xtbmv_core(
 {
     const T zero = 0.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = blas_up(trans);
+    const bool noconj = (TRANS == 'T');
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (n >= XTBMV_OMP_MIN && blas_omp_max_threads() > 1
-        && xtbmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, k, a, lda, x, incx))
+        && xtbmv_omp(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit, n, k, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
@@ -103,7 +103,7 @@ void xtbmv_core(
         }
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {

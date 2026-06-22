@@ -394,15 +394,15 @@ static void wtbmv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    const char TR = up(&trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = up(&trans);
+    const bool noconj = (TRANS == 'T');
     const bool nounit = (up(&diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (n >= WTBMV_OMP_MIN && blas_omp_available()
-        && wtbmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit != 0, n, k, a, lda, x, incx))
+        && wtbmv_omp(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit != 0, n, k, a, lda, x, incx))
         return;
 #endif
 
@@ -411,16 +411,16 @@ static void wtbmv_core(
      * Handles any stride (strided x is gathered to SoA up front; the SoA core's
      * 4x band speedup repays the O(N) gather). Alloc failure falls through to
      * the scalar cores below. */
-    if (TR == 'N'
+    if (TRANS == 'N'
         && wtbmv_notrans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, x, incx))
         return;
-    if ((TR == 'T' || TR == 'C')
-        && wtbmv_trans_soa(UPLO == 'U', TR == 'C', nounit != 0, n, k, a, lda, x, incx))
+    if ((TRANS == 'T' || TRANS == 'C')
+        && wtbmv_trans_soa(UPLO == 'U', TRANS == 'C', nounit != 0, n, k, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
                     if (!ceq0(x[j])) {
@@ -463,7 +463,7 @@ static void wtbmv_core(
         }
     } else {
         std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = 0; j < n; ++j) {

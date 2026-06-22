@@ -176,18 +176,18 @@ static void mgbmv_core(
     T *y, std::ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    char TR = up(&trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = up(&trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (m == 0 || n == 0 || (eq0(alpha) && eq1(beta))) return;
 
-    const std::ptrdiff_t leny = (TR == 'N') ? m : n;
-    const std::ptrdiff_t lenx = (TR == 'N') ? n : m;
+    const std::ptrdiff_t leny = (TRANS == 'N') ? m : n;
+    const std::ptrdiff_t lenx = (TRANS == 'N') ? n : m;
 
     mf_kernels::scale_y(leny, beta, y, incy);
     if (eq0(alpha)) return;
 
-    if (TR == 'N') {
+    if (TRANS == 'N') {
 #ifdef _OPENMP
         /* NoTrans threads for contiguous AND strided x/y (the helper gathers strided
          * x and writes strided y); bit-identical to the serial scatter (ascending-j). */

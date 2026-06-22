@@ -32,13 +32,13 @@ static inline size_t cbU(ptrdiff_t j) {
 #endif
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
- * incx!=1 fallback. TR is already normalized ('C' folded to 'T' by the caller). */
-static void etpsv_serial(char UPLO, char TR, bool nounit,
+ * incx!=1 fallback. TRANS is already normalized ('C' folded to 'T' by the caller). */
+static void etpsv_serial(char UPLO, char TRANS, bool nounit,
                          ptrdiff_t n, const T *restrict ap, T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0L;
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
@@ -96,7 +96,7 @@ static void etpsv_serial(char UPLO, char TR, bool nounit,
         }
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 ptrdiff_t jx = kx + (n - 1) * incx;
@@ -170,13 +170,13 @@ static void etpsv_serial(char UPLO, char TR, bool nounit,
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within fp80 fuzz tol. */
-static void etpsv_block(char UPLO, char TR, bool nounit,
+static void etpsv_block(char UPLO, char TRANS, bool nounit,
                         ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n,
                         const T *restrict ap, T *restrict x)
 {
     const T zero = 0.0L;
     const bool lower = (UPLO == 'L');
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 if (x[j] == zero) continue;
@@ -220,7 +220,7 @@ static void etpsv_block(char UPLO, char TR, bool nounit,
  * off-diagonal coupling is threaded over disjoint output rows. Returns 1 if it
  * handled the call. */
 __attribute__((noinline)) static bool etpsv_omp(
-    char UPLO, char TR, bool nounit, ptrdiff_t n, const T *restrict ap, T *restrict x)
+    char UPLO, char TRANS, bool nounit, ptrdiff_t n, const T *restrict ap, T *restrict x)
 {
     if (n < ETPSV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -228,13 +228,13 @@ __attribute__((noinline)) static bool etpsv_omp(
     if (nthreads > ETPSV_MAX_CPUS) nthreads = ETPSV_MAX_CPUS;
     const T zero = 0.0L;
     const bool lower = (UPLO == 'L');
-    const bool trans = (TR != 'N');
+    const bool trans = (TRANS != 'N');
 
     if (!trans) {
         if (lower) {
             for (ptrdiff_t j0 = 0; j0 < n; j0 += ETPSV_BLK) {
                 ptrdiff_t j1 = j0 + ETPSV_BLK; if (j1 > n) j1 = n;
-                etpsv_block(UPLO, TR, nounit, j0, j1, n, ap, x);
+                etpsv_block(UPLO, TRANS, nounit, j0, j1, n, ap, x);
                 if (j1 >= n) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -252,7 +252,7 @@ __attribute__((noinline)) static bool etpsv_omp(
         } else {
             for (ptrdiff_t j1 = n; j1 > 0; j1 -= ETPSV_BLK) {
                 ptrdiff_t j0 = j1 - ETPSV_BLK; if (j0 < 0) j0 = 0;
-                etpsv_block(UPLO, TR, nounit, j0, j1, n, ap, x);
+                etpsv_block(UPLO, TRANS, nounit, j0, j1, n, ap, x);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -286,7 +286,7 @@ __attribute__((noinline)) static bool etpsv_omp(
                         }
                     }
                 }
-                etpsv_block(UPLO, TR, nounit, j0, j1, n, ap, x);
+                etpsv_block(UPLO, TRANS, nounit, j0, j1, n, ap, x);
             }
         } else {                                           /* forward, k < j */
             for (ptrdiff_t j0 = 0; j0 < n; j0 += ETPSV_BLK) {
@@ -305,7 +305,7 @@ __attribute__((noinline)) static bool etpsv_omp(
                         }
                     }
                 }
-                etpsv_block(UPLO, TR, nounit, j0, j1, n, ap, x);
+                etpsv_block(UPLO, TRANS, nounit, j0, j1, n, ap, x);
             }
         }
     }
@@ -320,19 +320,19 @@ static void etpsv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (incx == 1 && n >= ETPSV_OMP_MIN && blas_omp_max_threads() > 1
-        && etpsv_omp(UPLO, TR, nounit, n, ap, x))
+        && etpsv_omp(UPLO, TRANS, nounit, n, ap, x))
         return;
 #endif
 
-    etpsv_serial(UPLO, TR, nounit, n, ap, x, incx);
+    etpsv_serial(UPLO, TRANS, nounit, n, ap, x, incx);
 }
 
 EPBLAS_FACADE_TPMV(etpsv, T)

@@ -4,7 +4,7 @@
  * (SIMD + scalar diagonal kernels, block policy, the per-block worker and the
  * per-column triangle scaler), shared through wsyrk_kernel.h.
  *
- *   C := α·A·Aᵀ + β·C   (TR='N')      C := α·Aᵀ·A + β·C   (TR='T')
+ *   C := α·A·Aᵀ + β·C   (TRANS='N')      C := α·Aᵀ·A + β·C   (TRANS='T')
  *
  * One `omp parallel for` over the jc BLOCK loop (schedule(dynamic,1)). Each
  * diagonal block owns a disjoint set of C columns, so its diagonal update and
@@ -52,7 +52,7 @@ static void wsyrk_core(
 #endif
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
-    const char TR = up(&trans);
+    const char TRANS = up(&trans);
 
     if (n == 0) return;
 
@@ -80,7 +80,7 @@ static void wsyrk_core(
 #endif
     for (std::ptrdiff_t jc = 0; jc < n; jc += pw) {
         const std::ptrdiff_t jb = (n - jc < pw) ? (n - jc) : pw;
-        wsyrk_block(jc, jb, n, k, UPLO, TR, alpha, beta, a, lda, c, ldc);
+        wsyrk_block(jc, jb, n, k, UPLO, TRANS, alpha, beta, a, lda, c, ldc);
     }
 }
 

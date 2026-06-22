@@ -219,9 +219,9 @@ void xtrsm_serial(
     const T alpha = *alpha_;
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
-    const char TR = xtrsm_uplo(transa);
+    const char TRANS = xtrsm_uplo(transa);
     const bool nounit = (xtrsm_uplo(diag) != 'U');
-    const bool cflag = (TR == 'C') ? 1 : 0;
+    const bool cflag = (TRANS == 'C') ? 1 : 0;
 
     if (m == 0 || n == 0) return;
 
@@ -247,10 +247,10 @@ void xtrsm_serial(
     }
 
     if (SIDE == 'L') {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') xtrsm_lln_core(0, n, m, alpha, a, lda, b, ldb, nounit);
             else             xtrsm_lun_core(0, n, m, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') xtrsm_llTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, 0);
             else             xtrsm_luTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, 0);
         } else { /* 'C' */
@@ -258,10 +258,10 @@ void xtrsm_serial(
             else             xtrsm_luTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag);
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') xtrsm_rln_core(0, m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrsm_run_core(0, m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') xtrsm_rlTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, 0);
             else             xtrsm_ruTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, 0);
         } else {

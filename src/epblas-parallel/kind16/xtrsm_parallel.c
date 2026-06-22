@@ -207,7 +207,7 @@ static void xtrsm_core(
     const T alpha = *alpha_;
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
-    const char TR = xtrsm_uplo(transa);
+    const char TRANS = xtrsm_uplo(transa);
     const bool nounit = (xtrsm_uplo(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -243,10 +243,10 @@ static void xtrsm_core(
     }
 
     if (SIDE == 'L') {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') xtrsm_lln(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrsm_lun(m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') xtrsm_llt(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrsm_lut(m, n, alpha, a, lda, b, ldb, nounit);
         } else { /* 'C' */
@@ -254,10 +254,10 @@ static void xtrsm_core(
             else             xtrsm_luc(m, n, alpha, a, lda, b, ldb, nounit);
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') xtrsm_rln(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrsm_run(m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') xtrsm_rlt(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrsm_rut(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
@@ -306,9 +306,9 @@ static void xtrsm_blocked_core(
     const ptrdiff_t nb = xtrsm_blocked_nb();
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
-    const char TR   = xtrsm_uplo(transa);
+    const char TRANS   = xtrsm_uplo(transa);
     const bool nounit = (xtrsm_uplo(diag) != 'U');
-    const bool cflag = (TR == 'C') ? 1 : 0;
+    const bool cflag = (TRANS == 'C') ? 1 : 0;
 
     if (m == 0 || n == 0) return;
 
@@ -323,7 +323,7 @@ static void xtrsm_blocked_core(
     }
 
     const T neg_one = -1.0Q + 0.0Qi;
-    const char TTc = (TR == 'C') ? 'C' : 'T';
+    const char TTc = (TRANS == 'C') ? 'C' : 'T';
     const T one_v = ONE;
 
     const bool use_omp = (n >= 2 && blas_omp_should_thread());
@@ -348,7 +348,7 @@ static void xtrsm_blocked_core(
                 }
             }
 
-            if (TR == 'N' && UPLO == 'L') {
+            if (TRANS == 'N' && UPLO == 'L') {
                 /* LLN forward. */
                 for (ptrdiff_t ic = 0; ic < m; ic += nb) {
                     ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
@@ -363,7 +363,7 @@ static void xtrsm_blocked_core(
                                      &B_(i0, j_lo), ldb);
                     }
                 }
-            } else if (TR == 'N' && UPLO == 'U') {
+            } else if (TRANS == 'N' && UPLO == 'U') {
                 /* LUN backward. */
                 ptrdiff_t ic = ((m - 1) / nb) * nb;
                 while (ic >= 0) {

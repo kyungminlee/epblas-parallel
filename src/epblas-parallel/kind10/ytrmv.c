@@ -33,16 +33,16 @@ static inline T cconj(T z) { return ~z; }
 
 #ifdef _OPENMP
 /* OMP core on a CONTIGUOUS x. Shared by the incx==1 fast path and the strided
- * path (via gather/scatter), so the threading lives in one place. TR='N' uses
+ * path (via gather/scatter), so the threading lives in one place. TRANS='N' uses
  * per-thread y_priv + reduction (esymv pattern, Add-36 — within tolerance, not
- * bit-exact); TR='T'/'C' writes a single shared y_buf (each j owns its output
+ * bit-exact); TRANS='T'/'C' writes a single shared y_buf (each j owns its output
  * → bit-exact). Returns 1 on success, 0 if a scratch alloc failed (caller
  * falls back to serial). */
-static bool ytrmv_omp_contig(char UPLO, char TR, bool nounit,
+static bool ytrmv_omp_contig(char UPLO, char TRANS, bool nounit,
                             ptrdiff_t n, const T *restrict a, ptrdiff_t lda,
                             T *restrict x, ptrdiff_t nthreads)
 {
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
         if (!y_priv_all) return 0;
         #pragma omp parallel num_threads(nthreads)
@@ -80,7 +80,7 @@ static bool ytrmv_omp_contig(char UPLO, char TR, bool nounit,
         free(y_priv_all);
         return 1;
     } else {
-        const bool conj_a = (TR == 'C');
+        const bool conj_a = (TRANS == 'C');
         T *y_buf = (T *)aligned_alloc(64,
             (((size_t)n * sizeof(T)) + 63) & ~(size_t)63);
         if (!y_buf) return 0;
@@ -129,7 +129,7 @@ static void ytrmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    const char TR   = blas_up(trans);
+    const char TRANS   = blas_up(trans);
     const char DIAG = blas_up(diag);
     const bool nounit = (DIAG != 'U');
 
@@ -139,10 +139,10 @@ static void ytrmv_core(
 #ifdef _OPENMP
         const ptrdiff_t nthreads = blas_omp_max_threads();
         if (n >= YTRMV_OMP_MIN && blas_omp_should_thread()
-            && ytrmv_omp_contig(UPLO, TR, nounit, n, a, lda, x, nthreads))
+            && ytrmv_omp_contig(UPLO, TRANS, nounit, n, a, lda, x, nthreads))
             return;
 #endif
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 /* Inner walks backward to match Fortran ytrmv.f
                  * (DO 50 I = N,J+1,-1). Sub-class C / Rule 21. */
@@ -165,7 +165,7 @@ static void ytrmv_core(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     T temp = x[j];
@@ -206,7 +206,7 @@ static void ytrmv_core(
             T *xc = (T *)malloc((size_t)n * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < n; ++i) xc[i] = x[kx + i * incx];
-                if (ytrmv_omp_contig(UPLO, TR, nounit, n, a, lda, xc, nthreads)) {
+                if (ytrmv_omp_contig(UPLO, TRANS, nounit, n, a, lda, xc, nthreads)) {
                     for (ptrdiff_t i = 0; i < n; ++i) x[kx + i * incx] = xc[i];
                     free(xc);
                     return;
@@ -215,7 +215,7 @@ static void ytrmv_core(
             }
         }
 #endif
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 /* Inner walks backward to match Fortran ytrmv.f
                  * (DO 70 I = N,J+1,-1). Sub-class C / Rule 21. */
@@ -236,7 +236,7 @@ static void ytrmv_core(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     T temp = x[kx + j * incx];

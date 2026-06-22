@@ -5,7 +5,7 @@
  *
  *   msyrk_serial.cpp    The pure single-thread symmetric rank-k update (no
  *                       OpenMP). Owns ALL the numerics: the AVX2 SIMD diagonal
- *                       kernels (TR='N' rank-1 and TR='T' dot forms), the
+ *                       kernels (TRANS='N' rank-1 and TRANS='T' dot forms), the
  *                       scalar diagonal fallback, the block-size policy, the
  *                       per-block worker `msyrk_block` (beta-scale + diagonal
  *                       update + trailing gemm via mgemm_serial — no nested
@@ -53,7 +53,7 @@ void msyrk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, msyrk_T beta
  * own triangle columns, accumulate the diagonal block (SIMD or scalar), then
  * the trailing gemm (routed through mgemm_serial — no nested OpenMP). Each
  * block writes a disjoint column range of C → race-free across blocks. */
-void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR,
+void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TRANS,
                  msyrk_T alpha, msyrk_T beta,
                  const msyrk_T *a, std::ptrdiff_t lda, msyrk_T *c, std::ptrdiff_t ldc);
 

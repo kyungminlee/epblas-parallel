@@ -63,8 +63,8 @@ static void etbmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
@@ -72,14 +72,14 @@ static void etbmv_core(
 #ifdef _OPENMP
     /* Cheap inline gate first: at OMP=1 (or below threshold) short-circuit
      * before the noinline call's argument marshalling (outlining tax). */
-    const ptrdiff_t omp_min = (TR == 'T') ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
+    const ptrdiff_t omp_min = (TRANS == 'T') ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
     if (n >= omp_min && blas_omp_max_threads() > 1
-        && etbmv_omp(UPLO == 'U', TR == 'T', nounit, n, k, a, lda, x, incx))
+        && etbmv_omp(UPLO == 'U', TRANS == 'T', nounit, n, k, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             /* In-place row-gather (NOT the old column scatter): each output x[i]
              * is a band dot accumulated in a register-resident x87 scalar and
              * stored once -- no read-modify-write to memory per element. Safe
@@ -125,7 +125,7 @@ static void etbmv_core(
             }
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             /* Strided in-place row-gather (same as the incx==1 path; logical
              * index i lives at x[off0 + i*incx], off0 placing logical 0 for
              * incx<0). Register-resident accumulator; upper ASCENDING / lower

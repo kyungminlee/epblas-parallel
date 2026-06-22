@@ -48,10 +48,10 @@ inline std::size_t cbU(std::ptrdiff_t j) {
  * (mf_kernels::dot, vector accumulate + hreduce -> within tolerance). The diagonal
  * divide and cross-column recurrence stay scalar/exact. The strided entry
  * gathers into contiguous scratch and reuses this. */
-static void mtpsv_serial_contig(char UPLO, char TR, bool nounit,
+static void mtpsv_serial_contig(char UPLO, char TRANS, bool nounit,
                                 std::ptrdiff_t n, const T *ap, T *x)
 {
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (UPLO == 'U') {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 if (!eq0(x[j])) {
@@ -89,12 +89,12 @@ static void mtpsv_serial_contig(char UPLO, char TR, bool nounit,
 }
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
- * incx!=1 fallback. TR is already normalized ('C' folded to 'T' by the caller). */
-static void mtpsv_serial(char UPLO, char TR, bool nounit,
+ * incx!=1 fallback. TRANS is already normalized ('C' folded to 'T' by the caller). */
+static void mtpsv_serial(char UPLO, char TRANS, bool nounit,
                          std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t incx)
 {
     if (incx == 1) {
-        mtpsv_serial_contig(UPLO, TR, nounit, n, ap, x);
+        mtpsv_serial_contig(UPLO, TRANS, nounit, n, ap, x);
         return;
     }
 
@@ -113,7 +113,7 @@ static void mtpsv_serial(char UPLO, char TR, bool nounit,
         if (xc) {
             std::ptrdiff_t ix = kx0;
             for (std::ptrdiff_t k = 0; k < n; ++k) { xc[k] = x[ix]; ix += sx; }
-            mtpsv_serial_contig(UPLO, TR, nounit, n, ap, xc);
+            mtpsv_serial_contig(UPLO, TRANS, nounit, n, ap, xc);
             ix = kx0;
             for (std::ptrdiff_t k = 0; k < n; ++k) { x[ix] = xc[k]; ix += sx; }
             std::free(heap);
@@ -124,7 +124,7 @@ static void mtpsv_serial(char UPLO, char TR, bool nounit,
 
     {
         std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 std::ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 std::ptrdiff_t jx = kx + (n - 1) * incx;
@@ -199,11 +199,11 @@ static void mtpsv_serial(char UPLO, char TR, bool nounit,
 /* Solve a single diagonal block [j0,j1) in packed storage (scalar, within-block
  * coupling only). Used by the threaded path; need only match serial within DD
  * fuzz tol (the threaded result is regrouped anyway). */
-static void mtpsv_block(char UPLO, char TR, bool nounit,
+static void mtpsv_block(char UPLO, char TRANS, bool nounit,
                         std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, const T *ap, T *x)
 {
     const bool lower = (UPLO == 'L');
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 if (eq0(x[j])) continue;
@@ -243,14 +243,14 @@ static void mtpsv_block(char UPLO, char TR, bool nounit,
  * off-diagonal coupling is threaded over disjoint output rows. Returns true if
  * it handled the call. */
 __attribute__((noinline)) static bool mtpsv_omp(
-    char UPLO, char TR, bool nounit, std::ptrdiff_t n, const T *ap, T *x)
+    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const T *ap, T *x)
 {
     if (n < MTPSV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTPSV_MAX_CPUS) nthreads = MTPSV_MAX_CPUS;
     const bool lower = (UPLO == 'L');
-    const bool trans = (TR != 'N');
+    const bool trans = (TRANS != 'N');
 
     if (!trans) {
         /* NoTrans: axpy form. Solve a diagonal block, then propagate its solved
@@ -258,7 +258,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
         if (lower) {
             for (std::ptrdiff_t j0 = 0; j0 < n; j0 += MTPSV_BLK) {
                 std::ptrdiff_t j1 = j0 + MTPSV_BLK; if (j1 > n) j1 = n;
-                mtpsv_block(UPLO, TR, nounit, j0, j1, n, ap, x);
+                mtpsv_block(UPLO, TRANS, nounit, j0, j1, n, ap, x);
                 if (j1 >= n) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -276,7 +276,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
         } else {
             for (std::ptrdiff_t j1 = n; j1 > 0; j1 -= MTPSV_BLK) {
                 std::ptrdiff_t j0 = j1 - MTPSV_BLK; if (j0 < 0) j0 = 0;
-                mtpsv_block(UPLO, TR, nounit, j0, j1, n, ap, x);
+                mtpsv_block(UPLO, TRANS, nounit, j0, j1, n, ap, x);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -311,7 +311,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         }
                     }
                 }
-                mtpsv_block(UPLO, TR, nounit, j0, j1, n, ap, x);
+                mtpsv_block(UPLO, TRANS, nounit, j0, j1, n, ap, x);
             }
         } else {                                           /* forward, k < j */
             for (std::ptrdiff_t j0 = 0; j0 < n; j0 += MTPSV_BLK) {
@@ -328,7 +328,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         }
                     }
                 }
-                mtpsv_block(UPLO, TR, nounit, j0, j1, n, ap, x);
+                mtpsv_block(UPLO, TRANS, nounit, j0, j1, n, ap, x);
             }
         }
     }
@@ -343,19 +343,19 @@ static void mtpsv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    char TR = up(&trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = up(&trans);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (up(&diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (incx == 1 && n >= MTPSV_OMP_MIN && blas_omp_available()
-        && mtpsv_omp(UPLO, TR, nounit, n, ap, x))
+        && mtpsv_omp(UPLO, TRANS, nounit, n, ap, x))
         return;
 #endif
 
-    mtpsv_serial(UPLO, TR, nounit, n, ap, x, incx);
+    mtpsv_serial(UPLO, TRANS, nounit, n, ap, x, incx);
 }
 
 extern "C" {

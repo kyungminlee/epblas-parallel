@@ -54,7 +54,7 @@ static void wtrsm_core(
     const T alpha = *alpha_;
     const char SIDE = up(&side);
     const char UPLO = up(&uplo);
-    const char TR = up(&transa);
+    const char TRANS = up(&transa);
     const bool nounit = (up(&diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -73,13 +73,13 @@ static void wtrsm_core(
                 std::ptrdiff_t nth  = omp_get_num_threads();
                 std::ptrdiff_t js  = blas_part_bound(n, tid, nth);
                 std::ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);
-                wtrsm_L_slice(UPLO, TR, use_blocked, js, je, m, nb, alpha,
+                wtrsm_L_slice(UPLO, TRANS, use_blocked, js, je, m, nb, alpha,
                               a, lda, b, ldb, nounit);
             }
             return;
         }
 #endif
-        wtrsm_L_slice(UPLO, TR, use_blocked, 0, n, m, nb, alpha,
+        wtrsm_L_slice(UPLO, TRANS, use_blocked, 0, n, m, nb, alpha,
                       a, lda, b, ldb, nounit);
     } else {
         /* SIDE='R': partition over rows of B. Round interior boundaries to
@@ -98,7 +98,7 @@ static void wtrsm_core(
             std::ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
             if (tid > 0)      i_lo &= ~3;
             if (tid < nth - 1) i_hi &= ~3;
-            wtrsm_R_slice(UPLO, TR, i_lo, i_hi, n, alpha, a, lda, b, ldb, nounit);
+            wtrsm_R_slice(UPLO, TRANS, i_lo, i_hi, n, alpha, a, lda, b, ldb, nounit);
         }
     }
 }

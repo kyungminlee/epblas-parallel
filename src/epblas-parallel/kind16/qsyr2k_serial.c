@@ -181,12 +181,12 @@ void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * A,B are K×N so all dot operands are unit-stride over the K axis. β is already
  * applied. Each C(i,j) is accumulated in a register and written once — packing
  * has nothing to save here, so the clean unpacked loop matches the reference. */
-void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
+void qsyr2k_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
                       T alpha, const T *a, ptrdiff_t lda,
                       const T *b, ptrdiff_t ldb, T *c, ptrdiff_t ldc)
 {
-    const ptrdiff_t i_lo = (uplo == 'L') ? j : 0;
-    const ptrdiff_t i_hi = (uplo == 'L') ? n : j + 1;
+    const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
+    const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
     const T *Aj = a + j * lda;
     const T *Bj = b + j * ldb;
     T *cj = c + j * ldc;
@@ -214,7 +214,7 @@ void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
  * (A and B in OCOPY shape) and two A-packs (ditto in ICOPY shape) per tile;
  * pass 1 = (Ap_A, Bp_B, flag=1), pass 2 = (Ap_B, Bp_A, flag=0). */
 void qsyr2k_serial(
-    char uplo_c, char trans_c,
+    char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
@@ -223,21 +223,21 @@ void qsyr2k_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char uplo  = blas_up(uplo_c);
-    char trans = blas_up(trans_c);
-    if (trans == 'C') trans = 'T';
+    const char UPLO  = blas_up(uplo);
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (n <= 0) return;
 
-    if (uplo == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
     else             qsyrk_beta_l(n, beta, c, ldc);
 
     if (k == 0 || alpha == 0.0Q) return;
 
     /* Transpose: netlib-style unpacked inner-product (no packing overhead). */
-    if (trans != 'N') {
+    if (TRANS != 'N') {
         for (ptrdiff_t j = 0; j < n; ++j)
-            qsyr2k_trans_col(j, uplo, n, k, alpha, a, lda, b, ldb, c, ldc);
+            qsyr2k_trans_col(j, UPLO, n, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
@@ -257,8 +257,8 @@ void qsyr2k_serial(
             /* UPLO clip of the [0, N] row range for this js-band:
              *   UPPER: only rows up to js+jb contribute.
              *   LOWER: only rows from js onwards. */
-            ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
-            ptrdiff_t m_hi_eff = (uplo == 'U' && n > js + jb) ? (js + jb) : n;
+            ptrdiff_t m_lo_eff = (UPLO == 'L') ? js : 0;
+            ptrdiff_t m_hi_eff = (UPLO == 'U' && n > js + jb) ? (js + jb) : n;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
             for (ptrdiff_t ls = 0; ls < k; ls += KC) {
@@ -279,13 +279,13 @@ void qsyr2k_serial(
                     const ptrdiff_t off = (ptrdiff_t)(is - js);
 
                     /* Pass 1: alpha·A·B^T + symmetric diagonal merge. */
-                    if (uplo == 'U')
+                    if (UPLO == 'U')
                         qsyr2k_kernel_u(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
                     else
                         qsyr2k_kernel_l(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
 
                     /* Pass 2: alpha·B·A^T into the off-diagonal strips only. */
-                    if (uplo == 'U')
+                    if (UPLO == 'U')
                         qsyr2k_kernel_u(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);
                     else
                         qsyr2k_kernel_l(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);

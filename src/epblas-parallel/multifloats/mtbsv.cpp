@@ -188,8 +188,8 @@ static void mtbsv_core(
     if (n == 0) return;
 
     const bool upper  = (up(&uplo) == 'U');
-    const char TR   = up(&trans);
-    const std::ptrdiff_t trans_ = (TR == 'T' || TR == 'C') ? 1 : 0;
+    const char TRANS   = up(&trans);
+    const std::ptrdiff_t trans_ = (TRANS == 'T' || TRANS == 'C') ? 1 : 0;
     const bool nounit = (up(&diag) == 'N');
 
     if (incx == 1) {

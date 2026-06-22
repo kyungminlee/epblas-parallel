@@ -2,8 +2,8 @@
  * wher2k_serial — multifloats complex (DD) Hermitian rank-2k update, pure
  * single-thread worker. Owns ALL the numerics; no OpenMP on this path.
  *
- *   C := alpha · A · Bᴴ + conj(alpha) · B · Aᴴ + beta · C  (TR_c='N')
- *   C := alpha · Aᴴ · B + conj(alpha) · Bᴴ · A + beta · C  (TR_c='C')
+ *   C := alpha · A · Bᴴ + conj(alpha) · B · Aᴴ + beta · C  (TRANS='N')
+ *   C := alpha · Aᴴ · B + conj(alpha) · Bᴴ · A + beta · C  (TRANS='C')
  *   alpha complex, beta real. The diagonal of C stays real.
  *
  * Blocked: AVX2 SIMD (or scalar) rank-2 diagonal kernel + two conjugate-
@@ -105,7 +105,7 @@ inline void unpack_4col_her2k_triangle(std::ptrdiff_t jc, std::ptrdiff_t jb, std
 
 using simd_exact::vbcast;
 
-/* TR_c='N': t1 = α · conj(B(j_panel..+4, l)),
+/* TRANS='N': t1 = α · conj(B(j_panel..+4, l)),
  *         t2 = conj(α) · conj(A(j_panel..+4, l));
  * C[i, panel] += A(i,l)·t1 + B(i,l)·t2 over i ∈ diag block. */
 inline void simd_her2k_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
@@ -175,7 +175,7 @@ inline void simd_her2k_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdif
     }
 }
 
-/* TR_c='C' SIMD, KC-tiled: accumulate s1 = Σ conj(Ai[l])·Bj_4 and
+/* TRANS='C' SIMD, KC-tiled: accumulate s1 = Σ conj(Ai[l])·Bj_4 and
  * s2 = Σ conj(Bi[l])·Aj_4 over l ∈ [l0, l0+kc) into per-row 4-wide
  * accumulators acc1/acc2. The aj_/bj_ scratch hold this chunk's 4 packed A/B
  * columns at chunk-local rows 0..kc-1. acc1/acc2 are loaded/stored each call, so
@@ -253,11 +253,11 @@ inline void simd_her2k_diag_tc_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::
 
 inline void simd_her2k_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
                                    const TC *a, std::ptrdiff_t lda, const TC *b, std::ptrdiff_t ldb,
-                                   TC *c, std::ptrdiff_t ldc, char UPLO, char TR_c)
+                                   TC *c, std::ptrdiff_t ldc, char UPLO, char TRANS)
 {
     alignas(32) double crh[kMaxBlockM * kSimdLane], crl[kMaxBlockM * kSimdLane];
     alignas(32) double cih[kMaxBlockM * kSimdLane], cil[kMaxBlockM * kSimdLane];
-    /* TR_c='C' scratch: one K-chunk of 4 packed A/B columns (bounded by kMaxK)
+    /* TRANS='C' scratch: one K-chunk of 4 packed A/B columns (bounded by kMaxK)
      * plus two per-row complex-DD accumulators (s1, s2) carried across chunks. */
     alignas(32) static thread_local double ajrh[kMaxK * kSimdLane], ajrl[kMaxK * kSimdLane];
     alignas(32) static thread_local double ajih[kMaxK * kSimdLane], ajil[kMaxK * kSimdLane];
@@ -271,8 +271,8 @@ inline void simd_her2k_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
     for (std::ptrdiff_t j = jc; j < jc + jb; j += kSimdLane) {
         const std::ptrdiff_t jcount = (jc + jb - j < kSimdLane) ? (jc + jb - j) : kSimdLane;
         pack_4col_cdd(jb, jc, c, ldc, j, jcount, crh, crl, cih, cil);
-        if (TR_c == 'N') {
-            /* TR_c='N' reads A/B directly per l — K-independent, no scratch cap. */
+        if (TRANS == 'N') {
+            /* TRANS='N' reads A/B directly per l — K-independent, no scratch cap. */
             simd_her2k_diag_tn(jc, jb, k, alpha, a, lda, b, ldb, j, jcount,
                                crh, crl, cih, cil);
         } else {
@@ -365,10 +365,10 @@ void her2k_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC a
                     const TC *a, std::ptrdiff_t lda,
                     const TC *b, std::ptrdiff_t ldb,
                     TC *c, std::ptrdiff_t ldc,
-                    char UPLO, char TR_c)
+                    char UPLO, char TRANS)
 {
     const TC alpha_conj = cconj(alpha);
-    if (TR_c == 'N') {
+    if (TRANS == 'N') {
         /* C(I,J) += α A(I,l) conj(B(J,l)) + conj(α) B(I,l) conj(A(J,l)) */
         for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
             const std::ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
@@ -409,15 +409,15 @@ void her2k_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC a
 
 inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
                           const TC *a, std::ptrdiff_t lda, const TC *b, std::ptrdiff_t ldb,
-                          TC *c, std::ptrdiff_t ldc, char UPLO, char TR_c)
+                          TC *c, std::ptrdiff_t ldc, char UPLO, char TRANS)
 {
 #ifdef MBLAS_SIMD_DD
     if (jb <= kMaxBlockM) {
-        simd_her2k_diag_panels(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+        simd_her2k_diag_panels(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TRANS);
         return;
     }
 #endif
-    her2k_diag_add(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+    her2k_diag_add(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TRANS);
 }
 
 } /* anonymous namespace */
@@ -445,7 +445,7 @@ void wher2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, TR beta, TC
     }
 }
 
-void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR_c,
+void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TRANS,
                   TC alpha, TR beta, const TC *a, std::ptrdiff_t lda, const TC *b, std::ptrdiff_t ldb,
                   TC *c, std::ptrdiff_t ldc)
 {
@@ -466,7 +466,7 @@ void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::p
         }
     }
 
-    diag_dispatch(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+    diag_dispatch(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TRANS);
 
     const char NN[1] = {'N'};
     const char CN[1] = {'C'};
@@ -476,7 +476,7 @@ void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::p
         const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
-            if (TR_c == 'N') {
+            if (TRANS == 'N') {
                 wgemm_serial(NN[0], CN[0], trailing, jb, k, &alpha, &A_(j0, 0), lda, &B_(jc, 0), ldb, &cone, &C_(j0, jc), ldc);
                 wgemm_serial(NN[0], CN[0], trailing, jb, k, &alpha_conj, &B_(j0, 0), ldb, &A_(jc, 0), lda, &cone, &C_(j0, jc), ldc);
             } else {
@@ -486,7 +486,7 @@ void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::p
         }
     } else {
         if (jc > 0) {
-            if (TR_c == 'N') {
+            if (TRANS == 'N') {
                 wgemm_serial(NN[0], CN[0], jc, jb, k, &alpha, &A_(0, 0), lda, &B_(jc, 0), ldb, &cone, &C_(0, jc), ldc);
                 wgemm_serial(NN[0], CN[0], jc, jb, k, &alpha_conj, &B_(0, 0), ldb, &A_(jc, 0), lda, &cone, &C_(0, jc), ldc);
             } else {
@@ -509,7 +509,7 @@ extern "C" void wher2k_serial(
     const TC alpha = *alpha_;
     const TR beta  = *beta_;
     const char UPLO = up(&uplo);
-    const char TR_c = up(&trans);
+    const char TRANS = up(&trans);
 
     if (n == 0) return;
 
@@ -525,7 +525,7 @@ extern "C" void wher2k_serial(
     const std::ptrdiff_t nb = wher2k_block_nb();
     for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
         const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        wher2k_block(jc, jb, n, k, UPLO, TR_c, alpha, beta, a, lda, b, ldb, c, ldc);
+        wher2k_block(jc, jb, n, k, UPLO, TRANS, alpha, beta, a, lda, b, ldb, c, ldc);
     }
 }
 

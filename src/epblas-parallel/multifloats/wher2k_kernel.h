@@ -6,8 +6,8 @@
  *
  *   wher2k_serial.cpp   The pure single-thread Hermitian rank-2k update (no
  *                       OpenMP). Owns ALL the numerics: the AVX2 SIMD diagonal
- *                       kernels (TR_c='N' rank-2 with conjugated panels /
- *                       TR_c='C' dot, complex-alpha + conj(alpha) scaling,
+ *                       kernels (TRANS='N' rank-2 with conjugated panels /
+ *                       TRANS='C' dot, complex-alpha + conj(alpha) scaling,
  *                       real-diag preservation), the scalar diagonal fallback,
  *                       the block-size policy, the per-block worker
  *                       `wher2k_block` (beta-scale + diagonal update + the two
@@ -28,7 +28,7 @@
  *                       per-column triangle scale (schedule(static)).
  *                       Delegates to wher2k_serial when nested.
  *
- * Hermitian rank-2k keeps TR_c ∈ {'N','C'} (conjugate transpose); the trailing
+ * Hermitian rank-2k keeps TRANS ∈ {'N','C'} (conjugate transpose); the trailing
  * gemms use 'C', and the diagonal cells keep their original imaginary part on
  * unpack (Netlib her2k semantics — the diagonal accumulates only the real part
  * of the update, the stored imaginary part is forced to zero by the beta pass).
@@ -66,7 +66,7 @@ void wher2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, wher2k_TR b
  * (SIMD or scalar), then the two trailing conjugate-transpose gemm calls
  * (routed through wgemm_serial — no nested OpenMP). Each block writes a
  * disjoint column range of C → race-free across blocks. */
-void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR_c,
+void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TRANS,
                   wher2k_TC alpha, wher2k_TR beta,
                   const wher2k_TC *a, std::ptrdiff_t lda, const wher2k_TC *b, std::ptrdiff_t ldb,
                   wher2k_TC *c, std::ptrdiff_t ldc);

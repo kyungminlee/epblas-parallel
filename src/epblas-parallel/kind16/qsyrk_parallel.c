@@ -43,7 +43,7 @@ typedef qsyrk_T T;
 #define NR QSYRK_NR
 
 static void qsyrk_core(
-    char uplo_c, char trans_c,
+    char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
@@ -53,18 +53,18 @@ static void qsyrk_core(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        qsyrk_serial(uplo_c, trans_c, n, k, alpha_, a, lda, beta_, c, ldc);
+        qsyrk_serial(uplo, trans, n, k, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const char uplo  = blas_up(uplo_c);
-    const char trans = blas_up(trans_c);
+    const char UPLO  = blas_up(uplo);
+    const char TRANS = blas_up(trans);
 
     if (n <= 0) return;
 
     /* Triangular beta pre-pass on the UPLO triangle of C only. */
-    if (uplo == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
     else             qsyrk_beta_l(n, beta, c, ldc);
 
     if (k == 0 || alpha == 0.0Q) return;
@@ -89,12 +89,12 @@ static void qsyrk_core(
     /* Transpose: netlib-style unpacked inner-product, embarrassingly parallel
      * over the output columns (cyclic schedule balances the triangular load; no
      * shared pack, no barrier). Same code the serial entry runs at nthreads=1. */
-    if (trans != 'N') {
+    if (TRANS != 'N') {
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static, 1) num_threads(nthreads)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j)
-            qsyrk_trans_col(j, uplo, n, k, alpha, a, lda, c, ldc);
+            qsyrk_trans_col(j, UPLO, n, k, alpha, a, lda, c, ldc);
         return;
     }
 
@@ -126,14 +126,14 @@ static void qsyrk_core(
              * row split caps the speedup at ~16/7 — the fat-end thread hogs
              * 7/16 of a triangular output). */
             ptrdiff_t m_lo, m_hi;
-            qtri_row_bounds(uplo, n, nth, tid, MR, &m_lo, &m_hi);
+            qtri_row_bounds(UPLO, n, nth, tid, MR, &m_lo, &m_hi);
 
             for (ptrdiff_t js = 0; js < n; js += NC) {
                 const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
                 /* UPLO clip of this thread's [m_lo, m_hi] for this js-band. */
-                ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
-                ptrdiff_t m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                ptrdiff_t m_lo_eff = (UPLO == 'L' && m_lo < js) ? js : m_lo;
+                ptrdiff_t m_hi_eff = (UPLO == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
@@ -155,7 +155,7 @@ static void qsyrk_core(
 
                         qtri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap);
 
-                        if (uplo == 'U')
+                        if (UPLO == 'U')
                             qsyrk_kernel_u(min_i, jb, pb, alpha, Ap, Bp,
                                            &c[(size_t)js * ldc + is], ldc,
                                            (ptrdiff_t)(is - js));

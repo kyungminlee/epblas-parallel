@@ -239,8 +239,8 @@ static void mtrmv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    char TR = up(&trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = up(&trans);
+    if (TRANS == 'C') TRANS = 'T';
     const char DIAG = up(&diag);
     const bool nounit = (DIAG != 'U');
 
@@ -248,12 +248,12 @@ static void mtrmv_core(
 
 #ifdef _OPENMP
     if (n >= MTRMV_OMP_MIN && blas_omp_available()
-        && mtrmv_omp(UPLO == 'U', TR != 'N', nounit, n, a, lda, x, incx))
+        && mtrmv_omp(UPLO == 'U', TRANS != 'N', nounit, n, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        mtrmv_contig(UPLO == 'U', TR != 'N', nounit, n, a, (std::size_t)lda, x);
+        mtrmv_contig(UPLO == 'U', TRANS != 'N', nounit, n, a, (std::size_t)lda, x);
         return;
     }
 
@@ -264,14 +264,14 @@ static void mtrmv_core(
     T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (xs) {
         for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
-        mtrmv_contig(UPLO == 'U', TR != 'N', nounit, n, a, (std::size_t)lda, xs);
+        mtrmv_contig(UPLO == 'U', TRANS != 'N', nounit, n, a, (std::size_t)lda, xs);
         for (std::ptrdiff_t i = 0; i < n; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
         std::free(xs);
         return;
     }
 
     std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (UPLO == 'L') {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 const T temp = x[kx + j * incx];

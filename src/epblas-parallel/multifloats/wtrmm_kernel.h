@@ -27,7 +27,7 @@
  *
  * Unlike the real (mtrmm) twin, TRANSA is kept as 'N'/'T'/'C' DISTINCT — for
  * complex, transpose ('T') and conjugate transpose ('C') differ, so the slice
- * workers take TR verbatim and map it (with UPLO) to the 6-way variant.
+ * workers take TRANS verbatim and map it (with UPLO) to the 6-way variant.
  *
  * Leaf names are wtrmm_-prefixed so they keep external linkage without
  * colliding with the other routines' helpers in the same archive.
@@ -49,20 +49,20 @@ std::ptrdiff_t wtrmm_block_nb(void);
 /* B := 0 over the full M×N tile (the alpha==0 early-exit). */
 void wtrmm_zero_B(std::ptrdiff_t m, std::ptrdiff_t n, wtrmm_T *b, std::ptrdiff_t ldb);
 
-/* One column slice [j_start, j_end) of a SIDE='L' multiply. UPLO/TR select the
- * variant (TR ∈ {'N','T','C'}); use_blocked picks the blocked path
+/* One column slice [j_start, j_end) of a SIDE='L' multiply. UPLO/TRANS select the
+ * variant (TRANS ∈ {'N','T','C'}); use_blocked picks the blocked path
  * (wgemm_serial trailing update + SIMD diagonal) vs the unblocked diagonal
  * core. Each slice owns a disjoint column range → race-free, bitwise-identical
  * to the serial sweep. */
-void wtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+void wtrmm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, std::ptrdiff_t nb, wtrmm_T alpha,
                    const wtrmm_T *a, std::ptrdiff_t lda, wtrmm_T *b, std::ptrdiff_t ldb, bool nounit);
 
-/* One row slice [row_lo, row_hi) of a SIDE='R' multiply. UPLO/TR select the
+/* One row slice [row_lo, row_hi) of a SIDE='R' multiply. UPLO/TRANS select the
  * variant; use_blocked picks the blocked path (wgemm_serial trailing update +
  * SIMD diagonal) vs the unblocked SIMD/scalar diagonal over the slice rows.
  * Each slice owns a disjoint row range → race-free. */
-void wtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+void wtrmm_R_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t row_lo, std::ptrdiff_t row_hi, std::ptrdiff_t n, std::ptrdiff_t nb, wtrmm_T alpha,
                    const wtrmm_T *a, std::ptrdiff_t lda, wtrmm_T *b, std::ptrdiff_t ldb, bool nounit);
 

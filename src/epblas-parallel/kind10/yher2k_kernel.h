@@ -39,7 +39,7 @@ ptrdiff_t yher2k_nb(void);
  * two trailing ygemm_serial conjugate-transpose updates. */
 void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, yher2k_TC alpha, yher2k_TR beta,
                   const yher2k_TC *a, ptrdiff_t lda, const yher2k_TC *b, ptrdiff_t ldb,
-                  yher2k_TC *c, ptrdiff_t ldc, char UPLO, char TR_c);
+                  yher2k_TC *c, ptrdiff_t ldc, char UPLO, char TRANS);
 
 /* C := beta*C over the columns [j_start, j_end) keeping the diagonal real —
  * the alpha==0 / K==0 quick path (and the per-block pre-scale). beta==1

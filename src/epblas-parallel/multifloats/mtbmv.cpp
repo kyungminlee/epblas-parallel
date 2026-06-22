@@ -543,15 +543,15 @@ static void mtbmv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    char TR = up(&trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = up(&trans);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (up(&diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (n >= MTBMV_OMP_MIN && blas_omp_available()
-        && mtbmv_omp(UPLO == 'U', TR != 'N', nounit != 0, n, k, a, lda, x, incx))
+        && mtbmv_omp(UPLO == 'U', TRANS != 'N', nounit != 0, n, k, a, lda, x, incx))
         return;
 #endif
 
@@ -561,15 +561,15 @@ static void mtbmv_core(
 #ifdef MBLAS_SIMD_DD
     /* 4-wide SoA — NoTrans axpy-per-column, Trans row-gather. A strided x is
      * gathered into the SoA limb arrays and scattered back (xp is at logical 0). */
-    if (TR == 'N'
+    if (TRANS == 'N'
         && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, xp, incx))
         return;
-    if (TR == 'T'
+    if (TRANS == 'T'
         && mtbmv_trans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, xp, incx))
         return;
 #endif
 
-    mtbmv_serial(UPLO == 'U', TR != 'N', nounit != 0,
+    mtbmv_serial(UPLO == 'U', TRANS != 'N', nounit != 0,
                  n, k, a, lda, xp, incx);
 }
 

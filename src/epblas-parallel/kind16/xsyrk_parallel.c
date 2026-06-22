@@ -50,7 +50,7 @@ static void xsyrk_core(
 #endif
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    const char TR   = blas_up(trans);
+    const char TRANS   = blas_up(trans);
 
     if (n == 0) return;
 
@@ -90,7 +90,7 @@ static void xsyrk_core(
 #endif
     for (ptrdiff_t jc = 0; jc < n; jc += nb) {
         const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        xsyrk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TR);
+        xsyrk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TRANS);
     }
 }
 

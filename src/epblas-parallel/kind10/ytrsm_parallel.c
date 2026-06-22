@@ -212,7 +212,7 @@ static void ytrsm_core(
     const T alpha = *alpha_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(transa);
+    const char TRANS = blas_up(transa);
     const bool nounit = (blas_up(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -225,7 +225,7 @@ static void ytrsm_core(
 
     if (SIDE == 'L') {
         const ptrdiff_t use_blocked = (m >= 2 * ytrsm_nb());
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 if (use_blocked) blocked_dispatch(YLLN, m, n, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_lln(m, n, alpha, a, lda, b, ldb, nounit);
@@ -233,7 +233,7 @@ static void ytrsm_core(
                 if (use_blocked) blocked_dispatch(YLUN, m, n, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_lun(m, n, alpha, a, lda, b, ldb, nounit);
             }
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') {
                 if (use_blocked) blocked_dispatch(YLLT, m, n, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_llt(m, n, alpha, a, lda, b, ldb, nounit);
@@ -253,12 +253,12 @@ static void ytrsm_core(
     } else {
         const ptrdiff_t use_blocked = (n >= 2 * ytrsm_nb());
         if (use_blocked) {
-            blocked_dispatch_R(UPLO == 'U', TR != 'N', TR == 'C',
+            blocked_dispatch_R(UPLO == 'U', TRANS != 'N', TRANS == 'C',
                                m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'N') {
+        } else if (TRANS == 'N') {
             if (UPLO == 'L') ytrsm_rln(m, n, alpha, a, lda, b, ldb, nounit);
             else             ytrsm_run(m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') ytrsm_rlt(m, n, alpha, a, lda, b, ldb, nounit);
             else             ytrsm_rut(m, n, alpha, a, lda, b, ldb, nounit);
         } else {

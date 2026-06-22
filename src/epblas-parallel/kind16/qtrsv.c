@@ -90,8 +90,8 @@ void qtrsv_serial_(
     const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = blas_up(*uplo);
-    char TR = blas_up(*trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(*trans);
+    if (TRANS == 'C') TRANS = 'T';
     const char DIAG = blas_up(*diag);
     const bool nounit = (DIAG != 'U');
 
@@ -99,7 +99,7 @@ void qtrsv_serial_(
     const T zero = 0.0Q;
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t i = 0; i < n; ++i) {
                     if (x[i] != zero) {
@@ -140,7 +140,7 @@ void qtrsv_serial_(
         }
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t i = 0; i < n; ++i) {
                     const ptrdiff_t ix = kx + i * incx;
@@ -207,8 +207,8 @@ void qtrsv_blocked_(
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = qtrsv_blocked_nb();
     const char UPLO = blas_up(*uplo);
-    char TR = blas_up(*trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(*trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (n == 0) return;
     if (incx != 1 || n < 2 * nb) {
@@ -235,7 +235,7 @@ void qtrsv_blocked_(
         if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
 
-        if (TR == 'N' && UPLO == 'L') {
+        if (TRANS == 'N' && UPLO == 'L') {
             for (ptrdiff_t j = 0; j < n; j += nb) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
@@ -268,7 +268,7 @@ void qtrsv_blocked_(
                 }
 #endif
             }
-        } else if (TR == 'N' && UPLO == 'U') {
+        } else if (TRANS == 'N' && UPLO == 'U') {
             ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
@@ -301,7 +301,7 @@ void qtrsv_blocked_(
 #endif
                 j -= nb;
             }
-        } else if (TR == 'T' && UPLO == 'L') {
+        } else if (TRANS == 'T' && UPLO == 'L') {
             ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
@@ -335,7 +335,7 @@ void qtrsv_blocked_(
                 j -= nb;
             }
         } else {
-            /* TR == 'T' && UPLO == 'U' */
+            /* TRANS == 'T' && UPLO == 'U' */
             for (ptrdiff_t j = 0; j < n; j += nb) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {

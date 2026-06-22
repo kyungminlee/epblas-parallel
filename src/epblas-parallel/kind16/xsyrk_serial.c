@@ -38,9 +38,9 @@ static const T ONE  = 1.0Q + 0.0Qi;
 static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, T alpha,
                           const T *restrict a, ptrdiff_t lda,
                           T *restrict c, ptrdiff_t ldc,
-                          char UPLO, char TR)
+                          char UPLO, char TRANS)
 {
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         for (ptrdiff_t j = jc; j < jc + jb; ++j) {
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
@@ -82,7 +82,7 @@ void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, T beta,
 }
 
 void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, T alpha, T beta,
-                 const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc, char UPLO, char TR)
+                 const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc, char UPLO, char TRANS)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
@@ -92,13 +92,13 @@ void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, T alpha, 
         else if (beta != ONE)  for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
     }
 
-    syrk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR);
+    syrk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
 
     if (UPLO == 'L') {
         const ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
-            if (TR == 'N') {
+            if (TRANS == 'N') {
                 xgemm_serial('N', 'T', trailing, jb, k, &alpha,
                              &A_(j0, 0), lda, &A_(jc, 0), lda,
                              &ONE, &C_(j0, jc), ldc);
@@ -110,7 +110,7 @@ void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, T alpha, 
         }
     } else {
         if (jc > 0) {
-            if (TR == 'N') {
+            if (TRANS == 'N') {
                 xgemm_serial('N', 'T', jc, jb, k, &alpha,
                              &A_(0, 0), lda, &A_(jc, 0), lda,
                              &ONE, &C_(0, jc), ldc);
@@ -133,7 +133,7 @@ void xsyrk_serial(
 {
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    const char TR   = blas_up(trans);
+    const char TRANS   = blas_up(trans);
 
     if (n == 0) return;
 
@@ -146,7 +146,7 @@ void xsyrk_serial(
     const ptrdiff_t nb = xsyrk_nb();
     for (ptrdiff_t jc = 0; jc < n; jc += nb) {
         const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        xsyrk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TR);
+        xsyrk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TRANS);
     }
 }
 

@@ -87,9 +87,9 @@ mtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
 /* Bit-exact serial path (the SIMD-packed reference). Also reused as the
- * diagonal-block solver by the threaded path below. TR is already normalized
+ * diagonal-block solver by the threaded path below. TRANS is already normalized
  * ('C' folded to 'T' by the caller). */
-static void mtrsv_serial(char UPLO, char TR, bool nounit,
+static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                          std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
 {
     if (n == 0) return;
@@ -103,7 +103,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
         for (std::size_t i = static_cast<std::size_t>(n); i < N_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
         const __m256d zerov = _mm256_setzero_pd();
 
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     T xi{x_hi[i], x_lo[i]};
@@ -236,7 +236,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
         for (std::ptrdiff_t i = 0; i < n; ++i) { x[i].limbs[0] = x_hi[i]; x[i].limbs[1] = x_lo[i]; }
         std::free(x_hi); std::free(x_lo);
 #else
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     if (!eq0(x[i])) {
@@ -293,11 +293,11 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
         if (buf) {
             std::ptrdiff_t ix = kx;
             for (std::ptrdiff_t i = 0; i < n; ++i) { buf[i] = x[ix]; ix += sx; }
-            mtrsv_serial(UPLO, TR, nounit, n, a, lda, buf, 1);
+            mtrsv_serial(UPLO, TRANS, nounit, n, a, lda, buf, 1);
             ix = kx;
             for (std::ptrdiff_t i = 0; i < n; ++i) { x[ix] = buf[i]; ix += sx; }
             if (n > 512) std::free(buf);
-        } else if (TR == 'N') {
+        } else if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     const std::ptrdiff_t ixi = kx + i * sx;
@@ -356,14 +356,14 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
  * (the off-diagonal contribution is regrouped / scalar rather than SIMD).
  * Returns true if it handled the call. */
 __attribute__((noinline)) static bool mtrsv_omp(
-    char UPLO, char TR, bool nounit, std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x)
+    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x)
 {
     if (n < MTRSV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTRSV_MAX_CPUS) nthreads = MTRSV_MAX_CPUS;
     const bool lower = (UPLO == 'L');
-    const bool trans = (TR != 'N');
+    const bool trans = (TRANS != 'N');
 
     if (!trans) {
         /* NoTrans: axpy form. Solve a diagonal block, then propagate its solved
@@ -371,7 +371,7 @@ __attribute__((noinline)) static bool mtrsv_omp(
         if (lower) {
             for (std::ptrdiff_t j0 = 0; j0 < n; j0 += MTRSV_BLK) {
                 std::ptrdiff_t j1 = j0 + MTRSV_BLK; if (j1 > n) j1 = n;
-                mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                mtrsv_serial(UPLO, TRANS, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
                 if (j1 >= n) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -393,7 +393,7 @@ __attribute__((noinline)) static bool mtrsv_omp(
         } else {
             for (std::ptrdiff_t j1 = n; j1 > 0; j1 -= MTRSV_BLK) {
                 std::ptrdiff_t j0 = j1 - MTRSV_BLK; if (j0 < 0) j0 = 0;
-                mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                mtrsv_serial(UPLO, TRANS, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -438,7 +438,7 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         }
                     }
                 }
-                mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                mtrsv_serial(UPLO, TRANS, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
             }
         } else {                                      /* forward, k < i */
             for (std::ptrdiff_t j0 = 0; j0 < n; j0 += MTRSV_BLK) {
@@ -461,7 +461,7 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         }
                     }
                 }
-                mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                mtrsv_serial(UPLO, TRANS, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
             }
         }
     }
@@ -476,8 +476,8 @@ static void mtrsv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    char TR = up(&trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = up(&trans);
+    if (TRANS == 'C') TRANS = 'T';
     const char DIAG = up(&diag);
     const bool nounit = (DIAG != 'U');
 
@@ -485,11 +485,11 @@ static void mtrsv_core(
 
 #ifdef _OPENMP
     if (incx == 1 && n >= MTRSV_OMP_MIN && blas_omp_available()
-        && mtrsv_omp(UPLO, TR, nounit, n, a, lda, x))
+        && mtrsv_omp(UPLO, TRANS, nounit, n, a, lda, x))
         return;
 #endif
 
-    mtrsv_serial(UPLO, TR, nounit, n, a, lda, x, incx);
+    mtrsv_serial(UPLO, TRANS, nounit, n, a, lda, x, incx);
 }
 
 extern "C" {

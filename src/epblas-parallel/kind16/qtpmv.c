@@ -200,18 +200,18 @@ void qtpmv_core(
 {
     const T zero = 0.0Q;
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
-    if (qtpmv_omp(UPLO == 'U', TR == 'T', nounit, n, incx, ap, x)) return;
+    if (qtpmv_omp(UPLO == 'U', TRANS == 'T', nounit, n, incx, ap, x)) return;
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = 0;
                 for (ptrdiff_t j = 0; j < n; ++j) {
@@ -260,7 +260,7 @@ void qtpmv_core(
         }
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = 0;
                 ptrdiff_t jx = kx;

@@ -91,7 +91,7 @@ void xtrsv_serial_(
     const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = blas_up(*uplo);
-    const char TR   = blas_up(*trans);
+    const char TRANS   = blas_up(*trans);
     const char DIAG = blas_up(*diag);
     const bool nounit = (DIAG != 'U');
 
@@ -100,7 +100,7 @@ void xtrsv_serial_(
     const T zero = 0.0Q + 0.0Qi;
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t i = 0; i < n; ++i) {
                     if (x[i] != zero) {
@@ -121,7 +121,7 @@ void xtrsv_serial_(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     T t = x[i];
@@ -152,7 +152,7 @@ void xtrsv_serial_(
         }
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t i = 0; i < n; ++i) {
                     const ptrdiff_t ix = kx + i * incx;
@@ -173,7 +173,7 @@ void xtrsv_serial_(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     T t = x[kx + i * incx];
@@ -226,7 +226,7 @@ void xtrsv_blocked_(
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = xtrsv_blocked_nb();
     const char UPLO = blas_up(*uplo);
-    const char TR   = blas_up(*trans);
+    const char TRANS   = blas_up(*trans);
 
     if (n == 0) return;
     if (incx != 1 || n < 2 * nb) {
@@ -239,7 +239,7 @@ void xtrsv_blocked_(
     const T neg_one = -1.0Q + 0.0Qi;
     const T one_v   =  1.0Q + 0.0Qi;
     const char NN[1] = {'N'};
-    const char TT[1] = {(TR == 'C') ? 'C' : 'T'};
+    const char TT[1] = {(TRANS == 'C') ? 'C' : 'T'};
     const ptrdiff_t one_i = 1;
 
     const bool use_omp = (blas_omp_should_thread());
@@ -253,7 +253,7 @@ void xtrsv_blocked_(
         if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
 
-        if (TR == 'N' && UPLO == 'L') {
+        if (TRANS == 'N' && UPLO == 'L') {
             /* Forward: solve A11 x1 = b1, then x2 -= A21 x1, repeat. */
             for (ptrdiff_t j = 0; j < n; j += nb) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
@@ -287,7 +287,7 @@ void xtrsv_blocked_(
                 }
 #endif
             }
-        } else if (TR == 'N' && UPLO == 'U') {
+        } else if (TRANS == 'N' && UPLO == 'U') {
             /* Backward: solve A22 x2 = b2, then x1 -= A12 x2, repeat. */
             ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
@@ -321,7 +321,7 @@ void xtrsv_blocked_(
 #endif
                 j -= nb;
             }
-        } else if ((TR == 'T' || TR == 'C') && UPLO == 'L') {
+        } else if ((TRANS == 'T' || TRANS == 'C') && UPLO == 'L') {
             /* L,L,T/C: iterate diagonal from bottom up.
              *  x[0:j] -= op(A[j:j+jb, 0:j]) * x[j:j+jb].
              *  xgemv(op, M=jb, N=j) on submatrix &A_(j, 0).

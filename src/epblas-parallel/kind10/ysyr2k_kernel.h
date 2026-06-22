@@ -36,7 +36,7 @@ ptrdiff_t ysyr2k_nb(void);
  * ygemm_serial updates against the rest of the panel. */
 void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, ysyr2k_T alpha, ysyr2k_T beta,
                   const ysyr2k_T *a, ptrdiff_t lda, const ysyr2k_T *b, ptrdiff_t ldb,
-                  ysyr2k_T *c, ptrdiff_t ldc, char UPLO, char TR);
+                  ysyr2k_T *c, ptrdiff_t ldc, char UPLO, char TRANS);
 
 /* C := beta*C over the triangular columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. */

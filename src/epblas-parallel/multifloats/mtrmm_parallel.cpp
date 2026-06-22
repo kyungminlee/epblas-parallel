@@ -53,8 +53,8 @@ static void mtrmm_core(
     const T alpha = *alpha_;
     const char SIDE = up(&side);
     const char UPLO = up(&uplo);
-    char TR = up(&transa);
-    if (TR == 'C') TR = 'T';   /* real DD: conj-trans ≡ trans */
+    char TRANS = up(&transa);
+    if (TRANS == 'C') TRANS = 'T';   /* real DD: conj-trans ≡ trans */
     const bool nounit = (up(&diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -74,13 +74,13 @@ static void mtrmm_core(
                 std::ptrdiff_t nth  = omp_get_num_threads();
                 std::ptrdiff_t js  = blas_part_bound(n, tid, nth);
                 std::ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);
-                mtrmm_L_slice(UPLO, TR, use_blocked, js, je, m, nb, alpha,
+                mtrmm_L_slice(UPLO, TRANS, use_blocked, js, je, m, nb, alpha,
                               a, lda, b, ldb, nounit);
             }
             return;
         }
 #endif
-        mtrmm_L_slice(UPLO, TR, use_blocked, 0, n, m, nb, alpha,
+        mtrmm_L_slice(UPLO, TRANS, use_blocked, 0, n, m, nb, alpha,
                       a, lda, b, ldb, nounit);
     } else {
         /* SIDE='R': partition over rows of B. Round interior boundaries to
@@ -100,7 +100,7 @@ static void mtrmm_core(
             std::ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
             if (tid > 0)      i_lo &= ~3;
             if (tid < nth - 1) i_hi &= ~3;
-            mtrmm_R_slice(UPLO, TR, use_blocked, i_lo, i_hi, n, nb, alpha,
+            mtrmm_R_slice(UPLO, TRANS, use_blocked, i_lo, i_hi, n, nb, alpha,
                           a, lda, b, ldb, nounit);
         }
     }

@@ -75,7 +75,7 @@ void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, T beta,
 
 void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, T alpha, T beta,
                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                  T *c, ptrdiff_t ldc, char UPLO, char TR)
+                  T *c, ptrdiff_t ldc, char UPLO, char TRANS)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
@@ -95,7 +95,7 @@ void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, T alpha,
      * fixes that; columns stay disjoint across blocks so block-level
      * threading is unaffected. TRANS='T' keeps the dot diagonal + ygemm
      * trailing: its register-accumulated dot already beats the reference. */
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         for (ptrdiff_t j = jc; j < jc + jb; ++j) {
             const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
             const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
@@ -147,8 +147,8 @@ void ysyr2k_serial(
 {
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (n == 0) return;
 
@@ -161,7 +161,7 @@ void ysyr2k_serial(
     const ptrdiff_t nb = ysyr2k_nb();
     for (ptrdiff_t jc = 0; jc < n; jc += nb) {
         const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        ysyr2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
+        ysyr2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TRANS);
     }
 }
 

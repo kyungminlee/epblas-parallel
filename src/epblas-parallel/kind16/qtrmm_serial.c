@@ -184,8 +184,8 @@ void qtrmm_serial(
     const T alpha = *alpha_;
     const char SIDE   = qtrmm_uplo(side);
     const char UPLO   = qtrmm_uplo(uplo);
-    char TR           = qtrmm_uplo(transa);
-    if (TR == 'C') TR = 'T';
+    char TRANS           = qtrmm_uplo(transa);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (qtrmm_uplo(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -197,7 +197,7 @@ void qtrmm_serial(
     }
 
     if (SIDE == 'L') {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') trmm_lln_core(0, n, m, alpha, a, lda, b, ldb, nounit);
             else             trmm_lun_core(0, n, m, alpha, a, lda, b, ldb, nounit);
         } else {
@@ -205,7 +205,7 @@ void qtrmm_serial(
             else             trmm_lut_core(0, n, m, alpha, a, lda, b, ldb, nounit);
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') trmm_rln_core(0, m, n, alpha, a, lda, b, ldb, nounit);
             else             trmm_run_core(0, m, n, alpha, a, lda, b, ldb, nounit);
         } else {

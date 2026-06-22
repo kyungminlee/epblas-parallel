@@ -8,8 +8,8 @@
  * One external-linkage by-value core (`xgemv_core`) drives both Fortran-ABI
  * facades (xgemv_ / xgemv_64_, via EPBLAS_FACADE_GEMV) AND the trsv/tbsv/tpsv
  * cross-calls (the trailing GEMV bypasses the by-ref facade). The core opens
- * its own `#pragma omp parallel` region over the M-axis (TR='N') or N-axis
- * (TR='T'/'C'); it falls back to serial when invoked inside an existing
+ * its own `#pragma omp parallel` region over the M-axis (TRANS='N') or N-axis
+ * (TRANS='T'/'C'); it falls back to serial when invoked inside an existing
  * parallel region (omp_in_parallel()), so it is safe to call from xtrsv_blocked.
  */
 
@@ -32,7 +32,7 @@ static inline T cconj(T z) { return conjq(z); }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-/* Pure serial body for TR='N', stride-1: y[i_lo:i_hi] += alpha * A[i_lo:i_hi, :] * x.
+/* Pure serial body for TRANS='N', stride-1: y[i_lo:i_hi] += alpha * A[i_lo:i_hi, :] * x.
  * Each thread (or the lone serial caller) writes a disjoint slice of y. */
 static void xgemv_n_stride1_slice(
     ptrdiff_t n, ptrdiff_t i_lo, ptrdiff_t i_hi,
@@ -51,7 +51,7 @@ static void xgemv_n_stride1_slice(
     }
 }
 
-/* Pure serial body for TR ∈ {'T','C'}, stride-1: y[j_lo:j_hi] += alpha * (op(A) * x)[j_lo:j_hi].
+/* Pure serial body for TRANS ∈ {'T','C'}, stride-1: y[j_lo:j_hi] += alpha * (op(A) * x)[j_lo:j_hi].
  * Each thread (or the lone serial caller) writes a disjoint slice of y. */
 static void xgemv_tc_stride1_slice(
     ptrdiff_t m, ptrdiff_t j_lo, ptrdiff_t j_hi, bool conj_a,
@@ -72,17 +72,17 @@ static void xgemv_tc_stride1_slice(
     }
 }
 
-/* General-stride slice (incx≠1 or incy≠1). For TR='N' [lo,hi) is the disjoint
- * output-row slice; for TR≠'N' it is the disjoint output-index (j) slice. Each
+/* General-stride slice (incx≠1 or incy≠1). For TRANS='N' [lo,hi) is the disjoint
+ * output-row slice; for TRANS≠'N' it is the disjoint output-index (j) slice. Each
  * output element is written by one thread in the same per-element order as the
  * full serial loop → race-free and bit-exact (iy0/jy0/ix recomputed). */
 static void xgemv_general_stride_slice(
-    ptrdiff_t m, ptrdiff_t n, char TR, bool conj_a,
+    ptrdiff_t m, ptrdiff_t n, char TRANS, bool conj_a,
     T alpha, const T *a, ptrdiff_t lda,
     const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy, ptrdiff_t lo, ptrdiff_t hi)
 {
     const T zero = 0.0Q + 0.0Qi;
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         const ptrdiff_t iy0 = (incy < 0) ? -(m - 1) * incy : 0;
         ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;
         for (ptrdiff_t j = 0; j < n; ++j) {
@@ -138,12 +138,12 @@ void xgemv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char TR = blas_up(trans);
+    const char TRANS = blas_up(trans);
 
     if (m == 0 || n == 0) return;
 
     const T zero = 0.0Q + 0.0Qi;
-    const ptrdiff_t leny = (TR == 'N') ? m : n;
+    const ptrdiff_t leny = (TRANS == 'N') ? m : n;
 
     xgemv_apply_beta(leny, incy, beta, y);
 
@@ -155,7 +155,7 @@ void xgemv_core(
     const bool in_parallel = 0;
 #endif
 
-    if (TR == 'N' && incx == 1 && incy == 1) {
+    if (TRANS == 'N' && incx == 1 && incy == 1) {
 #ifdef _OPENMP
         const bool use_omp = (m >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
@@ -169,8 +169,8 @@ void xgemv_core(
 #else
         xgemv_n_stride1_slice(n, 0, m, alpha, a, lda, x, y);
 #endif
-    } else if ((TR == 'T' || TR == 'C') && incx == 1 && incy == 1) {
-        const bool conj_a = (TR == 'C');
+    } else if ((TRANS == 'T' || TRANS == 'C') && incx == 1 && incy == 1) {
+        const bool conj_a = (TRANS == 'C');
 #ifdef _OPENMP
         const bool use_omp = (n >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
@@ -185,9 +185,9 @@ void xgemv_core(
         xgemv_tc_stride1_slice(m, 0, n, conj_a, alpha, a, lda, x, y);
 #endif
     } else {
-        const bool conj_a = (TR == 'C');
+        const bool conj_a = (TRANS == 'C');
 #ifdef _OPENMP
-        const ptrdiff_t span = (TR == 'N') ? m : n;
+        const ptrdiff_t span = (TRANS == 'N') ? m : n;
         const bool use_omp = (span >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
@@ -195,11 +195,11 @@ void xgemv_core(
             if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
             const ptrdiff_t lo = blas_part_bound(span, tid, nth);
             const ptrdiff_t hi = blas_part_bound(span, tid + 1, nth);
-            xgemv_general_stride_slice(m, n, TR, conj_a, alpha, a, lda, x, incx, y, incy, lo, hi);
+            xgemv_general_stride_slice(m, n, TRANS, conj_a, alpha, a, lda, x, incx, y, incy, lo, hi);
         }
 #else
-        xgemv_general_stride_slice(m, n, TR, conj_a, alpha, a, lda, x, incx, y, incy,
-                                   0, (TR == 'N') ? m : n);
+        xgemv_general_stride_slice(m, n, TRANS, conj_a, alpha, a, lda, x, incx, y, incy,
+                                   0, (TRANS == 'N') ? m : n);
 #endif
     }
 }

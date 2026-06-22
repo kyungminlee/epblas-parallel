@@ -244,20 +244,20 @@ static void wtpmv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    const char TR = up(&trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = up(&trans);
+    const bool noconj = (TRANS == 'T');
     const bool nounit = (up(&diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (n >= WTPMV_OMP_MIN && blas_omp_available()
-        && wtpmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit != 0, n, ap, x, incx))
+        && wtpmv_omp(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit != 0, n, ap, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        wtpmv_serial_contig(UPLO == 'U', TR != 'N', noconj != 0, nounit != 0, n, ap, x);
+        wtpmv_serial_contig(UPLO == 'U', TRANS != 'N', noconj != 0, nounit != 0, n, ap, x);
         return;
     }
 
@@ -266,7 +266,7 @@ static void wtpmv_core(
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
     std::vector<T> xs(static_cast<std::size_t>(n));
     for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
-    wtpmv_serial_contig(UPLO == 'U', TR != 'N', noconj != 0, nounit != 0, n, ap, xs.data());
+    wtpmv_serial_contig(UPLO == 'U', TRANS != 'N', noconj != 0, nounit != 0, n, ap, xs.data());
     for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
 }
 

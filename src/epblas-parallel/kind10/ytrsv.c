@@ -99,14 +99,14 @@ void ytrsv_serial_(
     const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = blas_up(*uplo);
-    const char TR   = blas_up(*trans);
+    const char TRANS   = blas_up(*trans);
     const char DIAG = blas_up(*diag);
     const bool nounit = (DIAG != 'U');
 
     if (n == 0) return;
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 /* Forward subst with J-unroll-by-2: process columns i and
                  * i+1 jointly so the trailing-x AXPY loop loads/stores each
@@ -156,7 +156,7 @@ void ytrsv_serial_(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 /* Inner walk backward to match the outer's descent — under
                  * memory pressure the forward variant collapses to ~0.3×
@@ -215,7 +215,7 @@ void ytrsv_serial_(
         /* General-stride fallback — hoist matrix column to ai[k] and
          * walk the strided vector with a running index (Class-B fix). */
         const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 ptrdiff_t ix = kx;
                 for (ptrdiff_t i = 0; i < n; ++i) {
@@ -248,7 +248,7 @@ void ytrsv_serial_(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 /* Inner walks backward to match Fortran reference; same
                  * cache-direction reasoning as the incx=1 LT/LC path
@@ -290,7 +290,7 @@ void ytrsv_serial_(
 /* ── Block-parallel variant: single parallel region ─────────────────
  *
  * Same shape as etrsv_blocked_ / qtrsv_blocked_ (Addendum 29).
- * For TR='C', the trailing update passes "C" to ygemv (which does
+ * For TRANS='C', the trailing update passes "C" to ygemv (which does
  * sum_i conj(A(i,j)) * x(i)). One `#pragma omp parallel` wraps the
  * entire diagonal walk; two `#pragma omp barrier`s per step.
  */
@@ -315,7 +315,7 @@ void ytrsv_blocked_(
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = ytrsv_blocked_nb();
     const char UPLO = blas_up(*uplo);
-    const char TR = blas_up(*trans);
+    const char TRANS = blas_up(*trans);
 
     if (n == 0) return;
     if (incx != 1 || n < 2 * nb) {
@@ -330,7 +330,7 @@ void ytrsv_blocked_(
     const char NN[1] = {'N'};
     const char TT[1] = {'T'};
     const char CC[1] = {'C'};
-    const char *gemv_tr = (TR == 'C') ? CC : TT;
+    const char *gemv_tr = (TRANS == 'C') ? CC : TT;
     const ptrdiff_t one_i = 1;
 
     const bool use_omp = (blas_omp_should_thread());
@@ -344,7 +344,7 @@ void ytrsv_blocked_(
         if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
 
-        if (TR == 'N' && UPLO == 'L') {
+        if (TRANS == 'N' && UPLO == 'L') {
             for (ptrdiff_t j = 0; j < n; j += nb) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
@@ -373,7 +373,7 @@ void ytrsv_blocked_(
                 if (use_omp) { _Pragma("omp barrier"); }
 #endif
             }
-        } else if (TR == 'N' && UPLO == 'U') {
+        } else if (TRANS == 'N' && UPLO == 'U') {
             ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
@@ -402,7 +402,7 @@ void ytrsv_blocked_(
 #endif
                 j -= nb;
             }
-        } else if ((TR == 'T' || TR == 'C') && UPLO == 'L') {
+        } else if ((TRANS == 'T' || TRANS == 'C') && UPLO == 'L') {
             ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
@@ -432,7 +432,7 @@ void ytrsv_blocked_(
                 j -= nb;
             }
         } else {
-            /* (TR == 'T' || TR == 'C') && UPLO == 'U' */
+            /* (TRANS == 'T' || TRANS == 'C') && UPLO == 'U' */
             for (ptrdiff_t j = 0; j < n; j += nb) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {

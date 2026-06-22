@@ -43,15 +43,15 @@ void egemv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (m == 0 || n == 0) return;
 
     const T zero = 0.0L, one = 1.0L;
 
     /* Output length: M for TRANS='N', N for TRANS='T'. */
-    const ptrdiff_t leny = (TR == 'N') ? m : n;
+    const ptrdiff_t leny = (TRANS == 'N') ? m : n;
 
     /* Beta-scale y (or zero) first — independent of A·x update. */
     if (beta != one) {
@@ -72,7 +72,7 @@ void egemv_core(
 
     if (alpha == zero) return;
 
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         /* y[i] += alpha · sum_j A(i,j) · x(j).
          * Stride-1 contiguous case (most common: incx==incy==1).
          * Partition rows of A across threads so each thread updates

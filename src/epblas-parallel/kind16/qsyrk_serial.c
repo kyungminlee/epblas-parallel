@@ -214,11 +214,11 @@ void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * Unlike the NoTrans outer product (which RMW-streams C K times per column),
  * each C(i,j) is accumulated in a register and written once — packing has
  * nothing to save here, so the clean unpacked loop matches the reference. */
-void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
+void qsyrk_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
                      T alpha, const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc)
 {
-    const ptrdiff_t i_lo = (uplo == 'L') ? j : 0;
-    const ptrdiff_t i_hi = (uplo == 'L') ? n : j + 1;
+    const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
+    const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
     const T *Aj = a + j * lda;
     T *cj = c + j * ldc;
     for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
@@ -239,7 +239,7 @@ void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
  * whole output (rows ∈ [0, N]). The js-band UPLO clip bounds the active row
  * range so the kernel only ever writes the requested triangle. */
 void qsyrk_serial(
-    char uplo_c, char trans_c,
+    char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
@@ -247,20 +247,20 @@ void qsyrk_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char uplo  = blas_up(uplo_c);
-    const char trans = blas_up(trans_c);
+    const char UPLO  = blas_up(uplo);
+    const char TRANS = blas_up(trans);
 
     if (n <= 0) return;
 
-    if (uplo == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
     else             qsyrk_beta_l(n, beta, c, ldc);
 
     if (k == 0 || alpha == 0.0Q) return;
 
     /* Transpose: netlib-style unpacked inner-product (no packing overhead). */
-    if (trans != 'N') {
+    if (TRANS != 'N') {
         for (ptrdiff_t j = 0; j < n; ++j)
-            qsyrk_trans_col(j, uplo, n, k, alpha, a, lda, c, ldc);
+            qsyrk_trans_col(j, UPLO, n, k, alpha, a, lda, c, ldc);
         return;
     }
 
@@ -278,8 +278,8 @@ void qsyrk_serial(
             /* UPLO clip of the [0, N] row range for this js-band:
              *   UPPER: only rows up to js+jb contribute.
              *   LOWER: only rows from js onwards. */
-            ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
-            ptrdiff_t m_hi_eff = (uplo == 'U' && n > js + jb) ? (js + jb) : n;
+            ptrdiff_t m_lo_eff = (UPLO == 'L') ? js : 0;
+            ptrdiff_t m_hi_eff = (UPLO == 'U' && n > js + jb) ? (js + jb) : n;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
             for (ptrdiff_t ls = 0; ls < k; ls += KC) {
@@ -294,7 +294,7 @@ void qsyrk_serial(
 
                     qtri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap);
 
-                    if (uplo == 'U')
+                    if (UPLO == 'U')
                         qsyrk_kernel_u(min_i, jb, pb, alpha, Ap, Bp,
                                        &c[(size_t)js * ldc + is], ldc,
                                        (ptrdiff_t)(is - js));

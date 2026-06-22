@@ -285,18 +285,18 @@ static void wgemv_core(
     T *y, std::ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char TR = up(&trans);
+    const char TRANS = up(&trans);
 
     if (m == 0 || n == 0) return;
 
-    const std::ptrdiff_t leny = (TR == 'N') ? m : n;
+    const std::ptrdiff_t leny = (TRANS == 'N') ? m : n;
 
     mf_kernels::cscale_y(leny, beta, y, incy);
     if (ceq0(alpha)) return;
 
-    const bool conj_a = (TR == 'C');
+    const bool conj_a = (TRANS == 'C');
 
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (incx == 1 && incy == 1) {
             wgemv_n_contig(m, n, alpha, a, lda, x, y);
             return;

@@ -5,7 +5,7 @@
  *
  *   wsyrk_serial.cpp    The pure single-thread complex symmetric rank-k update
  *                       (no OpenMP). Owns ALL the numerics: the AVX2 SIMD
- *                       diagonal kernels (TR='N' rank-1 and TR='T' dot forms,
+ *                       diagonal kernels (TRANS='N' rank-1 and TRANS='T' dot forms,
  *                       cmul/cadd over 4 SoA arrays), the scalar diagonal
  *                       fallback, the block-size policy, the per-block worker
  *                       `wsyrk_block` (beta-scale + diagonal update + trailing
@@ -24,9 +24,9 @@
  *                       scale (schedule(static)). Delegates to wsyrk_serial
  *                       when nested.
  *
- * Symmetric rank-k for complex input keeps TR ∈ {'N','T'} (no conjugate form);
+ * Symmetric rank-k for complex input keeps TRANS ∈ {'N','T'} (no conjugate form);
  * the trailing gemm uses the plain transpose ('T'), so the slice workers take
- * TR verbatim.
+ * TRANS verbatim.
  *
  * Leaf names are wsyrk_-prefixed so they keep external linkage without
  * colliding with the other routines' helpers in the same archive.
@@ -54,7 +54,7 @@ void wsyrk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, wsyrk_T beta
  * own triangle columns, accumulate the diagonal block (SIMD or scalar), then
  * the trailing gemm (routed through wgemm_serial — no nested OpenMP). Each
  * block writes a disjoint column range of C → race-free across blocks. */
-void wsyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR,
+void wsyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TRANS,
                  wsyrk_T alpha, wsyrk_T beta,
                  const wsyrk_T *a, std::ptrdiff_t lda, wsyrk_T *c, std::ptrdiff_t ldc);
 

@@ -85,13 +85,13 @@ static void ygbmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
-    const char TR = blas_up(trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = blas_up(trans);
+    const bool noconj = (TRANS == 'T');
 
     if (m == 0 || n == 0 || (alpha == zero && beta == one)) return;
 
-    const ptrdiff_t leny = (TR == 'N') ? m : n;
-    const ptrdiff_t lenx = (TR == 'N') ? n : m;
+    const ptrdiff_t leny = (TRANS == 'N') ? m : n;
+    const ptrdiff_t lenx = (TRANS == 'N') ? n : m;
 
     if (beta != one) {
         ptrdiff_t iy = (incy < 0) ? -(leny - 1) * incy : 0;
@@ -102,7 +102,7 @@ static void ygbmv_core(
 
     const ptrdiff_t s1 = (ptrdiff_t)lda - 1;
 
-    if (TR == 'N') {
+    if (TRANS == 'N') {
 #ifdef _OPENMP
         /* Cheap inline gate before the noinline call's marshalling, so the serial
          * gather below keeps its unperturbed register allocation (outlining tax). */

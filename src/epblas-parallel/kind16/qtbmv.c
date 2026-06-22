@@ -44,20 +44,20 @@ void qtbmv_core(
 {
     const T zero = 0.0Q;
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (n >= QTBMV_OMP_MIN && blas_omp_max_threads() > 1
-        && qtbmv_omp(UPLO == 'U', TR == 'T', nounit, n, k, a, lda, x, incx))
+        && qtbmv_omp(UPLO == 'U', TRANS == 'T', nounit, n, k, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
@@ -101,7 +101,7 @@ void qtbmv_core(
     } else {
         /* Non-unit stride — transcribe Netlib. */
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {

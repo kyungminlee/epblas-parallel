@@ -354,7 +354,7 @@ void ytrmm_serial(
     const T alpha = *alpha_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(transa);
+    const char TRANS = blas_up(transa);
     const bool nounit = (blas_up(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -370,8 +370,8 @@ void ytrmm_serial(
     if (SIDE == 'L') {
         const ptrdiff_t use_blocked = (m >= 2 * nb);
         enum ytrmm_variant_L V;
-        if (TR == 'N')      V = (UPLO == 'L') ? YLLN : YLUN;
-        else if (TR == 'T') V = (UPLO == 'L') ? YLLT : YLUT;
+        if (TRANS == 'N')      V = (UPLO == 'L') ? YLLN : YLUN;
+        else if (TRANS == 'T') V = (UPLO == 'L') ? YLLT : YLUT;
         else                V = (UPLO == 'L') ? YLLC : YLUC;
         if (use_blocked) {
             ytrmm_blocked_chunk_L(V, 0, n, m, nb, alpha, a, lda, b, ldb, nounit);
@@ -388,8 +388,8 @@ void ytrmm_serial(
     } else {
         const ptrdiff_t use_blocked = (n >= 2 * nb);
         enum ytrmm_variant_R V;
-        if (TR == 'N')      V = (UPLO == 'L') ? YRLN : YRUN;
-        else if (TR == 'T') V = (UPLO == 'L') ? YRLT : YRUT;
+        if (TRANS == 'N')      V = (UPLO == 'L') ? YRLN : YRUN;
+        else if (TRANS == 'T') V = (UPLO == 'L') ? YRLT : YRUT;
         else                V = (UPLO == 'L') ? YRLC : YRUC;
         if (use_blocked) {
             ytrmm_blocked_chunk_R(V, 0, m, n, nb, alpha, a, lda, b, ldb, nounit);

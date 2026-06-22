@@ -116,7 +116,7 @@ wtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi, b
 
 /* Bit-exact serial path (the SIMD-packed reference). Also reused as the
  * diagonal-block solver by the threaded path below. */
-static void wtrsv_serial(char UPLO, char TR, bool nounit,
+static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
                          std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
 {
     if (n == 0) return;
@@ -145,7 +145,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
             x_ih[k] = v.im.limbs[0]; x_il[k] = v.im.limbs[1];
         };
 
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             auto do_axpy_range = [&](std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi) {
                 T xi = load_x(i);
                 if (ceq0(xi)) return;
@@ -191,7 +191,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) do_axpy_range(i, 0, i);
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             auto do_dot_range = [&](std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi) {
                 const double *aip = reinterpret_cast<const double *>(&A_(0, i));
                 __m256d s_rh = zerov, s_rl = zerov, s_ih = zerov, s_il = zerov;
@@ -244,7 +244,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
         }
         std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
 #else
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     if (!ceq0(x[i])) {
@@ -265,7 +265,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
                     T t = x[i];
@@ -301,7 +301,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
         T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
         std::vector<T> xs(static_cast<std::size_t>(n));
         for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
-        wtrsv_serial(UPLO, TR, nounit, n, a, lda, xs.data(), 1);
+        wtrsv_serial(UPLO, TRANS, nounit, n, a, lda, xs.data(), 1);
         for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
     }
 }
@@ -313,15 +313,15 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
  * rows. Serial fallback stays bit-exact; threaded path matches within DD fuzz
  * tol. Returns true if it handled the call. */
 __attribute__((noinline)) static bool wtrsv_omp(
-    char UPLO, char TR, bool nounit, std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x)
+    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x)
 {
     if (n < WTRSV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WTRSV_MAX_CPUS) nthreads = WTRSV_MAX_CPUS;
     const bool lower = (UPLO == 'L');
-    const bool trans = (TR != 'N');
-    const bool conj_a = (TR == 'C');
+    const bool trans = (TRANS != 'N');
+    const bool conj_a = (TRANS == 'C');
 
     if (!trans) {
         /* NoTrans: axpy form. Solve a diagonal block, then propagate its solved
@@ -329,7 +329,7 @@ __attribute__((noinline)) static bool wtrsv_omp(
         if (lower) {
             for (std::ptrdiff_t j0 = 0; j0 < n; j0 += WTRSV_BLK) {
                 std::ptrdiff_t j1 = j0 + WTRSV_BLK; if (j1 > n) j1 = n;
-                wtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                wtrsv_serial(UPLO, TRANS, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
                 if (j1 >= n) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -351,7 +351,7 @@ __attribute__((noinline)) static bool wtrsv_omp(
         } else {
             for (std::ptrdiff_t j1 = n; j1 > 0; j1 -= WTRSV_BLK) {
                 std::ptrdiff_t j0 = j1 - WTRSV_BLK; if (j0 < 0) j0 = 0;
-                wtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                wtrsv_serial(UPLO, TRANS, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -399,7 +399,7 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         }
                     }
                 }
-                wtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                wtrsv_serial(UPLO, TRANS, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
             }
         } else {                                      /* forward, k < i */
             for (std::ptrdiff_t j0 = 0; j0 < n; j0 += WTRSV_BLK) {
@@ -425,7 +425,7 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         }
                     }
                 }
-                wtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
+                wtrsv_serial(UPLO, TRANS, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
             }
         }
     }
@@ -440,7 +440,7 @@ static void wtrsv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    const char TR   = up(&trans);
+    const char TRANS   = up(&trans);
     const char DIAG = up(&diag);
     const bool nounit = (DIAG != 'U');
 
@@ -448,11 +448,11 @@ static void wtrsv_core(
 
 #ifdef _OPENMP
     if (incx == 1 && n >= WTRSV_OMP_MIN && blas_omp_available()
-        && wtrsv_omp(UPLO, TR, nounit, n, a, lda, x))
+        && wtrsv_omp(UPLO, TRANS, nounit, n, a, lda, x))
         return;
 #endif
 
-    wtrsv_serial(UPLO, TR, nounit, n, a, lda, x, incx);
+    wtrsv_serial(UPLO, TRANS, nounit, n, a, lda, x, incx);
 }
 
 extern "C" {

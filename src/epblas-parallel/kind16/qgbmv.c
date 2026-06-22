@@ -62,13 +62,13 @@ void qgbmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0Q, one = 1.0Q;
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (m == 0 || n == 0 || (alpha == zero && beta == one)) return;
 
-    const ptrdiff_t leny = (TR == 'N') ? m : n;
-    const ptrdiff_t lenx = (TR == 'N') ? n : m;
+    const ptrdiff_t leny = (TRANS == 'N') ? m : n;
+    const ptrdiff_t lenx = (TRANS == 'N') ? n : m;
 
     if (beta != one) {
         ptrdiff_t iy = (incy < 0) ? -(leny - 1) * incy : 0;
@@ -82,7 +82,7 @@ void qgbmv_core(
 
     const ptrdiff_t s1 = (ptrdiff_t)lda - 1;
 
-    if (TR == 'N') {
+    if (TRANS == 'N') {
 #ifdef _OPENMP
         if (m >= QGBMV_OMP_MIN && blas_omp_max_threads() > 1
             && qgbmv_n_omp(m, n, KL, KU, a, lda, x, incx, alpha, y, incy))

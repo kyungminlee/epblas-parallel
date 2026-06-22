@@ -197,20 +197,20 @@ static void mtpmv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    char TR = up(&trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = up(&trans);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (up(&diag) != 'U');
 
     if (n == 0) return;
 
 #ifdef _OPENMP
     if (n >= MTPMV_OMP_MIN && blas_omp_available()
-        && mtpmv_omp(UPLO == 'U', TR != 'N', nounit != 0, n, ap, x, incx))
+        && mtpmv_omp(UPLO == 'U', TRANS != 'N', nounit != 0, n, ap, x, incx))
         return;
 #endif
 
     const bool is_upper = (UPLO == 'U');
-    const bool is_trans = (TR != 'N');
+    const bool is_trans = (TRANS != 'N');
 
     if (incx == 1) {
         mtpmv_serial_contig(is_upper, is_trans, nounit != 0, n, ap, x);
@@ -248,7 +248,7 @@ static void mtpmv_core(
          * extension. */
         const std::ptrdiff_t sx = incx;
         std::ptrdiff_t kx = (sx < 0) ? -(n - 1) * sx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 std::ptrdiff_t kk = 0;
                 std::ptrdiff_t jx = kx;

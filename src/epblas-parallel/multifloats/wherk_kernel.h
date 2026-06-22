@@ -6,8 +6,8 @@
  *   wherk_serial.cpp    The pure single-thread Hermitian rank-k update (no
  *                       OpenMP). alpha/beta REAL, A/C complex, the diagonal of
  *                       C stays real. Owns ALL the numerics: the AVX2 SIMD
- *                       diagonal kernels (TR_c='N' rank-1 with conjugated panel /
- *                       TR_c='C' dot, real-alpha scaling, real-diag preservation),
+ *                       diagonal kernels (TRANS='N' rank-1 with conjugated panel /
+ *                       TRANS='C' dot, real-alpha scaling, real-diag preservation),
  *                       the scalar diagonal fallback, the block-size policy, the
  *                       per-block worker `wherk_block` (beta-scale + diagonal
  *                       update + trailing gemm via wgemm_serial with conjugate
@@ -27,9 +27,9 @@
  *                       triangle scale (schedule(static)). Delegates to
  *                       wherk_serial when nested.
  *
- * Hermitian rank-k keeps TR_c ∈ {'N','C'} (conjugate transpose); the trailing
+ * Hermitian rank-k keeps TRANS ∈ {'N','C'} (conjugate transpose); the trailing
  * gemm uses 'C', and the diagonal cells keep their original imaginary part on
- * unpack (Netlib herk semantics). The slice workers take TR_c verbatim.
+ * unpack (Netlib herk semantics). The slice workers take TRANS verbatim.
  *
  * Leaf names are wherk_-prefixed so they keep external linkage without
  * colliding with the other routines' helpers in the same archive.
@@ -64,7 +64,7 @@ void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, wherk_TR bet
  * (SIMD or scalar), then the trailing conjugate-transpose gemm (routed through
  * wgemm_serial — no nested OpenMP). Each block writes a disjoint column range
  * of C → race-free across blocks. */
-void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR_c,
+void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TRANS,
                  wherk_TR alpha, wherk_TR beta,
                  const wherk_TC *a, std::ptrdiff_t lda, wherk_TC *c, std::ptrdiff_t ldc);
 

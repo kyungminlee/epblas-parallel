@@ -37,7 +37,7 @@ ptrdiff_t ysyrk_nb(void);
  * update against the rest of the panel. */
 void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, ysyrk_T alpha, ysyrk_T beta,
                  const ysyrk_T *a, ptrdiff_t lda, ysyrk_T *c, ptrdiff_t ldc,
-                 char UPLO, char TR);
+                 char UPLO, char TRANS);
 
 /* C := beta*C over the triangular columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. */

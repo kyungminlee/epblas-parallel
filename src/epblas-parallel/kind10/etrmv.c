@@ -6,7 +6,7 @@
  *
  * Netlib reference + restrict + stride-1 column access. OMP path
  * uses an external output buffer so the in-place data dependency
- * dissolves (TR='T' simple, TR='N' needs per-thread y_priv+reduce
+ * dissolves (TRANS='T' simple, TRANS='N' needs per-thread y_priv+reduce
  * — same pattern as esymv per Addendum 36).
  */
 
@@ -30,16 +30,16 @@ typedef long double T;
 #ifdef _OPENMP
 /* OMP core on a CONTIGUOUS x. Shared by the incx==1 fast path and the
  * strided path (via gather/scatter), so the threading lives in one place.
- * TR='T' writes each x[j] once (disjoint dot → bit-exact across threads);
- * TR='N' uses per-thread y_priv + reduction (esymv pattern, Add-36 — matches
+ * TRANS='T' writes each x[j] once (disjoint dot → bit-exact across threads);
+ * TRANS='N' uses per-thread y_priv + reduction (esymv pattern, Add-36 — matches
  * ref within tolerance, not bit-exact). Returns 1 on success, 0 if the
  * scratch alloc failed (caller falls back to serial). */
-static bool etrmv_omp_contig(char UPLO, char TR, bool nounit,
+static bool etrmv_omp_contig(char UPLO, char TRANS, bool nounit,
                             ptrdiff_t n, const T *restrict a, ptrdiff_t lda,
                             T *restrict x, ptrdiff_t nthreads)
 {
     const T zero = 0.0L;
-    if (TR == 'T') {
+    if (TRANS == 'T') {
         T *y_buf = (T *)aligned_alloc(64,
             (((size_t)n * sizeof(T)) + 63) & ~(size_t)63);
         if (!y_buf) return 0;
@@ -82,7 +82,7 @@ static bool etrmv_omp_contig(char UPLO, char TR, bool nounit,
         free(y_buf);
         return 1;
     } else {
-        /* TR='N' — per-thread y_priv + reduction. */
+        /* TRANS='N' — per-thread y_priv + reduction. */
         T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
         if (!y_priv_all) return 0;
         #pragma omp parallel num_threads(nthreads)
@@ -130,8 +130,8 @@ static void etrmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
     const char DIAG = blas_up(diag);
     const bool nounit = (DIAG != 'U');
 
@@ -142,10 +142,10 @@ static void etrmv_core(
 #ifdef _OPENMP
         const ptrdiff_t nthreads = blas_omp_max_threads();
         if (n >= ETRMV_OMP_MIN && blas_omp_should_thread()
-            && etrmv_omp_contig(UPLO, TR, nounit, n, a, lda, x, nthreads))
+            && etrmv_omp_contig(UPLO, TRANS, nounit, n, a, lda, x, nthreads))
             return;
 #endif
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 /* j backward: x[i] for i>j updated by temp=x[j]; then scale x[j].
                  * Inner walks backward (i = N-1..j+1) to match Fortran
@@ -270,7 +270,7 @@ static void etrmv_core(
             T *xc = (T *)malloc((size_t)n * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < n; ++i) xc[i] = x[kx + i * incx];
-                if (etrmv_omp_contig(UPLO, TR, nounit, n, a, lda, xc, nthreads)) {
+                if (etrmv_omp_contig(UPLO, TRANS, nounit, n, a, lda, xc, nthreads)) {
                     for (ptrdiff_t i = 0; i < n; ++i) x[kx + i * incx] = xc[i];
                     free(xc);
                     return;
@@ -279,7 +279,7 @@ static void etrmv_core(
             }
         }
 #endif
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 /* Inner walks backward to match Fortran etrmv.f (DO 70
                  * I=N,J+1,-1). J-unroll-by-2 (mirrors the incx==1 path):

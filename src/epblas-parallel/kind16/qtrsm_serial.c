@@ -202,8 +202,8 @@ void qtrsm_serial(
     const T alpha = *alpha_;
     const char SIDE   = qtrsm_uplo(side);
     const char UPLO   = qtrsm_uplo(uplo);
-    char TR           = qtrsm_uplo(transa);
-    if (TR == 'C') TR = 'T';   /* real type: conj-trans ≡ trans */
+    char TRANS           = qtrsm_uplo(transa);
+    if (TRANS == 'C') TRANS = 'T';   /* real type: conj-trans ≡ trans */
     const bool nounit = (qtrsm_uplo(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -230,7 +230,7 @@ void qtrsm_serial(
     }
 
     if (SIDE == 'L') {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') qtrsm_lln_core(0, n, m, alpha, a, lda, b, ldb, nounit);
             else             qtrsm_lun_core(0, n, m, alpha, a, lda, b, ldb, nounit);
         } else {
@@ -238,7 +238,7 @@ void qtrsm_serial(
             else             qtrsm_lut_core(0, n, m, alpha, a, lda, b, ldb, nounit);
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') qtrsm_rln_core(0, m, n, alpha, a, lda, b, ldb, nounit);
             else             qtrsm_run_core(0, m, n, alpha, a, lda, b, ldb, nounit);
         } else {

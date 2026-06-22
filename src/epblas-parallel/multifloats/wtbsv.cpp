@@ -37,11 +37,11 @@ inline T cdiv(T const &a, T const &b) {
  * AXPY-sub (caxpy_sub, bit-exact); Trans/ConjTrans is a banded-column complex
  * dot (cdot, reorders -> within fuzz tol). The cross-column recurrence stays
  * scalar. Strided callers gather x to a contiguous scratch around this. */
-static void wtbsv_serial_contig(char UPLO, char TR, bool noconj, bool nounit,
+static void wtbsv_serial_contig(char UPLO, char TRANS, bool noconj, bool nounit,
                                 std::ptrdiff_t n, std::ptrdiff_t k, const T *a, std::size_t lda, T *x)
 {
     const bool conj = (noconj == 0);
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (UPLO == 'U') {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 if (!ceq0(x[j])) {
@@ -87,14 +87,14 @@ static void wtbsv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    const char TR = up(&trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = up(&trans);
+    const bool noconj = (TRANS == 'T');
     const bool nounit = (up(&diag) != 'U');
 
     if (n == 0) return;
 
     if (incx == 1) {
-        wtbsv_serial_contig(UPLO, TR, noconj, nounit, n, k, a, lda, x);
+        wtbsv_serial_contig(UPLO, TRANS, noconj, nounit, n, k, a, lda, x);
         return;
     }
 
@@ -102,7 +102,7 @@ static void wtbsv_core(
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
     std::vector<T> xs(static_cast<std::size_t>(n));
     for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
-    wtbsv_serial_contig(UPLO, TR, noconj, nounit, n, k, a, lda, xs.data());
+    wtbsv_serial_contig(UPLO, TRANS, noconj, nounit, n, k, a, lda, xs.data());
     for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
 }
 

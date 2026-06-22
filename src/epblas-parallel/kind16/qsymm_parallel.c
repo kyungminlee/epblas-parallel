@@ -32,7 +32,7 @@ typedef qsymm_T T;
 #define NR QGEMM_NR
 
 static void qsymm_core(
-    char side_c, char uplo_c,
+    char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
@@ -43,14 +43,14 @@ static void qsymm_core(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        qsymm_serial(side_c, uplo_c, m, n, alpha_, a, lda, b, ldb, beta_,
+        qsymm_serial(side, uplo, m, n, alpha_, a, lda, b, ldb, beta_,
                      c, ldc);
         return;
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = blas_up(side_c);
-    const char UPLO = blas_up(uplo_c);
+    const char SIDE = blas_up(side);
+    const char UPLO = blas_up(uplo);
 
     if (m <= 0 || n <= 0) return;
 

@@ -97,8 +97,8 @@ static void qtrmm_core(
     const T alpha = *alpha_;
     const char SIDE   = blas_up(side);
     const char UPLO   = blas_up(uplo);
-    char TR           = blas_up(transa);
-    if (TR == 'C') TR = 'T';
+    char TRANS           = blas_up(transa);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -110,7 +110,7 @@ static void qtrmm_core(
     }
 
     if (SIDE == 'L') {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') trmm_lln(m, n, alpha, a, lda, b, ldb, nounit);
             else             trmm_lun(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
@@ -118,7 +118,7 @@ static void qtrmm_core(
             else             trmm_lut(m, n, alpha, a, lda, b, ldb, nounit);
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') trmm_rln(m, n, alpha, a, lda, b, ldb, nounit);
             else             trmm_run(m, n, alpha, a, lda, b, ldb, nounit);
         } else {

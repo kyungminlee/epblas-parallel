@@ -5,7 +5,7 @@
  * per-column triangle scaler and the diagonal-imaginary zeroer), shared
  * through wherk_kernel.h.
  *
- *   C := α·A·Aᴴ + β·C   (TR_c='N')      C := α·Aᴴ·A + β·C   (TR_c='C')
+ *   C := α·A·Aᴴ + β·C   (TRANS='N')      C := α·Aᴴ·A + β·C   (TRANS='C')
  *   alpha/beta REAL, A/C complex, the diagonal of C stays real.
  *
  * One `omp parallel for` over the jc BLOCK loop (schedule(dynamic,1)). Each
@@ -55,7 +55,7 @@ static void wherk_core(
 #endif
     const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
-    const char TR_c = up(&trans);
+    const char TRANS = up(&trans);
 
     if (n == 0) return;
 
@@ -80,7 +80,7 @@ static void wherk_core(
 #endif
     for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
         const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        wherk_block(jc, jb, n, k, UPLO, TR_c, alpha, beta, a, lda, c, ldc);
+        wherk_block(jc, jb, n, k, UPLO, TRANS, alpha, beta, a, lda, c, ldc);
     }
 }
 

@@ -3,8 +3,8 @@
  * single-thread worker. Owns ALL the numerics; no OpenMP on this path.
  * alpha/beta REAL, A/C complex, the diagonal of C stays real. TRANS ∈ {N, C}.
  *
- * Blocked: AVX2 SIMD diagonal (real-alpha scaling, conjugated panel for TR_c='N',
- * conjugated Ai for TR_c='C', real-diag preservation on unpack) + scalar diagonal
+ * Blocked: AVX2 SIMD diagonal (real-alpha scaling, conjugated panel for TRANS='N',
+ * conjugated Ai for TRANS='C', real-diag preservation on unpack) + scalar diagonal
  * fallback + wgemm_serial trailing with conjugate transpose.
  *
  * The trailing rank-k update routes through wgemm_serial (no nested OpenMP) so
@@ -106,7 +106,7 @@ inline void unpack_4col_herk_triangle(std::ptrdiff_t jc, std::ptrdiff_t jb, std:
 
 using simd_exact::vbcast;
 
-/* TR_c='N' rank-1 with Hermitian-conjugated Aj panel and real alpha.
+/* TRANS='N' rank-1 with Hermitian-conjugated Aj panel and real alpha.
  * t = alpha · conj(A(j_panel..+4, l));
  * C[i, j_panel..+4] += t · A(i, l). */
 inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
@@ -161,7 +161,7 @@ inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_
     }
 }
 
-/* TR_c='C' dot product SIMD, KC-tiled: accumulate the conjugated complex DD dot
+/* TRANS='C' dot product SIMD, KC-tiled: accumulate the conjugated complex DD dot
  * Σ conj(Ai[l])·Aj over l ∈ [l0, l0+kc) into the per-row 4-wide accumulator acc.
  * ajrh/.../ajil hold this chunk's 4 packed Aj columns (un-conjugated) at
  * chunk-local rows 0..kc-1. acc is loaded/stored each call, so accumulation
@@ -211,13 +211,13 @@ inline void simd_herk_diag_c_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
 inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
                                   const TC *a, std::ptrdiff_t lda,
                                   TC *c, std::ptrdiff_t ldc,
-                                  char UPLO, char TR_c)
+                                  char UPLO, char TRANS)
 {
     alignas(32) double crh[kMaxBlockM * kSimdLane];
     alignas(32) double crl[kMaxBlockM * kSimdLane];
     alignas(32) double cih[kMaxBlockM * kSimdLane];
     alignas(32) double cil[kMaxBlockM * kSimdLane];
-    /* TR_c='C' scratch: one K-chunk of 4 packed Aj columns (bounded by kMaxK)
+    /* TRANS='C' scratch: one K-chunk of 4 packed Aj columns (bounded by kMaxK)
      * plus a per-row complex-DD accumulator carried across chunks. */
     alignas(32) static thread_local double ajrh[kMaxK * kSimdLane];
     alignas(32) static thread_local double ajrl[kMaxK * kSimdLane];
@@ -231,8 +231,8 @@ inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
     for (std::ptrdiff_t j = jc; j < jc + jb; j += kSimdLane) {
         const std::ptrdiff_t jcount = (jc + jb - j < kSimdLane) ? (jc + jb - j) : kSimdLane;
         pack_4col_cdd(jb, jc, c, ldc, j, jcount, crh, crl, cih, cil);
-        if (TR_c == 'N') {
-            /* TR_c='N' reads A directly per l — K-independent, no scratch cap. */
+        if (TRANS == 'N') {
+            /* TRANS='N' reads A directly per l — K-independent, no scratch cap. */
             simd_herk_diag_n(jc, jb, k, alpha, a, lda, j, jcount,
                              crh, crl, cih, cil);
         } else {
@@ -299,9 +299,9 @@ inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
 
 void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
                    const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc,
-                   char UPLO, char TR_c)
+                   char UPLO, char TRANS)
 {
-    if (TR_c == 'N') {
+    if (TRANS == 'N') {
         for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
             const std::ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const std::ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
@@ -338,15 +338,15 @@ void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR al
 
 inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
                           const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc,
-                          char UPLO, char TR_c)
+                          char UPLO, char TRANS)
 {
 #ifdef MBLAS_SIMD_DD
     if (jb <= kMaxBlockM) {
-        simd_herk_diag_panels(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR_c);
+        simd_herk_diag_panels(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
         return;
     }
 #endif
-    herk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR_c);
+    herk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
 }
 
 } /* anonymous namespace */
@@ -375,7 +375,7 @@ void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, TR beta, TC 
     }
 }
 
-void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR_c,
+void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TRANS,
                  TR alpha, TR beta, const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc)
 {
     /* Beta-scale this block's own triangle columns (real-diag preservation). */
@@ -395,7 +395,7 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::pt
         }
     }
 
-    diag_dispatch(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR_c);
+    diag_dispatch(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
 
     const TC alpha_c = TC{ alpha, rzero };
     const TC cone { TR{1.0, 0.0}, rzero };
@@ -406,7 +406,7 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::pt
         const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
-            if (TR_c == 'N') {
+            if (TRANS == 'N') {
                 wgemm_serial(NN[0], CN[0], trailing, jb, k, &alpha_c, &A_(j0, 0), lda, &A_(jc, 0), lda, &cone, &C_(j0, jc), ldc);
             } else {
                 wgemm_serial(CN[0], NN[0], trailing, jb, k, &alpha_c, &A_(0, j0), lda, &A_(0, jc), lda, &cone, &C_(j0, jc), ldc);
@@ -414,7 +414,7 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::pt
         }
     } else {
         if (jc > 0) {
-            if (TR_c == 'N') {
+            if (TRANS == 'N') {
                 wgemm_serial(NN[0], CN[0], jc, jb, k, &alpha_c, &A_(0, 0), lda, &A_(jc, 0), lda, &cone, &C_(0, jc), ldc);
             } else {
                 wgemm_serial(CN[0], NN[0], jc, jb, k, &alpha_c, &A_(0, 0), lda, &A_(0, jc), lda, &cone, &C_(0, jc), ldc);
@@ -433,7 +433,7 @@ extern "C" void wherk_serial(
 {
     const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
-    const char TR_c = up(&trans);
+    const char TRANS = up(&trans);
 
     if (n == 0) return;
 
@@ -449,7 +449,7 @@ extern "C" void wherk_serial(
     const std::ptrdiff_t nb = wherk_block_nb();
     for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
         const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        wherk_block(jc, jb, n, k, UPLO, TR_c, alpha, beta, a, lda, c, ldc);
+        wherk_block(jc, jb, n, k, UPLO, TRANS, alpha, beta, a, lda, c, ldc);
     }
 }
 

@@ -20,7 +20,7 @@
  *
  * Unlike the real (mtrmm) twin, TRANSA is kept as 'N'/'T'/'C' DISTINCT — for
  * complex, the conjugate transpose differs from the plain transpose; the slice
- * workers take TR verbatim and map it (with UPLO) to the 6-way variant. The
+ * workers take TRANS verbatim and map it (with UPLO) to the 6-way variant. The
  * conjugate is threaded through the T/C cores via a conj_flag + A_op().
  */
 
@@ -858,15 +858,15 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
     }
 }
 
-/* Map (UPLO, TR) → blocked variant. TR ∈ {'N','T','C'} kept distinct. */
-inline trmm_variant_L l_variant(char UPLO, char TR) {
-    if (TR == 'N') return (UPLO == 'L') ? WLLN : WLUN;
-    if (TR == 'T') return (UPLO == 'L') ? WLLT : WLUT;
+/* Map (UPLO, TRANS) → blocked variant. TRANS ∈ {'N','T','C'} kept distinct. */
+inline trmm_variant_L l_variant(char UPLO, char TRANS) {
+    if (TRANS == 'N') return (UPLO == 'L') ? WLLN : WLUN;
+    if (TRANS == 'T') return (UPLO == 'L') ? WLLT : WLUT;
     return (UPLO == 'L') ? WLLC : WLUC;
 }
-inline trmm_variant_R r_variant(char UPLO, char TR) {
-    if (TR == 'N') return (UPLO == 'L') ? WRLN : WRUN;
-    if (TR == 'T') return (UPLO == 'L') ? WRLT : WRUT;
+inline trmm_variant_R r_variant(char UPLO, char TRANS) {
+    if (TRANS == 'N') return (UPLO == 'L') ? WRLN : WRUN;
+    if (TRANS == 'T') return (UPLO == 'L') ? WRLT : WRUT;
     return (UPLO == 'L') ? WRLC : WRUC;
 }
 
@@ -882,12 +882,12 @@ void wtrmm_zero_B(std::ptrdiff_t m, std::ptrdiff_t n, T *b, std::ptrdiff_t ldb)
         for (std::ptrdiff_t i = 0; i < m; ++i) B_(i, j) = zero_cdd;
 }
 
-void wtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+void wtrmm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, std::ptrdiff_t nb, T alpha,
                    const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, bool nounit)
 {
     if (j_start >= j_end) return;
-    const trmm_variant_L V = l_variant(UPLO, TR);
+    const trmm_variant_L V = l_variant(UPLO, TRANS);
     if (use_blocked) {
         blocked_chunk_L(V, j_start, j_end, m, nb, alpha, a, lda, b, ldb, nounit);
         return;
@@ -897,8 +897,8 @@ void wtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
      * diag too — same kernel, over this slice's column range. */
     if (m <= kMaxBlockM) {
         trmm_simd_op_w op;
-        if (TR == 'N')      op = (UPLO == 'L') ? WSLLN : WSLUN;
-        else if (TR == 'T') op = (UPLO == 'L') ? WSLLT : WSLUT;
+        if (TRANS == 'N')      op = (UPLO == 'L') ? WSLLN : WSLUN;
+        else if (TRANS == 'T') op = (UPLO == 'L') ? WSLLT : WSLUT;
         else                op = (UPLO == 'L') ? WSLLC : WSLUC;
         wtrmm_simd_diag(op, j_start, j_end, m, alpha, a, lda, b, ldb, nounit);
         return;
@@ -914,20 +914,20 @@ void wtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
     }
 }
 
-void wtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+void wtrmm_R_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t row_lo, std::ptrdiff_t row_hi, std::ptrdiff_t n, std::ptrdiff_t nb, T alpha,
                    const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, bool nounit)
 {
     if (row_lo >= row_hi) return;
-    const trmm_variant_R V = r_variant(UPLO, TR);
+    const trmm_variant_R V = r_variant(UPLO, TRANS);
     if (use_blocked) {
         blocked_chunk_R(V, row_lo, row_hi, n, nb, alpha, a, lda, b, ldb, nounit);
         return;
     }
 #ifdef MBLAS_SIMD_DD
     wtrmm_r_op op;
-    if (TR == 'N')      op = (UPLO == 'L') ? WRLN_OP : WRUN_OP;
-    else if (TR == 'T') op = (UPLO == 'L') ? WRLT_OP : WRUT_OP;
+    if (TRANS == 'N')      op = (UPLO == 'L') ? WRLN_OP : WRUN_OP;
+    else if (TRANS == 'T') op = (UPLO == 'L') ? WRLT_OP : WRUT_OP;
     else                op = (UPLO == 'L') ? WRLC_OP : WRUC_OP;
     wtrmm_simd_diag_R(op, row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit);
 #else
@@ -953,7 +953,7 @@ extern "C" void wtrmm_serial(
     using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
     const char SIDE = up(&side);
     const char UPLO = up(&uplo);
-    const char TR = up(&transa);   /* complex: N/T/C kept distinct */
+    const char TRANS = up(&transa);   /* complex: N/T/C kept distinct */
     const bool nounit = (up(&diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -964,11 +964,11 @@ extern "C" void wtrmm_serial(
 
     if (SIDE == 'L') {
         const std::ptrdiff_t use_blocked = (m >= 2 * nb);
-        wtrmm_L_slice(UPLO, TR, use_blocked, 0, n, m, nb, alpha,
+        wtrmm_L_slice(UPLO, TRANS, use_blocked, 0, n, m, nb, alpha,
                       a, lda, b, ldb, nounit);
     } else {
         const std::ptrdiff_t use_blocked = (n >= 2 * nb);
-        wtrmm_R_slice(UPLO, TR, use_blocked, 0, m, n, nb, alpha,
+        wtrmm_R_slice(UPLO, TRANS, use_blocked, 0, m, n, nb, alpha,
                       a, lda, b, ldb, nounit);
     }
 }

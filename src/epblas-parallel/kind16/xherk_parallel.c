@@ -49,7 +49,7 @@ static void xherk_core(
 #endif
     const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    const char TR_c = blas_up(trans);
+    const char TRANS = blas_up(trans);
 
     const TR rzero = 0.0Q, rone = 1.0Q;
 
@@ -94,7 +94,7 @@ static void xherk_core(
 #endif
     for (ptrdiff_t jc = 0; jc < n; jc += nb) {
         const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        xherk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TR_c);
+        xherk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TRANS);
     }
 }
 

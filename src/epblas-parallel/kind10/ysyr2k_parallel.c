@@ -51,8 +51,8 @@ static void ysyr2k_core(
 #endif
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (n == 0) return;
 
@@ -81,7 +81,7 @@ static void ysyr2k_core(
 #endif
     for (ptrdiff_t jc = 0; jc < n; jc += pw) {
         const ptrdiff_t jb = (n - jc < pw) ? (n - jc) : pw;
-        ysyr2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
+        ysyr2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TRANS);
     }
 }
 

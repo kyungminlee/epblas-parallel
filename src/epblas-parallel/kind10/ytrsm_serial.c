@@ -369,7 +369,7 @@ void ytrsm_serial(
     const T alpha = *alpha_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(transa);
+    const char TRANS = blas_up(transa);
     const bool nounit = (blas_up(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -383,7 +383,7 @@ void ytrsm_serial(
     if (SIDE == 'L') {
         const ptrdiff_t use_blocked = (m >= 2 * ytrsm_nb());
         const ptrdiff_t nb = ytrsm_nb();
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 if (use_blocked) ytrsm_blocked_chunk(YLLN, 0, n, m, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_lln_core(0, n, m, alpha, a, lda, b, ldb, nounit);
@@ -391,7 +391,7 @@ void ytrsm_serial(
                 if (use_blocked) ytrsm_blocked_chunk(YLUN, 0, n, m, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_lun_core(0, n, m, alpha, a, lda, b, ldb, nounit);
             }
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') {
                 if (use_blocked) ytrsm_blocked_chunk(YLLT, 0, n, m, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_llTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, 0);
@@ -412,15 +412,15 @@ void ytrsm_serial(
         const ptrdiff_t use_blocked = (n >= 2 * ytrsm_nb());
         const ptrdiff_t nb = ytrsm_nb();
         const bool upper = (UPLO == 'U');
-        const bool trans = (TR != 'N');
-        const bool conj  = (TR == 'C');
+        const bool trans = (TRANS != 'N');
+        const bool conj  = (TRANS == 'C');
         if (use_blocked) {
             ytrsm_R_blocked_chunk(upper, trans, conj, 0, m, n, nb, alpha,
                                   a, lda, b, ldb, nounit);
-        } else if (TR == 'N') {
+        } else if (TRANS == 'N') {
             if (UPLO == 'L') ytrsm_rln_core(0, m, n, alpha, a, lda, b, ldb, nounit);
             else             ytrsm_run_core(0, m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TR == 'T') {
+        } else if (TRANS == 'T') {
             if (UPLO == 'L') ytrsm_rlTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, 0);
             else             ytrsm_ruTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, 0);
         } else {

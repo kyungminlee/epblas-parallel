@@ -46,9 +46,9 @@ static void her2k_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TC alpha,
                            const TC *restrict a, ptrdiff_t lda,
                            const TC *restrict b, ptrdiff_t ldb,
                            TC *restrict c, ptrdiff_t ldc,
-                           char UPLO, char TR_c)
+                           char UPLO, char TRANS)
 {
-    if (TR_c == 'N') {
+    if (TRANS == 'N') {
         for (ptrdiff_t j = jc; j < jc + jb; ++j) {
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
@@ -107,20 +107,20 @@ void yher2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TR beta,
 
 void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha, TR beta,
                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
-                  TC *c, ptrdiff_t ldc, char UPLO, char TR_c)
+                  TC *c, ptrdiff_t ldc, char UPLO, char TRANS)
 {
     const TC cone       = 1.0L + 0.0Li;
     const TC alpha_conj = cconj(alpha);
 
     yher2k_beta_scale(jc, jc + jb, n, beta, c, ldc, UPLO);
 
-    her2k_diag_add(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+    her2k_diag_add(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TRANS);
 
     if (UPLO == 'L') {
         const ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
-            if (TR_c == 'N') {
+            if (TRANS == 'N') {
                 ygemm_serial('N', 'C', trailing, jb, k, &alpha,
                              &A_(j0, 0), lda, &B_(jc, 0), ldb,
                              &cone, &C_(j0, jc), ldc);
@@ -138,7 +138,7 @@ void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha
         }
     } else {
         if (jc > 0) {
-            if (TR_c == 'N') {
+            if (TRANS == 'N') {
                 ygemm_serial('N', 'C', jc, jb, k, &alpha,
                              &A_(0, 0), lda, &B_(jc, 0), ldb,
                              &cone, &C_(0, jc), ldc);
@@ -169,7 +169,7 @@ void yher2k_serial(
     const TC alpha = *alpha_;
     const TR beta  = *beta_;
     const char UPLO = blas_up(uplo);
-    const char TR_c = blas_up(trans);
+    const char TRANS = blas_up(trans);
 
     if (n == 0) return;
 
@@ -185,7 +185,7 @@ void yher2k_serial(
     const ptrdiff_t nb = yher2k_nb();
     for (ptrdiff_t jc = 0; jc < n; jc += nb) {
         const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        yher2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+        yher2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TRANS);
     }
 }
 

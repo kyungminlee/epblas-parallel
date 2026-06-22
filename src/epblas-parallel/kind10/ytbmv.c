@@ -75,8 +75,8 @@ static void ytbmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = blas_up(trans);
+    const bool noconj = (TRANS == 'T');
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
@@ -85,12 +85,12 @@ static void ytbmv_core(
     /* Cheap inline gate first: at OMP=1 (or below threshold) short-circuit
      * before the noinline call's argument marshalling (outlining tax). */
     if (n >= YTBMV_OMP_MIN && blas_omp_max_threads() > 1
-        && ytbmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, k, a, lda, x, incx))
+        && ytbmv_omp(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit, n, k, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             /* In-place row-gather (NOT the old column scatter): each output x[i]
              * is a band dot accumulated in a register-resident x87 scalar and
              * stored once -- no read-modify-write to memory per element. Safe
@@ -139,7 +139,7 @@ static void ytbmv_core(
             }
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             /* Strided in-place row-gather (same as the incx==1 path; logical
              * index i lives at x[off0 + i*incx], off0 placing logical 0 for
              * incx<0). Register-resident accumulator; upper ASCENDING / lower

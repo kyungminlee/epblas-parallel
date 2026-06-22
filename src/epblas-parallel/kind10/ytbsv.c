@@ -39,14 +39,14 @@ static void ytbsv_core(
 {
     const T zero = 0.0L + 0.0Li;
     const char UPLO = blas_up(uplo);
-    const char TR = blas_up(trans);
-    const bool noconj = (TR == 'T');
+    const char TRANS = blas_up(trans);
+    const bool noconj = (TRANS == 'T');
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
 
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
@@ -92,7 +92,7 @@ static void ytbsv_core(
         }
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;

@@ -50,7 +50,7 @@ static void yher2k_core(
     const TC alpha = *alpha_;
     const TR beta  = *beta_;
     const char UPLO = blas_up(uplo);
-    const char TR_c = blas_up(trans);
+    const char TRANS = blas_up(trans);
 
     const TR rone = 1.0L;
     const TC czero = 0.0L + 0.0Li;
@@ -85,7 +85,7 @@ static void yher2k_core(
 #endif
     for (ptrdiff_t jc = 0; jc < n; jc += pw) {
         const ptrdiff_t jb = (n - jc < pw) ? (n - jc) : pw;
-        yher2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+        yher2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TRANS);
     }
 }
 

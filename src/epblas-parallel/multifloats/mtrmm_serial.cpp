@@ -767,13 +767,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
     }
 }
 
-/* Map (UPLO, TR) → blocked variant. */
-inline trmm_variant_L l_variant(char UPLO, char TR) {
-    if (TR == 'N') return (UPLO == 'L') ? LLN : LUN;
+/* Map (UPLO, TRANS) → blocked variant. */
+inline trmm_variant_L l_variant(char UPLO, char TRANS) {
+    if (TRANS == 'N') return (UPLO == 'L') ? LLN : LUN;
     return (UPLO == 'L') ? LLT : LUT;
 }
-inline trmm_variant_R r_variant(char UPLO, char TR) {
-    if (TR == 'N') return (UPLO == 'L') ? RLN : RUN;
+inline trmm_variant_R r_variant(char UPLO, char TRANS) {
+    if (TRANS == 'N') return (UPLO == 'L') ? RLN : RUN;
     return (UPLO == 'L') ? RLT : RUT;
 }
 
@@ -789,12 +789,12 @@ void mtrmm_zero_B(std::ptrdiff_t m, std::ptrdiff_t n, T *b, std::ptrdiff_t ldb)
         for (std::ptrdiff_t i = 0; i < m; ++i) B_(i, j) = zero_dd;
 }
 
-void mtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+void mtrmm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, std::ptrdiff_t nb, T alpha,
                    const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, bool nounit)
 {
     if (j_start >= j_end) return;
-    const trmm_variant_L V = l_variant(UPLO, TR);
+    const trmm_variant_L V = l_variant(UPLO, TRANS);
     if (use_blocked) {
         blocked_chunk_L(V, j_start, j_end, m, nb, alpha, a, lda, b, ldb, nounit);
         return;
@@ -804,7 +804,7 @@ void mtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
      * diag too — same kernel, over this slice's column range. */
     if (m <= kMaxBlockM) {
         trmm_simd_op op;
-        if (TR == 'N') op = (UPLO == 'L') ? SLLN : SLUN;
+        if (TRANS == 'N') op = (UPLO == 'L') ? SLLN : SLUN;
         else           op = (UPLO == 'L') ? SLLT : SLUT;
         mtrmm_simd_diag(op, j_start, j_end, m, alpha, a, lda, b, ldb, nounit);
         return;
@@ -818,19 +818,19 @@ void mtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
     }
 }
 
-void mtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+void mtrmm_R_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t row_lo, std::ptrdiff_t row_hi, std::ptrdiff_t n, std::ptrdiff_t nb, T alpha,
                    const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, bool nounit)
 {
     if (row_lo >= row_hi) return;
-    const trmm_variant_R V = r_variant(UPLO, TR);
+    const trmm_variant_R V = r_variant(UPLO, TRANS);
     if (use_blocked) {
         blocked_chunk_R(V, row_lo, row_hi, n, nb, alpha, a, lda, b, ldb, nounit);
         return;
     }
 #ifdef MBLAS_SIMD_DD
     trmm_r_op op;
-    if (TR == 'N') op = (UPLO == 'L') ? RLN_OP : RUN_OP;
+    if (TRANS == 'N') op = (UPLO == 'L') ? RLN_OP : RUN_OP;
     else           op = (UPLO == 'L') ? RLT_OP : RUT_OP;
     mtrmm_simd_diag_R(op, row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit);
 #else
@@ -854,8 +854,8 @@ extern "C" void mtrmm_serial(
     using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
     const char SIDE = up(&side);
     const char UPLO = up(&uplo);
-    char TR = up(&transa);
-    if (TR == 'C') TR = 'T';   /* real DD: conj-trans ≡ trans */
+    char TRANS = up(&transa);
+    if (TRANS == 'C') TRANS = 'T';   /* real DD: conj-trans ≡ trans */
     const bool nounit = (up(&diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -866,11 +866,11 @@ extern "C" void mtrmm_serial(
 
     if (SIDE == 'L') {
         const std::ptrdiff_t use_blocked = (m >= 2 * nb);
-        mtrmm_L_slice(UPLO, TR, use_blocked, 0, n, m, nb, alpha,
+        mtrmm_L_slice(UPLO, TRANS, use_blocked, 0, n, m, nb, alpha,
                       a, lda, b, ldb, nounit);
     } else {
         const std::ptrdiff_t use_blocked = (n >= 2 * nb);
-        mtrmm_R_slice(UPLO, TR, use_blocked, 0, m, n, nb, alpha,
+        mtrmm_R_slice(UPLO, TRANS, use_blocked, 0, m, n, nb, alpha,
                       a, lda, b, ldb, nounit);
     }
 }

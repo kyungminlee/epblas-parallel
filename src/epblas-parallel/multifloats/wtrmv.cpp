@@ -266,7 +266,7 @@ static void wtrmv_core(
     T *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
-    const char TR   = up(&trans);
+    const char TRANS   = up(&trans);
     const char DIAG = up(&diag);
     const bool nounit = (DIAG != 'U');
 
@@ -274,12 +274,12 @@ static void wtrmv_core(
 
 #ifdef _OPENMP
     if (n >= WTRMV_OMP_MIN && blas_omp_available()
-        && wtrmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, a, lda, x, incx))
+        && wtrmv_omp(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit, n, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, a, lda, x);
+        wtrmv_serial_contig(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit, n, a, lda, x);
         return;
     }
 
@@ -290,7 +290,7 @@ static void wtrmv_core(
         T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
         if (xs) {
             for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
-            wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, a, lda, xs);
+            wtrmv_serial_contig(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit, n, a, lda, xs);
             for (std::ptrdiff_t i = 0; i < n; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
             std::free(xs);
             return;
@@ -299,7 +299,7 @@ static void wtrmv_core(
 
     {
         std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                     const T temp = x[kx + j * incx];
@@ -316,7 +316,7 @@ static void wtrmv_core(
                 }
             }
         } else {
-            const bool conj_a = (TR == 'C');
+            const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
                     T temp = x[kx + j * incx];

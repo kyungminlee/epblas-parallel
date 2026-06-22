@@ -47,9 +47,9 @@ static const TR rzero = 0.0Q, rone = 1.0Q;
 static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TR alpha,
                           const TC *restrict a, ptrdiff_t lda,
                           TC *restrict c, ptrdiff_t ldc,
-                          char UPLO, char TR_c)
+                          char UPLO, char TRANS)
 {
-    if (TR_c == 'N') {
+    if (TRANS == 'N') {
         for (ptrdiff_t j = jc; j < jc + jb; ++j) {
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
@@ -103,20 +103,20 @@ void xherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TR beta,
 }
 
 void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TR alpha, TR beta,
-                 const TC *a, ptrdiff_t lda, TC *c, ptrdiff_t ldc, char UPLO, char TR_c)
+                 const TC *a, ptrdiff_t lda, TC *c, ptrdiff_t ldc, char UPLO, char TRANS)
 {
     const TC cone    = 1.0Q + 0.0Qi;
     const TC alpha_c = alpha + 0.0Qi;
 
     xherk_beta_scale(jc, jc + jb, n, beta, c, ldc, UPLO);
 
-    herk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR_c);
+    herk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
 
     if (UPLO == 'L') {
         const ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
-            if (TR_c == 'N') {
+            if (TRANS == 'N') {
                 xgemm_serial('N', 'C', trailing, jb, k, &alpha_c,
                              &A_(j0, 0), lda, &A_(jc, 0), lda,
                              &cone, &C_(j0, jc), ldc);
@@ -128,7 +128,7 @@ void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TR alpha,
         }
     } else {
         if (jc > 0) {
-            if (TR_c == 'N') {
+            if (TRANS == 'N') {
                 xgemm_serial('N', 'C', jc, jb, k, &alpha_c,
                              &A_(0, 0), lda, &A_(jc, 0), lda,
                              &cone, &C_(0, jc), ldc);
@@ -151,7 +151,7 @@ void xherk_serial(
 {
     const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    const char TR_c = blas_up(trans);
+    const char TRANS = blas_up(trans);
 
     if (n == 0) return;
 
@@ -167,7 +167,7 @@ void xherk_serial(
     const ptrdiff_t nb = xherk_nb();
     for (ptrdiff_t jc = 0; jc < n; jc += nb) {
         const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        xherk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TR_c);
+        xherk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TRANS);
     }
 }
 

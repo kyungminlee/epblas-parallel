@@ -5,8 +5,8 @@
  * per-column triangle scaler and the diagonal-imaginary zeroer), shared
  * through wher2k_kernel.h.
  *
- *   C := alpha · A · Bᴴ + conj(alpha) · B · Aᴴ + beta · C  (TR_c='N')
- *   C := alpha · Aᴴ · B + conj(alpha) · Bᴴ · A + beta · C  (TR_c='C')
+ *   C := alpha · A · Bᴴ + conj(alpha) · B · Aᴴ + beta · C  (TRANS='N')
+ *   C := alpha · Aᴴ · B + conj(alpha) · Bᴴ · A + beta · C  (TRANS='C')
  *   alpha complex, beta real, A/B/C complex, the diagonal of C stays real.
  *
  * One `omp parallel for` over the jc BLOCK loop (schedule(dynamic,1)). Each
@@ -59,7 +59,7 @@ static void wher2k_core(
     const TC alpha = *alpha_;
     const TR beta  = *beta_;
     const char UPLO = up(&uplo);
-    const char TR_c = up(&trans);
+    const char TRANS = up(&trans);
     (void)lda; (void)ldb;
 
     if (n == 0) return;
@@ -85,7 +85,7 @@ static void wher2k_core(
 #endif
     for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
         const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        wher2k_block(jc, jb, n, k, UPLO, TR_c, alpha, beta, a, lda, b, ldb, c, ldc);
+        wher2k_block(jc, jb, n, k, UPLO, TRANS, alpha, beta, a, lda, b, ldb, c, ldc);
     }
 }
 

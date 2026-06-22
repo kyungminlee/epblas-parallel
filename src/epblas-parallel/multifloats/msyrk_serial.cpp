@@ -7,12 +7,12 @@
  * Strategy (matches the msymm pattern, adapted for rank-k shape):
  *  - For each 4-column panel of the diag block C[jc..jc+jb, j..j+4]:
  *    pack into SoA ch/cl scratch.
- *  - TR='N' rank-1 form (j outer, l middle, i inner):
+ *  - TRANS='N' rank-1 form (j outer, l middle, i inner):
  *        SIMD-load alpha · A(j..j+4, l) into a 4-wide vector,
  *        broadcast A(i, l), update C[i, j..j+4] across all i in
  *        the diag block. Computes the full square; unpack writes
  *        only the UPLO triangle.
- *  - TR='T' dot-product form:
+ *  - TRANS='T' dot-product form:
  *        Pre-pack 4 columns of A's "Aj" panel (rows 0..K) into
  *        SoA scratch ajh/ajl so the inner l loop reads stride-1.
  *        For each i in the diag block, run a 4-wide dot product
@@ -97,7 +97,7 @@ inline void unpack_4col_triangle(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrd
     }
 }
 
-/* TR='N' rank-1 SIMD: for each l, broadcast A(i,l) and update
+/* TRANS='N' rank-1 SIMD: for each l, broadcast A(i,l) and update
  * 4-wide C[i, j_panel..+4] using α·A(j_panel..+4, l). */
 inline void simd_syrk_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                               const T *a, std::ptrdiff_t lda,
@@ -143,7 +143,7 @@ inline void simd_syrk_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff
     }
 }
 
-/* TR='T' dot product SIMD, KC-tiled: accumulate the dot over l ∈
+/* TRANS='T' dot product SIMD, KC-tiled: accumulate the dot over l ∈
  * [l0, l0+kc) into the per-row 4-wide DD accumulator acc. ajh/ajl hold
  * this chunk's 4 packed A columns at chunk-local rows 0..kc-1. acc is
  * loaded/stored each call, so accumulation continues across chunks in the
@@ -179,11 +179,11 @@ inline void simd_syrk_diag_tt_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::p
 inline void simd_syrk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                                   const T *a, std::ptrdiff_t lda,
                                   T *c, std::ptrdiff_t ldc,
-                                  char UPLO, char TR)
+                                  char UPLO, char TRANS)
 {
     alignas(32) double ch[kMaxBlockM * kSimdLane];
     alignas(32) double cl[kMaxBlockM * kSimdLane];
-    /* TR='T' scratch: one K-chunk of 4 packed A columns (bounded by kMaxK)
+    /* TRANS='T' scratch: one K-chunk of 4 packed A columns (bounded by kMaxK)
      * plus a per-row DD accumulator carried across chunks. */
     alignas(32) static thread_local double ajh_scratch[kMaxK * kSimdLane];
     alignas(32) static thread_local double ajl_scratch[kMaxK * kSimdLane];
@@ -193,8 +193,8 @@ inline void simd_syrk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
     for (std::ptrdiff_t j = jc; j < jc + jb; j += kSimdLane) {
         const std::ptrdiff_t jcount = (jc + jb - j < kSimdLane) ? (jc + jb - j) : kSimdLane;
         pack_4col(jb, jc, c, ldc, j, jcount, ch, cl);
-        if (TR == 'N') {
-            /* TR='N' reads A directly per l — K-independent, no scratch cap. */
+        if (TRANS == 'N') {
+            /* TRANS='N' reads A directly per l — K-independent, no scratch cap. */
             simd_syrk_diag_tn(jc, jb, k, alpha, a, lda, j, jcount, ch, cl);
         } else {
             const __m256d zv = _mm256_setzero_pd();
@@ -245,9 +245,9 @@ inline void simd_syrk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
 
 void syrk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                    const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc,
-                   char UPLO, char TR)
+                   char UPLO, char TRANS)
 {
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
             const std::ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const std::ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
@@ -278,15 +278,15 @@ void syrk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alp
 
 inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                           const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc,
-                          char UPLO, char TR)
+                          char UPLO, char TRANS)
 {
 #ifdef MBLAS_SIMD_DD
     if (jb <= kMaxBlockM) {
-        simd_syrk_diag_panels(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR);
+        simd_syrk_diag_panels(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
         return;
     }
 #endif
-    syrk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR);
+    syrk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
 }
 
 } /* anonymous namespace */
@@ -305,7 +305,7 @@ void msyrk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, T beta, T *c
     else                 for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
 }
 
-void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR,
+void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TRANS,
                  T alpha, T beta, const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc)
 {
     /* Beta-scale this block's own triangle columns. */
@@ -317,13 +317,13 @@ void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::pt
         else if (!eq1(beta)) for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
     }
 
-    diag_dispatch(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR);
+    diag_dispatch(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
 
     if (UPLO == 'L') {
         const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
-            if (TR == 'N') {
+            if (TRANS == 'N') {
                 mgemm_serial('N', 'T', trailing, jb, k, &alpha,
                              &A_(j0, 0), lda, &A_(jc, 0), lda,
                              &one_dd, &C_(j0, jc), ldc);
@@ -335,7 +335,7 @@ void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::pt
         }
     } else {
         if (jc > 0) {
-            if (TR == 'N') {
+            if (TRANS == 'N') {
                 mgemm_serial('N', 'T', jc, jb, k, &alpha,
                              &A_(0, 0), lda, &A_(jc, 0), lda,
                              &one_dd, &C_(0, jc), ldc);
@@ -358,8 +358,8 @@ extern "C" void msyrk_serial(
 {
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
-    char TR = up(&trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = up(&trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (n == 0) return;
 
@@ -372,7 +372,7 @@ extern "C" void msyrk_serial(
     const std::ptrdiff_t nb = msyrk_block_nb();
     for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
         const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        msyrk_block(jc, jb, n, k, UPLO, TR, alpha, beta, a, lda, c, ldc);
+        msyrk_block(jc, jb, n, k, UPLO, TRANS, alpha, beta, a, lda, c, ldc);
     }
 }
 

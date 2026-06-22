@@ -45,7 +45,7 @@ typedef qsyr2k_T T;
 #define NR QSYR2K_NR
 
 static void qsyr2k_core(
-    char uplo_c, char trans_c,
+    char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
@@ -56,20 +56,20 @@ static void qsyr2k_core(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        qsyr2k_serial(uplo_c, trans_c, n, k, alpha_, a, lda, b, ldb,
+        qsyr2k_serial(uplo, trans, n, k, alpha_, a, lda, b, ldb,
                       beta_, c, ldc);
         return;
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const char uplo  = blas_up(uplo_c);
-    char trans = blas_up(trans_c);
-    if (trans == 'C') trans = 'T';
+    const char UPLO  = blas_up(uplo);
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (n <= 0) return;
 
     /* Triangular beta pre-pass on the UPLO triangle of C only. */
-    if (uplo == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
     else             qsyrk_beta_l(n, beta, c, ldc);
 
     if (k == 0 || alpha == 0.0Q) return;
@@ -94,12 +94,12 @@ static void qsyr2k_core(
     /* Transpose: netlib-style unpacked inner-product, embarrassingly parallel
      * over the output columns (cyclic schedule balances the triangular load; no
      * shared packs, no barrier). Same code the serial entry runs at nthreads=1. */
-    if (trans != 'N') {
+    if (TRANS != 'N') {
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static, 1) num_threads(nthreads)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j)
-            qsyr2k_trans_col(j, uplo, n, k, alpha, a, lda, b, ldb, c, ldc);
+            qsyr2k_trans_col(j, UPLO, n, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
@@ -135,14 +135,14 @@ static void qsyr2k_core(
              * row split caps the speedup at ~16/7 — the fat-end thread hogs
              * 7/16 of a triangular output). */
             ptrdiff_t m_lo, m_hi;
-            qtri_row_bounds(uplo, n, nth, tid, MR, &m_lo, &m_hi);
+            qtri_row_bounds(UPLO, n, nth, tid, MR, &m_lo, &m_hi);
 
             for (ptrdiff_t js = 0; js < n; js += NC) {
                 const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
                 /* UPLO clip of this thread's [m_lo, m_hi] for this js-band. */
-                ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
-                ptrdiff_t m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                ptrdiff_t m_lo_eff = (UPLO == 'L' && m_lo < js) ? js : m_lo;
+                ptrdiff_t m_hi_eff = (UPLO == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
@@ -170,13 +170,13 @@ static void qsyr2k_core(
                         const ptrdiff_t off = (ptrdiff_t)(is - js);
 
                         /* Pass 1: alpha·A·B^T + symmetric diagonal merge. */
-                        if (uplo == 'U')
+                        if (UPLO == 'U')
                             qsyr2k_kernel_u(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
                         else
                             qsyr2k_kernel_l(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
 
                         /* Pass 2: alpha·B·A^T into the off-diagonal strips. */
-                        if (uplo == 'U')
+                        if (UPLO == 'U')
                             qsyr2k_kernel_u(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);
                         else
                             qsyr2k_kernel_l(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);

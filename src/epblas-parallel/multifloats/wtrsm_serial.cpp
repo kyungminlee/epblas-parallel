@@ -108,8 +108,8 @@ inline void wtrsm_lun_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::pt
     }
 }
 
-/* For TR='T' (transpose, no conj): use A[k,i] as written.
- * For TR='C' (conjugate transpose): use conj(A[k,i]). The conj flag
+/* For TRANS='T' (transpose, no conj): use A[k,i] as written.
+ * For TRANS='C' (conjugate transpose): use conj(A[k,i]). The conj flag
  * gates the conj on A reads inside the inner loop. */
 inline T A_op(const T *a, std::ptrdiff_t lda, std::ptrdiff_t row, std::ptrdiff_t col, bool conj_flag) {
     return conj_flag ? cconj(A_(row, col)) : A_(row, col);
@@ -916,10 +916,10 @@ void blocked_chunk(wtrsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end
 #undef DIAG_C
 }
 
-/* Map (UPLO, TR) → blocked variant. */
-inline wtrsm_variant w_variant(char UPLO, char TR) {
-    if (TR == 'N') return (UPLO == 'L') ? WLLN : WLUN;
-    if (TR == 'C') return (UPLO == 'L') ? WLLC : WLUC;
+/* Map (UPLO, TRANS) → blocked variant. */
+inline wtrsm_variant w_variant(char UPLO, char TRANS) {
+    if (TRANS == 'N') return (UPLO == 'L') ? WLLN : WLUN;
+    if (TRANS == 'C') return (UPLO == 'L') ? WLLC : WLUC;
     return (UPLO == 'L') ? WLLT : WLUT;
 }
 
@@ -935,12 +935,12 @@ void wtrsm_zero_B(std::ptrdiff_t m, std::ptrdiff_t n, T *b, std::ptrdiff_t ldb)
         for (std::ptrdiff_t i = 0; i < m; ++i) B_(i, j) = zero_cdd;
 }
 
-void wtrsm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+void wtrsm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, std::ptrdiff_t nb, T alpha,
                    const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, bool nounit)
 {
     if (j_start >= j_end) return;
-    const wtrsm_variant V = w_variant(UPLO, TR);
+    const wtrsm_variant V = w_variant(UPLO, TRANS);
     if (use_blocked) {
         blocked_chunk(V, j_start, j_end, m, nb, alpha, a, lda, b, ldb, nounit);
         return;
@@ -974,7 +974,7 @@ void wtrsm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
     }
 }
 
-void wtrsm_R_slice(char UPLO, char TR, std::ptrdiff_t row_lo, std::ptrdiff_t row_hi,
+void wtrsm_R_slice(char UPLO, char TRANS, std::ptrdiff_t row_lo, std::ptrdiff_t row_hi,
                    std::ptrdiff_t n, T alpha,
                    const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, bool nounit)
 {
@@ -983,15 +983,15 @@ void wtrsm_R_slice(char UPLO, char TR, std::ptrdiff_t row_lo, std::ptrdiff_t row
     T *b_slice = b + row_lo;
 #ifdef WBLAS_SIMD_DD
     wtrsm_r_op op;
-    if (TR == 'N')      op = (UPLO == 'L') ? WTR_RLN : WTR_RUN;
-    else if (TR == 'C') op = (UPLO == 'L') ? WTR_RLC : WTR_RUC;
+    if (TRANS == 'N')      op = (UPLO == 'L') ? WTR_RLN : WTR_RUN;
+    else if (TRANS == 'C') op = (UPLO == 'L') ? WTR_RLC : WTR_RUC;
     else                op = (UPLO == 'L') ? WTR_RLT : WTR_RUT;
     wtrsm_simd_diag_R(op, Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
 #else
-    if (TR == 'N') {
+    if (TRANS == 'N') {
         if (UPLO == 'L') wtrsm_rln_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
         else             wtrsm_run_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
-    } else if (TR == 'C') {
+    } else if (TRANS == 'C') {
         if (UPLO == 'L') wtrsm_rlTC_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 1);
         else             wtrsm_ruTC_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 1);
     } else {
@@ -1012,7 +1012,7 @@ extern "C" void wtrsm_serial(
     using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
     const char SIDE = up(&side);
     const char UPLO = up(&uplo);
-    const char TR = up(&transa);
+    const char TRANS = up(&transa);
     const bool nounit = (up(&diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -1022,10 +1022,10 @@ extern "C" void wtrsm_serial(
     if (SIDE == 'L') {
         const std::ptrdiff_t nb = trsm_nb();
         const std::ptrdiff_t use_blocked = (m >= 2 * nb);
-        wtrsm_L_slice(UPLO, TR, use_blocked, 0, n, m, nb, alpha,
+        wtrsm_L_slice(UPLO, TRANS, use_blocked, 0, n, m, nb, alpha,
                       a, lda, b, ldb, nounit);
     } else {
-        wtrsm_R_slice(UPLO, TR, 0, m, n, alpha, a, lda, b, ldb, nounit);
+        wtrsm_R_slice(UPLO, TRANS, 0, m, n, alpha, a, lda, b, ldb, nounit);
     }
 }
 

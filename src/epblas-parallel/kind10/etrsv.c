@@ -107,8 +107,8 @@ void etrsv_serial_(
     const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = blas_up(*uplo);
-    char TR = blas_up(*trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(*trans);
+    if (TRANS == 'C') TRANS = 'T';
     const char DIAG = blas_up(*diag);
     const bool nounit = (DIAG != 'U');
 
@@ -118,7 +118,7 @@ void etrsv_serial_(
 
     (void)zero;
     if (incx == 1) {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 /* Forward substitution: x[i] = (b[i] - sum_{k<i} A(i,k) x[k]) / A(i,i).
                  *
@@ -232,7 +232,7 @@ void etrsv_serial_(
         /* General-stride fallback — hoist matrix column to ai[k] and
          * walk the strided vector with a running index (Class-B fix). */
         const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 ptrdiff_t ix = kx;
                 for (ptrdiff_t i = 0; i < n; ++i) {
@@ -344,8 +344,8 @@ void etrsv_blocked_(
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = etrsv_blocked_nb();
     const char UPLO = blas_up(*uplo);
-    char TR = blas_up(*trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(*trans);
+    if (TRANS == 'C') TRANS = 'T';
 
     if (n == 0) return;
     if (incx != 1 || n < 2 * nb) {
@@ -372,7 +372,7 @@ void etrsv_blocked_(
         if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
 
-        if (TR == 'N' && UPLO == 'L') {
+        if (TRANS == 'N' && UPLO == 'L') {
             for (ptrdiff_t j = 0; j < n; j += nb) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
@@ -405,7 +405,7 @@ void etrsv_blocked_(
                 }
 #endif
             }
-        } else if (TR == 'N' && UPLO == 'U') {
+        } else if (TRANS == 'N' && UPLO == 'U') {
             ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
@@ -438,7 +438,7 @@ void etrsv_blocked_(
 #endif
                 j -= nb;
             }
-        } else if (TR == 'T' && UPLO == 'L') {
+        } else if (TRANS == 'T' && UPLO == 'L') {
             ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
@@ -472,7 +472,7 @@ void etrsv_blocked_(
                 j -= nb;
             }
         } else {
-            /* TR == 'T' && UPLO == 'U' */
+            /* TRANS == 'T' && UPLO == 'U' */
             for (ptrdiff_t j = 0; j < n; j += nb) {
                 ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {

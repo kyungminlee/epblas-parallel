@@ -161,8 +161,8 @@ static void qtrsm_core(
     const T alpha = *alpha_;
     const char SIDE   = qtrsm_uplo(side);
     const char UPLO   = qtrsm_uplo(uplo);
-    char TR           = qtrsm_uplo(transa);
-    if (TR == 'C') TR = 'T';   /* real type: conj-trans ≡ trans */
+    char TRANS           = qtrsm_uplo(transa);
+    if (TRANS == 'C') TRANS = 'T';   /* real type: conj-trans ≡ trans */
     const bool nounit = (qtrsm_uplo(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -197,7 +197,7 @@ static void qtrsm_core(
     }
 
     if (SIDE == 'L') {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') qtrsm_lln(m, n, alpha, a, lda, b, ldb, nounit);
             else             qtrsm_lun(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
@@ -205,7 +205,7 @@ static void qtrsm_core(
             else             qtrsm_lut(m, n, alpha, a, lda, b, ldb, nounit);
         }
     } else {
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') qtrsm_rln(m, n, alpha, a, lda, b, ldb, nounit);
             else             qtrsm_run(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
@@ -247,8 +247,8 @@ static void qtrsm_blocked_core(
     const ptrdiff_t nb = qtrsm_blocked_nb();
     const char SIDE = qtrsm_uplo(side);
     const char UPLO = qtrsm_uplo(uplo);
-    char TR = qtrsm_uplo(transa);
-    if (TR == 'C') TR = 'T';
+    char TRANS = qtrsm_uplo(transa);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (qtrsm_uplo(diag) != 'U');
 
     if (m == 0 || n == 0) return;
@@ -288,7 +288,7 @@ static void qtrsm_blocked_core(
                 }
             }
 
-            if (TR == 'N' && UPLO == 'L') {
+            if (TRANS == 'N' && UPLO == 'L') {
                 for (ptrdiff_t ic = 0; ic < m; ic += nb) {
                     ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
                     qtrsm_lln_core(j_lo, j_hi, ib, 1.0Q,
@@ -302,7 +302,7 @@ static void qtrsm_blocked_core(
                                      &B_(i0, j_lo), ldb);
                     }
                 }
-            } else if (TR == 'N' && UPLO == 'U') {
+            } else if (TRANS == 'N' && UPLO == 'U') {
                 ptrdiff_t ic = ((m - 1) / nb) * nb;
                 while (ic >= 0) {
                     ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;

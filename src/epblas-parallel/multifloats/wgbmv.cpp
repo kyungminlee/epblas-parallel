@@ -121,9 +121,9 @@ static void wgbmv_core(
     T *y, std::ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char TR = up(&trans);
-    const bool notrans = (TR == 'N');
-    const bool conj = (TR == 'C');
+    const char TRANS = up(&trans);
+    const bool notrans = (TRANS == 'N');
+    const bool conj = (TRANS == 'C');
 
     if (m == 0 || n == 0 || (ceq0(alpha) && ceq1(beta))) return;
 

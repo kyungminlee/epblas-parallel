@@ -37,8 +37,8 @@ static void etbsv_core(
 {
     const T zero = 0.0L;
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
@@ -60,7 +60,7 @@ static void etbsv_core(
          * rolling left par ~14% behind the netlib reference; unrolling closes
          * it. par is now parity-or-better than both ob and the netlib-fortran
          * reference (mig) on every incx==1 cell. */
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
@@ -126,7 +126,7 @@ static void etbsv_core(
          * each access and left par ~4% behind ob on the strided Upper cells.
          * Hoisting the pointer brings every strided cell to parity-or-better. */
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'U') {
                 /* Upper NoTrans: the band x-window for column j ends just above
                  * the diagonal at row j-1, i.e. x[jx - incx], descending. ix is

@@ -5,9 +5,9 @@
  * Serial reference is the in-place Netlib column sweep (sequential). The
  * threaded path (incx==1, large N) dissolves the in-place dependency with an
  * external output buffer, mirroring kind10 etrmv / esymv (Addendum 36):
- *   - TR='T': y[j] = dot(column j, x), disjoint per thread -> shared buffer, no
+ *   - TRANS='T': y[j] = dot(column j, x), disjoint per thread -> shared buffer, no
  *     reduce, copy back.
- *   - TR='N': column j scatters into x[i] (i>j for L, i<j for U), so cross-
+ *   - TRANS='N': column j scatters into x[i] (i>j for L, i<j for U), so cross-
  *     thread j-ranges write overlapping i ranges -> per-thread y_priv + reduce.
  * Quad is compute-bound under libquadmath, so the per-column work amortizes the
  * fork/buffer almost immediately. Serial reference stays byte-for-byte. */
@@ -45,7 +45,7 @@ static bool qtrmv_omp(bool upper, bool trans_t, bool nounit, ptrdiff_t n, ptrdif
     const T zero = 0.0Q;
 
     if (trans_t) {
-        /* TR='T': each j writes a single x[j] (dot of column j with x). All
+        /* TRANS='T': each j writes a single x[j] (dot of column j with x). All
          * threads read x then write disjoint y_buf[j] — own j, no overlap. */
         T *y_buf = (T *)malloc((size_t)n * sizeof(T));
         if (!y_buf) return 0;
@@ -76,7 +76,7 @@ static bool qtrmv_omp(bool upper, bool trans_t, bool nounit, ptrdiff_t n, ptrdif
         free(y_buf);
         return 1;
     } else {
-        /* TR='N': per-thread y_priv + reduction (cross-thread overlapping writes). */
+        /* TRANS='N': per-thread y_priv + reduction (cross-thread overlapping writes). */
         T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
         if (!y_priv_all) return 0;
         #pragma omp parallel num_threads(nthreads)
@@ -120,8 +120,8 @@ void qtrmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
-    char TR = blas_up(trans);
-    if (TR == 'C') TR = 'T';
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
     const char DIAG = blas_up(diag);
     const bool nounit = (DIAG != 'U');
 
@@ -130,9 +130,9 @@ void qtrmv_core(
 
     if (incx == 1) {
 #ifdef _OPENMP
-        if (qtrmv_omp(UPLO == 'U', TR == 'T', nounit, n, lda, a, x)) return;
+        if (qtrmv_omp(UPLO == 'U', TRANS == 'T', nounit, n, lda, a, x)) return;
 #endif
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     const T temp = x[j];
@@ -182,7 +182,7 @@ void qtrmv_core(
             T *xc = (T *)malloc((size_t)n * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < n; ++i) xc[i] = x[kx + i * incx];
-                if (qtrmv_omp(UPLO == 'U', TR == 'T', nounit, n, lda, a, xc)) {
+                if (qtrmv_omp(UPLO == 'U', TRANS == 'T', nounit, n, lda, a, xc)) {
                     for (ptrdiff_t i = 0; i < n; ++i) x[kx + i * incx] = xc[i];
                     free(xc);
                     return;
@@ -191,7 +191,7 @@ void qtrmv_core(
             }
         }
 #endif
-        if (TR == 'N') {
+        if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     const T temp = x[kx + j * incx];

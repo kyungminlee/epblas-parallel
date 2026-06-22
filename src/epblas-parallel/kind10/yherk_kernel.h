@@ -41,7 +41,7 @@ ptrdiff_t yherk_nb(void);
  * panel. */
 void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, yherk_TR alpha, yherk_TR beta,
                  const yherk_TC *a, ptrdiff_t lda, yherk_TC *c, ptrdiff_t ldc,
-                 char UPLO, char TR_c);
+                 char UPLO, char TRANS);
 
 /* C := beta*C over the columns [j_start, j_end) keeping the diagonal real —
  * the alpha==0 / K==0 quick path (and the per-block pre-scale). beta==1

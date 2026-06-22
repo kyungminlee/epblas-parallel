@@ -42,7 +42,7 @@ typedef __float128 T;
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 static void xsyr2k_core(
-    char uplo_c, char trans_c,
+    char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
@@ -53,19 +53,19 @@ static void xsyr2k_core(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        xsyr2k_serial(uplo_c, trans_c, n, k, alpha_, a, lda, b, ldb,
+        xsyr2k_serial(uplo, trans, n, k, alpha_, a, lda, b, ldb,
                       beta_, c, ldc);
         return;
     }
 #endif
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0],  beta_i = beta_[1];
-    const char uplo  = blas_up(uplo_c);
-    const char trans = blas_up(trans_c);
+    const char UPLO  = blas_up(uplo);
+    const char TRANS = blas_up(trans);
 
     if (n <= 0) return;
 
-    if (uplo == 'U') qblas_ysyrk_beta_u(n, beta_r, beta_i, c, ldc);
+    if (UPLO == 'U') qblas_ysyrk_beta_u(n, beta_r, beta_i, c, ldc);
     else             qblas_ysyrk_beta_l(n, beta_r, beta_i, c, ldc);
 
     if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
@@ -133,8 +133,8 @@ static void xsyr2k_core(
             for (ptrdiff_t js = 0; js < n; js += NC) {
                 const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
-                ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
-                ptrdiff_t m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                ptrdiff_t m_lo_eff = (UPLO == 'L' && m_lo < js) ? js : m_lo;
+                ptrdiff_t m_hi_eff = (UPLO == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
@@ -146,7 +146,7 @@ static void xsyr2k_core(
                     #pragma omp single
 #endif
                     {
-                        if (trans == 'N') {
+                        if (TRANS == 'N') {
                             qblas_ygemm_tcopy(pb, jb, 0, &a[((size_t)ls * lda + js) * 2], lda, Bp_A);
                             qblas_ygemm_tcopy(pb, jb, 0, &b[((size_t)ls * ldb + js) * 2], ldb, Bp_B);
                         } else {
@@ -159,7 +159,7 @@ static void xsyr2k_core(
                     for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
                         const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
-                        if (trans == 'N') {
+                        if (TRANS == 'N') {
                             qblas_ygemm_tcopy(pb, min_i, 0, &a[((size_t)ls * lda + is) * 2], lda, Ap_A);
                             qblas_ygemm_tcopy(pb, min_i, 0, &b[((size_t)ls * ldb + is) * 2], ldb, Ap_B);
                         } else {
@@ -171,13 +171,13 @@ static void xsyr2k_core(
                         const ptrdiff_t off = is - js;
 
                         /* Pass 1: alpha·A·Bᵀ + symmetric diagonal merge. */
-                        if (uplo == 'U')
+                        if (UPLO == 'U')
                             qblas_ysyr2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
                         else
                             qblas_ysyr2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
 
                         /* Pass 2: alpha·B·Aᵀ into the off-diagonal strips. */
-                        if (uplo == 'U')
+                        if (UPLO == 'U')
                             qblas_ysyr2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_B, Bp_A, cij, ldc, off, 0);
                         else
                             qblas_ysyr2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_B, Bp_A, cij, ldc, off, 0);
