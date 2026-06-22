@@ -15,13 +15,14 @@
  */
 
 #include "qtrmm_kernel.h"
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 
 typedef qtrmm_T T;
 
 char qtrmm_uplo(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -33,7 +34,7 @@ char qtrmm_uplo(char c) {
 
 /* B := alpha · L · B */
 void trmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t k = M - 1; k >= 0; --k) {
@@ -50,7 +51,7 @@ void trmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 
 /* B := alpha · U · B */
 void trmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t k = 0; k < M; ++k) {
@@ -67,7 +68,7 @@ void trmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 
 /* B := alpha · Lᵀ · B */
 void trmm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = 0; i < M; ++i) {
@@ -81,7 +82,7 @@ void trmm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 
 /* B := alpha · Uᵀ · B */
 void trmm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = M - 1; i >= 0; --i) {
@@ -99,7 +100,7 @@ void trmm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 
 /* B := alpha · B · L */
 void trmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = 0; j < N; ++j) {
         T t = alpha;
@@ -118,7 +119,7 @@ void trmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 
 /* B := alpha · B · U */
 void trmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = N - 1; j >= 0; --j) {
         T t = alpha;
@@ -137,7 +138,7 @@ void trmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 
 /* B := alpha · B · Lᵀ */
 void trmm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t k = N - 1; k >= 0; --k) {
         for (ptrdiff_t j = k + 1; j < N; ++j) {
@@ -156,7 +157,7 @@ void trmm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 
 /* B := alpha · B · Uᵀ */
 void trmm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                   const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t k = 0; k < N; ++k) {
         for (ptrdiff_t j = 0; j < k; ++j) {
@@ -185,7 +186,7 @@ void qtrmm_serial(
     const char UPLO   = qtrmm_uplo(uplo);
     char TR           = qtrmm_uplo(transa);
     if (TR == 'C') TR = 'T';
-    const int nounit = (qtrmm_uplo(diag) != 'U');
+    const bool nounit = (qtrmm_uplo(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

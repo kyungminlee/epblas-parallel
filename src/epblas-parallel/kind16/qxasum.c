@@ -30,11 +30,11 @@ static R qxasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
 /* Threaded partial-reduction for large unit-stride X — see qasum.c. */
 #define QXASUM_OMP_MIN 128
 #define QXASUM_MAX_CPUS 64
-__attribute__((noinline)) static int qxasum_omp(ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static bool qxasum_omp(ptrdiff_t n, const T *x, R *out)
 {
-    if (n <= QXASUM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= QXASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QXASUM_MAX_CPUS) nthreads = QXASUM_MAX_CPUS;
     R partial[QXASUM_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
@@ -46,7 +46,7 @@ __attribute__((noinline)) static int qxasum_omp(ptrdiff_t n, const T *x, R *out)
         if (lo < hi) partial[tid] = qxasum_kernel(hi - lo, x + lo, 1);
     }
     R s = 0.0Q;
-    for (int i = 0; i < nthreads; ++i) s += partial[i];
+    for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }

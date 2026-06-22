@@ -18,6 +18,7 @@
  */
 
 #include "qsymm_kernel.h"
+#include "../common/blas_char.h"
 #include "qgemm_kernel.h"
 #include <stdlib.h>
 #include <ctype.h>
@@ -29,7 +30,7 @@ typedef qsymm_T T;
 #define NR QGEMM_NR
 
 char qsymm_uplo(const char *p) {
-    return (char)toupper((unsigned char)*p);
+    return blas_up(*p);
 }
 
 /* Pack a sub-block of an UPLO-stored symmetric matrix into qgemm's packed
@@ -136,8 +137,8 @@ void qsymm_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)side_c);
-    const char UPLO = (char)toupper((unsigned char)uplo_c);
+    const char SIDE = blas_up(side_c);
+    const char UPLO = blas_up(uplo_c);
 
     if (M <= 0 || N <= 0) return;
 

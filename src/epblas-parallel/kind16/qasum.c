@@ -35,11 +35,11 @@ static T qasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
  * (not bit-identical), but within fuzz tolerance for a sum of magnitudes. */
 #define QASUM_OMP_MIN 128
 #define QASUM_MAX_CPUS 64
-__attribute__((noinline)) static int qasum_omp(ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static bool qasum_omp(ptrdiff_t n, const T *x, T *out)
 {
-    if (n <= QASUM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= QASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QASUM_MAX_CPUS) nthreads = QASUM_MAX_CPUS;
     T partial[QASUM_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
@@ -51,7 +51,7 @@ __attribute__((noinline)) static int qasum_omp(ptrdiff_t n, const T *x, T *out)
         if (lo < hi) partial[tid] = qasum_kernel(hi - lo, x + lo, 1);
     }
     T s = 0.0Q;
-    for (int i = 0; i < nthreads; ++i) s += partial[i];
+    for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }

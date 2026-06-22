@@ -35,25 +35,25 @@ char qtrmm_uplo(char c);
  * B := alpha · op(A) · B, A is M×M, B is M×N.
  * Each call owns a column slice [j_start, j_end) of B. */
 void trmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
-                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void trmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
-                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void trmm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
-                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void trmm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
-                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 
 /* ── SIDE = 'R' row-range cores ────────────────────────────────────
  * B := alpha · B · op(A), A is N×N, B is M×N.
  * Each call owns a row slice [i_start, i_end) of B. */
 void trmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
-                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void trmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
-                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void trmm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
-                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void trmm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
-                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
  * invoke from inside another function's `#pragma omp parallel` region. Shares

@@ -18,6 +18,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <quadmath.h>
@@ -29,9 +30,6 @@
 
 typedef __float128 T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -91,11 +89,11 @@ void qtrsv_serial_(
     (void)uplo_len; (void)trans_len; (void)diag_len;
     const ptrdiff_t N = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(*uplo);
+    char TR = blas_up(*trans);
     if (TR == 'C') TR = 'T';
-    const char DIAG = up(diag);
-    const ptrdiff_t nounit = (DIAG != 'U');
+    const char DIAG = blas_up(*diag);
+    const bool nounit = (DIAG != 'U');
 
     if (N == 0) return;
     const T zero = 0.0Q;
@@ -208,8 +206,8 @@ void qtrsv_blocked_(
     const ptrdiff_t N = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = qtrsv_blocked_nb();
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(*uplo);
+    char TR = blas_up(*trans);
     if (TR == 'C') TR = 'T';
 
     if (N == 0) return;
@@ -227,9 +225,9 @@ void qtrsv_blocked_(
     const ptrdiff_t one_i = 1;
 
 #ifdef _OPENMP
-    const ptrdiff_t use_omp = (blas_omp_max_threads() > 1 && !omp_in_parallel());
+    const bool use_omp = (blas_omp_should_thread());
 #else
-    const ptrdiff_t use_omp = 0;
+    const bool use_omp = 0;
 #endif
 
 #ifdef _OPENMP

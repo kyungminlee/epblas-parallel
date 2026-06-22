@@ -3,15 +3,13 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #include "../common/epblas_facade.h"
 
 typedef __complex128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -22,10 +20,10 @@ void xtbsv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0Q + 0.0Qi;
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 

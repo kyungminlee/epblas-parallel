@@ -21,6 +21,7 @@
  */
 
 #include "qgemmtr_kernel.h"
+#include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <ctype.h>
@@ -42,9 +43,9 @@ static void qgemmtr_core(char uplo_c, char transa, char transb,
               T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const int upper = ((char)toupper((unsigned char)uplo_c) == 'U');
-    const int ta = (int)qgemmtr_trans_code(&transa);
-    const int tb = (int)qgemmtr_trans_code(&transb);
+    const bool upper = (blas_up(uplo_c) == 'U');
+    const char ta = qgemmtr_trans_code(&transa);
+    const char tb = qgemmtr_trans_code(&transb);
 
     if (N <= 0) return;
     const T zero = 0.0Q, one = 1.0Q;
@@ -52,7 +53,7 @@ static void qgemmtr_core(char uplo_c, char transa, char transb,
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const int use_omp0 = (N >= QGEMMTR_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
+        const bool use_omp0 = (N >= QGEMMTR_OMP_MIN && blas_omp_should_thread());
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j)
@@ -61,7 +62,7 @@ static void qgemmtr_core(char uplo_c, char transa, char transb,
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= QGEMMTR_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
+    const bool use_omp = (N >= QGEMMTR_OMP_MIN && blas_omp_should_thread());
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
     for (ptrdiff_t j = 0; j < N; ++j)

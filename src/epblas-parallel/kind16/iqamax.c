@@ -34,13 +34,13 @@ static ptrdiff_t iqamax_kernel(ptrdiff_t n, const T *x, T *bv_out)
 #define IQAMAX_MAX_CPUS 64
 __attribute__((noinline)) static ptrdiff_t iqamax_omp(ptrdiff_t n, const T *x, ptrdiff_t *out)
 {
-    if (n <= IQAMAX_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= IQAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > IQAMAX_MAX_CPUS) nthreads = IQAMAX_MAX_CPUS;
     T pval[IQAMAX_MAX_CPUS];
     ptrdiff_t pidx[IQAMAX_MAX_CPUS];   /* global 0-based index of each thread's local best */
-    for (int i = 0; i < nthreads; ++i) { pval[i] = -1.0Q; pidx[i] = -1; }
+    for (ptrdiff_t i = 0; i < nthreads; ++i) { pval[i] = -1.0Q; pidx[i] = -1; }
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -56,7 +56,7 @@ __attribute__((noinline)) static ptrdiff_t iqamax_omp(ptrdiff_t n, const T *x, p
     }
     T bv = -1.0Q;
     ptrdiff_t best = 0;
-    for (int i = 0; i < nthreads; ++i) {
+    for (ptrdiff_t i = 0; i < nthreads; ++i) {
         if (pidx[i] >= 0 && pval[i] > bv) { bv = pval[i]; best = pidx[i]; }
     }
     *out = best + 1;   /* 1-based */

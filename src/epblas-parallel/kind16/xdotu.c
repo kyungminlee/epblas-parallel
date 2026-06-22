@@ -36,11 +36,11 @@ static T xdotu_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdi
  * partial[] (omp reduction doesn't accept `__complex128`). See qasum.c. */
 #define XDOTU_OMP_MIN 128
 #define XDOTU_MAX_CPUS 64
-__attribute__((noinline)) static int xdotu_omp(ptrdiff_t n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static bool xdotu_omp(ptrdiff_t n, const T *x, const T *y, T *out)
 {
-    if (n <= XDOTU_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= XDOTU_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > XDOTU_MAX_CPUS) nthreads = XDOTU_MAX_CPUS;
     T partial[XDOTU_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
@@ -52,7 +52,7 @@ __attribute__((noinline)) static int xdotu_omp(ptrdiff_t n, const T *x, const T 
         if (lo < hi) partial[tid] = xdotu_kernel(hi - lo, x + lo, 1, y + lo, 1);
     }
     T s = 0;
-    for (int i = 0; i < nthreads; ++i) s += partial[i];
+    for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }

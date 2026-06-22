@@ -24,6 +24,7 @@
  */
 
 #include "xsyr2k_kernel.h"
+#include "../common/blas_char.h"
 #include "xl3_complex.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
@@ -59,8 +60,8 @@ static void xsyr2k_core(
 #endif
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0],  beta_i = beta_[1];
-    const int uplo  = (char)toupper((unsigned char)uplo_c);
-    const int trans = (char)toupper((unsigned char)trans_c);
+    const char uplo  = blas_up(uplo_c);
+    const char trans = blas_up(trans_c);
 
     if (N <= 0) return;
 
@@ -69,7 +70,7 @@ static void xsyr2k_core(
 
     if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
-    int MC0, KC0, NC0;
+    ptrdiff_t MC0, KC0, NC0;
     qblas_ygemm_blocks(&MC0, &KC0, &NC0);
     ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
 
@@ -103,7 +104,7 @@ static void xsyr2k_core(
     T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
     T **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
-    ptrdiff_t alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
+    bool alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_A_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         Ap_B_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);

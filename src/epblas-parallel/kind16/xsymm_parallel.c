@@ -20,6 +20,7 @@
  */
 
 #include "xsymm_kernel.h"
+#include "../common/blas_char.h"
 #include "xl3_complex.h"
 #include "../common/epblas_facade.h"
 #include <ctype.h>
@@ -54,8 +55,8 @@ static void xsymm_core(
 #endif
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
-    const int sd = (char)toupper((unsigned char)side);
-    const int up = (char)toupper((unsigned char)uplo);
+    const char sd = blas_up(side);
+    const char up = blas_up(uplo);
 
     if (M <= 0 || N <= 0) return;
 
@@ -73,10 +74,10 @@ static void xsymm_core(
     if (p.K == 0) return;
 
 #ifdef _OPENMP
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads < 1) nthreads = 1;
 #else
-    int nthreads = 1;
+    ptrdiff_t nthreads = 1;
 #endif
 
     long mnk = (long)M * (long)N * (long)p.K;
@@ -105,13 +106,13 @@ static void xsymm_core(
     if (!Bp) return;
     R **Ap_arr = calloc((size_t)nthreads, sizeof(R *));
     if (!Ap_arr) { free(Bp); return; }
-    int alloc_ok = 1;
-    for (int t = 0; t < nthreads; ++t) {
+    bool alloc_ok = 1;
+    for (ptrdiff_t t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (p.ap_bytes + 63) & ~(size_t)63);
         if (!Ap_arr[t]) { alloc_ok = 0; break; }
     }
     if (!alloc_ok) {
-        for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
+        for (ptrdiff_t t = 0; t < nthreads; ++t) free(Ap_arr[t]);
         free(Ap_arr); free(Bp);
         return;
     }
@@ -121,10 +122,10 @@ static void xsymm_core(
 #endif
     {
 #ifdef _OPENMP
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
 #else
-        int tid = 0, nth = 1;
+        ptrdiff_t tid = 0, nth = 1;
 #endif
         R *Ap = Ap_arr[tid];
 
@@ -151,7 +152,7 @@ static void xsymm_core(
         }
     }
 
-    for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
+    for (ptrdiff_t t = 0; t < nthreads; ++t) free(Ap_arr[t]);
     free(Ap_arr);
     free(Bp);
 }

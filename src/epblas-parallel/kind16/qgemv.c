@@ -13,6 +13,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -25,9 +26,6 @@
 
 typedef __float128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -72,7 +70,7 @@ static void qgemv_t_stride1_slice(
  * output element is written by one thread in the same per-element order as the
  * full serial loop → race-free and bit-exact (iy0/jy0/ix recomputed). */
 static void qgemv_general_stride_slice(
-    ptrdiff_t M, ptrdiff_t N, int TR,
+    ptrdiff_t M, ptrdiff_t N, char TR,
     T alpha, const T *a, ptrdiff_t lda,
     const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy, ptrdiff_t lo, ptrdiff_t hi)
 {
@@ -133,7 +131,7 @@ void qgemv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    char TR = up(trans);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
 
     if (M == 0 || N == 0) return;
@@ -146,14 +144,14 @@ void qgemv_core(
     if (alpha == zero) return;
 
 #ifdef _OPENMP
-    const int in_parallel = omp_in_parallel();
+    const bool in_parallel = omp_in_parallel();
 #else
-    const int in_parallel = 0;
+    const bool in_parallel = 0;
 #endif
 
     if (TR == 'N' && incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int use_omp = (M >= QGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
+        const bool use_omp = (M >= QGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
             ptrdiff_t tid = 0, nt = 1;
@@ -167,7 +165,7 @@ void qgemv_core(
 #endif
     } else if (TR != 'N' && incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= QGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
+        const bool use_omp = (N >= QGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
             ptrdiff_t tid = 0, nt = 1;
@@ -182,7 +180,7 @@ void qgemv_core(
     } else {
 #ifdef _OPENMP
         const ptrdiff_t span = (TR == 'N') ? M : N;
-        const int use_omp = (span >= QGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
+        const bool use_omp = (span >= QGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
             ptrdiff_t tid = 0, nt = 1;

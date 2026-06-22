@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -17,12 +18,9 @@
 
 typedef __complex128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 /* Matrix element with optional conjugation ('C' ⇒ conjugate, 'T' ⇒ as-is). */
-static inline T xelem(T a, int noconj) {
+static inline T xelem(T a, bool noconj) {
     return noconj ? a : conjq(a);
 }
 
@@ -40,7 +38,7 @@ static inline size_t cbU(ptrdiff_t j) {
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
  * incx!=1 fallback. noconj = (TR=='T'); NoTrans never conjugates. */
-static void xtpsv_serial(char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit,
+static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
                          ptrdiff_t N, const T *restrict ap, T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0Q + 0.0Qi;
@@ -170,11 +168,11 @@ static void xtpsv_serial(char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit,
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within fp128 fuzz tol. */
-static void xtpsv_block(char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit,
+static void xtpsv_block(char UPLO, char TR, bool noconj, bool nounit,
                         ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, const T *restrict ap, T *restrict x)
 {
     const T zero = 0.0Q + 0.0Qi;
-    const int lower = (UPLO == 'L');
+    const bool lower = (UPLO == 'L');
     if (TR == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (ptrdiff_t j = j1 - 1; j >= j0; --j) {
@@ -218,17 +216,17 @@ static void xtpsv_block(char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit,
  * to small XTPSV_BLK diagonal blocks (solved serially); the bulk O(N^2)
  * off-diagonal coupling is threaded over disjoint output rows. Returns 1 if it
  * handled the call. */
-__attribute__((noinline)) static int xtpsv_omp(
-    char UPLO, char TR, ptrdiff_t noconj, ptrdiff_t nounit, ptrdiff_t N,
+__attribute__((noinline)) static bool xtpsv_omp(
+    char UPLO, char TR, bool noconj, bool nounit, ptrdiff_t N,
     const T *restrict ap, T *restrict x)
 {
-    if (N < XTPSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (N < XTPSV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > XTPSV_MAX_CPUS) nthreads = XTPSV_MAX_CPUS;
     const T zero = 0.0Q + 0.0Qi;
-    const int lower = (UPLO == 'L');
-    const int trans = (TR != 'N');
+    const bool lower = (UPLO == 'L');
+    const bool trans = (TR != 'N');
 
     if (!trans) {
         if (lower) {
@@ -319,10 +317,10 @@ void xtpsv_core(
     const T *restrict ap,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 

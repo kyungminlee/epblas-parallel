@@ -18,6 +18,7 @@
  */
 
 #include "xtrsm_kernel.h"
+#include "../common/blas_char.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -47,7 +48,7 @@ static ptrdiff_t xtrsm_xtrsv_loop_max(ptrdiff_t M) {
 }
 
 char xtrsm_uplo(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 static const T ZERO = 0.0Q + 0.0Qi;
@@ -58,14 +59,14 @@ static inline T cconj(T a) { return conjq(a); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
-static inline T A_op(const T *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, int conj_flag) {
+static inline T A_op(const T *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, bool conj_flag) {
     return conj_flag ? cconj(A_(row, col)) : A_(row, col);
 }
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
 
 void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
@@ -81,7 +82,7 @@ void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 }
 
 void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
@@ -98,7 +99,7 @@ void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 
 void xtrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
-                     int nounit, int conj_flag)
+                     bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = M - 1; i >= 0; --i) {
@@ -112,7 +113,7 @@ void xtrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 
 void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
-                     int nounit, int conj_flag)
+                     bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = 0; i < M; ++i) {
@@ -127,7 +128,7 @@ void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
 
 void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = N - 1; j >= 0; --j) {
         if (alpha != ONE) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
@@ -145,7 +146,7 @@ void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 }
 
 void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = 0; j < N; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
@@ -164,7 +165,7 @@ void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 
 void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
-                     int nounit, int conj_flag)
+                     bool nounit, bool conj_flag)
 {
     for (ptrdiff_t k = 0; k < N; ++k) {
         if (nounit) {
@@ -183,7 +184,7 @@ void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 
 void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
-                     int nounit, int conj_flag)
+                     bool nounit, bool conj_flag)
 {
     for (ptrdiff_t k = N - 1; k >= 0; --k) {
         if (nounit) {
@@ -219,8 +220,8 @@ void xtrsm_serial(
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
     const char TR = xtrsm_uplo(transa);
-    const int nounit = (xtrsm_uplo(diag) != 'U');
-    const int cflag = (TR == 'C') ? 1 : 0;
+    const bool nounit = (xtrsm_uplo(diag) != 'U');
+    const bool cflag = (TR == 'C') ? 1 : 0;
 
     if (M == 0 || N == 0) return;
 

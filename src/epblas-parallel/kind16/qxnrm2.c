@@ -16,7 +16,7 @@ typedef __complex128 T;
 typedef __float128 R;
 
 static R btsml, btbig, bssml, bsbig, maxN;
-static int blue_inited = 0;
+static bool blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
 {
@@ -31,7 +31,7 @@ static __attribute__((cold)) void blue_init(void)
 static inline R sq(R x) { return x * x; }
 
 /* Bucket one scalar component into (abig, amed, asml). */
-static inline void blue_bucket(R ax, R *abig, R *amed, R *asml, int *notbig)
+static inline void blue_bucket(R ax, R *abig, R *amed, R *asml, bool *notbig)
 {
     if (ax > btbig) {
         *abig += sq(ax * bsbig);
@@ -81,7 +81,7 @@ static R qxnrm2_finalize(R abig, R amed, R asml)
 static void qxnrm2_bucket(ptrdiff_t n, const T *x, R *abig_, R *amed_, R *asml_)
 {
     R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
-    int notbig = 1;
+    bool notbig = 1;
     for (ptrdiff_t i = 0; i < n; ++i) {
         blue_bucket(fabsq(__real__ x[i]), &abig, &amed, &asml, &notbig);
         blue_bucket(fabsq(__imag__ x[i]), &abig, &amed, &asml, &notbig);
@@ -92,11 +92,11 @@ static void qxnrm2_bucket(ptrdiff_t n, const T *x, R *abig_, R *amed_, R *asml_)
 /* Threaded reduction for large unit-stride X (see qnrm2 for the rationale). */
 #define QXNRM2_OMP_MIN 128
 #define QXNRM2_MAX_CPUS 64
-__attribute__((noinline)) static int qxnrm2_omp(ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static bool qxnrm2_omp(ptrdiff_t n, const T *x, R *out)
 {
-    if (n <= QXNRM2_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= QXNRM2_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QXNRM2_MAX_CPUS) nthreads = QXNRM2_MAX_CPUS;
     R pbig[QXNRM2_MAX_CPUS] = {0}, pmed[QXNRM2_MAX_CPUS] = {0}, psml[QXNRM2_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
@@ -108,7 +108,7 @@ __attribute__((noinline)) static int qxnrm2_omp(ptrdiff_t n, const T *x, R *out)
         if (lo < hi) qxnrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
     }
     R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
-    for (int i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
+    for (ptrdiff_t i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
     *out = qxnrm2_finalize(abig, amed, asml);
     return 1;
 }
@@ -127,7 +127,7 @@ static R qxnrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 #endif
 
     R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
-    int notbig = 1;
+    bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
     for (ptrdiff_t i = 0; i < n; ++i) {
         blue_bucket(fabsq(__real__ x[ix]), &abig, &amed, &asml, &notbig);

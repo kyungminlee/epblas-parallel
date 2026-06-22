@@ -36,27 +36,27 @@ char xtrmm_uplo(char c);
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
 void xtrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
-                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, int nounit);
+                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void xtrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
-                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, int nounit);
+                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void xtrmm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
                      const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
-                     int nounit, int conj_flag);
+                     bool nounit, bool conj_flag);
 void xtrmm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
                      const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
-                     int nounit, int conj_flag);
+                     bool nounit, bool conj_flag);
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
 void xtrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
-                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, int nounit);
+                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void xtrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
-                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, int nounit);
+                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
 void xtrmm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
                      const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
-                     int nounit, int conj_flag);
+                     bool nounit, bool conj_flag);
 void xtrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
                      const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
-                     int nounit, int conj_flag);
+                     bool nounit, bool conj_flag);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
  * invoke from inside another function's `#pragma omp parallel` region. Shares

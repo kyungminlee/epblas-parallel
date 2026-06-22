@@ -37,19 +37,19 @@
 typedef __complex128 xgemm_T;
 
 /* Normalize a Fortran trans char to its uppercase code ('N'/'T'/'C'/'R'). */
-int xgemm_trans_code(char c);
+char xgemm_trans_code(char c);
 
 /* Blocking plan for one xgemm call. MC may be grown adaptively for small K.
  * The conj/trans flags are decoded once from the (ta, tb) codes. */
 typedef struct {
     ptrdiff_t MC, KC, NC;
     size_t ap_bytes, bp_bytes;
-    int conj_a, trans_a;
-    int conj_b, trans_b;
+    bool conj_a, trans_a;
+    bool conj_b, trans_b;
 } xgemm_plan_t;
 
 /* Fill *p from the problem dims and the (ta, tb) trans codes. */
-void xgemm_make_plan(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K, int ta, int tb, xgemm_plan_t *p);
+void xgemm_make_plan(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K, char ta, char tb, xgemm_plan_t *p);
 
 /* OCOPY(B): pack the (pb × jb) panel at (ls, js) into Bp. */
 void xgemm_pack_B(const xgemm_plan_t *p,

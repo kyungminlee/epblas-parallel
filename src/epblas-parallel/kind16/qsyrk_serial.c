@@ -28,6 +28,7 @@
  */
 
 #include "qsyrk_kernel.h"
+#include "../common/blas_char.h"
 #include "qtri_kernel.h"
 #include "qgemm_kernel.h"
 #include <stddef.h>
@@ -213,7 +214,7 @@ void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * Unlike the NoTrans outer product (which RMW-streams C K times per column),
  * each C(i,j) is accumulated in a register and written once — packing has
  * nothing to save here, so the clean unpacked loop matches the reference. */
-void qsyrk_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
+void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
                      T alpha, const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc)
 {
     const ptrdiff_t i_lo = (uplo == 'L') ? j : 0;
@@ -246,8 +247,8 @@ void qsyrk_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const int uplo  = (char)toupper((unsigned char)uplo_c);
-    const int trans = (char)toupper((unsigned char)trans_c);
+    const char uplo  = blas_up(uplo_c);
+    const char trans = blas_up(trans_c);
 
     if (N <= 0) return;
 

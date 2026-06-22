@@ -12,6 +12,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <quadmath.h>
@@ -25,9 +26,6 @@
 
 typedef __float128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -41,7 +39,7 @@ void qsymv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
     const T zero = 0.0Q, one = 1.0Q;
 
     if (N == 0) return;
@@ -58,8 +56,8 @@ void qsymv_core(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int nt = blas_omp_max_threads();
-        if (N >= QSYMV_OMP_MIN && nt > 1 && !omp_in_parallel()) {
+        const ptrdiff_t nt = blas_omp_max_threads();
+        if (N >= QSYMV_OMP_MIN && blas_omp_should_thread()) {
             /* Parallel two-pass with per-thread private y accumulator;
              * schedule(static,1) interleaves columns to balance the
              * triangular per-column work (linear in N-j for L, j for U). */

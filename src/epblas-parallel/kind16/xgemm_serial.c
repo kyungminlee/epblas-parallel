@@ -21,6 +21,7 @@
  */
 
 #include "xgemm_kernel.h"
+#include "../common/blas_char.h"
 #include "xl3_complex.h"
 #include <ctype.h>
 #include <stddef.h>
@@ -31,19 +32,19 @@ typedef __float128 R;
 #define MR QBLAS_YGEMM_MR
 #define NR QBLAS_YGEMM_NR
 
-int xgemm_trans_code(char c) {
-    return (char)toupper((unsigned char)c);
+char xgemm_trans_code(char c) {
+    return blas_up(c);
 }
 
-static int op_is_conj(int c)  { return (c == 'C' || c == 'R') ? 1 : 0; }
-static int op_is_trans(int c) { return (c == 'T' || c == 'C') ? 1 : 0; }
+static bool op_is_conj(char c)  { return (c == 'C' || c == 'R') ? 1 : 0; }
+static bool op_is_trans(char c) { return (c == 'T' || c == 'C') ? 1 : 0; }
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 /* ── Block plan (mirrors ob xgemm.c lines 136-155) ──────────────── */
-void xgemm_make_plan(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K, int ta, int tb, xgemm_plan_t *p)
+void xgemm_make_plan(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K, char ta, char tb, xgemm_plan_t *p)
 {
     (void)M; (void)N;
-    int MC0, KC, NC;
+    ptrdiff_t MC0, KC, NC;
     qblas_ygemm_blocks(&MC0, &KC, &NC);
 
     /* Adaptive MC for small K, sized to keep Ap inside L2.
@@ -124,8 +125,8 @@ void xgemm_serial(
 {
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
-    const int ta = xgemm_trans_code(transa);
-    const int tb = xgemm_trans_code(transb);
+    const char ta = xgemm_trans_code(transa);
+    const char tb = xgemm_trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 

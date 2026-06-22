@@ -27,6 +27,7 @@
  */
 
 #include "qsyr2k_kernel.h"
+#include "../common/blas_char.h"
 #include "qsyrk_kernel.h"   /* qsyrk_beta_{u,l} — shared triangular β pre-pass */
 #include "qtri_kernel.h"
 #include "qgemm_kernel.h"   /* qgemm_choose_blocks / qgemm_round_up */
@@ -61,8 +62,8 @@ static void qsyr2k_core(
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const int uplo  = (char)toupper((unsigned char)uplo_c);
-    int trans = (char)toupper((unsigned char)trans_c);
+    const char uplo  = blas_up(uplo_c);
+    char trans = blas_up(trans_c);
     if (trans == 'C') trans = 'T';
 
     if (N <= 0) return;
@@ -109,7 +110,7 @@ static void qsyr2k_core(
     T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
     T **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
-    ptrdiff_t alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
+    bool alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_A_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         Ap_B_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);

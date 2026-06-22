@@ -16,12 +16,12 @@ typedef __float128 T;
  * schedule(static) gives each thread a contiguous block (sequential stores).
  * Real-quad copy only wins past L2 (crossover ~8K; n=4096 still washes). */
 #define QCOPY_OMP_MIN 8192
-__attribute__((noinline)) static int qcopy_omp(ptrdiff_t n, const T *x, ptrdiff_t incx,
+__attribute__((noinline)) static bool qcopy_omp(ptrdiff_t n, const T *x, ptrdiff_t incx,
                                                T *y, ptrdiff_t incy)
 {
-    if (n <= QCOPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= QCOPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
     ptrdiff_t iy0 = (incy < 0) ? (-n + 1) * incy : 0;
     #pragma omp parallel for schedule(static) num_threads(nthreads)

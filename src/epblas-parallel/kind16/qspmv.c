@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -22,15 +23,12 @@ typedef __float128 T;
 #define QSPMV_OMP_MIN 16384
 #define QSPMV_MAX_CPUS 256
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #ifdef _OPENMP
 /* Sqrt-balanced contiguous column partition (OpenBLAS symv_partition, mask=3,
  * min_width=4). Per-column work grows with j for UPPER (length j+1) and shrinks
  * for LOWER (length n-j), so widths shrink / grow to equalize triangle area. */
-static ptrdiff_t qspmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
+static ptrdiff_t qspmv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
 {
     const ptrdiff_t mask = 3, min_width = 4;
     const double dnum = (double)n * (double)n / (double)nthreads;
@@ -74,7 +72,7 @@ void qspmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0Q, one = 1.0Q;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || (alpha == zero && beta == one)) return;
 
@@ -92,7 +90,7 @@ void qspmv_core(
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if ((size_t)N * (size_t)N > QSPMV_OMP_MIN
-            && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+            && blas_omp_should_thread()) {
             ptrdiff_t nthreads = blas_omp_max_threads();
             if (nthreads > QSPMV_MAX_CPUS) nthreads = QSPMV_MAX_CPUS;
             ptrdiff_t range[QSPMV_MAX_CPUS + 1];

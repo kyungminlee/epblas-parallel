@@ -28,6 +28,7 @@
  */
 
 #include "xher2k_kernel.h"
+#include "../common/blas_char.h"
 #include "xl3_complex.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -51,8 +52,8 @@ void xher2k_serial(
 {
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0];
-    const int uplo  = (char)toupper((unsigned char)uplo_c);
-    const int trans = (char)toupper((unsigned char)trans_c);
+    const char uplo  = blas_up(uplo_c);
+    const char trans = blas_up(trans_c);
 
     if (N <= 0) return;
 
@@ -61,7 +62,7 @@ void xher2k_serial(
 
     if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
-    int MC0, KC0, NC0;
+    ptrdiff_t MC0, KC0, NC0;
     qblas_ygemm_blocks(&MC0, &KC0, &NC0);
     ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
 
@@ -79,8 +80,8 @@ void xher2k_serial(
 
     /* Conjugation absorbed at pack time (upstream GEMM_KERNEL_R/_L choice):
      *   TRANS='N' → conjugate Bp;  TRANS='C' → conjugate Ap. */
-    const int conj_a_pack = (trans == 'C') ? 1 : 0;
-    const int conj_b_pack = (trans == 'N') ? 1 : 0;
+    const bool conj_a_pack = (trans == 'C') ? 1 : 0;
+    const bool conj_b_pack = (trans == 'N') ? 1 : 0;
 
     const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(T);

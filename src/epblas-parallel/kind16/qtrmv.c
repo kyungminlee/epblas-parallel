@@ -13,6 +13,7 @@
  * fork/buffer almost immediately. Serial reference stays byte-for-byte. */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -24,9 +25,6 @@
 
 typedef __float128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -39,11 +37,11 @@ static inline char up(char c) {
  * the serial reference. noinline so the serial loops compile in a clean register
  * context. */
 __attribute__((noinline))
-static int qtrmv_omp(int upper, int trans_t, int nounit, ptrdiff_t N, ptrdiff_t lda,
+static bool qtrmv_omp(bool upper, bool trans_t, bool nounit, ptrdiff_t N, ptrdiff_t lda,
                      const T *restrict a, T *restrict x)
 {
     const ptrdiff_t nt = blas_omp_max_threads();
-    if (N < QTRMV_OMP_MIN || nt <= 1 || omp_in_parallel()) return 0;
+    if (N < QTRMV_OMP_MIN || !blas_omp_should_thread()) return 0;
     const T zero = 0.0Q;
 
     if (trans_t) {
@@ -121,11 +119,11 @@ void qtrmv_core(
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(uplo);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
-    const char DIAG = up(diag);
-    const ptrdiff_t nounit = (DIAG != 'U');
+    const char DIAG = blas_up(diag);
+    const bool nounit = (DIAG != 'U');
 
     if (N == 0) return;
     const T zero = 0.0Q;
@@ -180,7 +178,7 @@ void qtrmv_core(
          * driving the shared OMP core, and scattering back — the threading
          * lives in one place (qtrmv_omp) and the serial strided code below
          * stays byte-for-byte unchanged. */
-        if (N >= QTRMV_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+        if (N >= QTRMV_OMP_MIN && blas_omp_should_thread()) {
             T *xc = (T *)malloc((size_t)N * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < N; ++i) xc[i] = x[kx + i * incx];

@@ -98,12 +98,12 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
 #define QTRSM_OMP_WRAP_L(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         if (N >= QTRSM_OMP_MIN && blas_omp_max_threads() > 1                \
                               && !omp_in_parallel()) {                      \
             _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                            \
-                int nt  = omp_get_num_threads();                           \
+                ptrdiff_t tid = omp_get_thread_num();                            \
+                ptrdiff_t nt  = omp_get_num_threads();                           \
                 ptrdiff_t js  = blas_part_bound(N, tid, nt);               \
                 ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);           \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit);            \
@@ -113,12 +113,12 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
 #define QTRSM_OMP_WRAP_R(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         if (M >= QTRSM_OMP_MIN && blas_omp_max_threads() > 1                \
                               && !omp_in_parallel()) {                      \
             _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                            \
-                int nt  = omp_get_num_threads();                           \
+                ptrdiff_t tid = omp_get_thread_num();                            \
+                ptrdiff_t nt  = omp_get_num_threads();                           \
                 ptrdiff_t is  = blas_part_bound(M, tid, nt);               \
                 ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);           \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit);            \
@@ -129,13 +129,13 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
 #define QTRSM_OMP_WRAP_L(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define QTRSM_OMP_WRAP_R(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
     }
 #endif
@@ -163,7 +163,7 @@ static void qtrsm_core(
     const char UPLO   = qtrsm_uplo(uplo);
     char TR           = qtrsm_uplo(transa);
     if (TR == 'C') TR = 'T';   /* real type: conj-trans ≡ trans */
-    const int nounit = (qtrsm_uplo(diag) != 'U');
+    const bool nounit = (qtrsm_uplo(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -178,9 +178,9 @@ static void qtrsm_core(
      * The M-threshold mirrors qtrsv's own block-parallel gate. */
     {
 #ifdef _OPENMP
-        const int xv_in_par = omp_in_parallel();
+        const bool xv_in_par = omp_in_parallel();
 #else
-        const int xv_in_par = 0;
+        const bool xv_in_par = 0;
 #endif
         const ptrdiff_t xv_max = qtrsm_qtrsv_loop_max(M);
         if (SIDE == 'L' && N >= 1 && N <= xv_max && M >= QTRSM_QTRSV_LOOP_M_MIN
@@ -232,7 +232,7 @@ EPBLAS_FACADE_TRMM(qtrsm, T)
 
 #define QTRSM_BLOCKED_NB_DEFAULT 64
 
-static int qtrsm_blocked_nb(void) {
+static ptrdiff_t qtrsm_blocked_nb(void) {
     return QTRSM_BLOCKED_NB_DEFAULT;
 }
 
@@ -249,7 +249,7 @@ static void qtrsm_blocked_core(
     const char UPLO = qtrsm_uplo(uplo);
     char TR = qtrsm_uplo(transa);
     if (TR == 'C') TR = 'T';
-    const int nounit = (qtrsm_uplo(diag) != 'U');
+    const bool nounit = (qtrsm_uplo(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -267,16 +267,16 @@ static void qtrsm_blocked_core(
     const T one_v = 1.0Q;
 
 #ifdef _OPENMP
-    const int use_omp = (N >= 2 && blas_omp_max_threads() > 1 && !omp_in_parallel());
+    const bool use_omp = (N >= 2 && blas_omp_should_thread());
 #else
-    const int use_omp = 0;
+    const bool use_omp = 0;
 #endif
 
 #ifdef _OPENMP
     #pragma omp parallel if(use_omp)
 #endif
     {
-        int tid = 0, nt = 1;
+        ptrdiff_t tid = 0, nt = 1;
 #ifdef _OPENMP
         if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
 #endif

@@ -14,6 +14,7 @@
  */
 
 #include "qtrsm_kernel.h"
+#include "../common/blas_char.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -43,7 +44,7 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
 }
 
 char qtrsm_uplo(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -52,7 +53,7 @@ char qtrsm_uplo(char c) {
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
 
 void qtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         if (alpha != 1.0Q) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
@@ -68,7 +69,7 @@ void qtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 }
 
 void qtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         if (alpha != 1.0Q) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
@@ -84,7 +85,7 @@ void qtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 }
 
 void qtrsm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = M - 1; i >= 0; --i) {
@@ -97,7 +98,7 @@ void qtrsm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 }
 
 void qtrsm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = 0; i < M; ++i) {
@@ -112,7 +113,7 @@ void qtrsm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
 
 void qtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = N - 1; j >= 0; --j) {
         if (alpha != 1.0Q) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
@@ -130,7 +131,7 @@ void qtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 }
 
 void qtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = 0; j < N; ++j) {
         if (alpha != 1.0Q) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
@@ -148,7 +149,7 @@ void qtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 }
 
 void qtrsm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t k = 0; k < N; ++k) {
         if (nounit) {
@@ -166,7 +167,7 @@ void qtrsm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
 }
 
 void qtrsm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t k = N - 1; k >= 0; --k) {
         if (nounit) {
@@ -203,7 +204,7 @@ void qtrsm_serial(
     const char UPLO   = qtrsm_uplo(uplo);
     char TR           = qtrsm_uplo(transa);
     if (TR == 'C') TR = 'T';   /* real type: conj-trans ≡ trans */
-    const int nounit = (qtrsm_uplo(diag) != 'U');
+    const bool nounit = (qtrsm_uplo(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

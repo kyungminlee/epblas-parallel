@@ -21,12 +21,12 @@ static inline void step(const T flag, const T h11, const T h12, const T h21, con
 /* Threaded modified Givens — quad is compute-bound, so it threads (see
  * qaxpy.c). Each iteration is independent; index-from-i covers every stride. */
 #define QROTM_OMP_MIN 128
-__attribute__((noinline)) static int qrotm_omp(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
+__attribute__((noinline)) static bool qrotm_omp(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
                                                T flag, T h11, T h12, T h21, T h22)
 {
-    if (n <= QROTM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= QROTM_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
     ptrdiff_t iy0 = (incy < 0) ? (-n + 1) * incy : 0;
     #pragma omp parallel for schedule(static) num_threads(nthreads)

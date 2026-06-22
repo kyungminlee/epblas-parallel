@@ -31,8 +31,7 @@ void qger_core(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int use_omp = (N >= QGER_OMP_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
+        const bool use_omp = (N >= QGER_OMP_MIN && blas_omp_should_thread());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j) {
@@ -49,8 +48,7 @@ void qger_core(
         const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
         const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
-        const int use_omp = (N >= QGER_OMP_MIN && blas_omp_max_threads() > 1
-                             && !omp_in_parallel());
+        const bool use_omp = (N >= QGER_OMP_MIN && blas_omp_should_thread());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j) {

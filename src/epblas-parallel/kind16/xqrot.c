@@ -13,12 +13,12 @@ typedef __float128 R;
 /* Threaded complex Givens (real c, s) — quad is compute-bound, so it threads
  * (see qaxpy.c). Each iteration is independent; index-from-i covers all strides. */
 #define XQROT_OMP_MIN 128
-__attribute__((noinline)) static int xqrot_omp(ptrdiff_t n, T *x, ptrdiff_t incx,
+__attribute__((noinline)) static bool xqrot_omp(ptrdiff_t n, T *x, ptrdiff_t incx,
                                                T *y, ptrdiff_t incy, R c, R s)
 {
-    if (n <= XQROT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= XQROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
     ptrdiff_t iy0 = (incy < 0) ? (-n + 1) * incy : 0;
     #pragma omp parallel for schedule(static) num_threads(nthreads)

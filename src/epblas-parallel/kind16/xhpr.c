@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -17,9 +18,6 @@
 typedef __complex128 T;
 typedef __float128 TR;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 void xhpr_core(
     char uplo,
@@ -31,14 +29,14 @@ void xhpr_core(
     const TR alpha = *alpha_;
     const TR rzero = 0.0Q;
     const T czero = 0.0Q + 0.0Qi;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || alpha == rzero) return;
 
     if (incx == 1) {
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const int use_omp = (N >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {
@@ -53,7 +51,7 @@ void xhpr_core(
             }
         } else {
 #ifdef _OPENMP
-            const int use_omp = (N >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {

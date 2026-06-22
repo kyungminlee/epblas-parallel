@@ -54,8 +54,8 @@ static void qgemm_core(
 #endif
 
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = qgemm_trans_code(transa);
-    const ptrdiff_t tb = qgemm_trans_code(transb);
+    const char ta = qgemm_trans_code(transa);
+    const char tb = qgemm_trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 

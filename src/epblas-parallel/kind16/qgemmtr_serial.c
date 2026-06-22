@@ -13,13 +13,14 @@
  */
 
 #include "qgemmtr_kernel.h"
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 
 typedef qgemmtr_T T;
 
-ptrdiff_t qgemmtr_trans_code(const char *p) {
-    char c = (char)toupper((unsigned char)*p);
+char qgemmtr_trans_code(const char *p) {
+    char c = blas_up(*p);
     return (c == 'C') ? 'T' : c;
 }
 
@@ -28,7 +29,7 @@ ptrdiff_t qgemmtr_trans_code(const char *p) {
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
 void qgemmtr_beta_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper,
     T beta,
     T *c, ptrdiff_t ldc)
 {
@@ -43,8 +44,8 @@ void qgemmtr_beta_core(
 }
 
 void qgemmtr_compute_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper, ptrdiff_t K,
-    int ta, int tb,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper, ptrdiff_t K,
+    char ta, char tb,
     T alpha, T beta,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -106,9 +107,9 @@ void qgemmtr_serial(char uplo, char transa, char transb,
                     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const int upper = ((char)toupper((unsigned char)uplo) == 'U');
-    const ptrdiff_t ta = qgemmtr_trans_code(&transa);
-    const ptrdiff_t tb = qgemmtr_trans_code(&transb);
+    const bool upper = (blas_up(uplo) == 'U');
+    const char ta = qgemmtr_trans_code(&transa);
+    const char tb = qgemmtr_trans_code(&transb);
 
     if (N <= 0) return;
     const T zero = 0.0Q, one = 1.0Q;

@@ -66,7 +66,7 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                from each of Ap and Bp. */
             ptrdiff_t k4 = bk / 4;
             for (ptrdiff_t k = 0; k < k4; ++k) {
-                for (int u = 0; u < 4; ++u) {
+                for (ptrdiff_t u = 0; u < 4; ++u) {
                     T a0 = ptrba[0], a1 = ptrba[1];
                     T a2 = ptrba[2], a3 = ptrba[3];
                     T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
@@ -196,7 +196,7 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
  * pair) is negated as it's written into `b`.
  */
 void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
-                       int conj,
+                       bool conj,
                        const T *a, ptrdiff_t lda,
                        T *b)
 {
@@ -262,7 +262,7 @@ void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
 
 /* ── tcopy: faithful port of OpenBLAS zgemm_tcopy_2.c, with conj ──── */
 void qblas_ygemm_tcopy(ptrdiff_t m, ptrdiff_t n,
-                       int conj,
+                       bool conj,
                        const T *a, ptrdiff_t lda,
                        T *b)
 {
@@ -375,7 +375,7 @@ void qblas_ygemm_beta(ptrdiff_t m, ptrdiff_t n,
 
 
 /* ── Block-size constants ───────────────────────────────────────── */
-void qblas_ygemm_blocks(int *mc, int *kc, int *nc) {
+void qblas_ygemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc) {
     *mc = QBLAS_YGEMM_GEMM_P; *kc = QBLAS_YGEMM_GEMM_Q; *nc = QBLAS_YGEMM_GEMM_R;
 }
 
@@ -1029,7 +1029,7 @@ void qblas_yherk_beta_l(ptrdiff_t n, T br, T *c, ptrdiff_t ldc) {
 void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            T alphar, T alphai,
                            const T *a, const T *b,
-                           T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag)
+                           T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
     T subbuf[NR * (NR + 1) * 2];
     const ptrdiff_t ldc2 = 2 * ldc;
@@ -1095,7 +1095,7 @@ void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            T alphar, T alphai,
                            const T *a, const T *b,
-                           T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag)
+                           T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
     T subbuf[NR * (NR + 1) * 2];
     const ptrdiff_t ldc2 = 2 * ldc;
@@ -1179,7 +1179,7 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            T alphar, T alphai,
                            const T *a, const T *b,
-                           T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag)
+                           T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
     T subbuf[NR * (NR + 1) * 2];
     const ptrdiff_t ldc2 = 2 * ldc;
@@ -1249,7 +1249,7 @@ void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            T alphar, T alphai,
                            const T *a, const T *b,
-                           T *c, ptrdiff_t ldc, ptrdiff_t offset, int flag)
+                           T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
     T subbuf[NR * (NR + 1) * 2];
     const ptrdiff_t ldc2 = 2 * ldc;

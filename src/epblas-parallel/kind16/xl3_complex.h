@@ -90,7 +90,7 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
  * via ncopy and op = 'C' (conj-trans) via the ICOPY path.
  */
 void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
-                       int conj,
+                       bool conj,
                        const __float128 *a, ptrdiff_t lda,
                        __float128 *b);
 
@@ -101,7 +101,7 @@ void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
  * Same `conj` semantics and lda convention as qblas_ygemm_ncopy.
  */
 void qblas_ygemm_tcopy(ptrdiff_t m, ptrdiff_t n,
-                       int conj,
+                       bool conj,
                        const __float128 *a, ptrdiff_t lda,
                        __float128 *b);
 
@@ -111,7 +111,7 @@ void qblas_ygemm_beta(ptrdiff_t m, ptrdiff_t n,
                       __float128 *c, ptrdiff_t ldc);
 
 /* ── Env-var block-size overrides (lazy, idempotent) ──────────────── */
-void qblas_ygemm_blocks(int *mc, int *kc, int *nc);
+void qblas_ygemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc);
 
 /* ── SYMM-aware packers (complex) ────────────────────────────────────
  *
@@ -214,22 +214,22 @@ void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 alphar, __float128 alphai,
                            const __float128 *a, const __float128 *b,
                            __float128 *c, ptrdiff_t ldc,
-                           ptrdiff_t offset, int flag);
+                           ptrdiff_t offset, bool flag);
 void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 alphar, __float128 alphai,
                            const __float128 *a, const __float128 *b,
                            __float128 *c, ptrdiff_t ldc,
-                           ptrdiff_t offset, int flag);
+                           ptrdiff_t offset, bool flag);
 void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 alphar, __float128 alphai,
                            const __float128 *a, const __float128 *b,
                            __float128 *c, ptrdiff_t ldc,
-                           ptrdiff_t offset, int flag);
+                           ptrdiff_t offset, bool flag);
 void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 alphar, __float128 alphai,
                            const __float128 *a, const __float128 *b,
                            __float128 *c, ptrdiff_t ldc,
-                           ptrdiff_t offset, int flag);
+                           ptrdiff_t offset, bool flag);
 
 #ifdef __cplusplus
 }

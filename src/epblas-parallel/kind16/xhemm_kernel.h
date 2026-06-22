@@ -40,12 +40,12 @@ typedef __complex128 xhemm_T;
 typedef struct {
     ptrdiff_t MC, KC, NC;
     size_t ap_bytes, bp_bytes;
-    int side;   /* 'L' / 'R' */
-    int uplo;   /* 'U' / 'L' */
+    char side;   /* 'L' / 'R' */
+    char uplo;   /* 'U' / 'L' */
     ptrdiff_t K;
 } xhemm_plan_t;
 
-void xhemm_make_plan(ptrdiff_t M, ptrdiff_t N, int side, int uplo, xhemm_plan_t *p);
+void xhemm_make_plan(ptrdiff_t M, ptrdiff_t N, char side, char uplo, xhemm_plan_t *p);
 
 /* OCOPY(B): pack the (pb × jb) panel at (ls, js) into Bp. For SIDE=L the
  * regular factor B goes through the standard GEMM ncopy; for SIDE=R the

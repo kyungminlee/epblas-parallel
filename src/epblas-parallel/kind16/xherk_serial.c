@@ -15,6 +15,7 @@
  */
 
 #include "xherk_kernel.h"
+#include "../common/blas_char.h"
 #include "xgemm_kernel.h"
 #include <stdlib.h>
 #include <ctype.h>
@@ -24,11 +25,11 @@ typedef xherk_TC TC;
 typedef xherk_TR TR;
 
 char xherk_uplo(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 char xherk_trans(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 ptrdiff_t xherk_nb(void) { return 32; }
@@ -149,8 +150,8 @@ void xherk_serial(
     TC *c, ptrdiff_t ldc)
 {
     const TR alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)uplo);
-    const char TR_c = (char)toupper((unsigned char)trans);
+    const char UPLO = blas_up(uplo);
+    const char TR_c = blas_up(trans);
 
     if (N == 0) return;
 

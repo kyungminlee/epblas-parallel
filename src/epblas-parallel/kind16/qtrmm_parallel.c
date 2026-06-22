@@ -19,6 +19,7 @@
  */
 
 #include "qtrmm_kernel.h"
+#include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <ctype.h>
@@ -32,9 +33,6 @@
 
 typedef qtrmm_T T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
@@ -43,11 +41,11 @@ static inline char up(char c) {
 #ifdef _OPENMP
 #define QTRMM_OMP_WRAP_L(name, core)                                       \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit) {     \
-        if (N >= QTRMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {             \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
+        if (N >= QTRMM_OMP_MIN && blas_omp_should_thread()) {             \
             _Pragma("omp parallel") {                                      \
-                int tid = omp_get_thread_num();                            \
-                int nt  = omp_get_num_threads();                           \
+                ptrdiff_t tid = omp_get_thread_num();                            \
+                ptrdiff_t nt  = omp_get_num_threads();                           \
                 ptrdiff_t js  = blas_part_bound(N, tid, nt);                  \
                 ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);            \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit);            \
@@ -56,11 +54,11 @@ static inline char up(char c) {
     }
 #define QTRMM_OMP_WRAP_R(name, core)                                       \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit) {     \
-        if (M >= QTRMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {             \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
+        if (M >= QTRMM_OMP_MIN && blas_omp_should_thread()) {             \
             _Pragma("omp parallel") {                                      \
-                int tid = omp_get_thread_num();                            \
-                int nt  = omp_get_num_threads();                           \
+                ptrdiff_t tid = omp_get_thread_num();                            \
+                ptrdiff_t nt  = omp_get_num_threads();                           \
                 ptrdiff_t is  = blas_part_bound(M, tid, nt);                  \
                 ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);            \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit);            \
@@ -70,12 +68,12 @@ static inline char up(char c) {
 #else
 #define QTRMM_OMP_WRAP_L(name, core)                                       \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit) {     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
         core(0, N, M, alpha, a, lda, b, ldb, nounit);                      \
     }
 #define QTRMM_OMP_WRAP_R(name, core)                                       \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit) {     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
         core(0, M, N, alpha, a, lda, b, ldb, nounit);                      \
     }
 #endif
@@ -97,11 +95,11 @@ static void qtrmm_core(
     T *b, ptrdiff_t ldb)
 {
     const T alpha = *alpha_;
-    const char SIDE   = up(side);
-    const char UPLO   = up(uplo);
-    char TR           = up(transa);
+    const char SIDE   = blas_up(side);
+    const char UPLO   = blas_up(uplo);
+    char TR           = blas_up(transa);
     if (TR == 'C') TR = 'T';
-    const int nounit = (up(diag) != 'U');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 

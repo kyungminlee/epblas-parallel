@@ -38,12 +38,12 @@ typedef __complex128 xsymm_T;
 typedef struct {
     ptrdiff_t MC, KC, NC;
     size_t ap_bytes, bp_bytes;
-    int side;   /* 'L' / 'R' */
-    int uplo;   /* 'U' / 'L' */
+    char side;   /* 'L' / 'R' */
+    char uplo;   /* 'U' / 'L' */
     ptrdiff_t K;
 } xsymm_plan_t;
 
-void xsymm_make_plan(ptrdiff_t M, ptrdiff_t N, int side, int uplo, xsymm_plan_t *p);
+void xsymm_make_plan(ptrdiff_t M, ptrdiff_t N, char side, char uplo, xsymm_plan_t *p);
 
 /* OCOPY(B): pack the (pb × jb) panel at (ls, js) into Bp. For SIDE=L the
  * regular factor B goes through the standard GEMM ncopy; for SIDE=R the

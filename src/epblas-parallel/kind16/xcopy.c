@@ -14,12 +14,12 @@ typedef __complex128 T;
  * bandwidth (see qcopy.c). schedule(static) → contiguous per-thread blocks.
  * Complex quad is 32B/elem so it leaves cache sooner (crossover ~3K). */
 #define XCOPY_OMP_MIN 2048
-__attribute__((noinline)) static int xcopy_omp(ptrdiff_t n, const T *x, ptrdiff_t incx,
+__attribute__((noinline)) static bool xcopy_omp(ptrdiff_t n, const T *x, ptrdiff_t incx,
                                                T *y, ptrdiff_t incy)
 {
-    if (n <= XCOPY_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= XCOPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
     ptrdiff_t iy0 = (incy < 0) ? (-n + 1) * incy : 0;
     #pragma omp parallel for schedule(static) num_threads(nthreads)

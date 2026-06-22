@@ -5,6 +5,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <quadmath.h>
@@ -18,9 +19,6 @@
 
 typedef __complex128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -34,7 +32,7 @@ void xhemv_core(
     T *restrict y, ptrdiff_t incy)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
     const T zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
 
     if (N == 0) return;
@@ -51,8 +49,8 @@ void xhemv_core(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const int nt = blas_omp_max_threads();
-        if (N >= XHEMV_OMP_MIN && nt > 1 && !omp_in_parallel()) {
+        const ptrdiff_t nt = blas_omp_max_threads();
+        if (N >= XHEMV_OMP_MIN && blas_omp_should_thread()) {
             /* Parallel column-walk with per-thread private y, then reduce
              * (same pattern as qsymv; Hermitian conjugation stays inside the
              * column loop unchanged). Faithful port of kind10 yhemv. */

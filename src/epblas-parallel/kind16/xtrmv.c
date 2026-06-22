@@ -13,6 +13,7 @@
  * amortizes the fork/buffer almost immediately. Serial reference byte-for-byte. */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -24,9 +25,6 @@
 
 typedef __complex128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -39,11 +37,11 @@ static inline char up(char c) {
  * the serial reference. noinline so the serial loops compile in a clean register
  * context. trans_t = (TR != 'N'), conj_a = (TR == 'C'). */
 __attribute__((noinline))
-static int xtrmv_omp(int upper, int trans_t, int conj_a, int nounit, ptrdiff_t N, ptrdiff_t lda,
+static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdiff_t N, ptrdiff_t lda,
                      const T *restrict a, T *restrict x)
 {
     const ptrdiff_t nt = blas_omp_max_threads();
-    if (N < XTRMV_OMP_MIN || nt <= 1 || omp_in_parallel()) return 0;
+    if (N < XTRMV_OMP_MIN || !blas_omp_should_thread()) return 0;
     const T zero = 0.0Q + 0.0Qi;
     const T one  = 1.0Q + 0.0Qi;
 
@@ -123,10 +121,10 @@ void xtrmv_core(
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    const char TR   = up(trans);
-    const char DIAG = up(diag);
-    const ptrdiff_t nounit = (DIAG != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR   = blas_up(trans);
+    const char DIAG = blas_up(diag);
+    const bool nounit = (DIAG != 'U');
 
     if (N == 0) return;
     const T zero = 0.0Q + 0.0Qi;
@@ -156,7 +154,7 @@ void xtrmv_core(
                 }
             }
         } else {
-            const ptrdiff_t conj_a = (TR == 'C');
+            const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[j];
@@ -190,7 +188,7 @@ void xtrmv_core(
          * driving the shared OMP core, and scattering back — the threading
          * lives in one place (xtrmv_omp) and the serial strided code below
          * stays byte-for-byte unchanged. */
-        if (N >= XTRMV_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
+        if (N >= XTRMV_OMP_MIN && blas_omp_should_thread()) {
             T *xc = (T *)malloc((size_t)N * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < N; ++i) xc[i] = x[kx + i * incx];
@@ -220,7 +218,7 @@ void xtrmv_core(
                 }
             }
         } else {
-            const ptrdiff_t conj_a = (TR == 'C');
+            const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[kx + j * incx];

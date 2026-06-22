@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -16,9 +17,6 @@
 
 typedef __float128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 void qspr_core(
     char uplo,
@@ -29,7 +27,7 @@ void qspr_core(
 {
     const T alpha = *alpha_;
     const T zero = 0.0Q;
-    const char UPLO = up(uplo);
+    const char UPLO = blas_up(uplo);
 
     if (N == 0 || alpha == zero) return;
 
@@ -37,7 +35,7 @@ void qspr_core(
         /* Columns are independent in packed storage when accessed via kk(j). */
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const int use_omp = (N >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {
@@ -49,7 +47,7 @@ void qspr_core(
             }
         } else {
 #ifdef _OPENMP
-            const int use_omp = (N >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (N >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (ptrdiff_t j = 0; j < N; ++j) {

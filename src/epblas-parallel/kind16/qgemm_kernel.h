@@ -43,7 +43,7 @@ typedef __float128 qgemm_T;
 #define QGEMM_NR 2
 
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-ptrdiff_t qgemm_trans_code(char c);
+char qgemm_trans_code(char c);
 
 ptrdiff_t qgemm_round_up(ptrdiff_t v, ptrdiff_t m);
 

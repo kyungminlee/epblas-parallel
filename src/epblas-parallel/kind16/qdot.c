@@ -38,11 +38,11 @@ static T qdot_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdif
 /* Threaded partial-reduction for large unit-stride X·Y — see qasum.c. */
 #define QDOT_OMP_MIN 128
 #define QDOT_MAX_CPUS 64
-__attribute__((noinline)) static int qdot_omp(ptrdiff_t n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static bool qdot_omp(ptrdiff_t n, const T *x, const T *y, T *out)
 {
-    if (n <= QDOT_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= QDOT_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QDOT_MAX_CPUS) nthreads = QDOT_MAX_CPUS;
     T partial[QDOT_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
@@ -54,7 +54,7 @@ __attribute__((noinline)) static int qdot_omp(ptrdiff_t n, const T *x, const T *
         if (lo < hi) partial[tid] = qdot_kernel(hi - lo, x + lo, 1, y + lo, 1);
     }
     T s = 0.0Q;
-    for (int i = 0; i < nthreads; ++i) s += partial[i];
+    for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }

@@ -23,6 +23,7 @@
  */
 
 #include "xgemmtr_kernel.h"
+#include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <ctype.h>
@@ -52,23 +53,23 @@ static void xgemmtr_core(char uplo, char transa, char transb,
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const int upper = ((char)toupper((unsigned char)uplo) == 'U');
-    const int ta = xgemmtr_trans_code(transa);
-    const int tb = xgemmtr_trans_code(transb);
+    const bool upper = (blas_up(uplo) == 'U');
+    const char ta = xgemmtr_trans_code(transa);
+    const char tb = xgemmtr_trans_code(transb);
 
     if (N <= 0) return;
     const T zero = 0.0Q + 0.0Qi;
     const T one  = 1.0Q + 0.0Qi;
 
-    const int conj_a = (ta == 'C');
-    const int conj_b = (tb == 'C');
-    const int trans_a = (ta != 'N');
-    const int trans_b = (tb != 'N');
+    const bool conj_a = (ta == 'C');
+    const bool conj_b = (tb == 'C');
+    const bool trans_a = (ta != 'N');
+    const bool trans_b = (tb != 'N');
 
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const ptrdiff_t use_omp0 = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp0 = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j)
@@ -77,7 +78,7 @@ static void xgemmtr_core(char uplo, char transa, char transb,
     }
 
 #ifdef _OPENMP
-    const ptrdiff_t use_omp = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
     for (ptrdiff_t j = 0; j < N; ++j)

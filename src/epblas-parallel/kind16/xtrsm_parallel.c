@@ -98,12 +98,12 @@ static const T ONE  = 1.0Q + 0.0Qi;
 #define XTRSM_OMP_WRAP_L(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         if (N >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
             _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                             \
-                int nt  = omp_get_num_threads();                            \
+                ptrdiff_t tid = omp_get_thread_num();                             \
+                ptrdiff_t nt  = omp_get_num_threads();                            \
                 ptrdiff_t js  = blas_part_bound(N, tid, nt);                   \
                 ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);             \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit);             \
@@ -113,12 +113,12 @@ static const T ONE  = 1.0Q + 0.0Qi;
 #define XTRSM_OMP_WRAP_L_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         if (N >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
             _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                             \
-                int nt  = omp_get_num_threads();                            \
+                ptrdiff_t tid = omp_get_thread_num();                             \
+                ptrdiff_t nt  = omp_get_num_threads();                            \
                 ptrdiff_t js  = blas_part_bound(N, tid, nt);                   \
                 ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);             \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit, cflag);      \
@@ -128,12 +128,12 @@ static const T ONE  = 1.0Q + 0.0Qi;
 #define XTRSM_OMP_WRAP_R(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         if (M >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
             _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                             \
-                int nt  = omp_get_num_threads();                            \
+                ptrdiff_t tid = omp_get_thread_num();                             \
+                ptrdiff_t nt  = omp_get_num_threads();                            \
                 ptrdiff_t is  = blas_part_bound(M, tid, nt);                   \
                 ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);             \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit);             \
@@ -143,12 +143,12 @@ static const T ONE  = 1.0Q + 0.0Qi;
 #define XTRSM_OMP_WRAP_R_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         if (M >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
             _Pragma("omp parallel") {                                       \
-                int tid = omp_get_thread_num();                             \
-                int nt  = omp_get_num_threads();                            \
+                ptrdiff_t tid = omp_get_thread_num();                             \
+                ptrdiff_t nt  = omp_get_num_threads();                            \
                 ptrdiff_t is  = blas_part_bound(M, tid, nt);                   \
                 ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);             \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit, cflag);      \
@@ -159,25 +159,25 @@ static const T ONE  = 1.0Q + 0.0Qi;
 #define XTRSM_OMP_WRAP_L(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRSM_OMP_WRAP_L_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #define XTRSM_OMP_WRAP_R(name, core)                                        \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRSM_OMP_WRAP_R_TC(name, core, cflag)                              \
     static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
-                     int nounit) {                                          \
+                     bool nounit) {                                          \
         core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #endif
@@ -208,7 +208,7 @@ static void xtrsm_core(
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
     const char TR = xtrsm_uplo(transa);
-    const int nounit = (xtrsm_uplo(diag) != 'U');
+    const bool nounit = (xtrsm_uplo(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -224,9 +224,9 @@ static void xtrsm_core(
      * only enter when each per-column call will actually parallelize. */
     {
 #ifdef _OPENMP
-        const int xv_in_par = omp_in_parallel();
+        const bool xv_in_par = omp_in_parallel();
 #else
-        const int xv_in_par = 0;
+        const bool xv_in_par = 0;
 #endif
         const ptrdiff_t xv_max = xtrsm_xtrsv_loop_max(M);
         if (SIDE == 'L' && N >= 1 && N <= xv_max && M >= XTRSM_XTRSV_LOOP_M_MIN
@@ -291,7 +291,7 @@ EPBLAS_FACADE_TRMM(xtrsm, T)
 
 #define XTRSM_BLOCKED_NB_DEFAULT 64
 
-static int xtrsm_blocked_nb(void) {
+static ptrdiff_t xtrsm_blocked_nb(void) {
     return XTRSM_BLOCKED_NB_DEFAULT;
 }
 
@@ -307,8 +307,8 @@ static void xtrsm_blocked_core(
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
     const char TR   = xtrsm_uplo(transa);
-    const int nounit = (xtrsm_uplo(diag) != 'U');
-    const int cflag = (TR == 'C') ? 1 : 0;
+    const bool nounit = (xtrsm_uplo(diag) != 'U');
+    const bool cflag = (TR == 'C') ? 1 : 0;
 
     if (M == 0 || N == 0) return;
 
@@ -327,16 +327,16 @@ static void xtrsm_blocked_core(
     const T one_v = ONE;
 
 #ifdef _OPENMP
-    const int use_omp = (N >= 2 && blas_omp_max_threads() > 1 && !omp_in_parallel());
+    const bool use_omp = (N >= 2 && blas_omp_should_thread());
 #else
-    const int use_omp = 0;
+    const bool use_omp = 0;
 #endif
 
 #ifdef _OPENMP
     #pragma omp parallel if(use_omp)
 #endif
     {
-        int tid = 0, nt = 1;
+        ptrdiff_t tid = 0, nt = 1;
 #ifdef _OPENMP
         if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
 #endif

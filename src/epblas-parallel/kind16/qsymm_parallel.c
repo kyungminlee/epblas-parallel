@@ -15,6 +15,7 @@
  */
 
 #include "qsymm_kernel.h"
+#include "../common/blas_char.h"
 #include "qgemm_kernel.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
@@ -48,8 +49,8 @@ static void qsymm_core(
     }
 #endif
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)side_c);
-    const char UPLO = (char)toupper((unsigned char)uplo_c);
+    const char SIDE = blas_up(side_c);
+    const char UPLO = blas_up(uplo_c);
 
     if (M <= 0 || N <= 0) return;
 
@@ -83,7 +84,7 @@ static void qsymm_core(
      * would deadlock the others at the Bp barrier. */
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
-    ptrdiff_t alloc_ok = (Bp && Ap_arr);
+    bool alloc_ok = (Bp && Ap_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (!Ap_arr[t]) alloc_ok = 0;

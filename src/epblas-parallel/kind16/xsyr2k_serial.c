@@ -25,6 +25,7 @@
  */
 
 #include "xsyr2k_kernel.h"
+#include "../common/blas_char.h"
 #include "xl3_complex.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -48,8 +49,8 @@ void xsyr2k_serial(
 {
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0],  beta_i = beta_[1];
-    const int uplo  = (char)toupper((unsigned char)uplo_c);
-    const int trans = (char)toupper((unsigned char)trans_c);
+    const char uplo  = blas_up(uplo_c);
+    const char trans = blas_up(trans_c);
 
     if (N <= 0) return;
 
@@ -58,7 +59,7 @@ void xsyr2k_serial(
 
     if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
-    int MC0, KC0, NC0;
+    ptrdiff_t MC0, KC0, NC0;
     qblas_ygemm_blocks(&MC0, &KC0, &NC0);
     ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
 

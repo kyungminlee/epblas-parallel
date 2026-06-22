@@ -21,6 +21,7 @@
  */
 
 #include "xsymm_kernel.h"
+#include "../common/blas_char.h"
 #include "xl3_complex.h"
 #include <ctype.h>
 #include <stddef.h>
@@ -34,10 +35,10 @@ typedef __float128 R;
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 /* ── Block plan (mirrors ob xsymm.c lines 85-101) ───────────────── */
-void xsymm_make_plan(ptrdiff_t M, ptrdiff_t N, int side, int uplo, xsymm_plan_t *p)
+void xsymm_make_plan(ptrdiff_t M, ptrdiff_t N, char side, char uplo, xsymm_plan_t *p)
 {
     const ptrdiff_t K = (side == 'L') ? M : N;
-    int MC0, KC, NC;
+    ptrdiff_t MC0, KC, NC;
     qblas_ygemm_blocks(&MC0, &KC, &NC);
 
     /* Adaptive MC for small K, sized to keep Ap inside L2.
@@ -117,8 +118,8 @@ void xsymm_serial(
 {
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
-    const int sd = (char)toupper((unsigned char)side);
-    const int up = (char)toupper((unsigned char)uplo);
+    const char sd = blas_up(side);
+    const char up = blas_up(uplo);
 
     if (M <= 0 || N <= 0) return;
 

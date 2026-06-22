@@ -33,15 +33,15 @@ static ptrdiff_t ixamax_kernel(ptrdiff_t n, const T *x, R *bv_out)
  * scan. See qasum.c for threshold/noinline rationale. */
 #define IXAMAX_OMP_MIN 128
 #define IXAMAX_MAX_CPUS 64
-__attribute__((noinline)) static int ixamax_omp(ptrdiff_t n, const T *x, ptrdiff_t *out)
+__attribute__((noinline)) static bool ixamax_omp(ptrdiff_t n, const T *x, ptrdiff_t *out)
 {
-    if (n <= IXAMAX_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= IXAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > IXAMAX_MAX_CPUS) nthreads = IXAMAX_MAX_CPUS;
     R pval[IXAMAX_MAX_CPUS];
     ptrdiff_t pidx[IXAMAX_MAX_CPUS];   /* global 0-based index of each thread's local best */
-    for (int i = 0; i < nthreads; ++i) { pval[i] = -1.0Q; pidx[i] = -1; }
+    for (ptrdiff_t i = 0; i < nthreads; ++i) { pval[i] = -1.0Q; pidx[i] = -1; }
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -57,7 +57,7 @@ __attribute__((noinline)) static int ixamax_omp(ptrdiff_t n, const T *x, ptrdiff
     }
     R bv = -1.0Q;
     ptrdiff_t best = 0;
-    for (int i = 0; i < nthreads; ++i) {
+    for (ptrdiff_t i = 0; i < nthreads; ++i) {
         if (pidx[i] >= 0 && pval[i] > bv) { bv = pval[i]; best = pidx[i]; }
     }
     *out = best + 1;   /* 1-based */

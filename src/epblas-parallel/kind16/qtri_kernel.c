@@ -269,7 +269,7 @@ void qtri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, T alpha,
  * W(r) = (t/nth)·T, i.e. the positive root of a quadratic. Rounding each
  * boundary independently to MR keeps the sequence monotone (W is increasing),
  * so the per-thread ranges still tile [0,N) exactly. */
-static ptrdiff_t tri_boundary(int uplo, ptrdiff_t N, ptrdiff_t nth,
+static ptrdiff_t tri_boundary(char uplo, ptrdiff_t N, ptrdiff_t nth,
                               ptrdiff_t t, ptrdiff_t mr)
 {
     if (t <= 0)   return 0;
@@ -297,7 +297,7 @@ static ptrdiff_t tri_boundary(int uplo, ptrdiff_t N, ptrdiff_t nth,
     return rr;
 }
 
-void qtri_row_bounds(int uplo, ptrdiff_t N, ptrdiff_t nth, ptrdiff_t tid,
+void qtri_row_bounds(char uplo, ptrdiff_t N, ptrdiff_t nth, ptrdiff_t tid,
                      ptrdiff_t mr, ptrdiff_t *m_lo, ptrdiff_t *m_hi)
 {
     ptrdiff_t lo = tri_boundary(uplo, N, nth, tid, mr);

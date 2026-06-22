@@ -11,6 +11,7 @@
  */
 
 #include "xsyrk_kernel.h"
+#include "../common/blas_char.h"
 #include "xgemm_kernel.h"
 #include <stdlib.h>
 #include <ctype.h>
@@ -19,11 +20,11 @@
 typedef xsyrk_T T;
 
 char xsyrk_uplo(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 char xsyrk_trans(char c) {
-    return (char)toupper((unsigned char)c);
+    return blas_up(c);
 }
 
 ptrdiff_t xsyrk_nb(void) { return 32; }
@@ -131,8 +132,8 @@ void xsyrk_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)uplo);
-    const char TR   = (char)toupper((unsigned char)trans);
+    const char UPLO = blas_up(uplo);
+    const char TR   = blas_up(trans);
 
     if (N == 0) return;
 

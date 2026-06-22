@@ -36,24 +36,24 @@ char qtrsm_uplo(char c);
 /* ── SIDE = 'L' column-range cores ──────────────────────────────────
  * Each solves columns [j_start,j_end) of B against the M×M triangular A. */
 void qtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrsm_T alpha,
-                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, bool nounit);
 void qtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrsm_T alpha,
-                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, bool nounit);
 void qtrsm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrsm_T alpha,
-                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, bool nounit);
 void qtrsm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrsm_T alpha,
-                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, bool nounit);
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────────
  * Each solves rows [i_start,i_end) of B against the N×N triangular A. */
 void qtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrsm_T alpha,
-                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, bool nounit);
 void qtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrsm_T alpha,
-                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, bool nounit);
 void qtrsm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrsm_T alpha,
-                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, bool nounit);
 void qtrsm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrsm_T alpha,
-                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, bool nounit);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; produces
  * results bit-identical to qtrsm_ run single-threaded (each core called over

@@ -30,13 +30,13 @@
 typedef __float128 qgemmtr_T;
 
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-ptrdiff_t qgemmtr_trans_code(const char *p);
+char qgemmtr_trans_code(const char *p);
 
 /* Beta-only pass over columns [j0,j1): the body run on the alpha==0 / K==0
  * early-exit path. Scales (or zeros) the UPLO triangle of each column by beta.
  * Only reached when beta != one. */
 void qgemmtr_beta_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper,
     qgemmtr_T beta,
     qgemmtr_T *c, ptrdiff_t ldc);
 
@@ -47,8 +47,8 @@ void qgemmtr_beta_core(
  * Folds the per-column beta scaling inline, matching the original loop body.
  * Each column is owned by exactly one call, so the partition is race-free. */
 void qgemmtr_compute_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper, ptrdiff_t K,
-    int ta, int tb,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper, ptrdiff_t K,
+    char ta, char tb,
     qgemmtr_T alpha, qgemmtr_T beta,
     const qgemmtr_T *a, ptrdiff_t lda,
     const qgemmtr_T *b, ptrdiff_t ldb,

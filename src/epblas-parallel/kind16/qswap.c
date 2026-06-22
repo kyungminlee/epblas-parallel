@@ -39,12 +39,12 @@ static void qswap_kernel(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy
  * slice via the unrolled kernel. Real-quad swap only wins past L2 (crossover
  * ~8K; n=4096 still washes). */
 #define QSWAP_OMP_MIN 8192
-__attribute__((noinline)) static int qswap_omp(ptrdiff_t n, T *x, ptrdiff_t incx,
+__attribute__((noinline)) static bool qswap_omp(ptrdiff_t n, T *x, ptrdiff_t incx,
                                                T *y, ptrdiff_t incy)
 {
-    if (n <= QSWAP_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= QSWAP_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();

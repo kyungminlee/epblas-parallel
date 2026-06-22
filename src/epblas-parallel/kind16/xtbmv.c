@@ -3,6 +3,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -14,9 +15,6 @@
 
 typedef __complex128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -34,7 +32,7 @@ static inline char up(char c) {
 #define XTBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
-static ptrdiff_t xtbmv_omp(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, ptrdiff_t nounit,
+static ptrdiff_t xtbmv_omp(bool upper, ptrdiff_t trans, bool conj, bool nounit,
                      ptrdiff_t n, ptrdiff_t k,
                      const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
 #endif
@@ -46,10 +44,10 @@ void xtbmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0Q + 0.0Qi;
-    const char UPLO = up(uplo);
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char UPLO = blas_up(uplo);
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 
@@ -187,7 +185,7 @@ void xtbmv_core(
  * stored once into the disjoint scratch y. Branch hoisted out of the i-loop;
  * lda-1 anti-diagonal stride (NoTrans) vs contiguous (Trans). ConjTrans
  * conjugates the band and diagonal entries. */
-static void xtbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, ptrdiff_t nounit,
+static void xtbmv_rowgather(bool upper, ptrdiff_t trans, bool conj, bool nounit,
                             ptrdiff_t n, ptrdiff_t k, ptrdiff_t lo, ptrdiff_t hi,
                             const T *restrict a, ptrdiff_t lda,
                             const T *restrict x, T *restrict y)
@@ -240,10 +238,10 @@ static void xtbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, pt
  * if handled, 0 to fall back. noinline so its bookkeeping does not pressure the
  * serial path. */
 __attribute__((noinline)) static ptrdiff_t xtbmv_omp(
-    ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, ptrdiff_t nounit, ptrdiff_t n, ptrdiff_t k,
+    bool upper, ptrdiff_t trans, bool conj, bool nounit, ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx)
 {
-    if (n < XTBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < XTBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > XTBMV_MAX_CPUS) nthreads = XTBMV_MAX_CPUS;

@@ -19,6 +19,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #include "../common/epblas_facade.h"
@@ -35,9 +36,6 @@
 
 typedef __float128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -64,7 +62,7 @@ void qgbmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0Q, one = 1.0Q;
-    char TR = up(trans);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
 
     if (M == 0 || N == 0 || (alpha == zero && beta == one)) return;
@@ -115,9 +113,9 @@ void qgbmv_core(
         }
     } else if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= QGBMV_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (N >= QGBMV_OMP_MIN && blas_omp_max_threads() > 1);
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
 #define QGBMV_T_BODY                                                         \
         for (ptrdiff_t j = 0; j < N; ++j) {                                        \
@@ -190,7 +188,7 @@ __attribute__((noinline)) static ptrdiff_t qgbmv_n_omp(
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
-    if (m < QGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (m < QGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QGBMV_MAX_CPUS) nthreads = QGBMV_MAX_CPUS;
@@ -243,7 +241,7 @@ __attribute__((noinline)) static ptrdiff_t qgbmv_t_omp(
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
-    if (n < QGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < QGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QGBMV_MAX_CPUS) nthreads = QGBMV_MAX_CPUS;

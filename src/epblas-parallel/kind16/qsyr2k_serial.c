@@ -27,6 +27,7 @@
  */
 
 #include "qsyr2k_kernel.h"
+#include "../common/blas_char.h"
 #include "qsyrk_kernel.h"   /* qsyrk_beta_{u,l} — shared triangular β pre-pass */
 #include "qtri_kernel.h"
 #include "qgemm_kernel.h"   /* qgemm_choose_blocks / qgemm_round_up */
@@ -48,7 +49,7 @@ typedef qsyr2k_T T;
  * pad. */
 void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
                      const T *a, const T *b,
-                     T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag)
+                     T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
     T subbuf[NR * (NR + 1)];
 
@@ -110,7 +111,7 @@ void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
 
 void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
                      const T *a, const T *b,
-                     T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag)
+                     T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
     T subbuf[NR * (NR + 1)];
 
@@ -180,7 +181,7 @@ void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * A,B are K×N so all dot operands are unit-stride over the K axis. β is already
  * applied. Each C(i,j) is accumulated in a register and written once — packing
  * has nothing to save here, so the clean unpacked loop matches the reference. */
-void qsyr2k_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
+void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
                       T alpha, const T *a, ptrdiff_t lda,
                       const T *b, ptrdiff_t ldb, T *c, ptrdiff_t ldc)
 {
@@ -222,8 +223,8 @@ void qsyr2k_serial(
     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const int uplo  = (char)toupper((unsigned char)uplo_c);
-    int trans = (char)toupper((unsigned char)trans_c);
+    const char uplo  = blas_up(uplo_c);
+    char trans = blas_up(trans_c);
     if (trans == 'C') trans = 'T';
 
     if (N <= 0) return;

@@ -18,6 +18,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #include "../common/epblas_facade.h"
@@ -34,9 +35,6 @@
 
 typedef __complex128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -48,7 +46,7 @@ static ptrdiff_t xgbmv_n_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t k
 static ptrdiff_t xgbmv_t_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
                        const T *restrict a, ptrdiff_t lda,
                        const T *restrict x, ptrdiff_t incx,
-                       T alpha, T *restrict y, ptrdiff_t incy, ptrdiff_t noconj);
+                       T alpha, T *restrict y, ptrdiff_t incy, bool noconj);
 #endif
 
 void xgbmv_core(
@@ -63,8 +61,8 @@ void xgbmv_core(
 {
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
-    const char TR = up(trans);
-    const ptrdiff_t noconj = (TR == 'T');
+    const char TR = blas_up(trans);
+    const bool noconj = (TR == 'T');
 
     if (M == 0 || N == 0 || (alpha == zero && beta == one)) return;
 
@@ -111,9 +109,9 @@ void xgbmv_core(
         }
     } else if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= XGBMV_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (N >= XGBMV_OMP_MIN && blas_omp_max_threads() > 1);
 #else
-        const ptrdiff_t use_omp = 0;
+        const bool use_omp = 0;
 #endif
 #define XGBMV_T_BODY                                                          \
         for (ptrdiff_t j = 0; j < N; ++j) {                                         \
@@ -187,7 +185,7 @@ __attribute__((noinline)) static ptrdiff_t xgbmv_n_omp(
     const T *restrict x, ptrdiff_t incx,
     T alpha, T *restrict y, ptrdiff_t incy)
 {
-    if (m < XGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (m < XGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > XGBMV_MAX_CPUS) nthreads = XGBMV_MAX_CPUS;
@@ -221,7 +219,7 @@ static void xgbmv_t_colgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t 
                              ptrdiff_t lo, ptrdiff_t hi,
                              const T *restrict a, ptrdiff_t lda,
                              const T *restrict x, T alpha,
-                             T *restrict y, ptrdiff_t incy, ptrdiff_t noconj)
+                             T *restrict y, ptrdiff_t incy, bool noconj)
 {
     for (ptrdiff_t j = lo; j < hi; ++j) {
         const ptrdiff_t i_lo = (j - ku > 0) ? (j - ku) : 0;
@@ -239,9 +237,9 @@ __attribute__((noinline)) static ptrdiff_t xgbmv_t_omp(
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy, ptrdiff_t noconj)
+    T alpha, T *restrict y, ptrdiff_t incy, bool noconj)
 {
-    if (n < XGBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < XGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > XGBMV_MAX_CPUS) nthreads = XGBMV_MAX_CPUS;

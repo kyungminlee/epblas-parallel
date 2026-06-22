@@ -12,11 +12,11 @@ typedef __complex128 T;
 /* Threaded elementwise SCAL — quad is compute-bound, so it threads (see
  * qaxpy.c). Index-from-i covers every stride; serial fast-paths preserved. */
 #define XSCAL_OMP_MIN 128
-__attribute__((noinline)) static int xscal_omp(ptrdiff_t n, T alpha, T *x, ptrdiff_t incx)
+__attribute__((noinline)) static bool xscal_omp(ptrdiff_t n, T alpha, T *x, ptrdiff_t incx)
 {
-    if (n <= XSCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= XSCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
     #pragma omp parallel for schedule(static) num_threads(nthreads)
     for (ptrdiff_t i = 0; i < n; ++i) x[ix0 + i * incx] *= alpha;

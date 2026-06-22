@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -17,9 +18,6 @@
 
 typedef __float128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #ifdef _OPENMP
 /* Column base offsets into the packed array (column-major triangle).
@@ -35,7 +33,7 @@ static inline size_t cbU(ptrdiff_t j) {
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
  * incx!=1 fallback. TR is already normalized ('C' folded to 'T' by the caller). */
-static void qtpsv_serial(char UPLO, char TR, ptrdiff_t nounit,
+static void qtpsv_serial(char UPLO, char TR, bool nounit,
                          ptrdiff_t N, const T *restrict ap, T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0Q;
@@ -163,11 +161,11 @@ static void qtpsv_serial(char UPLO, char TR, ptrdiff_t nounit,
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within fp128 fuzz tol. */
-static void qtpsv_block(char UPLO, char TR, ptrdiff_t nounit,
+static void qtpsv_block(char UPLO, char TR, bool nounit,
                         ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, const T *restrict ap, T *restrict x)
 {
     const T zero = 0.0Q;
-    const ptrdiff_t lower = (UPLO == 'L');
+    const bool lower = (UPLO == 'L');
     if (TR == 'N') {
         if (!lower) {                                   /* Upper: backward */
             for (ptrdiff_t j = j1 - 1; j >= j0; --j) {
@@ -211,15 +209,15 @@ static void qtpsv_block(char UPLO, char TR, ptrdiff_t nounit,
  * to small QTPSV_BLK diagonal blocks (solved serially); the bulk O(N^2)
  * off-diagonal coupling is threaded over disjoint output rows. Returns 1 if it
  * handled the call. */
-__attribute__((noinline)) static int qtpsv_omp(
-    char UPLO, char TR, ptrdiff_t nounit, ptrdiff_t N, const T *restrict ap, T *restrict x)
+__attribute__((noinline)) static bool qtpsv_omp(
+    char UPLO, char TR, bool nounit, ptrdiff_t N, const T *restrict ap, T *restrict x)
 {
-    if (N < QTPSV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (N < QTPSV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QTPSV_MAX_CPUS) nthreads = QTPSV_MAX_CPUS;
     const T zero = 0.0Q;
-    const ptrdiff_t lower = (UPLO == 'L');
+    const bool lower = (UPLO == 'L');
     const ptrdiff_t trans = (TR != 'N');
 
     if (!trans) {
@@ -311,10 +309,10 @@ void qtpsv_core(
     const T *restrict ap,
     T *restrict x, ptrdiff_t incx)
 {
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(uplo);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 

@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -15,9 +16,6 @@
 
 typedef __float128 T;
 
-static inline char up(char c) {
-    return (char)toupper((unsigned char)c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -34,7 +32,7 @@ static inline char up(char c) {
 #define QTBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
-static ptrdiff_t qtbmv_omp(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit, ptrdiff_t n, ptrdiff_t k,
+static ptrdiff_t qtbmv_omp(bool upper, ptrdiff_t trans, bool nounit, ptrdiff_t n, ptrdiff_t k,
                      const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
 #endif
 
@@ -45,10 +43,10 @@ void qtbmv_core(
     T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0Q;
-    const char UPLO = up(uplo);
-    char TR = up(trans);
+    const char UPLO = blas_up(uplo);
+    char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const bool nounit = (blas_up(diag) != 'U');
 
     if (N == 0) return;
 
@@ -182,7 +180,7 @@ void qtbmv_core(
  * globally (never written here), accumulated in a register-resident scalar,
  * stored once into the disjoint scratch y. Branch hoisted out of the i-loop;
  * lda-1 anti-diagonal stride (NoTrans) vs contiguous (Trans). */
-static void qtbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit,
+static void qtbmv_rowgather(bool upper, ptrdiff_t trans, bool nounit,
                             ptrdiff_t n, ptrdiff_t k, ptrdiff_t lo, ptrdiff_t hi,
                             const T *restrict a, ptrdiff_t lda,
                             const T *restrict x, T *restrict y)
@@ -233,10 +231,10 @@ static void qtbmv_rowgather(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit,
  * if handled, 0 to fall back. noinline so its bookkeeping does not pressure the
  * serial path. */
 __attribute__((noinline)) static ptrdiff_t qtbmv_omp(
-    ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t nounit, ptrdiff_t n, ptrdiff_t k,
+    bool upper, ptrdiff_t trans, bool nounit, ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx)
 {
-    if (n < QTBMV_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n < QTBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QTBMV_MAX_CPUS) nthreads = QTBMV_MAX_CPUS;

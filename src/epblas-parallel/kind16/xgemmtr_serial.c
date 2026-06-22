@@ -13,14 +13,15 @@
  */
 
 #include "xgemmtr_kernel.h"
+#include "../common/blas_char.h"
 #include <ctype.h>
 #include <stddef.h>
 #include <quadmath.h>
 
 typedef xgemmtr_T T;
 
-int xgemmtr_trans_code(char c) {
-    return (char)toupper((unsigned char)c);
+char xgemmtr_trans_code(char c) {
+    return blas_up(c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -28,7 +29,7 @@ int xgemmtr_trans_code(char c) {
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
 void xgemmtr_beta_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper,
     T beta,
     T *c, ptrdiff_t ldc)
 {
@@ -43,8 +44,8 @@ void xgemmtr_beta_core(
 }
 
 void xgemmtr_compute_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper, ptrdiff_t K,
-    int trans_a, int trans_b, int conj_a, int conj_b,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper, ptrdiff_t K,
+    bool trans_a, bool trans_b, bool conj_a, bool conj_b,
     T alpha, T beta,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -102,18 +103,18 @@ void xgemmtr_serial(char uplo, char transa, char transb,
                     T *c, ptrdiff_t ldc)
 {
     const T alpha = *alpha_, beta = *beta_;
-    const int upper = ((char)toupper((unsigned char)uplo) == 'U');
-    const int ta = xgemmtr_trans_code(transa);
-    const int tb = xgemmtr_trans_code(transb);
+    const bool upper = (blas_up(uplo) == 'U');
+    const char ta = xgemmtr_trans_code(transa);
+    const char tb = xgemmtr_trans_code(transb);
 
     if (N <= 0) return;
     const T zero = 0.0Q + 0.0Qi;
     const T one  = 1.0Q + 0.0Qi;
 
-    const int conj_a = (ta == 'C');
-    const int conj_b = (tb == 'C');
-    const int trans_a = (ta != 'N');
-    const int trans_b = (tb != 'N');
+    const bool conj_a = (ta == 'C');
+    const bool conj_b = (tb == 'C');
+    const bool trans_a = (ta != 'N');
+    const bool trans_b = (tb != 'N');
 
     if (alpha == zero || K == 0) {
         if (beta == one) return;

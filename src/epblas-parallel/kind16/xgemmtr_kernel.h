@@ -33,13 +33,13 @@ typedef __complex128 xgemmtr_T;
 
 /* Normalize a Fortran trans char to a code (upper-cased; 'C' kept distinct
  * from 'T' so conjugation can be applied for complex input). */
-int xgemmtr_trans_code(char c);
+char xgemmtr_trans_code(char c);
 
 /* Beta-only pass over columns [j0,j1): the body run on the alpha==0 / K==0
  * early-exit path. Scales (or zeros) the UPLO triangle of each column by beta.
  * Only reached when beta != one. */
 void xgemmtr_beta_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper,
     xgemmtr_T beta,
     xgemmtr_T *c, ptrdiff_t ldc);
 
@@ -52,8 +52,8 @@ void xgemmtr_beta_core(
  * conjugation at element access. Each column is owned by exactly one call, so
  * the partition is race-free. */
 void xgemmtr_compute_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper, ptrdiff_t K,
-    int trans_a, int trans_b, int conj_a, int conj_b,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper, ptrdiff_t K,
+    bool trans_a, bool trans_b, bool conj_a, bool conj_b,
     xgemmtr_T alpha, xgemmtr_T beta,
     const xgemmtr_T *a, ptrdiff_t lda,
     const xgemmtr_T *b, ptrdiff_t ldb,

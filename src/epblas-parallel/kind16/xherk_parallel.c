@@ -15,6 +15,7 @@
  */
 
 #include <stddef.h>
+#include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -47,8 +48,8 @@ static void xherk_core(
     }
 #endif
     const TR alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)uplo);
-    const char TR_c = (char)toupper((unsigned char)trans);
+    const char UPLO = blas_up(uplo);
+    const char TR_c = blas_up(trans);
 
     const TR rzero = 0.0Q, rone = 1.0Q;
 
@@ -60,7 +61,7 @@ static void xherk_core(
             return;
         }
 #ifdef _OPENMP
-        const ptrdiff_t use_omp = (N >= XHERK_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (N >= XHERK_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j)
@@ -71,7 +72,7 @@ static void xherk_core(
     ptrdiff_t nb = xherk_nb();
 
 #ifdef _OPENMP
-    const ptrdiff_t use_omp = (N >= XHERK_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (N >= XHERK_OMP_MIN && blas_omp_max_threads() > 1);
     if (use_omp) {
         /* Use a fine OMP panel so dynamic scheduling can balance the
          * triangular per-block work: the trailing GEMM shrinks from N-jc

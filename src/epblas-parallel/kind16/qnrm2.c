@@ -30,7 +30,7 @@ typedef __float128 T;
  *   minexp = -16381, maxexp = 16384, digits = 113 (binary)
  */
 static T btsml, btbig, bssml, bsbig, maxN;
-static int blue_inited = 0;
+static bool blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
 {
@@ -90,7 +90,7 @@ static T qnrm2_finalize(T abig, T amed, T asml)
 static void qnrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
 {
     T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
-    int notbig = 1;
+    bool notbig = 1;
     for (ptrdiff_t i = 0; i < n; ++i) {
         T ax = fabsq(x[i]);
         if (ax > btbig) { abig += sq(ax * bsbig); notbig = 0; }
@@ -107,11 +107,11 @@ static void qnrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
  * differs from serial (not bit-identical), but within fuzz tolerance. */
 #define QNRM2_OMP_MIN 128
 #define QNRM2_MAX_CPUS 64
-__attribute__((noinline)) static int qnrm2_omp(ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static bool qnrm2_omp(ptrdiff_t n, const T *x, T *out)
 {
-    if (n <= QNRM2_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
+    if (n <= QNRM2_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QNRM2_MAX_CPUS) nthreads = QNRM2_MAX_CPUS;
     T pbig[QNRM2_MAX_CPUS] = {0}, pmed[QNRM2_MAX_CPUS] = {0}, psml[QNRM2_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
@@ -123,7 +123,7 @@ __attribute__((noinline)) static int qnrm2_omp(ptrdiff_t n, const T *x, T *out)
         if (lo < hi) qnrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
     }
     T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
-    for (int i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
+    for (ptrdiff_t i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
     *out = qnrm2_finalize(abig, amed, asml);
     return 1;
 }
@@ -142,7 +142,7 @@ static T qnrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 #endif
 
     T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
-    int notbig = 1;
+    bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
     for (ptrdiff_t i = 0; i < n; ++i) {
         T ax = fabsq(x[ix]);
