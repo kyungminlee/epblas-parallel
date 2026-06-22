@@ -28,6 +28,22 @@
  * else `static`) in the including .c BEFORE the macro is invoked. Array/output
  * pointers keep their `restrict` in the core signature; the facade forwards
  * plain pointers (restrict is a callee hint, not part of the ABI).
+ *
+ * ── Type discipline (repo-wide) ───────────────────────────────────────────
+ * `int` is a BOUNDARY-ONLY type. The fixed-width Fortran-ABI integers
+ * (`int` LP64 / `int64_t` ILP64) appear in exactly two places, both in common/:
+ *   (1) here — the facade layer, the public Fortran by-reference ABI; and
+ *   (2) common/blas_omp.h — the OpenMP runtime wrapper, where the raw `int`
+ *       from omp_get_max_threads()/omp_get_thread_num() is widened to ptrdiff_t
+ *       at the boundary so no caller downstream handles `int`.
+ * Inside the library (kind10/ kind16/ multifloats/) every quantity is one of:
+ *   - ptrdiff_t — sizes, indices, leading dims, strides, thread ids/counts,
+ *                 block sizes (the core's integer currency);
+ *   - bool      — logical flags that are always 0/1 (nounit, upper, conj, …);
+ *   - char      — BLAS option letters ('U'/'L'/'N'/'T'/'C'/'R'), normalised
+ *                 once via blas_up() (common/blas_char.h) and compared as chars.
+ * The guard scripts/check_int_boundary.py (ctest epblas_parallel_int_boundary_
+ * guard) fails the suite if a bare `int` reappears in the three kind trees.
  */
 #ifndef EPBLAS_FACADE_H
 #define EPBLAS_FACADE_H

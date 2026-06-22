@@ -16,28 +16,53 @@
 #ifndef EPBLAS_PARALLEL_BLAS_OMP_H
 #define EPBLAS_PARALLEL_BLAS_OMP_H
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/* Thread counts/ids are ptrdiff_t internally; the raw int from the OpenMP
+ * runtime is widened here, at the boundary wrapper, so no caller handles int.
+ * (This and the public Fortran facade are the only two places int is allowed.) */
 #ifdef _OPENMP
 #include <omp.h>
-static inline int blas_omp_max_threads(void) {
+static inline ptrdiff_t blas_omp_max_threads(void) {
     int v = omp_get_max_threads();
     return (v < 1) ? 1 : v;
 }
 #else
-static inline int blas_omp_max_threads(void) { return 1; }
+static inline ptrdiff_t blas_omp_max_threads(void) { return 1; }
 #endif
 
 /* Whether threading is worth attempting at all: more than one thread is
  * available. The canonical spelling of the `blas_omp_max_threads() > 1` capability
  * check that gates every threaded dispatch — wrap it once so the "can we thread"
- * policy lives in one place (re-entrant helpers still pair it with their own
- * !omp_in_parallel() guard, which stays explicit at the call site). */
-static inline int blas_omp_available(void) { return blas_omp_max_threads() > 1; }
+ * policy lives in one place. Most dispatches want blas_omp_should_thread()
+ * (below), which also rules out re-entrant calls; use this bare form only where
+ * the !omp_in_parallel() half is handled separately. */
+static inline bool blas_omp_available(void) { return blas_omp_max_threads() > 1; }
 
-#include <stddef.h>
+/* Should THIS dispatch spin up its own team? True iff the runtime can give us
+ * more than one thread AND we are not already inside a parallel region — a
+ * re-entrant call from another routine's region must run serially (the overlay's
+ * flat regions don't nest). This is the canonical "can+should we thread"
+ * decision; the per-routine size threshold stays at the call site (every
+ * routine's break-even differs), so a dispatch pairs it with its own work test:
+ *     const bool use_omp = (n >= FOO_OMP_MIN && blas_omp_should_thread());
+ * and an early-return serial fallback reads:
+ *     if (n <= FOO_OMP_MIN || !blas_omp_should_thread()) return serial(...);
+ * Defined in both build modes (false, constant-folded, without _OPENMP) so the
+ * call site needs no `#ifdef _OPENMP` around the decision; being `static inline`
+ * its codegen is identical to the open-coded predicate it replaces. */
+#ifdef _OPENMP
+static inline bool blas_omp_should_thread(void) {
+    return blas_omp_max_threads() > 1 && !omp_in_parallel();
+}
+#else
+static inline bool blas_omp_should_thread(void) { return false; }
+#endif
 
 /* Balanced 1-D partition bound: the low index of chunk `idx` of `nparts` over
  * [0, total). Front-loaded-remainder scheme — every chunk gets base = total/nparts
@@ -67,10 +92,10 @@ static inline ptrdiff_t blas_part_bound(ptrdiff_t total, ptrdiff_t idx,
  * amortizes its trailing-GEMM overhead, and never wider than nb. Use ppt=1
  * for equal-work (rectangular) panels balanced by schedule(static); a larger
  * ppt for triangular work that needs finer granularity for dynamic balance. */
-static inline ptrdiff_t blas_omp_panel_width(ptrdiff_t axis, int nt,
-                                             ptrdiff_t nb, int ppt) {
+static inline ptrdiff_t blas_omp_panel_width(ptrdiff_t axis, ptrdiff_t nt,
+                                             ptrdiff_t nb, ptrdiff_t ppt) {
     if (nt <= 1) return nb;
-    const ptrdiff_t want = (ptrdiff_t)nt * ppt;
+    const ptrdiff_t want = nt * ppt;
     if ((axis + nb - 1) / nb >= want) return nb;   /* nb already feeds the team */
     ptrdiff_t pw = axis / want;
     if (pw < 8)  pw = 8;

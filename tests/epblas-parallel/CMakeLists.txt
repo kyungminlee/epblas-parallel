@@ -162,3 +162,20 @@ if(TARGET perf_etrsm)
         TIMEOUT 90
         LABELS "fuzz")
 endif()
+
+# Source-level lint: enforce the "int is a boundary-only type" rule. The overlay
+# uses ptrdiff_t (sizes/indices/counts), bool (logical flags), and char (BLAS
+# option letters) internally; the fixed-width Fortran ABI types int/int64_t are
+# confined to the two boundaries in common/ (epblas_facade.h facades + blas_omp.h
+# OpenMP wrapper). The guard greps kind10/ kind16/ multifloats/ for any bare
+# `int` (comments and string literals stripped) and fails the suite if one
+# reappears. No built target needed — it is a pure source check.
+find_program(EPBLAS_PARALLEL_PYTHON3 NAMES python3 python)
+if(EPBLAS_PARALLEL_PYTHON3)
+    add_test(NAME epblas_parallel_int_boundary_guard
+        COMMAND ${EPBLAS_PARALLEL_PYTHON3}
+                ${CMAKE_SOURCE_DIR}/scripts/check_int_boundary.py)
+    set_tests_properties(epblas_parallel_int_boundary_guard PROPERTIES
+        TIMEOUT 60
+        LABELS "lint")
+endif()
