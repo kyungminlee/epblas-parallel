@@ -237,21 +237,17 @@ void qsyrk_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
  * Faithful port of OpenBLAS level3_syrk.c with a single thread spanning the
  * whole output (rows ∈ [0, N]). The js-band UPLO clip bounds the active row
  * range so the kernel only ever writes the requested triangle. */
-void qsyrk_serial_(
-    const char *uplo_p, const char *trans_p,
-    const int *n_, const int *k_,
+void qsyrk_serial(
+    char uplo_c, char trans_c,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
+    const T *a, ptrdiff_t lda,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
-    const int uplo  = (char)toupper((unsigned char)*uplo_p);
-    const int trans = (char)toupper((unsigned char)*trans_p);
+    const int uplo  = (char)toupper((unsigned char)uplo_c);
+    const int trans = (char)toupper((unsigned char)trans_c);
 
     if (N <= 0) return;
 

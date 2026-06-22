@@ -15,7 +15,7 @@
  *                     parallel, one fork-join, with the xtrsv-loop fast
  *                     path) and `xtrsm_blocked_` (LAPACK-blocked inside a
  *                     SINGLE parallel region, driving trailing updates
- *                     through xgemm_serial_). Threading orchestration only.
+ *                     through xgemm_serial). Threading orchestration only.
  *
  * The within-core solve is loop-carried (serial), but DIFFERENT columns
  * (SIDE='L') / rows (SIDE='R') are independent — so the column/row
@@ -34,45 +34,44 @@
 
 typedef __complex128 xtrsm_T;
 
-/* Decode a Fortran character arg: first char, upper-cased. */
-char xtrsm_uplo(const char *p);
+/* Decode a Fortran character arg: upper-cased. */
+char xtrsm_uplo(char c);
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────────
  * Each solves columns [j_start,j_end) of B against the M×M triangular A.
  * The TC variants handle TRANSA in {'T','C'} via conj_flag (1 = conjugate). */
-void xtrsm_lln_core(int j_start, int j_end, int M, xtrsm_T alpha,
-                    const xtrsm_T *a, int lda, xtrsm_T *b, int ldb, int nounit);
-void xtrsm_lun_core(int j_start, int j_end, int M, xtrsm_T alpha,
-                    const xtrsm_T *a, int lda, xtrsm_T *b, int ldb, int nounit);
-void xtrsm_llTC_core(int j_start, int j_end, int M, xtrsm_T alpha,
-                     const xtrsm_T *a, int lda, xtrsm_T *b, int ldb,
+void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrsm_T alpha,
+                    const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, int nounit);
+void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrsm_T alpha,
+                    const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, int nounit);
+void xtrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrsm_T alpha,
+                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      int nounit, int conj_flag);
-void xtrsm_luTC_core(int j_start, int j_end, int M, xtrsm_T alpha,
-                     const xtrsm_T *a, int lda, xtrsm_T *b, int ldb,
+void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrsm_T alpha,
+                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      int nounit, int conj_flag);
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────────
  * Each solves rows [i_start,i_end) of B against the N×N triangular A. */
-void xtrsm_rln_core(int i_start, int i_end, int N, xtrsm_T alpha,
-                    const xtrsm_T *a, int lda, xtrsm_T *b, int ldb, int nounit);
-void xtrsm_run_core(int i_start, int i_end, int N, xtrsm_T alpha,
-                    const xtrsm_T *a, int lda, xtrsm_T *b, int ldb, int nounit);
-void xtrsm_rlTC_core(int i_start, int i_end, int N, xtrsm_T alpha,
-                     const xtrsm_T *a, int lda, xtrsm_T *b, int ldb,
+void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T alpha,
+                    const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, int nounit);
+void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T alpha,
+                    const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, int nounit);
+void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T alpha,
+                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      int nounit, int conj_flag);
-void xtrsm_ruTC_core(int i_start, int i_end, int N, xtrsm_T alpha,
-                     const xtrsm_T *a, int lda, xtrsm_T *b, int ldb,
+void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T alpha,
+                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      int nounit, int conj_flag);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; produces
+/* Pure-serial by-value entry. No OpenMP anywhere on this call path; produces
  * results bit-identical to xtrsm_ run single-threaded (each core called over
- * the full column/row range). Keeps the exact Fortran-ABI signature. */
-void xtrsm_serial_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+ * the full column/row range). Shares the ptrdiff_t core ABI of xtrsm_core. */
+void xtrsm_serial(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const xtrsm_T *alpha_,
-    const xtrsm_T *a, const int *lda_,
-    xtrsm_T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
+    const xtrsm_T *a, ptrdiff_t lda,
+    xtrsm_T *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XTRSM_KERNEL_H */

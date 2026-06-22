@@ -22,11 +22,12 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 typedef __complex128 T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #ifdef _OPENMP
@@ -192,21 +193,17 @@ static ptrdiff_t xtpmv_omp(ptrdiff_t upper, ptrdiff_t is_t, ptrdiff_t conj, ptrd
 }
 #endif /* _OPENMP */
 
-void xtpmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
+void xtpmv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
     const T *restrict ap,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int incx = *incx_;
     const T zero = 0.0Q + 0.0Qi;
     const char UPLO = up(uplo);
     const char TR = up(trans);
-    const int noconj = (TR == 'T');
-    const int nounit = (up(diag) != 'U');
+    const ptrdiff_t noconj = (TR == 'T');
+    const ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 
@@ -217,23 +214,23 @@ void xtpmv_(
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[j] != zero) {
                         const T tmp = x[j];
-                        int k = kk;
-                        for (int i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
+                        ptrdiff_t k = kk;
+                        for (ptrdiff_t i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
                         if (nounit) x[j] *= ap[kk + j];
                     }
                     kk += j + 1;
                 }
             } else {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (x[j] != zero) {
                         const T tmp = x[j];
-                        int k = kk;
-                        for (int i = N - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
+                        ptrdiff_t k = kk;
+                        for (ptrdiff_t i = N - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
                         if (nounit) x[j] *= ap[kk - (N - 1 - j)];
                     }
                     kk -= (N - j);
@@ -241,40 +238,40 @@ void xtpmv_(
             }
         } else {
             if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[j];
                     if (nounit) tmp *= (noconj ? ap[kk] : conjq(ap[kk]));
-                    int k = kk - 1;
-                    if (noconj) for (int i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
-                    else        for (int i = j - 1; i >= 0; --i) { tmp += conjq(ap[k]) * x[i]; --k; }
+                    ptrdiff_t k = kk - 1;
+                    if (noconj) for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
+                    else        for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += conjq(ap[k]) * x[i]; --k; }
                     x[j] = tmp;
                     kk -= j + 1;
                 }
             } else {
-                int kk = 0;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[j];
                     if (nounit) tmp *= (noconj ? ap[kk] : conjq(ap[kk]));
-                    int k = kk + 1;
-                    if (noconj) for (int i = j + 1; i < N; ++i) { tmp += ap[k] * x[i]; ++k; }
-                    else        for (int i = j + 1; i < N; ++i) { tmp += conjq(ap[k]) * x[i]; ++k; }
+                    ptrdiff_t k = kk + 1;
+                    if (noconj) for (ptrdiff_t i = j + 1; i < N; ++i) { tmp += ap[k] * x[i]; ++k; }
+                    else        for (ptrdiff_t i = j + 1; i < N; ++i) { tmp += conjq(ap[k]) * x[i]; ++k; }
                     x[j] = tmp;
                     kk += N - j;
                 }
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     if (x[jx] != zero) {
                         const T tmp = x[jx];
-                        int ix = kx;
-                        for (int k = kk; k < kk + j; ++k) {
+                        ptrdiff_t ix = kx;
+                        for (ptrdiff_t k = kk; k < kk + j; ++k) {
                             x[ix] += tmp * ap[k];
                             ix += incx;
                         }
@@ -284,14 +281,14 @@ void xtpmv_(
                     kk += j + 1;
                 }
             } else {
-                int kk = (N * (N + 1)) / 2 - 1;
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
                 kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (x[jx] != zero) {
                         const T tmp = x[jx];
-                        int ix = kx;
-                        for (int k = kk; k > kk - (N - 1 - j); --k) {
+                        ptrdiff_t ix = kx;
+                        for (ptrdiff_t k = kk; k > kk - (N - 1 - j); --k) {
                             x[ix] += tmp * ap[k];
                             ix -= incx;
                         }
@@ -303,13 +300,13 @@ void xtpmv_(
             }
         } else {
             if (UPLO == 'U') {
-                int kk = (N * (N + 1)) / 2 - 1;
-                int jx = kx + (N - 1) * incx;
-                for (int j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+                ptrdiff_t jx = kx + (N - 1) * incx;
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[jx];
-                    int ix = jx;
+                    ptrdiff_t ix = jx;
                     if (nounit) tmp *= (noconj ? ap[kk] : conjq(ap[kk]));
-                    for (int k = kk - 1; k >= kk - j; --k) {
+                    for (ptrdiff_t k = kk - 1; k >= kk - j; --k) {
                         ix -= incx;
                         tmp += (noconj ? ap[k] : conjq(ap[k])) * x[ix];
                     }
@@ -318,13 +315,13 @@ void xtpmv_(
                     kk -= j + 1;
                 }
             } else {
-                int kk = 0;
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                ptrdiff_t kk = 0;
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[jx];
-                    int ix = jx;
+                    ptrdiff_t ix = jx;
                     if (nounit) tmp *= (noconj ? ap[kk] : conjq(ap[kk]));
-                    for (int k = kk + 1; k < kk + N - j; ++k) {
+                    for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
                         ix += incx;
                         tmp += (noconj ? ap[k] : conjq(ap[k])) * x[ix];
                     }
@@ -336,3 +333,5 @@ void xtpmv_(
         }
     }
 }
+
+EPBLAS_FACADE_TPMV(xtpmv, T)

@@ -47,15 +47,14 @@ void qsymm_pack_b_sym(const qsymm_T *a, ptrdiff_t lda,
                       ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
                       char uplo, qsymm_T *Bp);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as qsymm_. */
-void qsymm_serial_(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+/* Pure-serial by-value entry (no OpenMP); shares the ptrdiff_t core ABI. */
+void qsymm_serial(
+    char side, char uplo,
+    ptrdiff_t M, ptrdiff_t N,
     const qsymm_T *alpha_,
-    const qsymm_T *a, const int *lda_,
-    const qsymm_T *b, const int *ldb_,
+    const qsymm_T *a, ptrdiff_t lda,
+    const qsymm_T *b, ptrdiff_t ldb,
     const qsymm_T *beta_,
-    qsymm_T *c, const int *ldc_,
-    size_t side_len, size_t uplo_len);
+    qsymm_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QSYMM_KERNEL_H */

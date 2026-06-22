@@ -37,3 +37,5 @@ void xrotg_(T *a_, const T *b_, R *c, T *s)
     T conjb; __real__ conjb = br; __imag__ conjb = -bi;
     *s = conjb * (a / d);
 }
+/* ILP64 twin — no integer args, so the ABI is identical to LP64. */
+void xrotg_64_(T *a_, const T *b_, R *c, T *s) { xrotg_(a_, b_, c, s); }

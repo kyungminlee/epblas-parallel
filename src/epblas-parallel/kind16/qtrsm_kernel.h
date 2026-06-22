@@ -30,40 +30,39 @@
 
 typedef __float128 qtrsm_T;
 
-/* Decode a Fortran character arg: first char, upper-cased. */
-char qtrsm_uplo(const char *p);
+/* Decode a Fortran character arg: upper-cased. */
+char qtrsm_uplo(char c);
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────────
  * Each solves columns [j_start,j_end) of B against the M×M triangular A. */
-void qtrsm_lln_core(int j_start, int j_end, int M, qtrsm_T alpha,
-                    const qtrsm_T *a, int lda, qtrsm_T *b, int ldb, int nounit);
-void qtrsm_lun_core(int j_start, int j_end, int M, qtrsm_T alpha,
-                    const qtrsm_T *a, int lda, qtrsm_T *b, int ldb, int nounit);
-void qtrsm_llt_core(int j_start, int j_end, int M, qtrsm_T alpha,
-                    const qtrsm_T *a, int lda, qtrsm_T *b, int ldb, int nounit);
-void qtrsm_lut_core(int j_start, int j_end, int M, qtrsm_T alpha,
-                    const qtrsm_T *a, int lda, qtrsm_T *b, int ldb, int nounit);
+void qtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrsm_T alpha,
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+void qtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrsm_T alpha,
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+void qtrsm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrsm_T alpha,
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+void qtrsm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrsm_T alpha,
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────────
  * Each solves rows [i_start,i_end) of B against the N×N triangular A. */
-void qtrsm_rln_core(int i_start, int i_end, int N, qtrsm_T alpha,
-                    const qtrsm_T *a, int lda, qtrsm_T *b, int ldb, int nounit);
-void qtrsm_run_core(int i_start, int i_end, int N, qtrsm_T alpha,
-                    const qtrsm_T *a, int lda, qtrsm_T *b, int ldb, int nounit);
-void qtrsm_rlt_core(int i_start, int i_end, int N, qtrsm_T alpha,
-                    const qtrsm_T *a, int lda, qtrsm_T *b, int ldb, int nounit);
-void qtrsm_rut_core(int i_start, int i_end, int N, qtrsm_T alpha,
-                    const qtrsm_T *a, int lda, qtrsm_T *b, int ldb, int nounit);
+void qtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrsm_T alpha,
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+void qtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrsm_T alpha,
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+void qtrsm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrsm_T alpha,
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
+void qtrsm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrsm_T alpha,
+                    const qtrsm_T *a, ptrdiff_t lda, qtrsm_T *b, ptrdiff_t ldb, int nounit);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; produces
+/* Pure-serial by-value entry. No OpenMP anywhere on this call path; produces
  * results bit-identical to qtrsm_ run single-threaded (each core called over
- * the full column/row range). Keeps the exact Fortran-ABI signature. */
-void qtrsm_serial_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+ * the full column/row range). Shares the ptrdiff_t core ABI of qtrsm_core. */
+void qtrsm_serial(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const qtrsm_T *alpha_,
-    const qtrsm_T *a, const int *lda_,
-    qtrsm_T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
+    const qtrsm_T *a, ptrdiff_t lda,
+    qtrsm_T *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QTRSM_KERNEL_H */

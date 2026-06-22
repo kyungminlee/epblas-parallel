@@ -11,11 +11,12 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 typedef __float128 T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -37,19 +38,15 @@ static ptrdiff_t qsbmv_omp(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
                      T alpha, T *restrict y, ptrdiff_t incy);
 #endif
 
-void qsbmv_(
-    const char *uplo,
-    const int *n_, const int *k_,
+void qsbmv_core(
+    char uplo,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict x, const int *incx_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict x, ptrdiff_t incx,
     const T *beta_,
-    T *restrict y, const int *incy_,
-    size_t uplo_len)
+    T *restrict y, ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0Q, one = 1.0Q;
     const char UPLO = up(uplo);
@@ -58,11 +55,11 @@ void qsbmv_(
 
     /* y := beta*y */
     if (beta != one) {
-        int iy = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
         if (beta == zero) {
-            for (int i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
+            for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
         } else {
-            for (int i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+            for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
         }
     }
     if (alpha == zero) return;
@@ -75,25 +72,25 @@ void qsbmv_(
 
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {
-            const int KP1 = K + 1;
-            for (int j = 0; j < N; ++j) {
+            const ptrdiff_t KP1 = K + 1;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[j];
                 T t2 = zero;
-                const int L = KP1 - 1 - j; /* row index of (i=0, j) is L+i; here L = K - j (0-based) */
-                const int i_lo = (j - K > 0) ? (j - K) : 0;
-                for (int i = i_lo; i < j; ++i) {
+                const ptrdiff_t L = KP1 - 1 - j; /* row index of (i=0, j) is L+i; here L = K - j (0-based) */
+                const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                for (ptrdiff_t i = i_lo; i < j; ++i) {
                     y[i] += t1 * A_(L + i, j);
                     t2 += A_(L + i, j) * x[i];
                 }
                 y[j] += t1 * A_(K, j) + alpha * t2;
             }
         } else {
-            for (int j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[j];
                 T t2 = zero;
                 y[j] += t1 * A_(0, j);
-                const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                for (int i = j + 1; i < i_hi; ++i) {
+                const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                     y[i] += t1 * A_(i - j, j);
                     t2 += A_(i - j, j) * x[i];
                 }
@@ -101,17 +98,17 @@ void qsbmv_(
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         if (UPLO == 'U') {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jx = kx, jy = ky;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero;
-                int ix = kx, iy = ky;
-                const int L = K - j;
-                const int i_lo = (j - K > 0) ? (j - K) : 0;
-                for (int i = i_lo; i < j; ++i) {
+                ptrdiff_t ix = kx, iy = ky;
+                const ptrdiff_t L = K - j;
+                const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                for (ptrdiff_t i = i_lo; i < j; ++i) {
                     y[iy] += t1 * A_(L + i, j);
                     t2 += A_(L + i, j) * x[ix];
                     ix += incx; iy += incy;
@@ -121,14 +118,14 @@ void qsbmv_(
                 if (j >= K) { kx += incx; ky += incy; }
             }
         } else {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
+            ptrdiff_t jx = kx, jy = ky;
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero;
                 y[jy] += t1 * A_(0, j);
-                int ix = jx, iy = jy;
-                const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                for (int i = j + 1; i < i_hi; ++i) {
+                ptrdiff_t ix = jx, iy = jy;
+                const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                     ix += incx; iy += incy;
                     y[iy] += t1 * A_(i - j, j);
                     t2 += A_(i - j, j) * x[ix];
@@ -206,8 +203,8 @@ __attribute__((noinline)) static ptrdiff_t qsbmv_omp(
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
-        ptrdiff_t lo = (n * (ptrdiff_t)tid) / nthreads;
-        ptrdiff_t hi = (n * (ptrdiff_t)(tid + 1)) / nthreads;
+        ptrdiff_t lo = blas_part_bound(n, tid, nthreads);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nthreads);
         qsbmv_rowgather(upper, n, k, lo, hi, a, lda, xptr, alpha, y, incy);
     }
 
@@ -215,5 +212,8 @@ __attribute__((noinline)) static ptrdiff_t qsbmv_omp(
     return 1;
 }
 #endif /* _OPENMP */
+
+
+EPBLAS_FACADE_SBMV(qsbmv, T)
 
 #undef A_

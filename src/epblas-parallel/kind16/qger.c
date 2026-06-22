@@ -9,6 +9,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 #define QGER_OMP_MIN 64
 
@@ -16,15 +17,13 @@ typedef __float128 T;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void qger_(
-    const int *m_, const int *n_,
+void qger_core(
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *restrict x, const int *incx_,
-    const T *restrict y, const int *incy_,
-    T *restrict a, const int *lda_)
+    const T *restrict x, ptrdiff_t incx,
+    const T *restrict y, ptrdiff_t incy,
+    T *restrict a, ptrdiff_t lda)
 {
-    const int M = *m_, N = *n_;
-    const int incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
     const T zero = 0.0Q;
 
@@ -36,31 +35,31 @@ void qger_(
                              && !omp_in_parallel());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < N; ++j) {
             const T yj = y[j];
             if (yj != zero) {
                 const T t = alpha * yj;
                 T *aj = &A_(0, j);
-                for (int i = 0; i < M; ++i) aj[i] += t * x[i];
+                for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * x[i];
             }
         }
     } else {
         /* Strided x/y. Columns of A are disjoint → OMP-over-j race-free and
          * bit-exact (jy recomputed as jy0 + j*incy, same as carried add). */
-        const int jy0 = (incy < 0) ? -(N - 1) * incy : 0;
-        const int ix0 = (incx < 0) ? -(M - 1) * incx : 0;
+        const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+        const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
         const int use_omp = (N >= QGER_OMP_MIN && blas_omp_max_threads() > 1
                              && !omp_in_parallel());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < N; ++j) {
             const T yj = y[jy0 + j * incy];
             if (yj != zero) {
                 const T t = alpha * yj;
-                int ix = ix0;
+                ptrdiff_t ix = ix0;
                 T *aj = &A_(0, j);
-                for (int i = 0; i < M; ++i) {
+                for (ptrdiff_t i = 0; i < M; ++i) {
                     aj[i] += t * x[ix];
                     ix += incx;
                 }
@@ -68,5 +67,8 @@ void qger_(
         }
     }
 }
+
+
+EPBLAS_FACADE_GER(qger, T)
 
 #undef A_

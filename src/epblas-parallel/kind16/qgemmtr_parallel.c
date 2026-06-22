@@ -21,6 +21,8 @@
  */
 
 #include "qgemmtr_kernel.h"
+#include "../common/epblas_facade.h"
+#include <stddef.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -31,22 +33,18 @@
 
 typedef qgemmtr_T T;
 
-void qgemmtr_(const char *uplo, const char *transa, const char *transb,
-              const int *n_, const int *k_,
+static void qgemmtr_core(char uplo_c, char transa, char transb,
+              ptrdiff_t N, ptrdiff_t K,
               const T *alpha_,
-              const T *a, const int *lda_,
-              const T *b, const int *ldb_,
+              const T *a, ptrdiff_t lda,
+              const T *b, ptrdiff_t ldb,
               const T *beta_,
-              T *c, const int *ldc_,
-              size_t uplo_len, size_t ta_len, size_t tb_len)
+              T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)ta_len; (void)tb_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int upper = ((char)toupper((unsigned char)*uplo) == 'U');
-    const int ta = qgemmtr_trans_code(transa);
-    const int tb = qgemmtr_trans_code(transb);
+    const int upper = ((char)toupper((unsigned char)uplo_c) == 'U');
+    const int ta = (int)qgemmtr_trans_code(&transa);
+    const int tb = (int)qgemmtr_trans_code(&transb);
 
     if (N <= 0) return;
     const T zero = 0.0Q, one = 1.0Q;
@@ -57,7 +55,7 @@ void qgemmtr_(const char *uplo, const char *transa, const char *transb,
         const int use_omp0 = (N >= QGEMMTR_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (ptrdiff_t j = 0; j < N; ++j)
             qgemmtr_beta_core(j, j + 1, N, upper, beta, c, ldc);
         return;
     }
@@ -66,7 +64,9 @@ void qgemmtr_(const char *uplo, const char *transa, const char *transb,
     const int use_omp = (N >= QGEMMTR_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-    for (int j = 0; j < N; ++j)
+    for (ptrdiff_t j = 0; j < N; ++j)
         qgemmtr_compute_core(j, j + 1, N, upper, K, ta, tb,
                              alpha, beta, a, lda, b, ldb, c, ldc);
 }
+
+EPBLAS_FACADE_GEMMTR(qgemmtr, T)

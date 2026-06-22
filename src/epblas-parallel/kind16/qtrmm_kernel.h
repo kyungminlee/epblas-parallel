@@ -28,42 +28,41 @@
 
 typedef __float128 qtrmm_T;
 
-/* Normalize a Fortran character to upper case (uplo / side / trans decode). */
-char qtrmm_uplo(const char *p);
+/* Normalize a character to upper case (uplo / side / trans decode). */
+char qtrmm_uplo(char c);
 
 /* ── SIDE = 'L' column-range cores ────────────────────────────────
  * B := alpha · op(A) · B, A is M×M, B is M×N.
  * Each call owns a column slice [j_start, j_end) of B. */
-void trmm_lln_core(int j_start, int j_end, int M, qtrmm_T alpha,
-                   const qtrmm_T *a, int lda, qtrmm_T *b, int ldb, int nounit);
-void trmm_lun_core(int j_start, int j_end, int M, qtrmm_T alpha,
-                   const qtrmm_T *a, int lda, qtrmm_T *b, int ldb, int nounit);
-void trmm_llt_core(int j_start, int j_end, int M, qtrmm_T alpha,
-                   const qtrmm_T *a, int lda, qtrmm_T *b, int ldb, int nounit);
-void trmm_lut_core(int j_start, int j_end, int M, qtrmm_T alpha,
-                   const qtrmm_T *a, int lda, qtrmm_T *b, int ldb, int nounit);
+void trmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+void trmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+void trmm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+void trmm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
 
 /* ── SIDE = 'R' row-range cores ────────────────────────────────────
  * B := alpha · B · op(A), A is N×N, B is M×N.
  * Each call owns a row slice [i_start, i_end) of B. */
-void trmm_rln_core(int i_start, int i_end, int N, qtrmm_T alpha,
-                   const qtrmm_T *a, int lda, qtrmm_T *b, int ldb, int nounit);
-void trmm_run_core(int i_start, int i_end, int N, qtrmm_T alpha,
-                   const qtrmm_T *a, int lda, qtrmm_T *b, int ldb, int nounit);
-void trmm_rlt_core(int i_start, int i_end, int N, qtrmm_T alpha,
-                   const qtrmm_T *a, int lda, qtrmm_T *b, int ldb, int nounit);
-void trmm_rut_core(int i_start, int i_end, int N, qtrmm_T alpha,
-                   const qtrmm_T *a, int lda, qtrmm_T *b, int ldb, int nounit);
+void trmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+void trmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+void trmm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
+void trmm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
+                   const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, int nounit);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; safe to
- * invoke from inside another function's `#pragma omp parallel` region. Keeps
- * the exact Fortran-ABI signature of qtrmm_. */
-void qtrmm_serial_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+/* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
+ * invoke from inside another function's `#pragma omp parallel` region. Shares
+ * the ptrdiff_t core ABI of qtrmm_core. */
+void qtrmm_serial(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const qtrmm_T *alpha_,
-    const qtrmm_T *a, const int *lda_,
-    qtrmm_T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
+    const qtrmm_T *a, ptrdiff_t lda,
+    qtrmm_T *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QTRMM_KERNEL_H */

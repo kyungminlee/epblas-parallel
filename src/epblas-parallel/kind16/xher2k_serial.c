@@ -41,22 +41,18 @@ typedef __float128 T;
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 void xher2k_serial(
-    const char *uplo_p, const char *trans_p,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo_c, char trans_c,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
-    const T *b, const ptrdiff_t *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0];
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const int uplo  = (char)toupper((unsigned char)*uplo_p);
-    const int trans = (char)toupper((unsigned char)*trans_p);
+    const int uplo  = (char)toupper((unsigned char)uplo_c);
+    const int trans = (char)toupper((unsigned char)trans_c);
 
     if (N <= 0) return;
 

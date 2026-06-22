@@ -30,15 +30,15 @@
 typedef __float128 qgemmtr_T;
 
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-int qgemmtr_trans_code(const char *p);
+ptrdiff_t qgemmtr_trans_code(const char *p);
 
 /* Beta-only pass over columns [j0,j1): the body run on the alpha==0 / K==0
  * early-exit path. Scales (or zeros) the UPLO triangle of each column by beta.
  * Only reached when beta != one. */
 void qgemmtr_beta_core(
-    int j0, int j1, int N, int upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper,
     qgemmtr_T beta,
-    qgemmtr_T *c, int ldc);
+    qgemmtr_T *c, ptrdiff_t ldc);
 
 /* Full compute pass over columns [j0,j1):
  *
@@ -47,24 +47,23 @@ void qgemmtr_beta_core(
  * Folds the per-column beta scaling inline, matching the original loop body.
  * Each column is owned by exactly one call, so the partition is race-free. */
 void qgemmtr_compute_core(
-    int j0, int j1, int N, int upper, int K,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper, ptrdiff_t K,
     int ta, int tb,
     qgemmtr_T alpha, qgemmtr_T beta,
-    const qgemmtr_T *a, int lda,
-    const qgemmtr_T *b, int ldb,
-    qgemmtr_T *c, int ldc);
+    const qgemmtr_T *a, ptrdiff_t lda,
+    const qgemmtr_T *b, ptrdiff_t ldb,
+    qgemmtr_T *c, ptrdiff_t ldc);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; safe to
- * invoke from inside another function's `#pragma omp parallel` region. Keeps
- * the exact Fortran-ABI signature of qgemmtr_. */
-void qgemmtr_serial_(
-    const char *uplo, const char *transa, const char *transb,
-    const int *n_, const int *k_,
+/* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
+ * invoke from inside another function's `#pragma omp parallel` region. Shares
+ * the ptrdiff_t core ABI of qgemmtr_core. */
+void qgemmtr_serial(
+    char uplo, char transa, char transb,
+    ptrdiff_t N, ptrdiff_t K,
     const qgemmtr_T *alpha_,
-    const qgemmtr_T *a, const int *lda_,
-    const qgemmtr_T *b, const int *ldb_,
+    const qgemmtr_T *a, ptrdiff_t lda,
+    const qgemmtr_T *b, ptrdiff_t ldb,
     const qgemmtr_T *beta_,
-    qgemmtr_T *c, const int *ldc_,
-    size_t uplo_len, size_t ta_len, size_t tb_len);
+    qgemmtr_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QGEMMTR_KERNEL_H */

@@ -19,6 +19,8 @@
  */
 
 #include "qtrmm_kernel.h"
+#include "../common/epblas_facade.h"
+#include <stddef.h>
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP
@@ -30,8 +32,8 @@
 
 typedef qtrmm_T T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
@@ -40,40 +42,40 @@ static inline char up(const char *p) {
 
 #ifdef _OPENMP
 #define QTRMM_OMP_WRAP_L(name, core)                                       \
-    static void name(int M, int N, T alpha,                                \
-                     const T *a, int lda, T *b, int ldb, int nounit) {     \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit) {     \
         if (N >= QTRMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {             \
             _Pragma("omp parallel") {                                      \
                 int tid = omp_get_thread_num();                            \
                 int nt  = omp_get_num_threads();                           \
-                int js  = (int)((long long)N * tid / nt);                  \
-                int je  = (int)((long long)N * (tid + 1) / nt);            \
+                ptrdiff_t js  = blas_part_bound(N, tid, nt);                  \
+                ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);            \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit);            \
             }                                                              \
         } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }           \
     }
 #define QTRMM_OMP_WRAP_R(name, core)                                       \
-    static void name(int M, int N, T alpha,                                \
-                     const T *a, int lda, T *b, int ldb, int nounit) {     \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit) {     \
         if (M >= QTRMM_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {             \
             _Pragma("omp parallel") {                                      \
                 int tid = omp_get_thread_num();                            \
                 int nt  = omp_get_num_threads();                           \
-                int is  = (int)((long long)M * tid / nt);                  \
-                int ie  = (int)((long long)M * (tid + 1) / nt);            \
+                ptrdiff_t is  = blas_part_bound(M, tid, nt);                  \
+                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);            \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit);            \
             }                                                              \
         } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }           \
     }
 #else
 #define QTRMM_OMP_WRAP_L(name, core)                                       \
-    static void name(int M, int N, T alpha,                                \
-                     const T *a, int lda, T *b, int ldb, int nounit) {     \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit) {     \
         core(0, N, M, alpha, a, lda, b, ldb, nounit);                      \
     }
 #define QTRMM_OMP_WRAP_R(name, core)                                       \
-    static void name(int M, int N, T alpha,                                \
-                     const T *a, int lda, T *b, int ldb, int nounit) {     \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit) {     \
         core(0, M, N, alpha, a, lda, b, ldb, nounit);                      \
     }
 #endif
@@ -87,17 +89,13 @@ QTRMM_OMP_WRAP_R(trmm_run, trmm_run_core)
 QTRMM_OMP_WRAP_R(trmm_rlt, trmm_rlt_core)
 QTRMM_OMP_WRAP_R(trmm_rut, trmm_rut_core)
 
-void qtrmm_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+static void qtrmm_core(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    const T *a, ptrdiff_t lda,
+    T *b, ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     const char SIDE   = up(side);
     const char UPLO   = up(uplo);
@@ -108,8 +106,8 @@ void qtrmm_(
     if (M == 0 || N == 0) return;
 
     if (alpha == 0.0Q) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = 0.0Q;
+        for (ptrdiff_t j = 0; j < N; ++j)
+            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = 0.0Q;
         return;
     }
 
@@ -131,5 +129,7 @@ void qtrmm_(
         }
     }
 }
+
+EPBLAS_FACADE_TRMM(qtrmm, T)
 
 #undef B_

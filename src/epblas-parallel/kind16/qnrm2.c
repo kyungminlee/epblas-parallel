@@ -10,11 +10,13 @@
  * __float128 every element is read via __addtf3/__multf3/__lttf2 — a
  * second pass doubled the soft-float call count.
  */
+#include <stddef.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
 typedef __float128 T;
@@ -85,11 +87,11 @@ static T qnrm2_finalize(T abig, T amed, T asml)
  * flag is chunk-local: asml is only consumed by qnrm2_finalize when the GLOBAL
  * abig==0 (no big element anywhere → every chunk kept notbig==1), so a
  * per-chunk notbig is exact. */
-static void qnrm2_bucket(int n, const T *x, T *abig_, T *amed_, T *asml_)
+static void qnrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
 {
     T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
     int notbig = 1;
-    for (int i = 0; i < n; ++i) {
+    for (ptrdiff_t i = 0; i < n; ++i) {
         T ax = fabsq(x[i]);
         if (ax > btbig) { abig += sq(ax * bsbig); notbig = 0; }
         else if (ax < btsml) { if (notbig) asml += sq(ax * bssml); }
@@ -105,7 +107,7 @@ static void qnrm2_bucket(int n, const T *x, T *abig_, T *amed_, T *asml_)
  * differs from serial (not bit-identical), but within fuzz tolerance. */
 #define QNRM2_OMP_MIN 128
 #define QNRM2_MAX_CPUS 64
-__attribute__((noinline)) static int qnrm2_omp(int n, const T *x, T *out)
+__attribute__((noinline)) static int qnrm2_omp(ptrdiff_t n, const T *x, T *out)
 {
     if (n <= QNRM2_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
@@ -114,10 +116,10 @@ __attribute__((noinline)) static int qnrm2_omp(int n, const T *x, T *out)
     T pbig[QNRM2_MAX_CPUS] = {0}, pmed[QNRM2_MAX_CPUS] = {0}, psml[QNRM2_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) qnrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
     }
     T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
@@ -127,9 +129,8 @@ __attribute__((noinline)) static int qnrm2_omp(int n, const T *x, T *out)
 }
 #endif
 
-T qnrm2_(const int *n_, const T *x, const int *incx_)
+static T qnrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
-    const int n = *n_, incx = *incx_;
     if (n <= 0) return 0.0Q;
     if (!blue_inited) blue_init();
 
@@ -142,8 +143,8 @@ T qnrm2_(const int *n_, const T *x, const int *incx_)
 
     T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
     int notbig = 1;
-    int ix = (incx < 0) ? -(n - 1) * incx : 0;
-    for (int i = 0; i < n; ++i) {
+    ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
+    for (ptrdiff_t i = 0; i < n; ++i) {
         T ax = fabsq(x[ix]);
         if (ax > btbig) {
             abig += sq(ax * bsbig);
@@ -157,3 +158,5 @@ T qnrm2_(const int *n_, const T *x, const int *incx_)
     }
     return qnrm2_finalize(abig, amed, asml);
 }
+
+EPBLAS_FACADE_ASUM(qnrm2, T, T)

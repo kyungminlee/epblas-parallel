@@ -23,6 +23,8 @@
  */
 
 #include "xgemmtr_kernel.h"
+#include "../common/epblas_facade.h"
+#include <stddef.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -33,20 +35,24 @@
 
 typedef xgemmtr_T T;
 
-void xgemmtr_(const char *uplo, const char *transa, const char *transb,
-              const int *n_, const int *k_,
+static void xgemmtr_core(char uplo, char transa, char transb,
+              ptrdiff_t N, ptrdiff_t K,
               const T *alpha_,
-              const T *a, const int *lda_,
-              const T *b, const int *ldb_,
+              const T *a, ptrdiff_t lda,
+              const T *b, ptrdiff_t ldb,
               const T *beta_,
-              T *c, const int *ldc_,
-              size_t uplo_len, size_t ta_len, size_t tb_len)
+              T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)ta_len; (void)tb_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+#ifdef _OPENMP
+    /* Called from inside another routine's parallel region: run fully
+     * serial, opening no team of our own (the libgomp wedge guard). */
+    if (omp_in_parallel()) {
+        xgemmtr_serial(uplo, transa, transb, N, K, alpha_, a, lda, b, ldb, beta_, c, ldc);
+        return;
+    }
+#endif
     const T alpha = *alpha_, beta = *beta_;
-    const int upper = ((char)toupper((unsigned char)*uplo) == 'U');
+    const int upper = ((char)toupper((unsigned char)uplo) == 'U');
     const int ta = xgemmtr_trans_code(transa);
     const int tb = xgemmtr_trans_code(transb);
 
@@ -62,20 +68,22 @@ void xgemmtr_(const char *uplo, const char *transa, const char *transb,
     if (alpha == zero || K == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const int use_omp0 = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
+        const ptrdiff_t use_omp0 = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (ptrdiff_t j = 0; j < N; ++j)
             xgemmtr_beta_core(j, j + 1, N, upper, beta, c, ldc);
         return;
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel());
+    const ptrdiff_t use_omp = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-    for (int j = 0; j < N; ++j)
+    for (ptrdiff_t j = 0; j < N; ++j)
         xgemmtr_compute_core(j, j + 1, N, upper, K,
                              trans_a, trans_b, conj_a, conj_b,
                              alpha, beta, a, lda, b, ldb, c, ldc);
 }
+
+EPBLAS_FACADE_GEMMTR(xgemmtr, T)

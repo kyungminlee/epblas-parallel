@@ -44,16 +44,17 @@
  * driver does (×2 per complex element); ld* are in COMPLEX elements. */
 typedef __float128 xsyr2k_T;
 
-/* Pure-serial entry (no OpenMP). Same Fortran-ABI argument shape as xsyr2k_
- * but with ptrdiff_t dimension pointers, mirroring the kind10 esyr2k_serial. */
+/* Pure-serial by-value entry (no OpenMP). Shares the ptrdiff_t core ABI of
+ * xsyr2k_core so callers already inside a parallel region can swap the symbol
+ * name only; mirrors the kind10 ysyr2k_serial by-value shape. The a/b/c/alpha/
+ * beta pointers are interleaved (re,im) __float128; alpha_/beta_ stay pointers. */
 void xsyr2k_serial(
-    const char *uplo, const char *trans,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const xsyr2k_T *alpha_,
-    const xsyr2k_T *a, const ptrdiff_t *lda_,
-    const xsyr2k_T *b, const ptrdiff_t *ldb_,
+    const xsyr2k_T *a, ptrdiff_t lda,
+    const xsyr2k_T *b, ptrdiff_t ldb,
     const xsyr2k_T *beta_,
-    xsyr2k_T *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len);
+    xsyr2k_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XSYR2K_KERNEL_H */

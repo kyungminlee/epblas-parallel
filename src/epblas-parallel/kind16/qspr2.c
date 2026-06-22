@@ -10,27 +10,24 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 #define QSPR2_OMP_MIN 64
 
 typedef __float128 T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
-void qspr2_(
-    const char *uplo,
-    const int *n_,
+void qspr2_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
-    const T *restrict x, const int *incx_,
-    const T *restrict y, const int *incy_,
-    T *restrict ap,
-    size_t uplo_len)
+    const T *restrict x, ptrdiff_t incx,
+    const T *restrict y, ptrdiff_t incy,
+    T *restrict ap)
 {
-    (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
     const T zero = 0.0Q;
     const char UPLO = up(uplo);
@@ -43,12 +40,12 @@ void qspr2_(
             const int use_omp = (N >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-            for (int j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 if (x[j] != zero || y[j] != zero) {
                     const T t1 = alpha * y[j];
                     const T t2 = alpha * x[j];
-                    const int kk = (j * (j + 1)) / 2;
-                    for (int i = 0; i <= j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
+                    const ptrdiff_t kk = (j * (j + 1)) / 2;
+                    for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
                 }
             }
         } else {
@@ -56,27 +53,27 @@ void qspr2_(
             const int use_omp = (N >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-            for (int j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 if (x[j] != zero || y[j] != zero) {
                     const T t1 = alpha * y[j];
                     const T t2 = alpha * x[j];
-                    const int kk = j * N - (j * (j - 1)) / 2;
-                    for (int i = j; i < N; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
+                    const ptrdiff_t kk = j * N - (j * (j - 1)) / 2;
+                    for (ptrdiff_t i = j; i < N; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
                 }
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        int kk = 0;
-        int jx = kx, jy = ky;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kk = 0;
+        ptrdiff_t jx = kx, jy = ky;
         if (UPLO == 'U') {
-            for (int j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const T t1 = alpha * y[jy];
                     const T t2 = alpha * x[jx];
-                    int ix = kx, iy = ky;
-                    for (int k = kk; k < kk + j + 1; ++k) {
+                    ptrdiff_t ix = kx, iy = ky;
+                    for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
                         ix += incx; iy += incy;
                     }
@@ -85,12 +82,12 @@ void qspr2_(
                 kk += j + 1;
             }
         } else {
-            for (int j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < N; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const T t1 = alpha * y[jy];
                     const T t2 = alpha * x[jx];
-                    int ix = jx, iy = jy;
-                    for (int k = kk; k < kk + N - j; ++k) {
+                    ptrdiff_t ix = jx, iy = jy;
+                    for (ptrdiff_t k = kk; k < kk + N - j; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
                         ix += incx; iy += incy;
                     }
@@ -101,3 +98,5 @@ void qspr2_(
         }
     }
 }
+
+EPBLAS_FACADE_SPR2(qspr2, T)

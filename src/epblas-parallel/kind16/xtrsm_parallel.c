@@ -19,10 +19,12 @@
  *
  * xtrsm_blocked_ adds a LAPACK-blocked SIDE='L' path wrapped in a SINGLE
  * `#pragma omp parallel` region; trailing updates route through
- * xgemm_serial_.
+ * xgemm_serial.
  */
 
 #include "xtrsm_kernel.h"
+#include "xgemm_kernel.h"
+#include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <quadmath.h>
@@ -54,12 +56,11 @@
 
 typedef xtrsm_T T;
 
-extern void xtrsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n,
-    const T *a, const int *lda,
-    T *x, const int *incx,
-    size_t uplo_len, size_t trans_len, size_t diag_len);
+extern void xtrsv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx);
 
 /* Maximum nrhs at which the xtrsv-loop fast path beats column-parallel
  * xtrsm. Derived from xtrsv_blocked's effective scaling factor:
@@ -72,14 +73,14 @@ extern void xtrsv_(
  * crossover where fast path stops winning vs col-parallel is at
  * nrhs = scaling — hence MAX = scaling - 1 (last nrhs where fast path
  * is still preferred). */
-static int xtrsm_xtrsv_loop_max(int M) {
+static ptrdiff_t xtrsm_xtrsv_loop_max(ptrdiff_t M) {
 #ifdef _OPENMP
-    const int max_nt     = blas_omp_max_threads() - 1;
+    const ptrdiff_t max_nt     = blas_omp_max_threads() - 1;
 #else
-    const int max_nt     = 1 - 1;
+    const ptrdiff_t max_nt     = 1 - 1;
 #endif
-    const int max_amdahl = M / XTRSM_XTRSV_LOOP_NB_HINT;
-    int v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
+    const ptrdiff_t max_amdahl = M / XTRSM_XTRSV_LOOP_NB_HINT;
+    ptrdiff_t v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
     if (v < 1) v = 1;
     return v;
 }
@@ -95,80 +96,88 @@ static const T ONE  = 1.0Q + 0.0Qi;
 
 #ifdef _OPENMP
 #define XTRSM_OMP_WRAP_L(name, core)                                        \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+                     int nounit) {                                          \
         if (N >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
             _Pragma("omp parallel") {                                       \
                 int tid = omp_get_thread_num();                             \
                 int nt  = omp_get_num_threads();                            \
-                int js  = (int)((long long)N * tid / nt);                   \
-                int je  = (int)((long long)N * (tid + 1) / nt);             \
+                ptrdiff_t js  = blas_part_bound(N, tid, nt);                   \
+                ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);             \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
         } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define XTRSM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+                     int nounit) {                                          \
         if (N >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
             _Pragma("omp parallel") {                                       \
                 int tid = omp_get_thread_num();                             \
                 int nt  = omp_get_num_threads();                            \
-                int js  = (int)((long long)N * tid / nt);                   \
-                int je  = (int)((long long)N * (tid + 1) / nt);             \
+                ptrdiff_t js  = blas_part_bound(N, tid, nt);                   \
+                ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);             \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
         } else { core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag); }     \
     }
 #define XTRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+                     int nounit) {                                          \
         if (M >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
             _Pragma("omp parallel") {                                       \
                 int tid = omp_get_thread_num();                             \
                 int nt  = omp_get_num_threads();                            \
-                int is  = (int)((long long)M * tid / nt);                   \
-                int ie  = (int)((long long)M * (tid + 1) / nt);             \
+                ptrdiff_t is  = blas_part_bound(M, tid, nt);                   \
+                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);             \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
         } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define XTRSM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+                     int nounit) {                                          \
         if (M >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
             _Pragma("omp parallel") {                                       \
                 int tid = omp_get_thread_num();                             \
                 int nt  = omp_get_num_threads();                            \
-                int is  = (int)((long long)M * tid / nt);                   \
-                int ie  = (int)((long long)M * (tid + 1) / nt);             \
+                ptrdiff_t is  = blas_part_bound(M, tid, nt);                   \
+                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);             \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
         } else { core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag); }     \
     }
 #else
 #define XTRSM_OMP_WRAP_L(name, core)                                        \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+                     int nounit) {                                          \
         core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRSM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+                     int nounit) {                                          \
         core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #define XTRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+                     int nounit) {                                          \
         core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRSM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(int M, int N, T alpha,                                 \
-                     const T *a, int lda, T *b, int ldb, int nounit) {      \
+    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+                     int nounit) {                                          \
         core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #endif
@@ -188,17 +197,13 @@ XTRSM_OMP_WRAP_R_TC(xtrsm_ruc, xtrsm_ruTC_core, 1)
 
 /* ── Entry point ──────────────────────────────────────────────── */
 
-void xtrsm_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+static void xtrsm_core(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    const T *a, ptrdiff_t lda,
+    T *b, ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
@@ -208,14 +213,14 @@ void xtrsm_(
     if (M == 0 || N == 0) return;
 
     if (alpha == ZERO) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = ZERO;
+        for (ptrdiff_t j = 0; j < N; ++j)
+            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = ZERO;
         return;
     }
 
     /* xtrsv-loop fast path. SIDE='L' is the only form where xtrsm
      * decomposes column-wise into xtrsv solves (b_j ← inv(op(A)) · b_j).
-     * The M-threshold mirrors xtrsv_'s own block-parallel gate so we
+     * The M-threshold mirrors xtrsv's own block-parallel gate so we
      * only enter when each per-column call will actually parallelize. */
     {
 #ifdef _OPENMP
@@ -223,17 +228,15 @@ void xtrsm_(
 #else
         const int xv_in_par = 0;
 #endif
-        const int xv_max = xtrsm_xtrsv_loop_max(M);
+        const ptrdiff_t xv_max = xtrsm_xtrsv_loop_max(M);
         if (SIDE == 'L' && N >= 1 && N <= xv_max && M >= XTRSM_XTRSV_LOOP_M_MIN
             && !xv_in_par) {
             if (alpha != ONE) {
-                for (int j = 0; j < N; ++j)
-                    for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
+                for (ptrdiff_t j = 0; j < N; ++j)
+                    for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
             }
-            const int incx_one = 1;
-            for (int j = 0; j < N; ++j) {
-                xtrsv_(uplo, transa, diag, m_, a, lda_,
-                       &B_(0, j), &incx_one, 1, 1, 1);
+            for (ptrdiff_t j = 0; j < N; ++j) {
+                xtrsv_core(uplo, transa, diag, M, a, lda, &B_(0, j), 1);
             }
             return;
         }
@@ -264,6 +267,8 @@ void xtrsm_(
     }
 }
 
+EPBLAS_FACADE_TRMM(xtrsm, T)
+
 /* ── Block-parallel SIDE='L' variant ─────────────────────────────────
  *
  * LAPACK-blocked algorithm: walk the diagonal of A in NB×NB blocks;
@@ -275,24 +280,14 @@ void xtrsm_(
  * needed: each operation reads and writes only the thread's own column
  * slice, so the work is race-free even with no inter-thread sync.
  *
- * Inner work routes through xgemm_serial_ and the xtrsm_*_core helpers
+ * Inner work routes through xgemm_serial and the xtrsm_*_core helpers
  * (which have no OMP), so we never call an OMP-using function from
  * inside an OMP region.
  *
- * SIDE='R' and small-M (M < 2·NB) fall back to xtrsm_, which has its
+ * SIDE='R' and small-M (M < 2·NB) fall back to xtrsm_core, which has its
  * own omp_in_parallel guard so the fallback is safe even when called
  * from inside another parallel region.
  */
-
-extern void xgemm_serial_(
-    const char *transa, const char *transb,
-    const int *m, const int *n, const int *k,
-    const T *alpha,
-    const T *a, const int *lda,
-    const T *b, const int *ldb,
-    const T *beta,
-    T *c, const int *ldc,
-    size_t transa_len, size_t transb_len);
 
 #define XTRSM_BLOCKED_NB_DEFAULT 64
 
@@ -300,19 +295,15 @@ static int xtrsm_blocked_nb(void) {
     return XTRSM_BLOCKED_NB_DEFAULT;
 }
 
-void xtrsm_blocked_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+static void xtrsm_blocked_core(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    const T *a, ptrdiff_t lda,
+    T *b, ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const int nb = xtrsm_blocked_nb();
+    const ptrdiff_t nb = xtrsm_blocked_nb();
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
     const char TR   = xtrsm_uplo(transa);
@@ -322,19 +313,17 @@ void xtrsm_blocked_(
     if (M == 0 || N == 0) return;
 
     if (SIDE != 'L' || M < 2 * nb) {
-        xtrsm_(side, uplo, transa, diag, m_, n_, alpha_, a, lda_, b, ldb_,
-               side_len, uplo_len, transa_len, diag_len);
+        xtrsm_core(side, uplo, transa, diag, M, N, alpha_, a, lda, b, ldb);
         return;
     }
 
     if (alpha == ZERO) {
-        for (int j = 0; j < N; ++j) for (int i = 0; i < M; ++i) B_(i, j) = ZERO;
+        for (ptrdiff_t j = 0; j < N; ++j) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = ZERO;
         return;
     }
 
     const T neg_one = -1.0Q + 0.0Qi;
-    const char NN[1] = {'N'};
-    const char TT[1] = {(TR == 'C') ? 'C' : 'T'};
+    const char TTc = (TR == 'C') ? 'C' : 'T';
     const T one_v = ONE;
 
 #ifdef _OPENMP
@@ -351,82 +340,84 @@ void xtrsm_blocked_(
 #ifdef _OPENMP
         if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
 #endif
-        const int j_lo = (int)((long long)N * tid / nt);
-        const int j_hi = (int)((long long)N * (tid + 1) / nt);
-        const int n_slice = j_hi - j_lo;
+        const ptrdiff_t j_lo = blas_part_bound(N, tid, nt);
+        const ptrdiff_t j_hi = blas_part_bound(N, tid + 1, nt);
+        const ptrdiff_t n_slice = j_hi - j_lo;
 
         if (n_slice > 0) {
             /* Pre-scale this thread's column slice of B by alpha. */
             if (alpha != ONE) {
-                for (int j = j_lo; j < j_hi; ++j) {
-                    for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
+                for (ptrdiff_t j = j_lo; j < j_hi; ++j) {
+                    for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
                 }
             }
 
             if (TR == 'N' && UPLO == 'L') {
                 /* LLN forward. */
-                for (int ic = 0; ic < M; ic += nb) {
-                    int ib = (M - ic < nb) ? (M - ic) : nb;
+                for (ptrdiff_t ic = 0; ic < M; ic += nb) {
+                    ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
                     xtrsm_lln_core(j_lo, j_hi, ib, ONE,
                                    &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-                    int mt = M - ic - ib;
+                    ptrdiff_t mt = M - ic - ib;
                     if (mt > 0) {
-                        int i0 = ic + ib;
-                        xgemm_serial_(NN, NN, &mt, &n_slice, &ib, &neg_one,
-                                      &A_(i0, ic), lda_,
-                                      &B_(ic, j_lo), ldb_, &one_v,
-                                      &B_(i0, j_lo), ldb_, 1, 1);
+                        ptrdiff_t i0 = ic + ib;
+                        xgemm_serial('N', 'N', mt, n_slice, ib, &neg_one,
+                                     &A_(i0, ic), lda,
+                                     &B_(ic, j_lo), ldb, &one_v,
+                                     &B_(i0, j_lo), ldb);
                     }
                 }
             } else if (TR == 'N' && UPLO == 'U') {
                 /* LUN backward. */
-                int ic = ((M - 1) / nb) * nb;
+                ptrdiff_t ic = ((M - 1) / nb) * nb;
                 while (ic >= 0) {
-                    int ib = (M - ic < nb) ? (M - ic) : nb;
+                    ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
                     xtrsm_lun_core(j_lo, j_hi, ib, ONE,
                                    &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
                     if (ic > 0) {
-                        xgemm_serial_(NN, NN, &ic, &n_slice, &ib, &neg_one,
-                                      &A_(0, ic), lda_,
-                                      &B_(ic, j_lo), ldb_, &one_v,
-                                      &B_(0, j_lo), ldb_, 1, 1);
+                        xgemm_serial('N', 'N', ic, n_slice, ib, &neg_one,
+                                     &A_(0, ic), lda,
+                                     &B_(ic, j_lo), ldb, &one_v,
+                                     &B_(0, j_lo), ldb);
                     }
                     ic -= nb;
                 }
             } else if (UPLO == 'L') {
                 /* L,L,T/C: bottom-up walk. */
-                int ic = ((M - 1) / nb) * nb;
+                ptrdiff_t ic = ((M - 1) / nb) * nb;
                 while (ic >= 0) {
-                    int ib = (M - ic < nb) ? (M - ic) : nb;
+                    ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
                     xtrsm_llTC_core(j_lo, j_hi, ib, ONE,
                                     &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, cflag);
                     if (ic > 0) {
-                        xgemm_serial_(TT, NN, &ic, &n_slice, &ib, &neg_one,
-                                      &A_(ic, 0), lda_,
-                                      &B_(ic, j_lo), ldb_, &one_v,
-                                      &B_(0, j_lo), ldb_, 1, 1);
+                        xgemm_serial(TTc, 'N', ic, n_slice, ib, &neg_one,
+                                     &A_(ic, 0), lda,
+                                     &B_(ic, j_lo), ldb, &one_v,
+                                     &B_(0, j_lo), ldb);
                     }
                     ic -= nb;
                 }
             } else {
                 /* L,U,T/C: top-down walk. */
-                for (int ic = 0; ic < M; ic += nb) {
-                    int ib = (M - ic < nb) ? (M - ic) : nb;
+                for (ptrdiff_t ic = 0; ic < M; ic += nb) {
+                    ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
                     xtrsm_luTC_core(j_lo, j_hi, ib, ONE,
                                     &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, cflag);
-                    int mt = M - ic - ib;
+                    ptrdiff_t mt = M - ic - ib;
                     if (mt > 0) {
-                        int i0 = ic + ib;
-                        xgemm_serial_(TT, NN, &mt, &n_slice, &ib, &neg_one,
-                                      &A_(ic, i0), lda_,
-                                      &B_(ic, j_lo), ldb_, &one_v,
-                                      &B_(i0, j_lo), ldb_, 1, 1);
+                        ptrdiff_t i0 = ic + ib;
+                        xgemm_serial(TTc, 'N', mt, n_slice, ib, &neg_one,
+                                     &A_(ic, i0), lda,
+                                     &B_(ic, j_lo), ldb, &one_v,
+                                     &B_(i0, j_lo), ldb);
                     }
                 }
             }
         }
     }
 }
+
+EPBLAS_FACADE_TRMM(xtrsm_blocked, T)
 
 #undef A_
 #undef B_

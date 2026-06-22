@@ -9,9 +9,8 @@
  * trailing update run single-thread inside each block worker.
  *
  * Nesting guard: when xsyrk_ is itself called from inside another routine's
- * parallel region, it delegates to xsyrk_serial_ and opens no region of its
- * own. xsyrk_serial_ shares the int Fortran ABI, so forward the pointers
- * unchanged. Mirrors the kind10 ysyrk overlay.
+ * parallel region, it delegates to xsyrk_serial and opens no region of its
+ * own. Mirrors the kind10 ysyrk overlay.
  */
 
 #include <stddef.h>
@@ -22,6 +21,7 @@
 #endif
 
 #include "xsyrk_kernel.h"
+#include "../common/epblas_facade.h"
 
 typedef xsyrk_T T;
 
@@ -31,31 +31,25 @@ typedef xsyrk_T T;
 static const T ZERO = 0.0Q + 0.0Qi;
 static const T ONE  = 1.0Q + 0.0Qi;
 
-void xsyrk_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+static void xsyrk_core(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
+    const T *restrict a, ptrdiff_t lda,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
-     * serial, opening no team of our own. xsyrk_serial_ shares the int
-     * Fortran ABI, so forward the pointers unchanged. */
+     * serial, opening no team of our own. */
     if (omp_in_parallel()) {
-        xsyrk_serial_(uplo, trans, n_, k_, alpha_, a, lda_, beta_, c, ldc_,
-                      uplo_len, trans_len);
+        xsyrk_serial(uplo, trans, N, K, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    const char TR   = (char)toupper((unsigned char)*trans);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char TR   = (char)toupper((unsigned char)trans);
 
     if (N == 0) return;
 
@@ -98,3 +92,5 @@ void xsyrk_(
         xsyrk_block(jc, jb, N, K, alpha, beta, a, lda, c, ldc, UPLO, TR);
     }
 }
+
+EPBLAS_FACADE_SYRK(xsyrk, T, T)

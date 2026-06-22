@@ -22,6 +22,7 @@
 
 #include "xgemm_kernel.h"
 #include "xl3_complex.h"
+#include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
 #ifdef _OPENMP
@@ -30,38 +31,35 @@
 #endif
 
 typedef __float128 R;
+typedef xgemm_T T;
 
 #define MR QBLAS_YGEMM_MR
 
-static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
+static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
-void xgemm_(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+static void xgemm_core(
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const xgemm_T *alpha_,
-    const xgemm_T *a, const int *lda_,
-    const xgemm_T *b, const int *ldb_,
+    const xgemm_T *a, ptrdiff_t lda,
+    const xgemm_T *b, ptrdiff_t ldb,
     const xgemm_T *beta_,
-    xgemm_T *c, const int *ldc_,
-    size_t transa_len, size_t transb_len)
+    xgemm_T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
-     * serial, opening no team of our own. xgemm_serial_ shares the int
-     * Fortran ABI, so forward the pointers unchanged. */
+     * serial, opening no team of our own. */
     if (omp_in_parallel()) {
-        xgemm_serial_(transa, transb, m_, n_, k_, alpha_, a, lda_,
-                      b, ldb_, beta_, c, ldc_, transa_len, transb_len);
+        xgemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+                     b, ldb, beta_, c, ldc);
         return;
     }
 #endif
 
-    const int M = *m_, N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
-    const int ta = xgemm_trans_code(transa, transa_len);
-    const int tb = xgemm_trans_code(transb, transb_len);
+    const int ta = xgemm_trans_code(transa);
+    const int tb = xgemm_trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 
@@ -69,7 +67,7 @@ void xgemm_(
     const R *B = (const R *)b;
     R *C = (R *)c;
 
-    qblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i, C, (ptrdiff_t)ldc);
+    qblas_ygemm_beta(M, N, beta_r, beta_i, C, ldc);
     if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
     xgemm_plan_t p;
@@ -91,10 +89,10 @@ void xgemm_(
         if (!Ap) return;
         R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
         if (!Bp) { free(Ap); return; }
-        for (int js = 0; js < N; js += p.NC) {
-            int jb = (N - js < p.NC) ? (N - js) : p.NC;
-            for (int ls = 0; ls < K; ls += p.KC) {
-                int pb = (K - ls < p.KC) ? (K - ls) : p.KC;
+        for (ptrdiff_t js = 0; js < N; js += p.NC) {
+            ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
+            for (ptrdiff_t ls = 0; ls < K; ls += p.KC) {
+                ptrdiff_t pb = (K - ls < p.KC) ? (K - ls) : p.KC;
                 xgemm_pack_B(&p, B, ldb, js, ls, pb, jb, Bp);
                 xgemm_level3_slab(0, M, &p, alphar, alphai,
                                   A, lda, Ap, Bp, js, ls, pb, jb, C, ldc);
@@ -134,15 +132,15 @@ void xgemm_(
 #endif
         R *Ap = Ap_arr[tid];
 
-        int m_chunk = round_up((M + nth - 1) / nth, MR);
-        int m_lo = tid * m_chunk;
-        int m_hi = m_lo + m_chunk;
+        ptrdiff_t m_chunk = round_up((M + nth - 1) / nth, MR);
+        ptrdiff_t m_lo = (ptrdiff_t)tid * m_chunk;
+        ptrdiff_t m_hi = m_lo + m_chunk;
         if (m_hi > M) m_hi = M;
 
-        for (int js = 0; js < N; js += p.NC) {
-            int jb = (N - js < p.NC) ? (N - js) : p.NC;
-            for (int ls = 0; ls < K; ls += p.KC) {
-                int pb = (K - ls < p.KC) ? (K - ls) : p.KC;
+        for (ptrdiff_t js = 0; js < N; js += p.NC) {
+            ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
+            for (ptrdiff_t ls = 0; ls < K; ls += p.KC) {
+                ptrdiff_t pb = (K - ls < p.KC) ? (K - ls) : p.KC;
 #ifdef _OPENMP
                 #pragma omp barrier
                 #pragma omp single
@@ -161,3 +159,5 @@ void xgemm_(
     free(Ap_arr);
     free(Bp);
 }
+
+EPBLAS_FACADE_GEMM(xgemm, T)

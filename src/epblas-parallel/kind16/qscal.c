@@ -1,30 +1,31 @@
 /* qscal — kind16 real: X := α · X. */
+#include <stddef.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 typedef __float128 T;
 
 #ifdef _OPENMP
 /* Threaded elementwise SCAL — quad is compute-bound, so it threads (see
  * qaxpy.c). Index-from-i covers every stride; serial fast-paths preserved. */
 #define QSCAL_OMP_MIN 128
-__attribute__((noinline)) static int qscal_omp(int n, T alpha, T *x, int incx)
+__attribute__((noinline)) static int qscal_omp(ptrdiff_t n, T alpha, T *x, ptrdiff_t incx)
 {
     if (n <= QSCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
-    int ix0 = (incx < 0) ? (-n + 1) * incx : 0;
+    ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
     #pragma omp parallel for schedule(static) num_threads(nthreads)
-    for (int i = 0; i < n; ++i) x[ix0 + i * incx] *= alpha;
+    for (ptrdiff_t i = 0; i < n; ++i) x[ix0 + i * incx] *= alpha;
     return 1;
 }
 #endif
 
-void qscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
+static void qscal_core(ptrdiff_t n, const T *alpha_, T *x, ptrdiff_t incx)
 {
-    const int n = *n_, incx = *incx_;
     const T alpha = *alpha_;
     if (n <= 0 || alpha == 1.0Q) return;
 #ifdef _OPENMP
@@ -32,9 +33,9 @@ void qscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
 #endif
     if (incx == 1) {
         /* 5-way unroll matches NETLIB DSCAL. */
-        const int m = n % 5;
-        for (int i = 0; i < m; ++i) x[i] *= alpha;
-        for (int i = m; i < n; i += 5) {
+        const ptrdiff_t m = n % 5;
+        for (ptrdiff_t i = 0; i < m; ++i) x[i] *= alpha;
+        for (ptrdiff_t i = m; i < n; i += 5) {
             x[i    ] *= alpha;
             x[i + 1] *= alpha;
             x[i + 2] *= alpha;
@@ -42,7 +43,9 @@ void qscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
             x[i + 4] *= alpha;
         }
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        for (int i = 0; i < n; ++i) { x[ix] *= alpha; ix += incx; }
+        ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        for (ptrdiff_t i = 0; i < n; ++i) { x[ix] *= alpha; ix += incx; }
     }
 }
+
+EPBLAS_FACADE_SCAL(qscal, T, T)

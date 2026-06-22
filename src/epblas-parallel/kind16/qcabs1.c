@@ -10,3 +10,5 @@ typedef __float128 R;
 R qcabs1_(const T *z) {
     return __builtin_fabsf128(__real__ *z) + __builtin_fabsf128(__imag__ *z);
 }
+/* ILP64 twin — no integer args, so the ABI is identical to LP64. */
+R qcabs1_64_(const T *z) { return qcabs1_(z); }

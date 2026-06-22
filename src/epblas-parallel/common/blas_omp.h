@@ -39,6 +39,18 @@ static inline int blas_omp_available(void) { return blas_omp_max_threads() > 1; 
 
 #include <stddef.h>
 
+/* Overflow-safe balanced 1-D partition bound: the low index of chunk `idx` of
+ * `nparts` over [0, total), i.e. floor(total*idx/nparts). The product
+ * total*idx can exceed 2^63 for ILP64 counts (once total > ~2^63/nparts), so
+ * it is formed in 128-bit before the divide — the int->ptrdiff_t widening made
+ * `(long long)total * idx` a real overflow site that LP64 (total <= 2^31) never
+ * reached. total >= 0, 0 <= idx <= nparts, nparts >= 1; result is in [0,total]
+ * and fits ptrdiff_t. Computed once per thread per dispatch, never per element. */
+static inline ptrdiff_t blas_part_bound(ptrdiff_t total, ptrdiff_t idx,
+                                        ptrdiff_t nparts) {
+    return (ptrdiff_t)((__int128)total * idx / nparts);
+}
+
 /* Outer panel width for a threaded L3 panel loop. The cache-tuned serial
  * block `nb` leaves too few panels to feed the team at small problem sizes
  * (axis=64, nb=32 -> 2 panels, so 2 of 4 threads sit idle). When the default

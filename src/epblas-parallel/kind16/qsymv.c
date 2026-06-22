@@ -19,30 +19,27 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 #define QSYMV_OMP_MIN 128
 
 typedef __float128 T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void qsymv_(
-    const char *uplo,
-    const int *n_,
+void qsymv_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict x, const int *incx_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict x, ptrdiff_t incx,
     const T *beta_,
-    T *restrict y, const int *incy_,
-    size_t uplo_len)
+    T *restrict y, ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
     const T zero = 0.0Q, one = 1.0Q;
@@ -50,8 +47,8 @@ void qsymv_(
     if (N == 0) return;
 
     if (beta != one) {
-        int iy = (incy < 0) ? -(N - 1) * incy : 0;
-        for (int i = 0; i < N; ++i) {
+        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
+        for (ptrdiff_t i = 0; i < N; ++i) {
             if (beta == zero) y[iy] = zero;
             else              y[iy] *= beta;
             iy += incy;
@@ -70,17 +67,17 @@ void qsymv_(
             if (y_priv_all) {
                 #pragma omp parallel num_threads(nt)
                 {
-                    const int tid = omp_get_thread_num();
+                    const ptrdiff_t tid = omp_get_thread_num();
                     T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
-                        for (int j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < N; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = zero;
                             const T *aj = &A_(0, j);
                             y_priv[j] += temp1 * aj[j];
-                            for (int k = j + 1; k < N; ++k) {
+                            for (ptrdiff_t k = j + 1; k < N; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += aj[k] * x[k];
                             }
@@ -88,11 +85,11 @@ void qsymv_(
                         }
                     } else {
                         #pragma omp for schedule(static, 1)
-                        for (int j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < N; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = zero;
                             const T *aj = &A_(0, j);
-                            for (int k = 0; k < j; ++k) {
+                            for (ptrdiff_t k = 0; k < j; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += aj[k] * x[k];
                             }
@@ -102,9 +99,9 @@ void qsymv_(
                     /* Implicit barrier after `omp for` orders the writes
                      * before the reduction reads. */
                     #pragma omp for schedule(static)
-                    for (int i = 0; i < N; ++i) {
+                    for (ptrdiff_t i = 0; i < N; ++i) {
                         T s = zero;
-                        for (int t = 0; t < nt; ++t)
+                        for (ptrdiff_t t = 0; t < nt; ++t)
                             s += y_priv_all[(size_t)t * N + i];
                         y[i] += s;
                     }
@@ -116,23 +113,23 @@ void qsymv_(
         }
 #endif
         if (UPLO == 'L') {
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = zero;
                 const T *ai = &A_(0, i);
                 y[i] += temp1 * ai[i];
-                for (int k = i + 1; k < N; ++k) {
+                for (ptrdiff_t k = i + 1; k < N; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += ai[k] * x[k];
                 }
                 y[i] += alpha * temp2;
             }
         } else {
-            for (int i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = zero;
                 const T *ai = &A_(0, i);
-                for (int k = 0; k < i; ++k) {
+                for (ptrdiff_t k = 0; k < i; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += ai[k] * x[k];
                 }
@@ -142,16 +139,16 @@ void qsymv_(
     } else {
         /* General-stride fallback: walks ix/iy by incrementing (matches
          * Netlib reference's IX=IX+INCX, not k*incx recomputation). */
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         if (UPLO == 'L') {
-            int jx = kx, jy = ky;
-            for (int i = 0; i < N; ++i) {
+            ptrdiff_t jx = kx, jy = ky;
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[jx];
                 T temp2 = zero;
                 y[jy] += temp1 * A_(i, i);
-                int ix = jx, iy = jy;
-                for (int k = i + 1; k < N; ++k) {
+                ptrdiff_t ix = jx, iy = jy;
+                for (ptrdiff_t k = i + 1; k < N; ++k) {
                     ix += incx; iy += incy;
                     y[iy] += temp1 * A_(k, i);
                     temp2 += A_(k, i) * x[ix];
@@ -160,12 +157,12 @@ void qsymv_(
                 jx += incx; jy += incy;
             }
         } else {
-            int jx = kx, jy = ky;
-            for (int i = 0; i < N; ++i) {
+            ptrdiff_t jx = kx, jy = ky;
+            for (ptrdiff_t i = 0; i < N; ++i) {
                 const T temp1 = alpha * x[jx];
                 T temp2 = zero;
-                int ix = kx, iy = ky;
-                for (int k = 0; k < i; ++k) {
+                ptrdiff_t ix = kx, iy = ky;
+                for (ptrdiff_t k = 0; k < i; ++k) {
                     y[iy] += temp1 * A_(k, i);
                     temp2 += A_(k, i) * x[ix];
                     ix += incx; iy += incy;
@@ -176,5 +173,8 @@ void qsymv_(
         }
     }
 }
+
+
+EPBLAS_FACADE_SYMV(qsymv, T)
 
 #undef A_

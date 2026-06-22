@@ -5,13 +5,13 @@
  *
  * TRANS ∈ {N, C}. alpha/beta are REAL; the diagonal of C stays real.
  * Blocked: beta pre-scale + scalar Hermitian diagonal add + xgemm trailing
- * with conjugate transpose. The trailing update runs through xgemm_serial_
+ * with conjugate transpose. The trailing update runs through xgemm_serial
  * (NOT xgemm_): when xherk_block runs inside the team xherk_parallel.c
  * opened, a nested xgemm team would open a region inside a region. Mirrors
  * the kind10 yherk overlay.
  *
- * The block dims threaded into the trailing GEMMs are bridged to xgemm's int
- * Fortran ABI by xgemm_s() below.
+ * The trailing GEMMs go through xgemm_serial's by-value ptrdiff_t ABI
+ * (xgemm_kernel.h), so the block dims pass straight through.
  */
 
 #include "xherk_kernel.h"
@@ -23,27 +23,15 @@
 typedef xherk_TC TC;
 typedef xherk_TR TR;
 
-char xherk_uplo(const char *p) {
-    return (char)toupper((unsigned char)*p);
+char xherk_uplo(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
-char xherk_trans(const char *p) {
-    return (char)toupper((unsigned char)*p);
+char xherk_trans(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 ptrdiff_t xherk_nb(void) { return 32; }
-
-/* Bridge the ptrdiff_t block dims of the trailing update to xgemm_serial_'s
- * int Fortran ABI (block sizes are bounded by N/K, which arrive as int). */
-static inline void xgemm_s(const char *ta, const char *tb,
-                           ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, const TC *alpha,
-                           const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
-                           const TC *beta, TC *c, ptrdiff_t ldc)
-{
-    int mi = (int)m, ni = (int)n, ki = (int)k;
-    int ldai = (int)lda, ldbi = (int)ldb, ldci = (int)ldc;
-    xgemm_serial_(ta, tb, &mi, &ni, &ki, alpha, a, &ldai, b, &ldbi, beta, c, &ldci, 1, 1);
-}
 
 static inline TC cconj(TC z) { return ~z; }
 
@@ -118,8 +106,6 @@ void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TR alpha,
 {
     const TC cone    = 1.0Q + 0.0Qi;
     const TC alpha_c = alpha + 0.0Qi;
-    const char NN[1] = {'N'};
-    const char CN[1] = {'C'};
 
     xherk_beta_scale(jc, jc + jb, N, beta, c, ldc, UPLO);
 
@@ -130,45 +116,41 @@ void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TR alpha,
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
             if (TR_c == 'N') {
-                xgemm_s(NN, CN, trailing, jb, K, &alpha_c,
-                        &A_(j0, 0), lda, &A_(jc, 0), lda,
-                        &cone, &C_(j0, jc), ldc);
+                xgemm_serial('N', 'C', trailing, jb, K, &alpha_c,
+                             &A_(j0, 0), lda, &A_(jc, 0), lda,
+                             &cone, &C_(j0, jc), ldc);
             } else {
-                xgemm_s(CN, NN, trailing, jb, K, &alpha_c,
-                        &A_(0, j0), lda, &A_(0, jc), lda,
-                        &cone, &C_(j0, jc), ldc);
+                xgemm_serial('C', 'N', trailing, jb, K, &alpha_c,
+                             &A_(0, j0), lda, &A_(0, jc), lda,
+                             &cone, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR_c == 'N') {
-                xgemm_s(NN, CN, jc, jb, K, &alpha_c,
-                        &A_(0, 0), lda, &A_(jc, 0), lda,
-                        &cone, &C_(0, jc), ldc);
+                xgemm_serial('N', 'C', jc, jb, K, &alpha_c,
+                             &A_(0, 0), lda, &A_(jc, 0), lda,
+                             &cone, &C_(0, jc), ldc);
             } else {
-                xgemm_s(CN, NN, jc, jb, K, &alpha_c,
-                        &A_(0, 0), lda, &A_(0, jc), lda,
-                        &cone, &C_(0, jc), ldc);
+                xgemm_serial('C', 'N', jc, jb, K, &alpha_c,
+                             &A_(0, 0), lda, &A_(0, jc), lda,
+                             &cone, &C_(0, jc), ldc);
             }
         }
     }
 }
 
-void xherk_serial_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+void xherk_serial(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const TR *alpha_,
-    const TC *a, const int *lda_,
+    const TC *a, ptrdiff_t lda,
     const TR *beta_,
-    TC *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    TC *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
     const TR alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    const char TR_c = (char)toupper((unsigned char)*trans);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char TR_c = (char)toupper((unsigned char)trans);
 
     if (N == 0) return;
 

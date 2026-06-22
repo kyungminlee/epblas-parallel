@@ -25,6 +25,7 @@
 
 #include "xsyr2k_kernel.h"
 #include "xl3_complex.h"
+#include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -39,32 +40,27 @@ typedef __float128 T;
 
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
-void xsyr2k_(
-    const char *uplo_p, const char *trans_p,
-    const int *n_, const int *k_,
+static void xsyr2k_core(
+    char uplo_c, char trans_c,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
-        xsyr2k_serial(uplo_p, trans_p, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt,
-                      beta_, c, &ldc_pt, uplo_len, trans_len);
+        xsyr2k_serial(uplo_c, trans_c, N, K, alpha_, a, lda, b, ldb,
+                      beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0],  beta_i = beta_[1];
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const int uplo  = (char)toupper((unsigned char)*uplo_p);
-    const int trans = (char)toupper((unsigned char)*trans_p);
+    const int uplo  = (char)toupper((unsigned char)uplo_c);
+    const int trans = (char)toupper((unsigned char)trans_c);
 
     if (N <= 0) return;
 
@@ -197,3 +193,5 @@ void xsyr2k_(
     free(Bp_A);
     free(Bp_B);
 }
+
+EPBLAS_FACADE_SYR2K(xsyr2k, T, T, T)

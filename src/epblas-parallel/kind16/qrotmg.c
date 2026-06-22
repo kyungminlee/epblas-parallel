@@ -55,3 +55,7 @@ void qrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
     else                   { dparam[1]=h11; dparam[4]=h22; }
     *d1_ = d1; *d2_ = d2; *x1_ = x1;
 }
+/* ILP64 twin — no integer args, so the ABI is identical to LP64. */
+void qrotmg_64_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam) {
+    qrotmg_(d1_, d2_, x1_, y1_, dparam);
+}

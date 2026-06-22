@@ -1,9 +1,11 @@
 /* qasum — kind16 real: returns Σ |X|. */
+#include <stddef.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 /* fabsq via __builtin_fabsf128 — single `pand` instead of a libquadmath function call. */
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
@@ -12,15 +14,15 @@ typedef __float128 T;
 /* Σ|x| over a logical range; 2-accumulator unroll on the unit-stride path.
  * Carved out so the OMP partial-reduction can call it per chunk; serial
  * behaviour is identical to the pre-threading version. */
-static T qasum_kernel(int n, const T *x, int incx)
+static T qasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
     T s0 = 0.0Q, s1 = 0.0Q;
     if (incx == 1) {
-        int i = 0;
+        ptrdiff_t i = 0;
         for (; i + 1 < n; i += 2) { s0 += fabsq(x[i]); s1 += fabsq(x[i + 1]); }
         if (i < n) s0 += fabsq(x[i]);
     } else {
-        for (int i = 0, ix = 0; i < n; ++i, ix += incx) s0 += fabsq(x[ix]);
+        for (ptrdiff_t i = 0, ix = 0; i < n; ++i, ix += incx) s0 += fabsq(x[ix]);
     }
     return s0 + s1;
 }
@@ -33,7 +35,7 @@ static T qasum_kernel(int n, const T *x, int incx)
  * (not bit-identical), but within fuzz tolerance for a sum of magnitudes. */
 #define QASUM_OMP_MIN 128
 #define QASUM_MAX_CPUS 64
-__attribute__((noinline)) static int qasum_omp(int n, const T *x, T *out)
+__attribute__((noinline)) static int qasum_omp(ptrdiff_t n, const T *x, T *out)
 {
     if (n <= QASUM_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
@@ -42,10 +44,10 @@ __attribute__((noinline)) static int qasum_omp(int n, const T *x, T *out)
     T partial[QASUM_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo = (int)((long long)n * tid / nth);
-        int hi = (int)((long long)n * (tid + 1) / nth);
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) partial[tid] = qasum_kernel(hi - lo, x + lo, 1);
     }
     T s = 0.0Q;
@@ -55,9 +57,8 @@ __attribute__((noinline)) static int qasum_omp(int n, const T *x, T *out)
 }
 #endif
 
-T qasum_(const int *n_, const T *x, const int *incx_)
+static T qasum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
-    const int n = *n_, incx = *incx_;
     if (n < 1 || incx < 1) return 0.0Q;
 #ifdef _OPENMP
     if (incx == 1) {
@@ -67,3 +68,5 @@ T qasum_(const int *n_, const T *x, const int *incx_)
 #endif
     return qasum_kernel(n, x, incx);
 }
+
+EPBLAS_FACADE_ASUM(qasum, T, T)

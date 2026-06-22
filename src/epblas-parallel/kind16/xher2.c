@@ -11,29 +11,26 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 #define XHER2_OMP_MIN 64
 
 typedef __complex128 T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void xher2_(
-    const char *uplo,
-    const int *n_,
+void xher2_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
-    const T *restrict x, const int *incx_,
-    const T *restrict y, const int *incy_,
-    T *restrict a, const int *lda_,
-    size_t uplo_len)
+    const T *restrict x, ptrdiff_t incx,
+    const T *restrict y, ptrdiff_t incy,
+    T *restrict a, ptrdiff_t lda)
 {
-    (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
     const T zero = 0.0Q + 0.0Qi;
     const char UPLO = up(uplo);
@@ -46,42 +43,45 @@ void xher2_(
                              && !omp_in_parallel());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j], yj = y[j];
             if (xj != zero || yj != zero) {
                 const T temp1 = alpha * conjq(yj);
                 const T temp2 = conjq(alpha * xj);
                 T *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
+                    for (ptrdiff_t i = j + 1; i < N; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
                     aj[j] = crealq(aj[j]) + crealq(x[j] * temp1 + y[j] * temp2);
                 } else {
-                    for (int i = 0; i < j; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
+                    for (ptrdiff_t i = 0; i < j; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
                     aj[j] = crealq(aj[j]) + crealq(x[j] * temp1 + y[j] * temp2);
                 }
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
-        for (int j = 0; j < N; ++j) {
-            const T xj = x[kx + j * incx];
-            const T yj = y[ky + j * incy];
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            const T xj = x[kx + (ptrdiff_t)j * incx];
+            const T yj = y[ky + (ptrdiff_t)j * incy];
             if (xj != zero || yj != zero) {
                 const T temp1 = alpha * conjq(yj);
                 const T temp2 = conjq(alpha * xj);
                 if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i)
-                        A_(i, j) += x[kx + i * incx] * temp1 + y[ky + i * incy] * temp2;
+                    for (ptrdiff_t i = j + 1; i < N; ++i)
+                        A_(i, j) += x[kx + (ptrdiff_t)i * incx] * temp1 + y[ky + (ptrdiff_t)i * incy] * temp2;
                     A_(j, j) = crealq(A_(j, j)) + crealq(xj * temp1 + yj * temp2);
                 } else {
-                    for (int i = 0; i < j; ++i)
-                        A_(i, j) += x[kx + i * incx] * temp1 + y[ky + i * incy] * temp2;
+                    for (ptrdiff_t i = 0; i < j; ++i)
+                        A_(i, j) += x[kx + (ptrdiff_t)i * incx] * temp1 + y[ky + (ptrdiff_t)i * incy] * temp2;
                     A_(j, j) = crealq(A_(j, j)) + crealq(xj * temp1 + yj * temp2);
                 }
             }
         }
     }
 }
+
+
+EPBLAS_FACADE_SYR2(xher2, T)
 
 #undef A_

@@ -20,11 +20,12 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 typedef __complex128 T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -116,20 +117,16 @@ static int xtrmv_omp(int upper, int trans_t, int conj_a, int nounit, ptrdiff_t N
 }
 #endif /* _OPENMP */
 
-void xtrmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+void xtrmv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     const char TR   = up(trans);
     const char DIAG = up(diag);
-    const int nounit = (DIAG != 'U');
+    const ptrdiff_t nounit = (DIAG != 'U');
 
     if (N == 0) return;
     const T zero = 0.0Q + 0.0Qi;
@@ -140,54 +137,54 @@ void xtrmv_(
 #endif
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     const T temp = x[j];
                     if (temp != zero) {
                         const T *aj = &A_(0, j);
-                        for (int i = j + 1; i < N; ++i) x[i] += temp * aj[i];
+                        for (ptrdiff_t i = j + 1; i < N; ++i) x[i] += temp * aj[i];
                     }
                     if (nounit) x[j] *= A_(j, j);
                 }
             } else {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     const T temp = x[j];
                     if (temp != zero) {
                         const T *aj = &A_(0, j);
-                        for (int i = 0; i < j; ++i) x[i] += temp * aj[i];
+                        for (ptrdiff_t i = 0; i < j; ++i) x[i] += temp * aj[i];
                     }
                     if (nounit) x[j] *= A_(j, j);
                 }
             }
         } else {
-            const int conj_a = (TR == 'C');
+            const ptrdiff_t conj_a = (TR == 'C');
             if (UPLO == 'L') {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[j];
                     if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
                     const T *aj = &A_(0, j);
                     if (conj_a) {
-                        for (int i = j + 1; i < N; ++i) temp += conjq(aj[i]) * x[i];
+                        for (ptrdiff_t i = j + 1; i < N; ++i) temp += conjq(aj[i]) * x[i];
                     } else {
-                        for (int i = j + 1; i < N; ++i) temp += aj[i] * x[i];
+                        for (ptrdiff_t i = j + 1; i < N; ++i) temp += aj[i] * x[i];
                     }
                     x[j] = temp;
                 }
             } else {
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T temp = x[j];
                     if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
                     const T *aj = &A_(0, j);
                     if (conj_a) {
-                        for (int i = 0; i < j; ++i) temp += conjq(aj[i]) * x[i];
+                        for (ptrdiff_t i = 0; i < j; ++i) temp += conjq(aj[i]) * x[i];
                     } else {
-                        for (int i = 0; i < j; ++i) temp += aj[i] * x[i];
+                        for (ptrdiff_t i = 0; i < j; ++i) temp += aj[i] * x[i];
                     }
                     x[j] = temp;
                 }
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
 #ifdef _OPENMP
         /* Thread the strided path by gathering x into a contiguous buffer,
          * driving the shared OMP core, and scattering back — the threading
@@ -196,9 +193,9 @@ void xtrmv_(
         if (N >= XTRMV_OMP_MIN && blas_omp_max_threads() > 1 && !omp_in_parallel()) {
             T *xc = (T *)malloc((size_t)N * sizeof(T));
             if (xc) {
-                for (int i = 0; i < N; ++i) xc[i] = x[kx + i * incx];
+                for (ptrdiff_t i = 0; i < N; ++i) xc[i] = x[kx + i * incx];
                 if (xtrmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, N, lda, a, xc)) {
-                    for (int i = 0; i < N; ++i) x[kx + i * incx] = xc[i];
+                    for (ptrdiff_t i = 0; i < N; ++i) x[kx + i * incx] = xc[i];
                     free(xc);
                     return;
                 }
@@ -208,37 +205,37 @@ void xtrmv_(
 #endif
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     const T temp = x[kx + j * incx];
                     if (temp != zero)
-                        for (int i = j + 1; i < N; ++i) x[kx + i * incx] += temp * A_(i, j);
+                        for (ptrdiff_t i = j + 1; i < N; ++i) x[kx + i * incx] += temp * A_(i, j);
                     if (nounit) x[kx + j * incx] *= A_(j, j);
                 }
             } else {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     const T temp = x[kx + j * incx];
                     if (temp != zero)
-                        for (int i = 0; i < j; ++i) x[kx + i * incx] += temp * A_(i, j);
+                        for (ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] += temp * A_(i, j);
                     if (nounit) x[kx + j * incx] *= A_(j, j);
                 }
             }
         } else {
-            const int conj_a = (TR == 'C');
+            const ptrdiff_t conj_a = (TR == 'C');
             if (UPLO == 'L') {
-                for (int j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[kx + j * incx];
                     if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
-                    for (int i = j + 1; i < N; ++i) {
+                    for (ptrdiff_t i = j + 1; i < N; ++i) {
                         const T aij = conj_a ? conjq(A_(i, j)) : A_(i, j);
                         temp += aij * x[kx + i * incx];
                     }
                     x[kx + j * incx] = temp;
                 }
             } else {
-                for (int j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = N - 1; j >= 0; --j) {
                     T temp = x[kx + j * incx];
                     if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
-                    for (int i = 0; i < j; ++i) {
+                    for (ptrdiff_t i = 0; i < j; ++i) {
                         const T aij = conj_a ? conjq(A_(i, j)) : A_(i, j);
                         temp += aij * x[kx + i * incx];
                     }
@@ -248,5 +245,7 @@ void xtrmv_(
         }
     }
 }
+
+EPBLAS_FACADE_TRMV(xtrmv, T)
 
 #undef A_

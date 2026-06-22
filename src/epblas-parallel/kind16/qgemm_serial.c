@@ -66,9 +66,8 @@ static void init_blocks(void) {
     g_mc = 64;  /* set last: g_mc!=0 is the init flag */
 }
 
-ptrdiff_t qgemm_trans_code(const char *p, size_t len) {
-    (void)len;
-    char c = (char)toupper((unsigned char)*p);
+ptrdiff_t qgemm_trans_code(char c) {
+    c = (char)toupper((unsigned char)c);
     return (c == 'C') ? 'T' : c;  /* real: 'C' ≡ 'T' */
 }
 
@@ -259,23 +258,20 @@ void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, T alpha,
     }
 }
 
-/* ── Single-thread entry (Fortran ABI: int dims) ──────────────── */
+/* ── Single-thread entry (by-value ptrdiff_t dims) ────────────── */
 
-void qgemm_serial_(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+void qgemm_serial(
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t transa_len, size_t transb_len)
+    T *c, ptrdiff_t ldc)
 {
-    const ptrdiff_t M = *m_, N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = qgemm_trans_code(transa, transa_len);
-    const ptrdiff_t tb = qgemm_trans_code(transb, transb_len);
+    const ptrdiff_t ta = qgemm_trans_code(transa);
+    const ptrdiff_t tb = qgemm_trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 

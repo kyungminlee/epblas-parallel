@@ -71,17 +71,17 @@ void qsyr2k_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
                       const qsyr2k_T *b, ptrdiff_t ldb,
                       qsyr2k_T *c, ptrdiff_t ldc);
 
-/* Pure-serial Fortran entry (no OpenMP). Same signature as qsyr2k_; the
- * single-thread packed driver. Safe to call from inside another routine's
+/* Pure-serial by-value entry (no OpenMP); the single-thread packed driver.
+ * Shares the ptrdiff_t core ABI so callers already inside a parallel region can
+ * swap the symbol name only. Safe to call from inside another routine's
  * parallel region. */
-void qsyr2k_serial_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+void qsyr2k_serial(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const qsyr2k_T *alpha_,
-    const qsyr2k_T *a, const int *lda_,
-    const qsyr2k_T *b, const int *ldb_,
+    const qsyr2k_T *a, ptrdiff_t lda,
+    const qsyr2k_T *b, ptrdiff_t ldb,
     const qsyr2k_T *beta_,
-    qsyr2k_T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len);
+    qsyr2k_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QSYR2K_KERNEL_H */

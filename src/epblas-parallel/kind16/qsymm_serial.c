@@ -126,22 +126,18 @@ void qsymm_pack_b_sym(const T *a, ptrdiff_t lda,
     else             qsymm_pack_l(pb, jb, a, lda, jc, pc, Bp);
 }
 
-void qsymm_serial_(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+void qsymm_serial(
+    char side_c, char uplo_c,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t side_len, size_t uplo_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)side_len; (void)uplo_len;
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)*side);
-    const char UPLO = (char)toupper((unsigned char)*uplo);
+    const char SIDE = (char)toupper((unsigned char)side_c);
+    const char UPLO = (char)toupper((unsigned char)uplo_c);
 
     if (M <= 0 || N <= 0) return;
 

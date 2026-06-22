@@ -1,9 +1,11 @@
 /* xqscal — kind16: X := α·X with α real __float128, X complex. */
+#include <stddef.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 typedef __complex128 T;
 typedef __float128 R;
 
@@ -11,15 +13,15 @@ typedef __float128 R;
 /* Threaded elementwise real-scale of complex X — quad is compute-bound, so it
  * threads (see qaxpy.c). Index-from-i covers every stride; serial preserved. */
 #define XQSCAL_OMP_MIN 128
-__attribute__((noinline)) static int xqscal_omp(int n, R alpha, T *x, int incx)
+__attribute__((noinline)) static int xqscal_omp(ptrdiff_t n, R alpha, T *x, ptrdiff_t incx)
 {
     if (n <= XQSCAL_OMP_MIN || blas_omp_max_threads() <= 1 || omp_in_parallel())
         return 0;
     int nthreads = blas_omp_max_threads();
-    int ix0 = (incx < 0) ? (-n + 1) * incx : 0;
+    ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
     #pragma omp parallel for schedule(static) num_threads(nthreads)
-    for (int i = 0; i < n; ++i) {
-        int ix = ix0 + i * incx;
+    for (ptrdiff_t i = 0; i < n; ++i) {
+        ptrdiff_t ix = ix0 + i * incx;
         __real__ x[ix] *= alpha;
         __imag__ x[ix] *= alpha;
     }
@@ -27,9 +29,8 @@ __attribute__((noinline)) static int xqscal_omp(int n, R alpha, T *x, int incx)
 }
 #endif
 
-void xqscal_(const int *n_, const R *alpha_, T *x, const int *incx_)
+static void xqscal_core(ptrdiff_t n, const R *alpha_, T *x, ptrdiff_t incx)
 {
-    const int n = *n_, incx = *incx_;
     const R alpha = *alpha_;
     if (n <= 0 || alpha == 1.0Q) return;
 #ifdef _OPENMP
@@ -42,11 +43,13 @@ void xqscal_(const int *n_, const R *alpha_, T *x, const int *incx_)
             __imag__ *p *= alpha;
         }
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        for (int i = 0; i < n; ++i) {
+        ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        for (ptrdiff_t i = 0; i < n; ++i) {
             __real__ x[ix] *= alpha;
             __imag__ x[ix] *= alpha;
             ix += incx;
         }
     }
 }
+
+EPBLAS_FACADE_SCAL(xqscal, R, T)

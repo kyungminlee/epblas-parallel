@@ -28,6 +28,7 @@
 #include "qsyrk_kernel.h"
 #include "qtri_kernel.h"
 #include "qgemm_kernel.h"   /* qgemm_choose_blocks / qgemm_round_up */
+#include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -40,29 +41,24 @@ typedef qsyrk_T T;
 #define MR QSYRK_MR
 #define NR QSYRK_NR
 
-void qsyrk_(
-    const char *uplo_p, const char *trans_p,
-    const int *n_, const int *k_,
+static void qsyrk_core(
+    char uplo_c, char trans_c,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
+    const T *a, ptrdiff_t lda,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        qsyrk_serial_(uplo_p, trans_p, n_, k_, alpha_, a, lda_, beta_,
-                      c, ldc_, uplo_len, trans_len);
+        qsyrk_serial(uplo_c, trans_c, N, K, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
-    const int uplo  = (char)toupper((unsigned char)*uplo_p);
-    const int trans = (char)toupper((unsigned char)*trans_p);
+    const int uplo  = (char)toupper((unsigned char)uplo_c);
+    const int trans = (char)toupper((unsigned char)trans_c);
 
     if (N <= 0) return;
 
@@ -176,3 +172,5 @@ void qsyrk_(
     free(Ap_arr);
     free(Bp);
 }
+
+EPBLAS_FACADE_SYRK(qsyrk, T, T)

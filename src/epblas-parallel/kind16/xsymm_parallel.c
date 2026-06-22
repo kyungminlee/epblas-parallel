@@ -12,12 +12,16 @@
  * per (js, ls) under `omp single`, bracketed by an explicit barrier and the
  * single's implicit end barrier. The beta pre-pass runs once up front.
  *
- * Nesting guard: when xsymm_ is called from inside another routine's
- * parallel region it delegates to xsymm_serial_ and opens no region.
+ * Nesting guard: when the core is called from inside another routine's
+ * parallel region it delegates to xsymm_serial and opens no region.
+ *
+ * ABI: the LP64 `xsymm_` and ILP64 `xsymm_64_` Fortran facades are emitted
+ * by EPBLAS_FACADE_SYMM around this single ptrdiff_t `xsymm_core`.
  */
 
 #include "xsymm_kernel.h"
 #include "xl3_complex.h"
+#include "../common/epblas_facade.h"
 #include <ctype.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -27,46 +31,42 @@
 #endif
 
 typedef __float128 R;
+typedef xsymm_T T;
 
 #define MR QBLAS_YGEMM_MR
 
-static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
+static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
-void xsymm_(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+static void xsymm_core(
+    char side, char uplo,
+    ptrdiff_t M, ptrdiff_t N,
     const xsymm_T *alpha_,
-    const xsymm_T *a, const int *lda_,
-    const xsymm_T *b, const int *ldb_,
+    const xsymm_T *a, ptrdiff_t lda,
+    const xsymm_T *b, ptrdiff_t ldb,
     const xsymm_T *beta_,
-    xsymm_T *c, const int *ldc_,
-    size_t side_len, size_t uplo_len)
+    xsymm_T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        xsymm_serial_(side, uplo, m_, n_, alpha_, a, lda_, b, ldb_,
-                      beta_, c, ldc_, side_len, uplo_len);
+        xsymm_serial(side, uplo, M, N, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
-    (void)side_len; (void)uplo_len;
-    const int M = *m_, N = *n_;
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
-    const int sd = (char)toupper((unsigned char)*side);
-    const int up = (char)toupper((unsigned char)*uplo);
-    const int ldc = *ldc_;
+    const int sd = (char)toupper((unsigned char)side);
+    const int up = (char)toupper((unsigned char)uplo);
 
     if (M <= 0 || N <= 0) return;
 
     R *C = (R *)c;
-    qblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i, C, (ptrdiff_t)ldc);
+    qblas_ygemm_beta(M, N, beta_r, beta_i, C, ldc);
     if (alphar == 0.0Q && alphai == 0.0Q) return;
 
     const R *A_eff = (const R *)((sd == 'L') ? a : b);
     const R *B_eff = (const R *)((sd == 'L') ? b : a);
-    const int lda_eff = (sd == 'L') ? *lda_ : *ldb_;
-    const int ldb_eff = (sd == 'L') ? *ldb_ : *lda_;
+    const ptrdiff_t lda_eff = (sd == 'L') ? lda : ldb;
+    const ptrdiff_t ldb_eff = (sd == 'L') ? ldb : lda;
 
     xsymm_plan_t p;
     xsymm_make_plan(M, N, sd, up, &p);
@@ -87,10 +87,10 @@ void xsymm_(
         if (!Ap) return;
         R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
         if (!Bp) { free(Ap); return; }
-        for (int js = 0; js < N; js += p.NC) {
-            int jb = (N - js < p.NC) ? (N - js) : p.NC;
-            for (int ls = 0; ls < p.K; ls += p.KC) {
-                int pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
+        for (ptrdiff_t js = 0; js < N; js += p.NC) {
+            ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
+            for (ptrdiff_t ls = 0; ls < p.K; ls += p.KC) {
+                ptrdiff_t pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
                 xsymm_pack_B(&p, B_eff, ldb_eff, js, ls, pb, jb, Bp);
                 xsymm_level3_slab(0, M, &p, alphar, alphai,
                                   A_eff, lda_eff, Ap, Bp, js, ls, pb, jb, C, ldc);
@@ -128,15 +128,15 @@ void xsymm_(
 #endif
         R *Ap = Ap_arr[tid];
 
-        int m_chunk = round_up((M + nth - 1) / nth, MR);
-        int m_lo = tid * m_chunk;
-        int m_hi = m_lo + m_chunk;
+        ptrdiff_t m_chunk = round_up((M + nth - 1) / nth, MR);
+        ptrdiff_t m_lo = (ptrdiff_t)tid * m_chunk;
+        ptrdiff_t m_hi = m_lo + m_chunk;
         if (m_hi > M) m_hi = M;
 
-        for (int js = 0; js < N; js += p.NC) {
-            int jb = (N - js < p.NC) ? (N - js) : p.NC;
-            for (int ls = 0; ls < p.K; ls += p.KC) {
-                int pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
+        for (ptrdiff_t js = 0; js < N; js += p.NC) {
+            ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
+            for (ptrdiff_t ls = 0; ls < p.K; ls += p.KC) {
+                ptrdiff_t pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
 #ifdef _OPENMP
                 #pragma omp barrier
                 #pragma omp single
@@ -155,3 +155,5 @@ void xsymm_(
     free(Ap_arr);
     free(Bp);
 }
+
+EPBLAS_FACADE_SYMM(xsymm, T)

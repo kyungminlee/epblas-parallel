@@ -5,6 +5,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 typedef __float128 T;
 
 /* Unit-stride 4-way kernel + strided fallback, shared by the serial entry and
@@ -47,8 +48,8 @@ __attribute__((noinline)) static int qswap_omp(ptrdiff_t n, T *x, ptrdiff_t incx
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
-        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi)
             qswap_kernel(hi - lo, x + lo * incx, incx, y + lo * incy, incy);
     }
@@ -56,9 +57,8 @@ __attribute__((noinline)) static int qswap_omp(ptrdiff_t n, T *x, ptrdiff_t incx
 }
 #endif
 
-void qswap_(const int *n_, T *x, const int *incx_, T *y, const int *incy_)
+static void qswap_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return;
     /* Shift to the first logical element for negative strides, then walk forward
      * with i*inc inside the kernel (matches ob). */
@@ -69,3 +69,5 @@ void qswap_(const int *n_, T *x, const int *incx_, T *y, const int *incy_)
 #endif
     qswap_kernel(n, x, incx, y, incy);
 }
+
+EPBLAS_FACADE_SWAP(qswap, T)

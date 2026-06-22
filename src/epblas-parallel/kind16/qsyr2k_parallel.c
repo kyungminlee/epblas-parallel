@@ -30,6 +30,7 @@
 #include "qsyrk_kernel.h"   /* qsyrk_beta_{u,l} — shared triangular β pre-pass */
 #include "qtri_kernel.h"
 #include "qgemm_kernel.h"   /* qgemm_choose_blocks / qgemm_round_up */
+#include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -42,30 +43,26 @@ typedef qsyr2k_T T;
 #define MR QSYR2K_MR
 #define NR QSYR2K_NR
 
-void qsyr2k_(
-    const char *uplo_p, const char *trans_p,
-    const int *n_, const int *k_,
+static void qsyr2k_core(
+    char uplo_c, char trans_c,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        qsyr2k_serial_(uplo_p, trans_p, n_, k_, alpha_, a, lda_, b, ldb_,
-                       beta_, c, ldc_, uplo_len, trans_len);
+        qsyr2k_serial(uplo_c, trans_c, N, K, alpha_, a, lda, b, ldb,
+                      beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const int uplo  = (char)toupper((unsigned char)*uplo_p);
-    int trans = (char)toupper((unsigned char)*trans_p);
+    const int uplo  = (char)toupper((unsigned char)uplo_c);
+    int trans = (char)toupper((unsigned char)trans_c);
     if (trans == 'C') trans = 'T';
 
     if (N <= 0) return;
@@ -195,3 +192,5 @@ void qsyr2k_(
     free(Bp_A);
     free(Bp_B);
 }
+
+EPBLAS_FACADE_SYR2K(qsyr2k, T, T, T)

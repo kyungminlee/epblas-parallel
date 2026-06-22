@@ -212,22 +212,18 @@ void qsyr2k_trans_col(ptrdiff_t j, int uplo, ptrdiff_t N, ptrdiff_t K,
  * range so the kernel only ever writes the requested triangle. Two B-packs
  * (A and B in OCOPY shape) and two A-packs (ditto in ICOPY shape) per tile;
  * pass 1 = (Ap_A, Bp_B, flag=1), pass 2 = (Ap_B, Bp_A, flag=0). */
-void qsyr2k_serial_(
-    const char *uplo_p, const char *trans_p,
-    const int *n_, const int *k_,
+void qsyr2k_serial(
+    char uplo_c, char trans_c,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const int uplo  = (char)toupper((unsigned char)*uplo_p);
-    int trans = (char)toupper((unsigned char)*trans_p);
+    const int uplo  = (char)toupper((unsigned char)uplo_c);
+    int trans = (char)toupper((unsigned char)trans_c);
     if (trans == 'C') trans = 'T';
 
     if (N <= 0) return;

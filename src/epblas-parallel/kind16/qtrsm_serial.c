@@ -4,12 +4,11 @@
  *
  * Owns ALL the numerics shared by the serial and parallel entries: the
  * uplo decode and the eight range-parameterized solve cores (declared in
- * qtrsm_kernel.h), plus the public `qtrsm_serial_` Fortran entry — the
- * qtrsm_ algorithm forced fully serial. No OpenMP anywhere on this call
- * path; safe to invoke from inside another function's `#pragma omp parallel`
- * region.
+ * qtrsm_kernel.h), plus the by-value `qtrsm_serial` entry — the qtrsm_
+ * algorithm forced fully serial. No OpenMP anywhere on this call path; safe
+ * to invoke from inside another function's `#pragma omp parallel` region.
  *
- * qtrsm_serial_ drives numerics through the same cores the parallel entry
+ * qtrsm_serial drives numerics through the same cores the parallel entry
  * threads (each called over the full column/row range), so the two paths
  * are bitwise-identical.
  */
@@ -26,26 +25,25 @@
 
 typedef qtrsm_T T;
 
-extern void qtrsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n,
-    const T *a, const int *lda,
-    T *x, const int *incx,
-    size_t uplo_len, size_t trans_len, size_t diag_len);
+extern void qtrsv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx);
 
 /* Maximum nrhs at which the qtrsv-loop fast path beats column-parallel
  * qtrsm. In the serial entry no team is available, so the heuristic floors
  * at 1. */
-static int qtrsm_qtrsv_loop_max(int M) {
-    const int max_nt     = 1 - 1;
-    const int max_amdahl = M / QTRSM_QTRSV_LOOP_NB_HINT;
-    int v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
+static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
+    const ptrdiff_t max_nt     = 1 - 1;
+    const ptrdiff_t max_amdahl = M / QTRSM_QTRSV_LOOP_NB_HINT;
+    ptrdiff_t v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
     if (v < 1) v = 1;
     return v;
 }
 
-char qtrsm_uplo(const char *p) {
-    return (char)toupper((unsigned char)*p);
+char qtrsm_uplo(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -53,58 +51,58 @@ char qtrsm_uplo(const char *p) {
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
 
-void qtrsm_lln_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void qtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        if (alpha != 1.0Q) for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (int k = 0; k < M; ++k) {
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        if (alpha != 1.0Q) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
+        for (ptrdiff_t k = 0; k < M; ++k) {
             if (B_(k, j) != 0.0Q) {
                 if (nounit) B_(k, j) /= A_(k, k);
                 const T bk = B_(k, j);
-                for (int i = k + 1; i < M; ++i)
+                for (ptrdiff_t i = k + 1; i < M; ++i)
                     B_(i, j) -= bk * A_(i, k);
             }
         }
     }
 }
 
-void qtrsm_lun_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void qtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        if (alpha != 1.0Q) for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (int k = M - 1; k >= 0; --k) {
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        if (alpha != 1.0Q) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
+        for (ptrdiff_t k = M - 1; k >= 0; --k) {
             if (B_(k, j) != 0.0Q) {
                 if (nounit) B_(k, j) /= A_(k, k);
                 const T bk = B_(k, j);
-                for (int i = 0; i < k; ++i)
+                for (ptrdiff_t i = 0; i < k; ++i)
                     B_(i, j) -= bk * A_(i, k);
             }
         }
     }
 }
 
-void qtrsm_llt_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void qtrsm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = M - 1; i >= 0; --i) {
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (ptrdiff_t i = M - 1; i >= 0; --i) {
             T t = alpha * B_(i, j);
-            for (int k = i + 1; k < M; ++k) t -= A_(k, i) * B_(k, j);
+            for (ptrdiff_t k = i + 1; k < M; ++k) t -= A_(k, i) * B_(k, j);
             if (nounit) t /= A_(i, i);
             B_(i, j) = t;
         }
     }
 }
 
-void qtrsm_lut_core(int j_start, int j_end, int M, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void qtrsm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = 0; i < M; ++i) {
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (ptrdiff_t i = 0; i < M; ++i) {
             T t = alpha * B_(i, j);
-            for (int k = 0; k < i; ++k) t -= A_(k, i) * B_(k, j);
+            for (ptrdiff_t k = 0; k < i; ++k) t -= A_(k, i) * B_(k, j);
             if (nounit) t /= A_(i, i);
             B_(i, j) = t;
         }
@@ -113,75 +111,75 @@ void qtrsm_lut_core(int j_start, int j_end, int M, T alpha,
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
 
-void qtrsm_rln_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void qtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
 {
-    for (int j = N - 1; j >= 0; --j) {
-        if (alpha != 1.0Q) for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (int k = j + 1; k < N; ++k) {
+    for (ptrdiff_t j = N - 1; j >= 0; --j) {
+        if (alpha != 1.0Q) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
+        for (ptrdiff_t k = j + 1; k < N; ++k) {
             if (A_(k, j) != 0.0Q) {
                 const T akj = A_(k, j);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
+                for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
             }
         }
         if (nounit) {
             const T inv = 1.0Q / A_(j, j);
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= inv;
+            for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= inv;
         }
     }
 }
 
-void qtrsm_run_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void qtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
 {
-    for (int j = 0; j < N; ++j) {
-        if (alpha != 1.0Q) for (int i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (int k = 0; k < j; ++k) {
+    for (ptrdiff_t j = 0; j < N; ++j) {
+        if (alpha != 1.0Q) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
+        for (ptrdiff_t k = 0; k < j; ++k) {
             if (A_(k, j) != 0.0Q) {
                 const T akj = A_(k, j);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
+                for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
             }
         }
         if (nounit) {
             const T inv = 1.0Q / A_(j, j);
-            for (int i = i_start; i < i_end; ++i) B_(i, j) *= inv;
+            for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= inv;
         }
     }
 }
 
-void qtrsm_rlt_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void qtrsm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
 {
-    for (int k = 0; k < N; ++k) {
+    for (ptrdiff_t k = 0; k < N; ++k) {
         if (nounit) {
             const T inv = 1.0Q / A_(k, k);
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= inv;
+            for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= inv;
         }
-        for (int j = k + 1; j < N; ++j) {
+        for (ptrdiff_t j = k + 1; j < N; ++j) {
             if (A_(j, k) != 0.0Q) {
                 const T ajk = A_(j, k);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
+                for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
             }
         }
-        if (alpha != 1.0Q) for (int i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
+        if (alpha != 1.0Q) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
     }
 }
 
-void qtrsm_rut_core(int i_start, int i_end, int N, T alpha,
-                    const T *a, int lda, T *b, int ldb, int nounit)
+void qtrsm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, int nounit)
 {
-    for (int k = N - 1; k >= 0; --k) {
+    for (ptrdiff_t k = N - 1; k >= 0; --k) {
         if (nounit) {
             const T inv = 1.0Q / A_(k, k);
-            for (int i = i_start; i < i_end; ++i) B_(i, k) *= inv;
+            for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= inv;
         }
-        for (int j = 0; j < k; ++j) {
+        for (ptrdiff_t j = 0; j < k; ++j) {
             if (A_(j, k) != 0.0Q) {
                 const T ajk = A_(j, k);
-                for (int i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
+                for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
             }
         }
-        if (alpha != 1.0Q) for (int i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
+        if (alpha != 1.0Q) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= alpha;
     }
 }
 
@@ -193,17 +191,13 @@ void qtrsm_rut_core(int i_start, int i_end, int N, T alpha,
  * is serial: nrhs sequential qtrsv solves), with no omp_in_parallel guard
  * since this path never threads.
  */
-void qtrsm_serial_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+void qtrsm_serial(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    const T *a, ptrdiff_t lda,
+    T *b, ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     const char SIDE   = qtrsm_uplo(side);
     const char UPLO   = qtrsm_uplo(uplo);
@@ -214,23 +208,21 @@ void qtrsm_serial_(
     if (M == 0 || N == 0) return;
 
     if (alpha == 0.0Q) {
-        for (int j = 0; j < N; ++j)
-            for (int i = 0; i < M; ++i) B_(i, j) = 0.0Q;
+        for (ptrdiff_t j = 0; j < N; ++j)
+            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = 0.0Q;
         return;
     }
 
     /* qtrsv-loop fast path (serial: nrhs sequential qtrsv solves). */
     {
-        const int xv_max = qtrsm_qtrsv_loop_max(M);
+        const ptrdiff_t xv_max = qtrsm_qtrsv_loop_max(M);
         if (SIDE == 'L' && N >= 1 && N <= xv_max && M >= QTRSM_QTRSV_LOOP_M_MIN) {
             if (alpha != 1.0Q) {
-                for (int j = 0; j < N; ++j)
-                    for (int i = 0; i < M; ++i) B_(i, j) *= alpha;
+                for (ptrdiff_t j = 0; j < N; ++j)
+                    for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
             }
-            const int incx_one = 1;
-            for (int j = 0; j < N; ++j) {
-                qtrsv_(uplo, transa, diag, m_, a, lda_,
-                       &B_(0, j), &incx_one, 1, 1, 1);
+            for (ptrdiff_t j = 0; j < N; ++j) {
+                qtrsv_core(uplo, transa, diag, M, a, lda, &B_(0, j), 1);
             }
             return;
         }

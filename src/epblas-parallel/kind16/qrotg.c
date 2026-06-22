@@ -20,3 +20,5 @@ void qrotg_(T *a, T *b, T *c, T *s)
     *a = r;
     *b = z;
 }
+/* ILP64 twin — no integer args, so the ABI is identical to LP64. */
+void qrotg_64_(T *a, T *b, T *c, T *s) { qrotg_(a, b, c, s); }

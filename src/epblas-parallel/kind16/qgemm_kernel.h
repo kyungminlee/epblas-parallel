@@ -43,7 +43,7 @@ typedef __float128 qgemm_T;
 #define QGEMM_NR 2
 
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-ptrdiff_t qgemm_trans_code(const char *p, size_t len);
+ptrdiff_t qgemm_trans_code(char c);
 
 ptrdiff_t qgemm_round_up(ptrdiff_t v, ptrdiff_t m);
 
@@ -76,18 +76,17 @@ void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, qgemm_T alpha,
                     const qgemm_T *a, ptrdiff_t lda, const qgemm_T *b, ptrdiff_t ldb,
                     qgemm_T *c, ptrdiff_t ldc);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; safe to
- * invoke from inside another function's `#pragma omp parallel` region. Keeps
- * the exact Fortran-ABI signature of qgemm_ so callers already inside a
- * parallel region can swap the symbol name only. */
-void qgemm_serial_(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+/* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
+ * invoke from inside another function's `#pragma omp parallel` region. Shares
+ * the ptrdiff_t core ABI of qgemm_core so callers already inside a parallel
+ * region can swap the symbol name only. */
+void qgemm_serial(
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const qgemm_T *alpha_,
-    const qgemm_T *a, const int *lda_,
-    const qgemm_T *b, const int *ldb_,
+    const qgemm_T *a, ptrdiff_t lda,
+    const qgemm_T *b, ptrdiff_t ldb,
     const qgemm_T *beta_,
-    qgemm_T *c, const int *ldc_,
-    size_t transa_len, size_t transb_len);
+    qgemm_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QGEMM_KERNEL_H */

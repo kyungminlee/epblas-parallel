@@ -10,29 +10,26 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 #define XHER_OMP_MIN 64
 
 typedef __complex128 TC;
 typedef __float128   TR;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void xher_(
-    const char *uplo,
-    const int *n_,
+void xher_core(
+    char uplo,
+    ptrdiff_t N,
     const TR *alpha_,
-    const TC *restrict x, const int *incx_,
-    TC *restrict a, const int *lda_,
-    size_t uplo_len)
+    const TC *restrict x, ptrdiff_t incx,
+    TC *restrict a, ptrdiff_t lda)
 {
-    (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, lda = *lda_;
     const TR alpha = *alpha_;
     const TR rzero = 0.0Q;
     const TC czero = 0.0Q + 0.0Qi;
@@ -46,36 +43,39 @@ void xher_(
                              && !omp_in_parallel());
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < N; ++j) {
             const TC xj = x[j];
             if (xj != czero) {
                 const TC t = alpha * conjq(xj);
                 TC *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i) aj[i] += t * x[i];
+                    for (ptrdiff_t i = j + 1; i < N; ++i) aj[i] += t * x[i];
                     aj[j] = crealq(aj[j]) + crealq(t * x[j]);
                 } else {
-                    for (int i = 0; i < j; ++i) aj[i] += t * x[i];
+                    for (ptrdiff_t i = 0; i < j; ++i) aj[i] += t * x[i];
                     aj[j] = crealq(aj[j]) + crealq(t * x[j]);
                 }
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        for (int j = 0; j < N; ++j) {
-            const TC xj = x[kx + j * incx];
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        for (ptrdiff_t j = 0; j < N; ++j) {
+            const TC xj = x[kx + (ptrdiff_t)j * incx];
             if (xj != czero) {
                 const TC t = alpha * conjq(xj);
                 if (UPLO == 'L') {
-                    for (int i = j + 1; i < N; ++i) A_(i, j) += t * x[kx + i * incx];
-                    A_(j, j) = crealq(A_(j, j)) + crealq(t * x[kx + j * incx]);
+                    for (ptrdiff_t i = j + 1; i < N; ++i) A_(i, j) += t * x[kx + (ptrdiff_t)i * incx];
+                    A_(j, j) = crealq(A_(j, j)) + crealq(t * x[kx + (ptrdiff_t)j * incx]);
                 } else {
-                    for (int i = 0; i < j; ++i) A_(i, j) += t * x[kx + i * incx];
-                    A_(j, j) = crealq(A_(j, j)) + crealq(t * x[kx + j * incx]);
+                    for (ptrdiff_t i = 0; i < j; ++i) A_(i, j) += t * x[kx + (ptrdiff_t)i * incx];
+                    A_(j, j) = crealq(A_(j, j)) + crealq(t * x[kx + (ptrdiff_t)j * incx]);
                 }
             }
         }
     }
 }
+
+
+EPBLAS_FACADE_SYR(xher, TR, TC)
 
 #undef A_

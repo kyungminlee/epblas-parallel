@@ -16,6 +16,7 @@
 
 #include "qsymm_kernel.h"
 #include "qgemm_kernel.h"
+#include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -29,30 +30,26 @@ typedef qsymm_T T;
 #define MR QGEMM_MR
 #define NR QGEMM_NR
 
-void qsymm_(
-    const char *side, const char *uplo,
-    const int *m_, const int *n_,
+static void qsymm_core(
+    char side_c, char uplo_c,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict b, const int *ldb_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict b, ptrdiff_t ldb,
     const T *beta_,
-    T *restrict c, const int *ldc_,
-    size_t side_len, size_t uplo_len)
+    T *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        qsymm_serial_(side, uplo, m_, n_, alpha_, a, lda_, b, ldb_, beta_,
-                      c, ldc_, side_len, uplo_len);
+        qsymm_serial(side_c, uplo_c, M, N, alpha_, a, lda, b, ldb, beta_,
+                     c, ldc);
         return;
     }
 #endif
-    (void)side_len; (void)uplo_len;
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)*side);
-    const char UPLO = (char)toupper((unsigned char)*uplo);
+    const char SIDE = (char)toupper((unsigned char)side_c);
+    const char UPLO = (char)toupper((unsigned char)uplo_c);
 
     if (M <= 0 || N <= 0) return;
 
@@ -153,3 +150,5 @@ void qsymm_(
     free(Ap_arr);
     free(Bp);
 }
+
+EPBLAS_FACADE_SYMM(qsymm, T)

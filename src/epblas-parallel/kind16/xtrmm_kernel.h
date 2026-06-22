@@ -32,41 +32,40 @@
 typedef __complex128 xtrmm_T;
 
 /* Normalize a Fortran character to upper case (uplo / side / trans decode). */
-char xtrmm_uplo(const char *p);
+char xtrmm_uplo(char c);
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
-void xtrmm_lln_core(int j_start, int j_end, int M, xtrmm_T alpha,
-                    const xtrmm_T *a, int lda, xtrmm_T *b, int ldb, int nounit);
-void xtrmm_lun_core(int j_start, int j_end, int M, xtrmm_T alpha,
-                    const xtrmm_T *a, int lda, xtrmm_T *b, int ldb, int nounit);
-void xtrmm_llTC_core(int j_start, int j_end, int M, xtrmm_T alpha,
-                     const xtrmm_T *a, int lda, xtrmm_T *b, int ldb,
+void xtrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
+                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, int nounit);
+void xtrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
+                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, int nounit);
+void xtrmm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
+                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
                      int nounit, int conj_flag);
-void xtrmm_luTC_core(int j_start, int j_end, int M, xtrmm_T alpha,
-                     const xtrmm_T *a, int lda, xtrmm_T *b, int ldb,
+void xtrmm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
+                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
                      int nounit, int conj_flag);
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
-void xtrmm_rln_core(int i_start, int i_end, int N, xtrmm_T alpha,
-                    const xtrmm_T *a, int lda, xtrmm_T *b, int ldb, int nounit);
-void xtrmm_run_core(int i_start, int i_end, int N, xtrmm_T alpha,
-                    const xtrmm_T *a, int lda, xtrmm_T *b, int ldb, int nounit);
-void xtrmm_rlTC_core(int i_start, int i_end, int N, xtrmm_T alpha,
-                     const xtrmm_T *a, int lda, xtrmm_T *b, int ldb,
+void xtrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
+                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, int nounit);
+void xtrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
+                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, int nounit);
+void xtrmm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
+                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
                      int nounit, int conj_flag);
-void xtrmm_ruTC_core(int i_start, int i_end, int N, xtrmm_T alpha,
-                     const xtrmm_T *a, int lda, xtrmm_T *b, int ldb,
+void xtrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
+                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
                      int nounit, int conj_flag);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; safe to
- * invoke from inside another function's `#pragma omp parallel` region. Keeps
- * the exact Fortran-ABI signature of xtrmm_. */
-void xtrmm_serial_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+/* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
+ * invoke from inside another function's `#pragma omp parallel` region. Shares
+ * the ptrdiff_t core ABI of xtrmm_core. */
+void xtrmm_serial(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const xtrmm_T *alpha_,
-    const xtrmm_T *a, const int *lda_,
-    xtrmm_T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
+    const xtrmm_T *a, ptrdiff_t lda,
+    xtrmm_T *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XTRMM_KERNEL_H */

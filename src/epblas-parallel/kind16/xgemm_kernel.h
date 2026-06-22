@@ -37,44 +37,45 @@
 typedef __complex128 xgemm_T;
 
 /* Normalize a Fortran trans char to its uppercase code ('N'/'T'/'C'/'R'). */
-int xgemm_trans_code(const char *p, size_t len);
+int xgemm_trans_code(char c);
 
 /* Blocking plan for one xgemm call. MC may be grown adaptively for small K.
  * The conj/trans flags are decoded once from the (ta, tb) codes. */
 typedef struct {
-    int MC, KC, NC;
+    ptrdiff_t MC, KC, NC;
     size_t ap_bytes, bp_bytes;
     int conj_a, trans_a;
     int conj_b, trans_b;
 } xgemm_plan_t;
 
 /* Fill *p from the problem dims and the (ta, tb) trans codes. */
-void xgemm_make_plan(int M, int N, int K, int ta, int tb, xgemm_plan_t *p);
+void xgemm_make_plan(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K, int ta, int tb, xgemm_plan_t *p);
 
 /* OCOPY(B): pack the (pb × jb) panel at (ls, js) into Bp. */
 void xgemm_pack_B(const xgemm_plan_t *p,
-                  const __float128 *b, int ldb,
-                  int js, int ls, int pb, int jb,
+                  const __float128 *b, ptrdiff_t ldb,
+                  ptrdiff_t js, ptrdiff_t ls, ptrdiff_t pb, ptrdiff_t jb,
                   __float128 *Bp);
 
 /* One (m_lo..m_hi) × (js..js+jb) slab: ICOPY(A) per M-block + microkernel
  * against an already-packed Bp. */
-void xgemm_level3_slab(int m_lo, int m_hi, const xgemm_plan_t *p,
+void xgemm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xgemm_plan_t *p,
                        __float128 alphar, __float128 alphai,
-                       const __float128 *A, int lda, __float128 *Ap,
+                       const __float128 *A, ptrdiff_t lda, __float128 *Ap,
                        const __float128 *Bp,
-                       int js, int ls, int pb, int jb,
-                       __float128 *C, int ldc);
+                       ptrdiff_t js, ptrdiff_t ls, ptrdiff_t pb, ptrdiff_t jb,
+                       __float128 *C, ptrdiff_t ldc);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same int signature as xgemm_. */
-void xgemm_serial_(
-    const char *transa, const char *transb,
-    const int *m_, const int *n_, const int *k_,
+/* Pure-serial by-value entry (no OpenMP). Shares the ptrdiff_t core ABI of
+ * xgemm_core so callers already inside a parallel region (e.g. xtrsm) can swap
+ * the symbol name only. */
+void xgemm_serial(
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const xgemm_T *alpha_,
-    const xgemm_T *a, const int *lda_,
-    const xgemm_T *b, const int *ldb_,
+    const xgemm_T *a, ptrdiff_t lda,
+    const xgemm_T *b, ptrdiff_t ldb,
     const xgemm_T *beta_,
-    xgemm_T *c, const int *ldc_,
-    size_t transa_len, size_t transb_len);
+    xgemm_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XGEMM_KERNEL_H */

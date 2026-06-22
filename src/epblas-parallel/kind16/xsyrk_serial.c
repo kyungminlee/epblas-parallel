@@ -5,12 +5,9 @@
  *
  * TRANS ∈ {N, T}. Complex syrk does NOT conjugate (see xherk). Blocked:
  * scalar diagonal + xgemm trailing. The trailing update runs through
- * xgemm_serial_ (NOT xgemm_): when xsyrk_block runs inside the team
+ * xgemm_serial (NOT xgemm_): when xsyrk_block runs inside the team
  * xsyrk_parallel.c opened, a nested xgemm team would open a region inside a
  * region. Mirrors the kind10 ysyrk overlay.
- *
- * The block dims threaded into the trailing GEMMs are bridged to xgemm's int
- * Fortran ABI by xgemm_s() below.
  */
 
 #include "xsyrk_kernel.h"
@@ -21,27 +18,15 @@
 
 typedef xsyrk_T T;
 
-char xsyrk_uplo(const char *p) {
-    return (char)toupper((unsigned char)*p);
+char xsyrk_uplo(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
-char xsyrk_trans(const char *p) {
-    return (char)toupper((unsigned char)*p);
+char xsyrk_trans(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 ptrdiff_t xsyrk_nb(void) { return 32; }
-
-/* Bridge the ptrdiff_t block dims of the trailing update to xgemm_serial_'s
- * int Fortran ABI (block sizes are bounded by N/K, which arrive as int). */
-static inline void xgemm_s(const char *ta, const char *tb,
-                           ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, const T *alpha,
-                           const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                           const T *beta, T *c, ptrdiff_t ldc)
-{
-    int mi = (int)m, ni = (int)n, ki = (int)k;
-    int ldai = (int)lda, ldbi = (int)ldb, ldci = (int)ldc;
-    xgemm_serial_(ta, tb, &mi, &ni, &ki, alpha, a, &ldai, b, &ldbi, beta, c, &ldci, 1, 1);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
@@ -98,9 +83,6 @@ void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, T beta,
 void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha, T beta,
                  const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc, char UPLO, char TR)
 {
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
         const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
@@ -116,45 +98,41 @@ void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha, 
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
             if (TR == 'N') {
-                xgemm_s(NN, TN, trailing, jb, K, &alpha,
-                        &A_(j0, 0), lda, &A_(jc, 0), lda,
-                        &ONE, &C_(j0, jc), ldc);
+                xgemm_serial('N', 'T', trailing, jb, K, &alpha,
+                             &A_(j0, 0), lda, &A_(jc, 0), lda,
+                             &ONE, &C_(j0, jc), ldc);
             } else {
-                xgemm_s(TN, NN, trailing, jb, K, &alpha,
-                        &A_(0, j0), lda, &A_(0, jc), lda,
-                        &ONE, &C_(j0, jc), ldc);
+                xgemm_serial('T', 'N', trailing, jb, K, &alpha,
+                             &A_(0, j0), lda, &A_(0, jc), lda,
+                             &ONE, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR == 'N') {
-                xgemm_s(NN, TN, jc, jb, K, &alpha,
-                        &A_(0, 0), lda, &A_(jc, 0), lda,
-                        &ONE, &C_(0, jc), ldc);
+                xgemm_serial('N', 'T', jc, jb, K, &alpha,
+                             &A_(0, 0), lda, &A_(jc, 0), lda,
+                             &ONE, &C_(0, jc), ldc);
             } else {
-                xgemm_s(TN, NN, jc, jb, K, &alpha,
-                        &A_(0, 0), lda, &A_(0, jc), lda,
-                        &ONE, &C_(0, jc), ldc);
+                xgemm_serial('T', 'N', jc, jb, K, &alpha,
+                             &A_(0, 0), lda, &A_(0, jc), lda,
+                             &ONE, &C_(0, jc), ldc);
             }
         }
     }
 }
 
-void xsyrk_serial_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+void xsyrk_serial(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
+    const T *a, ptrdiff_t lda,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    const char TR   = (char)toupper((unsigned char)*trans);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char TR   = (char)toupper((unsigned char)trans);
 
     if (N == 0) return;
 

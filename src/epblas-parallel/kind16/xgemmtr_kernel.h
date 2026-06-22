@@ -33,15 +33,15 @@ typedef __complex128 xgemmtr_T;
 
 /* Normalize a Fortran trans char to a code (upper-cased; 'C' kept distinct
  * from 'T' so conjugation can be applied for complex input). */
-int xgemmtr_trans_code(const char *p);
+int xgemmtr_trans_code(char c);
 
 /* Beta-only pass over columns [j0,j1): the body run on the alpha==0 / K==0
  * early-exit path. Scales (or zeros) the UPLO triangle of each column by beta.
  * Only reached when beta != one. */
 void xgemmtr_beta_core(
-    int j0, int j1, int N, int upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper,
     xgemmtr_T beta,
-    xgemmtr_T *c, int ldc);
+    xgemmtr_T *c, ptrdiff_t ldc);
 
 /* Full compute pass over columns [j0,j1):
  *
@@ -52,24 +52,23 @@ void xgemmtr_beta_core(
  * conjugation at element access. Each column is owned by exactly one call, so
  * the partition is race-free. */
 void xgemmtr_compute_core(
-    int j0, int j1, int N, int upper, int K,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, int upper, ptrdiff_t K,
     int trans_a, int trans_b, int conj_a, int conj_b,
     xgemmtr_T alpha, xgemmtr_T beta,
-    const xgemmtr_T *a, int lda,
-    const xgemmtr_T *b, int ldb,
-    xgemmtr_T *c, int ldc);
+    const xgemmtr_T *a, ptrdiff_t lda,
+    const xgemmtr_T *b, ptrdiff_t ldb,
+    xgemmtr_T *c, ptrdiff_t ldc);
 
-/* Pure-serial Fortran entry. No OpenMP anywhere on this call path; safe to
- * invoke from inside another function's `#pragma omp parallel` region. Keeps
- * the exact Fortran-ABI signature of xgemmtr_. */
-void xgemmtr_serial_(
-    const char *uplo, const char *transa, const char *transb,
-    const int *n_, const int *k_,
+/* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
+ * invoke from inside another function's `#pragma omp parallel` region. Shares
+ * the ptrdiff_t core ABI of xgemmtr_core. */
+void xgemmtr_serial(
+    char uplo, char transa, char transb,
+    ptrdiff_t N, ptrdiff_t K,
     const xgemmtr_T *alpha_,
-    const xgemmtr_T *a, const int *lda_,
-    const xgemmtr_T *b, const int *ldb_,
+    const xgemmtr_T *a, ptrdiff_t lda,
+    const xgemmtr_T *b, ptrdiff_t ldb,
     const xgemmtr_T *beta_,
-    xgemmtr_T *c, const int *ldc_,
-    size_t uplo_len, size_t ta_len, size_t tb_len);
+    xgemmtr_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XGEMMTR_KERNEL_H */

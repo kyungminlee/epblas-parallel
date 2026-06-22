@@ -10,28 +10,25 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 #define QSYR_OMP_MIN 64
 
 typedef __float128 T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void qsyr_(
-    const char *uplo,
-    const int *n_,
+void qsyr_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
-    const T *restrict x, const int *incx_,
-    T *restrict a, const int *lda_,
-    size_t uplo_len)
+    const T *restrict x, ptrdiff_t incx,
+    T *restrict a, ptrdiff_t lda)
 {
-    (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, lda = *lda_;
     const T alpha = *alpha_;
     const T zero = 0.0Q;
     const char UPLO = up(uplo);
@@ -47,15 +44,15 @@ void qsyr_(
         /* Branch on use_omp at C source level — `#pragma omp parallel for
          * if(use_omp)` outlines unconditionally. */
 #define QSYR_BODY                                                            \
-        for (int j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
             const T xj = x[j];                                               \
             if (xj != zero) {                                                \
                 const T t = alpha * xj;                                      \
                 T *aj = &A_(0, j);                                           \
                 if (UPLO == 'L') {                                           \
-                    for (int i = j; i < N; ++i) aj[i] += t * x[i];           \
+                    for (ptrdiff_t i = j; i < N; ++i) aj[i] += t * x[i];           \
                 } else {                                                     \
-                    for (int i = 0; i <= j; ++i) aj[i] += t * x[i];          \
+                    for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += t * x[i];          \
                 }                                                            \
             }                                                                \
         }
@@ -72,19 +69,22 @@ void qsyr_(
         }
 #undef QSYR_BODY
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        for (int j = 0; j < N; ++j) {
+        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        for (ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[kx + j * incx];
             if (xj != zero) {
                 const T t = alpha * xj;
                 if (UPLO == 'L') {
-                    for (int i = j; i < N; ++i) A_(i, j) += t * x[kx + i * incx];
+                    for (ptrdiff_t i = j; i < N; ++i) A_(i, j) += t * x[kx + i * incx];
                 } else {
-                    for (int i = 0; i <= j; ++i) A_(i, j) += t * x[kx + i * incx];
+                    for (ptrdiff_t i = 0; i <= j; ++i) A_(i, j) += t * x[kx + i * incx];
                 }
             }
         }
     }
 }
+
+
+EPBLAS_FACADE_SYR(qsyr, T, T)
 
 #undef A_
