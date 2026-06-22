@@ -510,8 +510,8 @@ void etrsm_serial(
 
     const bool lside = (blas_up(side)   == 'L');
     const bool upper = (blas_up(uplo)   == 'U');
-    const char trc  = blas_up(transa);
-    const bool trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
+    const char TR  = blas_up(transa);
+    const bool trans = (TR == 'T' || TR == 'C');   /* real: 'C' ≡ 'T' */
     const bool unit  = (blas_up(diag) == 'U');
 
     if (M == 0 || N == 0) return;
