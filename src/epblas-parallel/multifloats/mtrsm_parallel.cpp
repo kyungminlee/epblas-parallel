@@ -54,7 +54,7 @@ static void mtrsm_core(
     const char UPLO = up(&uplo);
     char TR = up(&transa);
     if (TR == 'C') TR = 'T';
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -64,7 +64,7 @@ static void mtrsm_core(
         const std::ptrdiff_t nb = mtrsm_block_nb();
         const std::ptrdiff_t use_blocked = (M >= 2 * nb);
 #ifdef _OPENMP
-        const std::ptrdiff_t use_omp = (N >= MTRSM_OMP_N_MIN && blas_omp_available());
+        const bool use_omp = (N >= MTRSM_OMP_N_MIN && blas_omp_available());
         if (use_omp) {
             #pragma omp parallel
             {
@@ -85,7 +85,7 @@ static void mtrsm_core(
          * multiples of 4 so the SIMD 4-row chunks stay aligned; the last
          * thread absorbs the M&3 tail. */
 #ifdef _OPENMP
-        const std::ptrdiff_t use_omp = (M >= MTRSM_OMP_N_MIN && blas_omp_available());
+        const bool use_omp = (M >= MTRSM_OMP_N_MIN && blas_omp_available());
         #pragma omp parallel if(use_omp)
 #endif
         {

@@ -175,7 +175,7 @@ __attribute__((noinline)) static bool msymv_omp(
     double *y_hi, double *y_lo, T alpha)
 {
     std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads <= 1 || omp_in_parallel()) return false;
+    if (!blas_omp_should_thread()) return false;
     if (nthreads > MSYMV_MAX_CPUS) nthreads = MSYMV_MAX_CPUS;
 
     std::ptrdiff_t range[MSYMV_MAX_CPUS + 1];

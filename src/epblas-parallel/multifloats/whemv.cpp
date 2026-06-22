@@ -187,7 +187,7 @@ __attribute__((noinline)) static bool whemv_omp(
     double *y_rh, double *y_rl, double *y_ih, double *y_il)
 {
     std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads <= 1 || omp_in_parallel()) return false;
+    if (!blas_omp_should_thread()) return false;
     if (nthreads > WHEMV_MAX_CPUS) nthreads = WHEMV_MAX_CPUS;
 
     std::ptrdiff_t range[WHEMV_MAX_CPUS + 1];

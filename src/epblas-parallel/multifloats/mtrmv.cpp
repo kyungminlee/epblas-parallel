@@ -212,7 +212,7 @@ __attribute__((noinline)) static bool mtrmv_omp(
     bool upper, bool trans, bool nounit, std::ptrdiff_t n,
     const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
 {
-    if (n < MTRMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n < MTRMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTRMV_MAX_CPUS) nthreads = MTRMV_MAX_CPUS;

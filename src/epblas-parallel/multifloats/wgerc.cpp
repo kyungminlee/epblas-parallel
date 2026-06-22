@@ -59,7 +59,7 @@ static void wgerc_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, T *a, std:
             x_rh[i] = 0.0; x_rl[i] = 0.0; x_ih[i] = 0.0; x_il[i] = 0.0;
         }
 #ifdef _OPENMP
-        const std::ptrdiff_t use_omp = (N >= WGERC_OMP_MIN && blas_omp_available());
+        const bool use_omp = (N >= WGERC_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (std::ptrdiff_t j = 0; j < N; ++j) {
@@ -93,7 +93,7 @@ static void wgerc_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, T *a, std:
         std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
 #else
 #ifdef _OPENMP
-        const std::ptrdiff_t use_omp = (N >= WGERC_OMP_MIN && blas_omp_available());
+        const bool use_omp = (N >= WGERC_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (std::ptrdiff_t j = 0; j < N; ++j) {

@@ -65,7 +65,7 @@ static void waxpy_unit(std::ptrdiff_t n, T alpha, const T *x, T *y)
 #define WAXPY_OMP_MIN 2048
 __attribute__((noinline)) static std::ptrdiff_t waxpy_omp(std::ptrdiff_t n, T alpha, const T *x, T *y)
 {
-    if (n <= WAXPY_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= WAXPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

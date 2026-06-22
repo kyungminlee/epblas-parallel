@@ -88,7 +88,7 @@ static bool mgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
                         const T *a, std::ptrdiff_t lda,
                         const T *x, std::ptrdiff_t incx, T *y, std::ptrdiff_t incy)
 {
-    if (M < MGBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (M < MGBMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
@@ -130,7 +130,7 @@ static bool mgbmv_t_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
                         const T *a, std::ptrdiff_t lda,
                         const T *x, std::ptrdiff_t incx, T *y, std::ptrdiff_t incy)
 {
-    if (N < MGBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (N < MGBMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;

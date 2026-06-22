@@ -124,7 +124,7 @@ static R mwnrm2_ssq_unit(std::ptrdiff_t n, const T *x, R scale)
  * matches serial within fuzz tol). Returns false below threshold. */
 __attribute__((noinline)) static bool mwnrm2_omp(std::ptrdiff_t n, const T *x, R *out)
 {
-    if (n <= MWNRM2_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= MWNRM2_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MWNRM2_MAX_CPUS) nthreads = MWNRM2_MAX_CPUS;

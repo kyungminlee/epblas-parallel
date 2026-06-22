@@ -197,7 +197,7 @@ __attribute__((noinline)) static bool wtrmv_omp(
     bool upper, bool trans, bool conj, bool nounit, std::ptrdiff_t n,
     const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
 {
-    if (n < WTRMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n < WTRMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WTRMV_MAX_CPUS) nthreads = WTRMV_MAX_CPUS;

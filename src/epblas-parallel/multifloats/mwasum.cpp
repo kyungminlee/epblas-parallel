@@ -90,7 +90,7 @@ static R mwasum_unit(std::ptrdiff_t n, const T *x)
 #define MWASUM_MAX_CPUS 64
 __attribute__((noinline)) static std::ptrdiff_t mwasum_omp(std::ptrdiff_t n, const T *x, R *out)
 {
-    if (n <= MWASUM_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= MWASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MWASUM_MAX_CPUS) nthreads = MWASUM_MAX_CPUS;

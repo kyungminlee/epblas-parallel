@@ -60,7 +60,7 @@ static void wscal_unit(std::ptrdiff_t n, T alpha, T *x)
 #define WSCAL_OMP_MIN 2048
 __attribute__((noinline)) static std::ptrdiff_t wscal_omp(std::ptrdiff_t n, T alpha, T *x)
 {
-    if (n <= WSCAL_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= WSCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

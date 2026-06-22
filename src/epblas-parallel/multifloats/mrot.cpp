@@ -69,7 +69,7 @@ static void mrot_unit(std::ptrdiff_t n, const T c, const T s, T *x, T *y)
 #define MROT_OMP_MIN 2048
 __attribute__((noinline)) static std::ptrdiff_t mrot_omp(std::ptrdiff_t n, T c, T s, T *x, T *y)
 {
-    if (n <= MROT_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= MROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

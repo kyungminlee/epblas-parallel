@@ -67,7 +67,7 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 {
     std::ptrdiff_t nt = 1;
 #ifdef _OPENMP
-    if (M >= MGEMV_OMP_MIN && blas_omp_available() && !omp_in_parallel()) {
+    if (M >= MGEMV_OMP_MIN && blas_omp_should_thread()) {
         nt = blas_omp_max_threads();
         if (nt > MGEMV_MAX_CPUS) nt = MGEMV_MAX_CPUS;
     }
@@ -147,8 +147,7 @@ static void mgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
                            const T *x, T *y)
 {
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= MGEMV_OMP_MIN && blas_omp_available()
-                         && !omp_in_parallel());
+    const bool use_omp = (N >= MGEMV_OMP_MIN && blas_omp_should_thread());
 #endif
 #ifdef MBLAS_SIMD_DD
     const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);

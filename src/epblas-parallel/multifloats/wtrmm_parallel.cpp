@@ -57,7 +57,7 @@ static void wtrmm_core(
     const char SIDE = up(&side);
     const char UPLO = up(&uplo);
     const char TR = up(&transa);   /* complex: N/T/C kept distinct */
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -68,7 +68,7 @@ static void wtrmm_core(
     if (SIDE == 'L') {
         const std::ptrdiff_t use_blocked = (M >= 2 * nb);
 #ifdef _OPENMP
-        const std::ptrdiff_t use_omp = (N >= WTRMM_OMP_MIN && blas_omp_available());
+        const bool use_omp = (N >= WTRMM_OMP_MIN && blas_omp_available());
         if (use_omp) {
             #pragma omp parallel
             {
@@ -90,7 +90,7 @@ static void wtrmm_core(
          * thread absorbs the M&3 tail. */
         const std::ptrdiff_t use_blocked = (N >= 2 * nb);
 #ifdef _OPENMP
-        const std::ptrdiff_t use_omp = (M >= WTRMM_OMP_MIN && blas_omp_available());
+        const bool use_omp = (M >= WTRMM_OMP_MIN && blas_omp_available());
         #pragma omp parallel if(use_omp)
 #endif
         {

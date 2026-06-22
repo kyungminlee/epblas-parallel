@@ -37,7 +37,7 @@ inline T cdiv(T const &a, T const &b) {
  * AXPY-sub (caxpy_sub, bit-exact); Trans/ConjTrans is a banded-column complex
  * dot (cdot, reorders -> within fuzz tol). The cross-column recurrence stays
  * scalar. Strided callers gather x to a contiguous scratch around this. */
-static void wtbsv_serial_contig(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit,
+static void wtbsv_serial_contig(char UPLO, char TR, bool noconj, bool nounit,
                                 std::ptrdiff_t N, std::ptrdiff_t K, const T *a, std::size_t lda, T *x)
 {
     const bool conj = (noconj == 0);
@@ -89,8 +89,8 @@ static void wtbsv_core(
     const std::ptrdiff_t K = k;
     const char UPLO = up(&uplo);
     const char TR = up(&trans);
-    const std::ptrdiff_t noconj = (TR == 'T');
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool noconj = (TR == 'T');
+    const bool nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 

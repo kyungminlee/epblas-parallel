@@ -61,7 +61,7 @@ static void mspr_core(
     const double *xlp = xl.data();
 
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= MSPR_OMP_MIN && blas_omp_available());
+    const bool use_omp = (N >= MSPR_OMP_MIN && blas_omp_available());
     /* static,8: column j writes j+1 (U) / N-j (L) packed elems — a triangular
      * skew that plain static dumps onto one thread. Packed columns are
      * contiguous in ap, so cyclic static,1 would false-share cache lines on

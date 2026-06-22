@@ -170,7 +170,7 @@ __attribute__((noinline)) static bool mtpmv_omp(
     bool upper, bool trans, bool nounit, std::ptrdiff_t n,
     const T *ap, T *x, std::ptrdiff_t incx)
 {
-    if (n < MTPMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n < MTPMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTPMV_MAX_CPUS) nthreads = MTPMV_MAX_CPUS;
@@ -199,7 +199,7 @@ static void mtpmv_core(
     const char UPLO = up(&uplo);
     char TR = up(&trans);
     if (TR == 'C') TR = 'T';
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 

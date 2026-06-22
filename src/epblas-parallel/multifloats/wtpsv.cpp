@@ -51,7 +51,7 @@ inline std::size_t cbL(std::ptrdiff_t j, std::ptrdiff_t N) {
 inline std::size_t cbU(std::ptrdiff_t j) {
     return static_cast<std::size_t>(j) * static_cast<std::size_t>(j + 1) / 2;
 }
-inline T melem(const T &a, std::ptrdiff_t noconj) { return noconj ? a : cconj(a); }
+inline T melem(const T &a, bool noconj) { return noconj ? a : cconj(a); }
 #endif
 }
 
@@ -59,7 +59,7 @@ inline T melem(const T &a, std::ptrdiff_t noconj) { return noconj ? a : cconj(a)
  * (caxpy_sub, bit-exact); Trans/ConjTrans is a packed-column complex dot
  * (cdot, reorders -> within fuzz tol). The cross-column recurrence (divide by
  * the diagonal, feed the result forward) stays scalar here. */
-static void wtpsv_serial_contig(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit,
+static void wtpsv_serial_contig(char UPLO, char TR, bool noconj, bool nounit,
                                 std::ptrdiff_t N, const T *ap, T *x)
 {
     if (TR == 'N') {
@@ -106,7 +106,7 @@ static void wtpsv_serial_contig(char UPLO, char TR, std::ptrdiff_t noconj, std::
 
 /* Serial entry / <threshold / strided fallback. Strided gathers x to a
  * contiguous scratch, runs the SIMD core, and scatters back. */
-static void wtpsv_serial(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit,
+static void wtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
                          std::ptrdiff_t N, const T *ap, T *x, std::ptrdiff_t incx)
 {
     if (incx == 1) {
@@ -123,7 +123,7 @@ static void wtpsv_serial(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within DD fuzz tol. */
-static void wtpsv_block(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit,
+static void wtpsv_block(char UPLO, char TR, bool noconj, bool nounit,
                         std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, const T *ap, T *x)
 {
     const bool lower = (UPLO == 'L');
@@ -167,9 +167,9 @@ static void wtpsv_block(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_
  * to small WTPSV_BLK diagonal blocks; bulk O(N^2) off-diagonal coupling threaded
  * over disjoint output rows. Returns true if it handled the call. */
 __attribute__((noinline)) static bool wtpsv_omp(
-    char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit, std::ptrdiff_t N, const T *ap, T *x)
+    char UPLO, char TR, bool noconj, bool nounit, std::ptrdiff_t N, const T *ap, T *x)
 {
-    if (N < WTPSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (N < WTPSV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WTPSV_MAX_CPUS) nthreads = WTPSV_MAX_CPUS;
@@ -264,8 +264,8 @@ static void wtpsv_core(
 {
     const char UPLO = up(&uplo);
     const char TR = up(&trans);
-    const std::ptrdiff_t noconj = (TR == 'T');
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool noconj = (TR == 'T');
+    const bool nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 

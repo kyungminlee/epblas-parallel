@@ -62,7 +62,7 @@ static void msyr2_core(
     const double *yhp = yh.data(), *ylp = yl.data();
 
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= MSYR2_OMP_MIN && blas_omp_available());
+    const bool use_omp = (N >= MSYR2_OMP_MIN && blas_omp_available());
     /* static,1 balances the triangular column skew; full storage → columns
      * lda apart, no false sharing. Hot loop is mf_kernels::dd_axpy2. */
 #endif

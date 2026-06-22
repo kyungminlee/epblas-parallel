@@ -152,7 +152,7 @@ __attribute__((noinline)) static bool mspmv_omp(
     bool upper, std::ptrdiff_t n, const T *ap,
     const T *x, std::ptrdiff_t incx, T alpha, T *y, std::ptrdiff_t incy)
 {
-    if (n < MSPMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n < MSPMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MSPMV_MAX_CPUS) nthreads = MSPMV_MAX_CPUS;

@@ -51,7 +51,7 @@ static bool wgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
                         const T *a, std::size_t lda, const T *x, T *y)
 {
     std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads <= 1 || omp_in_parallel()) return false;
+    if (!blas_omp_should_thread()) return false;
     if (nthreads > WGBMV_MAX_CPUS) nthreads = WGBMV_MAX_CPUS;
 
     #pragma omp parallel num_threads(nthreads)
@@ -100,8 +100,7 @@ static void wgbmv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL
                            const T *a, std::size_t lda, const T *x, T *y, bool conj)
 {
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= WGBMV_OMP_MIN && blas_omp_available()
-                         && !omp_in_parallel());
+    const bool use_omp = (N >= WGBMV_OMP_MIN && blas_omp_should_thread());
     #pragma omp parallel for if(use_omp) schedule(static) num_threads(blas_omp_max_threads())
 #endif
     for (std::ptrdiff_t j = 0; j < N; ++j) {

@@ -102,7 +102,7 @@ static T mdot_unit(std::ptrdiff_t n, const T *x, const T *y)
 #define MDOT_MAX_CPUS 64
 __attribute__((noinline)) static std::ptrdiff_t mdot_omp(std::ptrdiff_t n, const T *x, const T *y, T *out)
 {
-    if (n <= MDOT_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= MDOT_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MDOT_MAX_CPUS) nthreads = MDOT_MAX_CPUS;

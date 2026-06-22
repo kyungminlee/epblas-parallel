@@ -217,7 +217,7 @@ __attribute__((noinline)) static bool wtpmv_omp(
     bool upper, bool trans, bool conj, bool nounit, std::ptrdiff_t n,
     const T *ap, T *x, std::ptrdiff_t incx)
 {
-    if (n < WTPMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n < WTPMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WTPMV_MAX_CPUS) nthreads = WTPMV_MAX_CPUS;
@@ -245,8 +245,8 @@ static void wtpmv_core(
 {
     const char UPLO = up(&uplo);
     const char TR = up(&trans);
-    const std::ptrdiff_t noconj = (TR == 'T');
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool noconj = (TR == 'T');
+    const bool nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 

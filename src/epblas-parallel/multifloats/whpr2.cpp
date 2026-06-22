@@ -88,7 +88,7 @@ static void whpr2_core(
     }
 
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= WHPR2_OMP_MIN && blas_omp_available());
+    const bool use_omp = (N >= WHPR2_OMP_MIN && blas_omp_available());
 #endif
     if (UPLO == 'U') {
 #ifdef _OPENMP

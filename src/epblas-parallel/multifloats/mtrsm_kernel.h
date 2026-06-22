@@ -49,13 +49,13 @@ void mtrsm_zero_B(std::ptrdiff_t M, std::ptrdiff_t N, mtrsm_T *b, std::ptrdiff_t
  * column range → race-free, bitwise-identical to the serial sweep. */
 void mtrsm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, std::ptrdiff_t nb, mtrsm_T alpha,
-                   const mtrsm_T *a, std::ptrdiff_t lda, mtrsm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
+                   const mtrsm_T *a, std::ptrdiff_t lda, mtrsm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* One row slice [row_lo, row_hi) of a SIDE='R' solve (SIMD 4-row chunks +
  * scalar tail). Each slice owns a disjoint row range → race-free. */
 void mtrsm_R_slice(char UPLO, char TR, std::ptrdiff_t row_lo, std::ptrdiff_t row_hi,
                    std::ptrdiff_t N, mtrsm_T alpha,
-                   const mtrsm_T *a, std::ptrdiff_t lda, mtrsm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
+                   const mtrsm_T *a, std::ptrdiff_t lda, mtrsm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void mtrsm_serial(

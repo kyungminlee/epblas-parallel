@@ -55,7 +55,7 @@ static void mtrmm_core(
     const char UPLO = up(&uplo);
     char TR = up(&transa);
     if (TR == 'C') TR = 'T';   /* real DD: conj-trans ≡ trans */
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -66,7 +66,7 @@ static void mtrmm_core(
     if (SIDE == 'L') {
         const std::ptrdiff_t use_blocked = (M >= 2 * nb);
 #ifdef _OPENMP
-        const std::ptrdiff_t use_omp = (N >= MTRMM_OMP_MIN && blas_omp_available());
+        const bool use_omp = (N >= MTRMM_OMP_MIN && blas_omp_available());
         if (use_omp) {
             #pragma omp parallel
             {
@@ -88,7 +88,7 @@ static void mtrmm_core(
          * thread absorbs the M&3 tail. */
         const std::ptrdiff_t use_blocked = (N >= 2 * nb);
 #ifdef _OPENMP
-        const std::ptrdiff_t use_omp = (M >= MTRMM_OMP_MIN && blas_omp_available());
+        const bool use_omp = (M >= MTRMM_OMP_MIN && blas_omp_available());
         #pragma omp parallel if(use_omp)
 #endif
         {

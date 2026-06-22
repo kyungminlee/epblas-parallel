@@ -47,7 +47,7 @@ static void mswap_core(std::ptrdiff_t n,
 
 #ifdef _OPENMP
     /* Memory-bandwidth bound (2 reads + 2 writes); disjoint contiguous slices. */
-    if (n > MSWAP_OMP_MIN && blas_omp_available() && !omp_in_parallel()) {
+    if (n > MSWAP_OMP_MIN && blas_omp_should_thread()) {
         std::ptrdiff_t nthreads = blas_omp_max_threads();
         #pragma omp parallel num_threads(nthreads)
         {

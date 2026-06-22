@@ -125,7 +125,7 @@ static T mnrm2_ssq_unit(std::ptrdiff_t n, const T *x, T scale)
  * threshold or already inside a parallel region. */
 __attribute__((noinline)) static bool mnrm2_omp(std::ptrdiff_t n, const T *x, T *out)
 {
-    if (n <= MNRM2_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= MNRM2_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MNRM2_MAX_CPUS) nthreads = MNRM2_MAX_CPUS;

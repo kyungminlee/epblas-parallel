@@ -94,7 +94,7 @@ static void mger_core(
     const std::ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
     const std::ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= MGER_OMP_MIN && blas_omp_available());
+    const bool use_omp = (N >= MGER_OMP_MIN && blas_omp_available());
 #endif
 
 #ifdef MBLAS_SIMD_DD

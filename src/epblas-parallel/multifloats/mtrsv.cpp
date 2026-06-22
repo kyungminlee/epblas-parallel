@@ -358,7 +358,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
 __attribute__((noinline)) static bool mtrsv_omp(
     char UPLO, char TR, bool nounit, std::ptrdiff_t N, const T *a, std::ptrdiff_t lda, T *x)
 {
-    if (N < MTRSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (N < MTRSV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTRSV_MAX_CPUS) nthreads = MTRSV_MAX_CPUS;

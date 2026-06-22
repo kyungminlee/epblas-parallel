@@ -56,7 +56,7 @@ void wtrmm_zero_B(std::ptrdiff_t M, std::ptrdiff_t N, wtrmm_T *b, std::ptrdiff_t
  * to the serial sweep. */
 void wtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, std::ptrdiff_t nb, wtrmm_T alpha,
-                   const wtrmm_T *a, std::ptrdiff_t lda, wtrmm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
+                   const wtrmm_T *a, std::ptrdiff_t lda, wtrmm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* One row slice [row_lo, row_hi) of a SIDE='R' multiply. UPLO/TR select the
  * variant; use_blocked picks the blocked path (wgemm_serial trailing update +
@@ -64,7 +64,7 @@ void wtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
  * Each slice owns a disjoint row range → race-free. */
 void wtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t row_lo, std::ptrdiff_t row_hi, std::ptrdiff_t N, std::ptrdiff_t nb, wtrmm_T alpha,
-                   const wtrmm_T *a, std::ptrdiff_t lda, wtrmm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
+                   const wtrmm_T *a, std::ptrdiff_t lda, wtrmm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wtrmm_. */
 extern "C" void wtrmm_serial(

@@ -151,7 +151,7 @@ __attribute__((noinline)) static bool msbmv_omp(
     bool upper, std::ptrdiff_t n, std::ptrdiff_t k, const T *a, std::size_t lda,
     const T *x, std::ptrdiff_t incx, T alpha, T *y, std::ptrdiff_t incy)
 {
-    if (n < MSBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n < MSBMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MSBMV_MAX_CPUS) nthreads = MSBMV_MAX_CPUS;

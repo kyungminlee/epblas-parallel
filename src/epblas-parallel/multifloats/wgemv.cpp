@@ -128,7 +128,7 @@ static void wgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
         y_rh[i] = 0.0; y_rl[i] = 0.0; y_ih[i] = 0.0; y_il[i] = 0.0;
     }
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (M >= WGEMV_OMP_MIN && blas_omp_available());
+    const bool use_omp = (M >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel if(use_omp)
     {
         std::ptrdiff_t tid = 0, nt = 1;
@@ -152,7 +152,7 @@ static void wgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
     std::free(y_rh); std::free(y_rl); std::free(y_ih); std::free(y_il);
 #else
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (M >= WGEMV_OMP_MIN && blas_omp_available());
+    const bool use_omp = (M >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel if(use_omp)
     {
         std::ptrdiff_t tid = 0, nt = 1;
@@ -185,7 +185,7 @@ static void wgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
  * length M and y length N (beta already applied). conj_a selects C (conjugate A)
  * vs T. SIMD-serial when MBLAS_SIMD_DD; scalar fallback threads over output cols. */
 static void wgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T *a, std::size_t lda,
-                           const T *x, T *y, std::ptrdiff_t conj_a)
+                           const T *x, T *y, bool conj_a)
 {
 #ifdef MBLAS_SIMD_DD
     /* Pre-pack x to SoA; 4-lane cmul/cadd accumulator over i for each j;
@@ -205,7 +205,7 @@ static void wgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
     const __m256d zerov = _mm256_setzero_pd();
     /* Each output column j is independent (reads shared x SoA, writes y[j]). */
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= WGEMV_OMP_MIN && blas_omp_available());
+    const bool use_omp = (N >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (std::ptrdiff_t j = 0; j < N; ++j) {
@@ -259,7 +259,7 @@ static void wgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
     std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
 #else
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= WGEMV_OMP_MIN && blas_omp_available());
+    const bool use_omp = (N >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (std::ptrdiff_t j = 0; j < N; ++j) {
@@ -294,7 +294,7 @@ static void wgemv_core(
     mf_kernels::cscale_y(leny, beta, y, incy);
     if (ceq0(alpha)) return;
 
-    const std::ptrdiff_t conj_a = (TR == 'C');
+    const bool conj_a = (TR == 'C');
 
     if (TR == 'N') {
         if (incx == 1 && incy == 1) {

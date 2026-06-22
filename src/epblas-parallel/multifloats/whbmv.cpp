@@ -87,7 +87,7 @@ __attribute__((noinline)) static bool whbmv_omp(
     bool upper, std::ptrdiff_t N, std::ptrdiff_t K, const T *a, std::size_t lda, const T *x, T alpha, T *y)
 {
     std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads <= 1 || omp_in_parallel()) return false;
+    if (!blas_omp_should_thread()) return false;
     if (nthreads > WHBMV_MAX_CPUS) nthreads = WHBMV_MAX_CPUS;
 
     std::ptrdiff_t range[WHBMV_MAX_CPUS + 1];

@@ -153,7 +153,7 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
 #define IMAMAX_MAX_CPUS 64
 __attribute__((noinline)) static std::ptrdiff_t imamax_omp(std::ptrdiff_t n, const T *x, std::ptrdiff_t *out)
 {
-    if (n <= IMAMAX_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= IMAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > IMAMAX_MAX_CPUS) nthreads = IMAMAX_MAX_CPUS;

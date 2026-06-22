@@ -315,7 +315,7 @@ static void wtrsv_serial(char UPLO, char TR, bool nounit,
 __attribute__((noinline)) static bool wtrsv_omp(
     char UPLO, char TR, bool nounit, std::ptrdiff_t N, const T *a, std::ptrdiff_t lda, T *x)
 {
-    if (N < WTRSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (N < WTRSV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WTRSV_MAX_CPUS) nthreads = WTRSV_MAX_CPUS;

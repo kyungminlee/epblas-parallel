@@ -54,14 +54,14 @@ void wtrsm_zero_B(std::ptrdiff_t M, std::ptrdiff_t N, wtrsm_T *b, std::ptrdiff_t
  * the serial sweep. */
 void wtrsm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
                    std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, std::ptrdiff_t nb, wtrsm_T alpha,
-                   const wtrsm_T *a, std::ptrdiff_t lda, wtrsm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
+                   const wtrsm_T *a, std::ptrdiff_t lda, wtrsm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* One row slice [row_lo, row_hi) of a SIDE='R' solve (SIMD 4-row chunks +
  * scalar tail). TR ∈ {'N','T','C'}. Each slice owns a disjoint row range →
  * race-free. */
 void wtrsm_R_slice(char UPLO, char TR, std::ptrdiff_t row_lo, std::ptrdiff_t row_hi,
                    std::ptrdiff_t N, wtrsm_T alpha,
-                   const wtrsm_T *a, std::ptrdiff_t lda, wtrsm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
+                   const wtrsm_T *a, std::ptrdiff_t lda, wtrsm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wtrsm_. */
 extern "C" void wtrsm_serial(

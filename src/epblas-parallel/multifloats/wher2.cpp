@@ -89,7 +89,7 @@ static void wher2_core(
     }
 
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= WHER2_OMP_MIN && blas_omp_available());
+    const bool use_omp = (N >= WHER2_OMP_MIN && blas_omp_available());
 #endif
     if (UPLO == 'L') {
 #ifdef _OPENMP

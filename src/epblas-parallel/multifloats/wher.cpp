@@ -41,7 +41,7 @@ using mf_kernels::rcmul;
 static void wher_contig(char UPLO, std::ptrdiff_t N, R alpha, T *a, std::size_t lda, const T *x)
 {
 #ifdef _OPENMP
-    const std::ptrdiff_t use_omp = (N >= WHER_OMP_MIN && blas_omp_available());
+    const bool use_omp = (N >= WHER_OMP_MIN && blas_omp_available());
     /* static,1: cyclic interleave balances the triangular column skew; mirrors
      * the yher twin. */
     #pragma omp parallel for if(use_omp) schedule(static, 1)

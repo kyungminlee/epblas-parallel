@@ -468,7 +468,7 @@ __attribute__((noinline)) static bool mtbmv_omp(
     bool upper, bool trans, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
     const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
 {
-    if (n < MTBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n < MTBMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTBMV_MAX_CPUS) nthreads = MTBMV_MAX_CPUS;
@@ -545,7 +545,7 @@ static void mtbmv_core(
     const char UPLO = up(&uplo);
     char TR = up(&trans);
     if (TR == 'C') TR = 'T';
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 

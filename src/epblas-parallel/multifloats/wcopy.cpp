@@ -31,7 +31,7 @@ static void wcopy_core(std::ptrdiff_t n,
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if (n > WCOPY_OMP_MIN && n <= WCOPY_OMP_MAX &&
-            blas_omp_available() && !omp_in_parallel()) {
+            blas_omp_should_thread()) {
             std::ptrdiff_t nthreads = blas_omp_max_threads();
             #pragma omp parallel num_threads(nthreads)
             {

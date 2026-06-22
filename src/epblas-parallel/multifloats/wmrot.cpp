@@ -86,7 +86,7 @@ static void wmrot_unit(std::ptrdiff_t n, const R c, const R s, T *x, T *y)
 #define WMROT_OMP_MIN 2048
 __attribute__((noinline)) static std::ptrdiff_t wmrot_omp(std::ptrdiff_t n, R c, R s, T *x, T *y)
 {
-    if (n <= WMROT_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (n <= WMROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)

@@ -48,7 +48,7 @@ inline std::size_t cbU(std::ptrdiff_t j) {
  * (mf_kernels::dot, vector accumulate + hreduce -> within tolerance). The diagonal
  * divide and cross-column recurrence stay scalar/exact. The strided entry
  * gathers into contiguous scratch and reuses this. */
-static void mtpsv_serial_contig(char UPLO, char TR, std::ptrdiff_t nounit,
+static void mtpsv_serial_contig(char UPLO, char TR, bool nounit,
                                 std::ptrdiff_t n, const T *ap, T *x)
 {
     if (TR == 'N') {
@@ -90,7 +90,7 @@ static void mtpsv_serial_contig(char UPLO, char TR, std::ptrdiff_t nounit,
 
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
  * incx!=1 fallback. TR is already normalized ('C' folded to 'T' by the caller). */
-static void mtpsv_serial(char UPLO, char TR, std::ptrdiff_t nounit,
+static void mtpsv_serial(char UPLO, char TR, bool nounit,
                          std::ptrdiff_t N, const T *ap, T *x, std::ptrdiff_t incx)
 {
     if (incx == 1) {
@@ -199,7 +199,7 @@ static void mtpsv_serial(char UPLO, char TR, std::ptrdiff_t nounit,
 /* Solve a single diagonal block [j0,j1) in packed storage (scalar, within-block
  * coupling only). Used by the threaded path; need only match serial within DD
  * fuzz tol (the threaded result is regrouped anyway). */
-static void mtpsv_block(char UPLO, char TR, std::ptrdiff_t nounit,
+static void mtpsv_block(char UPLO, char TR, bool nounit,
                         std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, const T *ap, T *x)
 {
     const bool lower = (UPLO == 'L');
@@ -243,9 +243,9 @@ static void mtpsv_block(char UPLO, char TR, std::ptrdiff_t nounit,
  * off-diagonal coupling is threaded over disjoint output rows. Returns true if
  * it handled the call. */
 __attribute__((noinline)) static bool mtpsv_omp(
-    char UPLO, char TR, std::ptrdiff_t nounit, std::ptrdiff_t N, const T *ap, T *x)
+    char UPLO, char TR, bool nounit, std::ptrdiff_t N, const T *ap, T *x)
 {
-    if (N < MTPSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
+    if (N < MTPSV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTPSV_MAX_CPUS) nthreads = MTPSV_MAX_CPUS;
@@ -345,7 +345,7 @@ static void mtpsv_core(
     const char UPLO = up(&uplo);
     char TR = up(&trans);
     if (TR == 'C') TR = 'T';
-    const std::ptrdiff_t nounit = (up(&diag) != 'U');
+    const bool nounit = (up(&diag) != 'U');
 
     if (N == 0) return;
 
