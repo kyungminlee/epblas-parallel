@@ -21,7 +21,7 @@ typedef long double T;
 
 static void esyr_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict x, ptrdiff_t incx,
     T *restrict a, ptrdiff_t lda)
@@ -30,22 +30,22 @@ static void esyr_core(
     const T zero = 0.0L;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == zero) return;
+    if (n == 0 || alpha == zero) return;
 
     if (incx == 1) {
-        const bool use_omp = (N >= ESYR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (n >= ESYR_OMP_MIN && blas_omp_max_threads() > 1);
         /* Branch on use_omp at C source level — `#pragma omp parallel for
          * if(use_omp)` outlines unconditionally; at OMP=1 the GOMP_parallel
          * + omp_get_* overhead is a visible fraction of the per-call cost
          * for this small kernel. See Addendum 16. */
 #define ESYR_BODY                                                            \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < n; ++j) {                                        \
             const T xj = x[j];                                               \
             if (xj != zero) {                                                \
                 const T t = alpha * xj;                                      \
                 T *aj = &A_(0, j);                                           \
                 if (UPLO == 'L') {                                           \
-                    for (ptrdiff_t i = j; i < N; ++i) aj[i] += t * x[i];           \
+                    for (ptrdiff_t i = j; i < n; ++i) aj[i] += t * x[i];           \
                 } else {                                                     \
                     for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += t * x[i];          \
                 }                                                            \
@@ -66,16 +66,16 @@ static void esyr_core(
     } else {
         /* General-stride fallback — hoist the matrix column to aj[i] and
          * walk the strided vector with a running index (Class-B fix). */
-        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t jx = kx;
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const T xj = x[jx];
             if (xj != zero) {
                 const T t = alpha * xj;
                 T *aj = &A_(0, j);
                 if (UPLO == 'L') {
                     ptrdiff_t ix = jx;
-                    for (ptrdiff_t i = j; i < N; ++i) { aj[i] += t * x[ix]; ix += incx; }
+                    for (ptrdiff_t i = j; i < n; ++i) { aj[i] += t * x[ix]; ix += incx; }
                 } else {
                     ptrdiff_t ix = kx;
                     for (ptrdiff_t i = 0; i <= j; ++i) { aj[i] += t * x[ix]; ix += incx; }

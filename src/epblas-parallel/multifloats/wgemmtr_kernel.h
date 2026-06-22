@@ -34,14 +34,14 @@ std::ptrdiff_t wgemmtr_block_nb(void);
 
 /* Beta-only pass over columns [j0,j1): scales (or zeros) the UPLO triangle of
  * each column by beta. The body of the alpha==0 / K==0 early-exit loop. */
-void wgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, bool upper,
+void wgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, bool upper,
                        wgemmtr_T beta, wgemmtr_T *c, std::ptrdiff_t ldc);
 
 /* One jc-block of the full update: beta-scale the triangle slice for columns
  * [jc, jc+jb), add the scalar jb×jb diagonal triangle, then route the off-
  * diagonal rectangle through wgemm_serial. Each jc-block is column-disjoint →
  * race-free. ta/tb are kept distinct (N/T/C) for the complex case. */
-void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K,
+void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k,
                         wgemmtr_T alpha, wgemmtr_T beta,
                         const wgemmtr_T *a, std::ptrdiff_t lda,
                         const wgemmtr_T *b, std::ptrdiff_t ldb,
@@ -51,7 +51,7 @@ void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wgemmtr_. */
 extern "C" void wgemmtr_serial(
     char uplo, char transa, char transb,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const wgemmtr_T *alpha_,
     const wgemmtr_T *a, std::ptrdiff_t lda,
     const wgemmtr_T *b, std::ptrdiff_t ldb,

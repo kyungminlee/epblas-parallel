@@ -40,10 +40,10 @@ ptrdiff_t egemm_round_up(ptrdiff_t v, ptrdiff_t m);
 
 /* Cache-block sizes (env-overridable EBLAS_MC/KC/NC) with OpenBLAS-style
  * adaptive MC when K fits one panel. */
-void egemm_choose_blocks(ptrdiff_t K, ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
+void egemm_choose_blocks(ptrdiff_t k, ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
 
 /* C := beta*C pre-pass over the full M×N tile (handles K==0 / alpha==0). */
-void egemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, egemm_T beta, egemm_T *c, ptrdiff_t ldc);
+void egemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, egemm_T beta, egemm_T *c, ptrdiff_t ldc);
 
 /* Packers (panel-packed, OpenBLAS-style). */
 void egemm_pack_A(const egemm_T *restrict A, ptrdiff_t lda,
@@ -59,7 +59,7 @@ void egemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemm_T alpha,
                         egemm_T *restrict C, ptrdiff_t ldc);
 
 /* Fast path TA='T',TB='N': one C-column j2 (stride-1 dot, no packing). */
-void egemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, egemm_T alpha,
+void egemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, egemm_T alpha,
                     const egemm_T *a, ptrdiff_t lda, const egemm_T *b, ptrdiff_t ldb,
                     egemm_T *c, ptrdiff_t ldc);
 
@@ -78,15 +78,15 @@ void egemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, egemm_T alpha,
  * lost ~25% to the always-blocked ob reference (par1 243k vs ob1 191k ns).
  * Gating on min(M,N) and total work routes that cube to the blocked path.
  * Everything genuinely skinny/tiny still takes fast_col. */
-static inline ptrdiff_t egemm_tn_use_fast(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K) {
-    const ptrdiff_t mn = (M < N) ? M : N;   /* skinny (min) dimension */
-    return mn <= 8 || (long)M * (long)N * (long)K <= 32L * 32L * 32L;
+static inline ptrdiff_t egemm_tn_use_fast(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k) {
+    const ptrdiff_t mn = (m < n) ? m : n;   /* skinny (min) dimension */
+    return mn <= 8 || (long)m * (long)n * (long)k <= 32L * 32L * 32L;
 }
 
 /* Pure single-thread GEMM (by-value core). Same math as egemm_ — no OpenMP. */
 void egemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const egemm_T *alpha_,
     const egemm_T *a, ptrdiff_t lda,
     const egemm_T *b, ptrdiff_t ldb,

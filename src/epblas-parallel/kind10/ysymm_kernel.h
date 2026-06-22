@@ -35,12 +35,12 @@ ptrdiff_t ysymm_nb(void);
 
 /* alpha==0 quick path: C := beta*C over columns [j_start, j_end), rows
  * [0, M). */
-void ysymm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ysymm_T beta,
+void ysymm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ysymm_T beta,
                      ysymm_T *c, ptrdiff_t ldc);
 
 /* SIDE='L', M <= nb single-block fast path, one column range [j_start,
  * j_end): inlined scalar ZSYMM with beta folded into the diagonal write. */
-void ysymm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
+void ysymm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m,
                          ysymm_T alpha, ysymm_T beta,
                          const ysymm_T *a, ptrdiff_t lda,
                          const ysymm_T *b, ptrdiff_t ldb,
@@ -48,20 +48,20 @@ void ysymm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
 
 /* SIDE='L' general path, one column panel [jc, jc+jb): beta pre-scale +
  * I/K block loops (ygemm_serial trailing) + scalar diagonal block. */
-void ysymm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, ysymm_T alpha, ysymm_T beta,
+void ysymm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, ysymm_T alpha, ysymm_T beta,
                    const ysymm_T *a, ptrdiff_t lda, const ysymm_T *b, ptrdiff_t ldb,
                    ysymm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
 /* SIDE='R' general path, one row panel [ic, ic+ib): beta pre-scale +
  * J/K block loops (ygemm_serial trailing) + scalar diagonal block. */
-void ysymm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, ysymm_T alpha, ysymm_T beta,
+void ysymm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, ysymm_T alpha, ysymm_T beta,
                    const ysymm_T *a, ptrdiff_t lda, const ysymm_T *b, ptrdiff_t ldb,
                    ysymm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
 /* Pure-serial by-value core (no OpenMP). */
 void ysymm_serial(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const ysymm_T *alpha_,
     const ysymm_T *a, ptrdiff_t lda,
     const ysymm_T *b, ptrdiff_t ldb,

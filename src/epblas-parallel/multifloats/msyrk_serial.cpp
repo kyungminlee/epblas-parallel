@@ -99,7 +99,7 @@ inline void unpack_4col_triangle(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrd
 
 /* TR='N' rank-1 SIMD: for each l, broadcast A(i,l) and update
  * 4-wide C[i, j_panel..+4] using α·A(j_panel..+4, l). */
-inline void simd_syrk_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alpha,
+inline void simd_syrk_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                               const T *a, std::ptrdiff_t lda,
                               std::ptrdiff_t j_panel, std::ptrdiff_t j_count,
                               double *ch, double *cl)
@@ -112,7 +112,7 @@ inline void simd_syrk_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff
      * (we read A directly); use a temp load with explicit zero for tail. */
     alignas(32) double aj_buf_h[kSimdLane];
     alignas(32) double aj_buf_l[kSimdLane];
-    for (std::ptrdiff_t l = 0; l < K; ++l) {
+    for (std::ptrdiff_t l = 0; l < k; ++l) {
         for (std::ptrdiff_t j = 0; j < j_count; ++j) {
             aj_buf_h[j] = A_(j_panel + j, l).limbs[0];
             aj_buf_l[j] = A_(j_panel + j, l).limbs[1];
@@ -176,7 +176,7 @@ inline void simd_syrk_diag_tt_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::p
     }
 }
 
-inline void simd_syrk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alpha,
+inline void simd_syrk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                                   const T *a, std::ptrdiff_t lda,
                                   T *c, std::ptrdiff_t ldc,
                                   char UPLO, char TR)
@@ -195,7 +195,7 @@ inline void simd_syrk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
         pack_4col(jb, jc, c, ldc, j, jcount, ch, cl);
         if (TR == 'N') {
             /* TR='N' reads A directly per l — K-independent, no scratch cap. */
-            simd_syrk_diag_tn(jc, jb, K, alpha, a, lda, j, jcount, ch, cl);
+            simd_syrk_diag_tn(jc, jb, k, alpha, a, lda, j, jcount, ch, cl);
         } else {
             const __m256d zv = _mm256_setzero_pd();
             for (std::ptrdiff_t ir = 0; ir < jb; ++ir) {
@@ -203,8 +203,8 @@ inline void simd_syrk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
                 _mm256_store_pd(&acc_l[ir * kSimdLane], zv);
             }
             /* KC-tile over K so any K fits the bounded pre-pack scratch. */
-            for (std::ptrdiff_t l0 = 0; l0 < K; l0 += kMaxK) {
-                const std::ptrdiff_t kc = (K - l0 < kMaxK) ? (K - l0) : kMaxK;
+            for (std::ptrdiff_t l0 = 0; l0 < k; l0 += kMaxK) {
+                const std::ptrdiff_t kc = (k - l0 < kMaxK) ? (k - l0) : kMaxK;
                 for (std::ptrdiff_t jj = 0; jj < jcount; ++jj) {
                     const T *col = a + static_cast<std::size_t>(j + jj) * lda;
                     for (std::ptrdiff_t ll = 0; ll < kc; ++ll) {
@@ -243,7 +243,7 @@ inline void simd_syrk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
 
 #endif  /* MBLAS_SIMD_DD */
 
-void syrk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alpha,
+void syrk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                    const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc,
                    char UPLO, char TR)
 {
@@ -252,7 +252,7 @@ void syrk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alp
             const std::ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const std::ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
             T *cj = c + static_cast<std::size_t>(j) * ldc;
-            for (std::ptrdiff_t l = 0; l < K; ++l) {
+            for (std::ptrdiff_t l = 0; l < k; ++l) {
                 const T ajl = A_(j, l);
                 if (!eq0(ajl)) {
                     const T t = alpha * ajl;
@@ -269,24 +269,24 @@ void syrk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alp
             for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
                 const T *Ai = a + static_cast<std::size_t>(i) * lda;
                 T s = zero_dd;
-                for (std::ptrdiff_t l = 0; l < K; ++l) s = s + Ai[l] * Aj[l];
+                for (std::ptrdiff_t l = 0; l < k; ++l) s = s + Ai[l] * Aj[l];
                 cj[i] = cj[i] + alpha * s;
             }
         }
     }
 }
 
-inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alpha,
+inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                           const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc,
                           char UPLO, char TR)
 {
 #ifdef MBLAS_SIMD_DD
     if (jb <= kMaxBlockM) {
-        simd_syrk_diag_panels(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR);
+        simd_syrk_diag_panels(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR);
         return;
     }
 #endif
-    syrk_diag_add(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR);
+    syrk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR);
 }
 
 } /* anonymous namespace */
@@ -297,38 +297,38 @@ std::ptrdiff_t msyrk_block_nb(void) {
     return nb;
 }
 
-void msyrk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, T beta, T *c, std::ptrdiff_t ldc) {
+void msyrk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, T beta, T *c, std::ptrdiff_t ldc) {
     const std::ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-    const std::ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+    const std::ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
     T *cj = c + static_cast<std::size_t>(j) * ldc;
     if (eq0(beta)) for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
     else                 for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
 }
 
-void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR,
+void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR,
                  T alpha, T beta, const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc)
 {
     /* Beta-scale this block's own triangle columns. */
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const std::ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+        const std::ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
         T *cj = c + static_cast<std::size_t>(j) * ldc;
         if (eq0(beta))      for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = zero_dd;
         else if (!eq1(beta)) for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = cj[i] * beta;
     }
 
-    diag_dispatch(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR);
+    diag_dispatch(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR);
 
     if (UPLO == 'L') {
-        const std::ptrdiff_t trailing = N - jc - jb;
+        const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
             if (TR == 'N') {
-                mgemm_serial('N', 'T', trailing, jb, K, &alpha,
+                mgemm_serial('N', 'T', trailing, jb, k, &alpha,
                              &A_(j0, 0), lda, &A_(jc, 0), lda,
                              &one_dd, &C_(j0, jc), ldc);
             } else {
-                mgemm_serial('T', 'N', trailing, jb, K, &alpha,
+                mgemm_serial('T', 'N', trailing, jb, k, &alpha,
                              &A_(0, j0), lda, &A_(0, jc), lda,
                              &one_dd, &C_(j0, jc), ldc);
             }
@@ -336,11 +336,11 @@ void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
     } else {
         if (jc > 0) {
             if (TR == 'N') {
-                mgemm_serial('N', 'T', jc, jb, K, &alpha,
+                mgemm_serial('N', 'T', jc, jb, k, &alpha,
                              &A_(0, 0), lda, &A_(jc, 0), lda,
                              &one_dd, &C_(0, jc), ldc);
             } else {
-                mgemm_serial('T', 'N', jc, jb, K, &alpha,
+                mgemm_serial('T', 'N', jc, jb, k, &alpha,
                              &A_(0, 0), lda, &A_(0, jc), lda,
                              &one_dd, &C_(0, jc), ldc);
             }
@@ -350,7 +350,7 @@ void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
 
 extern "C" void msyrk_serial(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *beta_,
@@ -361,18 +361,18 @@ extern "C" void msyrk_serial(
     char TR = up(&trans);
     if (TR == 'C') TR = 'T';
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (eq0(alpha) || K == 0) {
+    if (eq0(alpha) || k == 0) {
         if (eq1(beta)) return;
-        for (std::ptrdiff_t j = 0; j < N; ++j) msyrk_scale_col(j, N, UPLO, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < n; ++j) msyrk_scale_col(j, n, UPLO, beta, c, ldc);
         return;
     }
 
     const std::ptrdiff_t nb = msyrk_block_nb();
-    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        msyrk_block(jc, jb, N, K, UPLO, TR, alpha, beta, a, lda, c, ldc);
+    for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        msyrk_block(jc, jb, n, k, UPLO, TR, alpha, beta, a, lda, c, ldc);
     }
 }
 

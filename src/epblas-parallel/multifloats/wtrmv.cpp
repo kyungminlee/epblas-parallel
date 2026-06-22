@@ -261,7 +261,7 @@ static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
 
 static void wtrmv_core(
     char uplo, char trans, char diag,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const T *a, std::ptrdiff_t lda,
     T *x, std::ptrdiff_t incx)
 {
@@ -270,45 +270,45 @@ static void wtrmv_core(
     const char DIAG = up(&diag);
     const bool nounit = (DIAG != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
-    if (N >= WTRMV_OMP_MIN && blas_omp_available()
-        && wtrmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, N, a, lda, x, incx))
+    if (n >= WTRMV_OMP_MIN && blas_omp_available()
+        && wtrmv_omp(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, N, a, lda, x);
+        wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, a, lda, x);
         return;
     }
 
     /* Strided: gather x to contiguous scratch, run the SIMD contiguous core,
      * scatter back. The in-place strided walk is the alloc-fail fallback. */
     {
-        const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
-        T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+        const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(n - 1) * incx : 0;
+        T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
         if (xs) {
-            for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
-            wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, N, a, lda, xs);
-            for (std::ptrdiff_t i = 0; i < N; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
+            for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
+            wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, n, a, lda, xs);
+            for (std::ptrdiff_t i = 0; i < n; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
             std::free(xs);
             return;
         }
     }
 
     {
-        std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                     const T temp = x[kx + j * incx];
                     if (!ceq0(temp))
-                        for (std::ptrdiff_t i = j + 1; i < N; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
+                        for (std::ptrdiff_t i = j + 1; i < n; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
                     if (nounit) x[kx + j * incx] = cmul(x[kx + j * incx], A_(j, j));
                 }
             } else {
-                for (std::ptrdiff_t j = 0; j < N; ++j) {
+                for (std::ptrdiff_t j = 0; j < n; ++j) {
                     const T temp = x[kx + j * incx];
                     if (!ceq0(temp))
                         for (std::ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
@@ -318,17 +318,17 @@ static void wtrmv_core(
         } else {
             const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
-                for (std::ptrdiff_t j = 0; j < N; ++j) {
+                for (std::ptrdiff_t j = 0; j < n; ++j) {
                     T temp = x[kx + j * incx];
                     if (nounit) temp = cmul(temp, conj_a ? cconj(A_(j, j)) : A_(j, j));
-                    for (std::ptrdiff_t i = j + 1; i < N; ++i) {
+                    for (std::ptrdiff_t i = j + 1; i < n; ++i) {
                         const T aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
                         temp = cadd(temp, cmul(aij, x[kx + i * incx]));
                     }
                     x[kx + j * incx] = temp;
                 }
             } else {
-                for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                     T temp = x[kx + j * incx];
                     if (nounit) temp = cmul(temp, conj_a ? cconj(A_(j, j)) : A_(j, j));
                     for (std::ptrdiff_t i = 0; i < j; ++i) {

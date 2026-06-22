@@ -180,12 +180,10 @@ void mtbsv_strided(bool upper, std::ptrdiff_t trans_, bool nounit,
 
 static void mtbsv_core(
     char uplo, char trans, char diag,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *a, std::ptrdiff_t lda,
     T *x, std::ptrdiff_t incx)
 {
-    const std::ptrdiff_t n    = N;
-    const std::ptrdiff_t k    = K;
 
     if (n == 0) return;
 

@@ -538,7 +538,7 @@ __attribute__((noinline)) static bool mtbmv_omp(
 
 static void mtbmv_core(
     char uplo, char trans, char diag,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *a, std::ptrdiff_t lda,
     T *x, std::ptrdiff_t incx)
 {
@@ -547,30 +547,30 @@ static void mtbmv_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (up(&diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
-    if (N >= MTBMV_OMP_MIN && blas_omp_available()
-        && mtbmv_omp(UPLO == 'U', TR != 'N', nounit != 0, N, K, a, lda, x, incx))
+    if (n >= MTBMV_OMP_MIN && blas_omp_available()
+        && mtbmv_omp(UPLO == 'U', TR != 'N', nounit != 0, n, k, a, lda, x, incx))
         return;
 #endif
 
     T *xp = x;
-    if (incx < 0) xp -= (std::ptrdiff_t)(N - 1) * incx;   /* x at logical 0 */
+    if (incx < 0) xp -= (std::ptrdiff_t)(n - 1) * incx;   /* x at logical 0 */
 
 #ifdef MBLAS_SIMD_DD
     /* 4-wide SoA — NoTrans axpy-per-column, Trans row-gather. A strided x is
      * gathered into the SoA limb arrays and scattered back (xp is at logical 0). */
     if (TR == 'N'
-        && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp, incx))
+        && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, xp, incx))
         return;
     if (TR == 'T'
-        && mtbmv_trans_soa(UPLO == 'U', nounit != 0, N, K, a, lda, xp, incx))
+        && mtbmv_trans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, xp, incx))
         return;
 #endif
 
     mtbmv_serial(UPLO == 'U', TR != 'N', nounit != 0,
-                 N, K, a, lda, xp, incx);
+                 n, k, a, lda, xp, incx);
 }
 
 extern "C" {

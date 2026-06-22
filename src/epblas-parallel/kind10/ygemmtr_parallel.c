@@ -29,7 +29,7 @@ typedef ygemmtr_T T;
 #define YGEMMTR_OMP_MIN 32
 
 static void ygemmtr_core(char uplo, char transa, char transb,
-              ptrdiff_t N, ptrdiff_t K,
+              ptrdiff_t n, ptrdiff_t k,
               const T *alpha_,
               const T *a, ptrdiff_t lda,
               const T *b, ptrdiff_t ldb,
@@ -40,7 +40,7 @@ static void ygemmtr_core(char uplo, char transa, char transb,
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        ygemmtr_serial(uplo, transa, transb, N, K, alpha_, a, lda, b, ldb, beta_, c, ldc);
+        ygemmtr_serial(uplo, transa, transb, n, k, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
@@ -49,7 +49,7 @@ static void ygemmtr_core(char uplo, char transa, char transb,
     const char ta = blas_up(transa);
     const char tb = blas_up(transb);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
     const T zero = 0.0L + 0.0iL;
     const T one  = 1.0L + 0.0iL;
 
@@ -58,23 +58,23 @@ static void ygemmtr_core(char uplo, char transa, char transb,
     const bool trans_a = (ta != 'N');
     const bool trans_b = (tb != 'N');
 
-    if (alpha == zero || K == 0) {
+    if (alpha == zero || k == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const bool use_omp0 = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp0 = (n >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j)
-            ygemmtr_beta_scale(j, j + 1, N, upper, beta, c, ldc);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            ygemmtr_beta_scale(j, j + 1, n, upper, beta, c, ldc);
         return;
     }
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (n >= YGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-    for (ptrdiff_t j = 0; j < N; ++j)
-        ygemmtr_col(j, N, K, upper, alpha, beta, a, lda, b, ldb, c, ldc,
+    for (ptrdiff_t j = 0; j < n; ++j)
+        ygemmtr_col(j, n, k, upper, alpha, beta, a, lda, b, ldb, c, ldc,
                     trans_a, conj_a, trans_b, conj_b);
 }
 

@@ -43,7 +43,7 @@ typedef egemm_T T;
 
 static void egemm_core(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -56,7 +56,7 @@ static void egemm_core(
      * the wedge; it is also slightly faster (no per-call team setup) and
      * hardens egemm against oversubscription if OMP_NESTED is ever set. */
     if (omp_in_parallel()) {
-        egemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+        egemm_serial(transa, transb, m, n, k, alpha_, a, lda,
                      b, ldb, beta_, c, ldc);
         return;
     }
@@ -66,27 +66,27 @@ static void egemm_core(
     const char ta = egemm_trans_code(transa);
     const char tb = egemm_trans_code(transb);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
-    egemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
-    if (alpha == 0.0L || K == 0) return;
+    egemm_beta_prepass(m, n, beta, c, ldc);   /* handles K==0 / alpha==0 */
+    if (alpha == 0.0L || k == 0) return;
 
     /* Fast path: TA='T' (≡'C'), TB='N'. Stride-1 dot, no packing — but only
      * for skinny problems (see egemm_tn_use_fast). For non-trivial K the
      * blocked packed path below is faster per FLOP (the single fp80 dot
      * accumulator in fast_col serializes the fadd latency the blocked
      * kernel's 4 chains hide) and threads over M just as well. */
-    if (ta == 'T' && tb == 'N' && egemm_tn_use_fast(M, N, K)) {
+    if (ta == 'T' && tb == 'N' && egemm_tn_use_fast(m, n, k)) {
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static)
 #endif
-        for (ptrdiff_t j2 = 0; j2 < N; ++j2)
-            egemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
+        for (ptrdiff_t j2 = 0; j2 < n; ++j2)
+            egemm_fast_col(j2, m, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
     ptrdiff_t MC, KC, NC;
-    egemm_choose_blocks(K, &MC, &KC, &NC);
+    egemm_choose_blocks(k, &MC, &KC, &NC);
 #ifdef _OPENMP
     /* This entry partitions the ic loop across the team via `omp for`, so the
      * number of ic-blocks (ceil(M/MC)) must be >= the team size or threads
@@ -98,7 +98,7 @@ static void egemm_core(
      * other axes) is untouched. Only shrinks MC; stays a multiple of MR. */
     const ptrdiff_t nthr = omp_get_max_threads();
     if (nthr > 1) {
-        ptrdiff_t cap = egemm_round_up((M + nthr - 1) / nthr, MR);
+        ptrdiff_t cap = egemm_round_up((m + nthr - 1) / nthr, MR);
         if (cap < MR) cap = MR;
         if (MC > cap) MC = cap;
     }
@@ -124,10 +124,10 @@ static void egemm_core(
     {
         T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (Ap) {
-            for (ptrdiff_t jc = 0; jc < N; jc += NC) {
-                const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-                for (ptrdiff_t pc = 0; pc < K; pc += KC) {
-                    const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+            for (ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
 #ifdef _OPENMP
                     #pragma omp single
 #endif
@@ -137,8 +137,8 @@ static void egemm_core(
 #ifdef _OPENMP
                     #pragma omp for schedule(static)
 #endif
-                    for (ptrdiff_t ic = 0; ic < M; ic += MC) {
-                        const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (ptrdiff_t ic = 0; ic < m; ic += MC) {
+                        const ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                         egemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         egemm_macro_kernel(ib, jb, pb, alpha, Ap, Bp,
                                            &c[(size_t)jc * ldc + ic], ldc);

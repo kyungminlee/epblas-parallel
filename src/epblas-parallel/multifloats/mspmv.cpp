@@ -183,7 +183,7 @@ __attribute__((noinline)) static bool mspmv_omp(
 
 static void mspmv_core(
     char uplo,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const T *alpha_,
     const T *ap,
     const T *x, std::ptrdiff_t incx,
@@ -193,19 +193,19 @@ static void mspmv_core(
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
 
-    if (N == 0 || (eq0(alpha) && eq1(beta))) return;
+    if (n == 0 || (eq0(alpha) && eq1(beta))) return;
 
-    mf_kernels::scale_y(N, beta, y, incy);
+    mf_kernels::scale_y(n, beta, y, incy);
     if (eq0(alpha)) return;
 
 #ifdef _OPENMP
-    if (N >= MSPMV_OMP_MIN && blas_omp_available()
-        && mspmv_omp(UPLO == 'U', N, ap, x, incx, alpha, y, incy))
+    if (n >= MSPMV_OMP_MIN && blas_omp_available()
+        && mspmv_omp(UPLO == 'U', n, ap, x, incx, alpha, y, incy))
         return;
 #endif
 
     if (incx == 1 && incy == 1) {
-        mspmv_contig(UPLO == 'U', N, ap, x, alpha, y);
+        mspmv_contig(UPLO == 'U', n, ap, x, alpha, y);
         return;
     }
 
@@ -213,13 +213,13 @@ static void mspmv_core(
      * SIMD contiguous core (y += alpha*A*x), scatter y back. O(N) gather/scatter
      * vs O(N*N) packed work; the in-place strided walk is the alloc-fail fallback. */
     {
-        T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
-        T *ys = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+        T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        T *ys = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
         if (xs && ys) {
-            mf_kernels::gather_strided(N, x, incx, xs);
-            mf_kernels::gather_strided(N, y, incy, ys);
-            mspmv_contig(UPLO == 'U', N, ap, xs, alpha, ys);
-            mf_kernels::scatter_strided(N, y, incy, ys);
+            mf_kernels::gather_strided(n, x, incx, xs);
+            mf_kernels::gather_strided(n, y, incy, ys);
+            mspmv_contig(UPLO == 'U', n, ap, xs, alpha, ys);
+            mf_kernels::scatter_strided(n, y, incy, ys);
             std::free(xs); std::free(ys);
             return;
         }
@@ -228,11 +228,11 @@ static void mspmv_core(
 
     {
         std::ptrdiff_t kk = 0;
-        std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        std::ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        std::ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         if (UPLO == 'U') {
             std::ptrdiff_t jx = kx, jy = ky;
-            for (std::ptrdiff_t j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero_dd;
                 std::ptrdiff_t ix = kx, iy = ky;
@@ -247,19 +247,19 @@ static void mspmv_core(
             }
         } else {
             std::ptrdiff_t jx = kx, jy = ky;
-            for (std::ptrdiff_t j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero_dd;
                 y[jy] = y[jy] + t1 * ap[kk];
                 std::ptrdiff_t ix = jx, iy = jy;
-                for (std::ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
+                for (std::ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                     ix += incx; iy += incy;
                     y[iy] = y[iy] + t1 * ap[k];
                     t2 = t2 + ap[k] * x[ix];
                 }
                 y[jy] = y[jy] + alpha * t2;
                 jx += incx; jy += incy;
-                kk += N - j;
+                kk += n - j;
             }
         }
     }

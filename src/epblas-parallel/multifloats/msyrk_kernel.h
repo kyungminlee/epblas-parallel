@@ -46,21 +46,21 @@ std::ptrdiff_t msyrk_block_nb(void);
 
 /* Scale column j's UPLO triangle of C by beta (the alpha==0 / K==0 early
  * exit). Handles beta==0 (zero-fill) and beta!=1; the caller skips beta==1. */
-void msyrk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, msyrk_T beta,
+void msyrk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, msyrk_T beta,
                      msyrk_T *c, std::ptrdiff_t ldc);
 
 /* One diagonal block [jc, jc+jb) of the rank-k update: beta-scale the block's
  * own triangle columns, accumulate the diagonal block (SIMD or scalar), then
  * the trailing gemm (routed through mgemm_serial — no nested OpenMP). Each
  * block writes a disjoint column range of C → race-free across blocks. */
-void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR,
+void msyrk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR,
                  msyrk_T alpha, msyrk_T beta,
                  const msyrk_T *a, std::ptrdiff_t lda, msyrk_T *c, std::ptrdiff_t ldc);
 
 /* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void msyrk_serial(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const msyrk_T *alpha_,
     const msyrk_T *a, std::ptrdiff_t lda,
     const msyrk_T *beta_,

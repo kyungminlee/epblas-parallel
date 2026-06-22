@@ -42,21 +42,21 @@ ptrdiff_t xsyrk_nb(void);
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's columns, the
  * scalar symmetric rank-k diagonal add, and the trailing xgemm_serial
  * transpose update against the rest of the panel. */
-void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K,
+void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k,
                  xsyrk_T alpha, xsyrk_T beta,
                  const xsyrk_T *a, ptrdiff_t lda, xsyrk_T *c, ptrdiff_t ldc,
                  char UPLO, char TR);
 
 /* C := beta*C over the columns [j_start, j_end) — the alpha==0 / K==0 quick
  * path (and the per-block pre-scale). */
-void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, xsyrk_T beta,
+void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, xsyrk_T beta,
                       xsyrk_T *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial by-value entry (no OpenMP). Shares the ptrdiff_t core ABI so
  * callers already inside a parallel region can swap the symbol name only. */
 void xsyrk_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const xsyrk_T *alpha_,
     const xsyrk_T *a, ptrdiff_t lda,
     const xsyrk_T *beta_,

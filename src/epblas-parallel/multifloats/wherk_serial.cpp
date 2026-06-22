@@ -109,7 +109,7 @@ using simd_exact::vbcast;
 /* TR_c='N' rank-1 with Hermitian-conjugated Aj panel and real alpha.
  * t = alpha · conj(A(j_panel..+4, l));
  * C[i, j_panel..+4] += t · A(i, l). */
-inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR alpha,
+inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
                              const TC *a, std::ptrdiff_t lda,
                              std::ptrdiff_t j_panel, std::ptrdiff_t j_count,
                              double *crh, double *crl,
@@ -119,7 +119,7 @@ inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_
     const __m256d a_l = _mm256_set1_pd(alpha.limbs[1]);
     alignas(32) double aj_rh[kSimdLane], aj_rl[kSimdLane];
     alignas(32) double aj_ih[kSimdLane], aj_il[kSimdLane];
-    for (std::ptrdiff_t l = 0; l < K; ++l) {
+    for (std::ptrdiff_t l = 0; l < k; ++l) {
         for (std::ptrdiff_t j = 0; j < j_count; ++j) {
             const TC v = A_(j_panel + j, l);
             aj_rh[j] = v.re.limbs[0]; aj_rl[j] = v.re.limbs[1];
@@ -208,7 +208,7 @@ inline void simd_herk_diag_c_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
     }
 }
 
-inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR alpha,
+inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
                                   const TC *a, std::ptrdiff_t lda,
                                   TC *c, std::ptrdiff_t ldc,
                                   char UPLO, char TR_c)
@@ -233,7 +233,7 @@ inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
         pack_4col_cdd(jb, jc, c, ldc, j, jcount, crh, crl, cih, cil);
         if (TR_c == 'N') {
             /* TR_c='N' reads A directly per l — K-independent, no scratch cap. */
-            simd_herk_diag_n(jc, jb, K, alpha, a, lda, j, jcount,
+            simd_herk_diag_n(jc, jb, k, alpha, a, lda, j, jcount,
                              crh, crl, cih, cil);
         } else {
             const __m256d zv = _mm256_setzero_pd();
@@ -244,8 +244,8 @@ inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
                 _mm256_store_pd(&acc_il[ir * kSimdLane], zv);
             }
             /* KC-tile over K so any K fits the bounded pre-pack scratch. */
-            for (std::ptrdiff_t l0 = 0; l0 < K; l0 += kMaxK) {
-                const std::ptrdiff_t kc = (K - l0 < kMaxK) ? (K - l0) : kMaxK;
+            for (std::ptrdiff_t l0 = 0; l0 < k; l0 += kMaxK) {
+                const std::ptrdiff_t kc = (k - l0 < kMaxK) ? (k - l0) : kMaxK;
                 for (std::ptrdiff_t jj = 0; jj < jcount; ++jj) {
                     const TC *col = a + static_cast<std::size_t>(j + jj) * lda;
                     for (std::ptrdiff_t ll = 0; ll < kc; ++ll) {
@@ -297,7 +297,7 @@ inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
 
 #endif  /* MBLAS_SIMD_DD */
 
-void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR alpha,
+void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
                    const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc,
                    char UPLO, char TR_c)
 {
@@ -306,7 +306,7 @@ void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR al
             const std::ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const std::ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
             TC *cj = c + static_cast<std::size_t>(j) * ldc;
-            for (std::ptrdiff_t l = 0; l < K; ++l) {
+            for (std::ptrdiff_t l = 0; l < k; ++l) {
                 const TC ajl = A_(j, l);
                 if (!ceq0(ajl)) {
                     const TC t = rcmul(alpha, cconj(ajl));
@@ -327,7 +327,7 @@ void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR al
             for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
                 const TC *Ai = a + static_cast<std::size_t>(i) * lda;
                 TC s = czero;
-                for (std::ptrdiff_t l = 0; l < K; ++l) s = cadd(s, cmul(cconj(Ai[l]), Aj[l]));
+                for (std::ptrdiff_t l = 0; l < k; ++l) s = cadd(s, cmul(cconj(Ai[l]), Aj[l]));
                 TC as = rcmul(alpha, s);
                 if (i == j) cj[i] = TC{ cj[i].re + as.re, cj[i].im };
                 else        cj[i] = cadd(cj[i], as);
@@ -336,17 +336,17 @@ void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR al
     }
 }
 
-inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR alpha,
+inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
                           const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc,
                           char UPLO, char TR_c)
 {
 #ifdef MBLAS_SIMD_DD
     if (jb <= kMaxBlockM) {
-        simd_herk_diag_panels(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
+        simd_herk_diag_panels(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR_c);
         return;
     }
 #endif
-    herk_diag_add(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
+    herk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR_c);
 }
 
 } /* anonymous namespace */
@@ -361,9 +361,9 @@ void wherk_zero_diag_im(std::ptrdiff_t j, TC *c, std::ptrdiff_t ldc) {
     c[static_cast<std::size_t>(j) * ldc + j].im = rzero;
 }
 
-void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, TR beta, TC *c, std::ptrdiff_t ldc) {
+void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, TR beta, TC *c, std::ptrdiff_t ldc) {
     const std::ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-    const std::ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+    const std::ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
     TC *cj = c + static_cast<std::size_t>(j) * ldc;
     if (eq0(beta)) {
         for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
@@ -375,13 +375,13 @@ void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, TR beta, TC 
     }
 }
 
-void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR_c,
+void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR_c,
                  TR alpha, TR beta, const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc)
 {
     /* Beta-scale this block's own triangle columns (real-diag preservation). */
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const std::ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+        const std::ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
         TC *cj = c + static_cast<std::size_t>(j) * ldc;
         if (eq0(beta)) {
             for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
@@ -395,7 +395,7 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
         }
     }
 
-    diag_dispatch(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
+    diag_dispatch(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR_c);
 
     const TC alpha_c = TC{ alpha, rzero };
     const TC cone { TR{1.0, 0.0}, rzero };
@@ -403,21 +403,21 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
     const char CN[1] = {'C'};
 
     if (UPLO == 'L') {
-        const std::ptrdiff_t trailing = N - jc - jb;
+        const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
             if (TR_c == 'N') {
-                wgemm_serial(NN[0], CN[0], trailing, jb, K, &alpha_c, &A_(j0, 0), lda, &A_(jc, 0), lda, &cone, &C_(j0, jc), ldc);
+                wgemm_serial(NN[0], CN[0], trailing, jb, k, &alpha_c, &A_(j0, 0), lda, &A_(jc, 0), lda, &cone, &C_(j0, jc), ldc);
             } else {
-                wgemm_serial(CN[0], NN[0], trailing, jb, K, &alpha_c, &A_(0, j0), lda, &A_(0, jc), lda, &cone, &C_(j0, jc), ldc);
+                wgemm_serial(CN[0], NN[0], trailing, jb, k, &alpha_c, &A_(0, j0), lda, &A_(0, jc), lda, &cone, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR_c == 'N') {
-                wgemm_serial(NN[0], CN[0], jc, jb, K, &alpha_c, &A_(0, 0), lda, &A_(jc, 0), lda, &cone, &C_(0, jc), ldc);
+                wgemm_serial(NN[0], CN[0], jc, jb, k, &alpha_c, &A_(0, 0), lda, &A_(jc, 0), lda, &cone, &C_(0, jc), ldc);
             } else {
-                wgemm_serial(CN[0], NN[0], jc, jb, K, &alpha_c, &A_(0, 0), lda, &A_(0, jc), lda, &cone, &C_(0, jc), ldc);
+                wgemm_serial(CN[0], NN[0], jc, jb, k, &alpha_c, &A_(0, 0), lda, &A_(0, jc), lda, &cone, &C_(0, jc), ldc);
             }
         }
     }
@@ -425,7 +425,7 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
 
 extern "C" void wherk_serial(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const TR *alpha_,
     const TC *a, std::ptrdiff_t lda,
     const TR *beta_,
@@ -435,21 +435,21 @@ extern "C" void wherk_serial(
     const char UPLO = up(&uplo);
     const char TR_c = up(&trans);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (eq0(alpha) || K == 0) {
+    if (eq0(alpha) || k == 0) {
         if (eq1(beta)) {
-            for (std::ptrdiff_t j = 0; j < N; ++j) wherk_zero_diag_im(j, c, ldc);
+            for (std::ptrdiff_t j = 0; j < n; ++j) wherk_zero_diag_im(j, c, ldc);
             return;
         }
-        for (std::ptrdiff_t j = 0; j < N; ++j) wherk_scale_col(j, N, UPLO, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < n; ++j) wherk_scale_col(j, n, UPLO, beta, c, ldc);
         return;
     }
 
     const std::ptrdiff_t nb = wherk_block_nb();
-    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        wherk_block(jc, jb, N, K, UPLO, TR_c, alpha, beta, a, lda, c, ldc);
+    for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        wherk_block(jc, jb, n, k, UPLO, TR_c, alpha, beta, a, lda, c, ldc);
     }
 }
 

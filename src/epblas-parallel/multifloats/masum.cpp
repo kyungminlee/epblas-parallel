@@ -40,8 +40,8 @@ static T masum_unit(std::ptrdiff_t n, const T *x)
     __m256d a2 = _mm256_setzero_pd();
     const __m256d signbit = _mm256_castsi256_pd(
         _mm256_set1_epi64x(static_cast<long long>(0x8000000000000000ULL)));
-    constexpr std::ptrdiff_t K = 64;
-    std::ptrdiff_t counter = K;
+    constexpr std::ptrdiff_t k = 64;
+    std::ptrdiff_t counter = k;
     const std::ptrdiff_t n4 = n & ~3;
     for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xh, xl;
@@ -63,7 +63,7 @@ static T masum_unit(std::ptrdiff_t n, const T *x)
             a1 = _mm256_add_pd(a1, a2);
             fast2sum(a0, a1, a0, a1);
             a2 = _mm256_setzero_pd();
-            counter = K;
+            counter = k;
         }
     }
     __m256d t = _mm256_add_pd(a1, a2);

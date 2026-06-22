@@ -47,10 +47,10 @@ inline void wher2_col_upper(std::ptrdiff_t j, T t1, T t2, const T *x, const T *y
     aj[j] = T{ aj[j].re + prod.re, rzero };
 }
 
-inline void wher2_col_lower(std::ptrdiff_t j, std::ptrdiff_t N, T t1, T t2, const T *x, const T *y, T *aj) {
+inline void wher2_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, T t1, T t2, const T *x, const T *y, T *aj) {
     const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
     aj[j] = T{ aj[j].re + prod.re, rzero };
-    mf_kernels::caxpy2_add(N - (j + 1), aj + j + 1, x + j + 1, t1, y + j + 1, t2);
+    mf_kernels::caxpy2_add(n - (j + 1), aj + j + 1, x + j + 1, t1, y + j + 1, t2);
 }
 }
 
@@ -58,7 +58,7 @@ inline void wher2_col_lower(std::ptrdiff_t j, std::ptrdiff_t N, T t1, T t2, cons
 
 static void wher2_core(
     char uplo,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const T *alpha_,
     const T *x, std::ptrdiff_t incx,
     const T *y, std::ptrdiff_t incy,
@@ -67,7 +67,7 @@ static void wher2_core(
     const T alpha = *alpha_;
     const char UPLO = up(&uplo);
 
-    if (N == 0 || ceq0(alpha)) return;
+    if (n == 0 || ceq0(alpha)) return;
 
     /* Gather strided x,y into contiguous scratch once (O(N), handles negative
      * incx/incy) so the column kernel is always unit-stride -- this both feeds
@@ -78,10 +78,10 @@ static void wher2_core(
     std::vector<T> xg, yg;
     const T *xp = x, *yp = y;
     if (incx != 1 || incy != 1) {
-        xg.resize(N); yg.resize(N);
-        std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
-        std::ptrdiff_t iy = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        xg.resize(n); yg.resize(n);
+        std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(n - 1) * incx : 0;
+        std::ptrdiff_t iy = (incy < 0) ? -(std::ptrdiff_t)(n - 1) * incy : 0;
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             xg[j] = x[ix]; ix += incx;
             yg[j] = y[iy]; iy += incy;
         }
@@ -89,15 +89,15 @@ static void wher2_core(
     }
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= WHER2_OMP_MIN && blas_omp_available());
+    const bool use_omp = (n >= WHER2_OMP_MIN && blas_omp_available());
 #endif
     if (UPLO == 'L') {
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (!ceq0(xp[j]) || !ceq0(yp[j]))
-                wher2_col_lower(j, N, cmul(alpha, cconj(yp[j])),
+                wher2_col_lower(j, n, cmul(alpha, cconj(yp[j])),
                                 cconj(cmul(alpha, xp[j])), xp, yp, &A_(0, j));
             else {
                 T *aj = &A_(0, j);
@@ -108,7 +108,7 @@ static void wher2_core(
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (!ceq0(xp[j]) || !ceq0(yp[j]))
                 wher2_col_upper(j, cmul(alpha, cconj(yp[j])),
                                 cconj(cmul(alpha, xp[j])), xp, yp, &A_(0, j));

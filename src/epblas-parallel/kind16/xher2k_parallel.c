@@ -52,7 +52,7 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 
 static void xher2k_core(
     char uplo_c, char trans_c,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -62,7 +62,7 @@ static void xher2k_core(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        xher2k_serial(uplo_c, trans_c, N, K, alpha_, a, lda, b, ldb,
+        xher2k_serial(uplo_c, trans_c, n, k, alpha_, a, lda, b, ldb,
                       beta_, c, ldc);
         return;
     }
@@ -72,20 +72,20 @@ static void xher2k_core(
     const char uplo  = blas_up(uplo_c);
     const char trans = blas_up(trans_c);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
-    if (uplo == 'U') qblas_yherk_beta_u(N, beta_r, c, ldc);
-    else             qblas_yherk_beta_l(N, beta_r, c, ldc);
+    if (uplo == 'U') qblas_yherk_beta_u(n, beta_r, c, ldc);
+    else             qblas_yherk_beta_l(n, beta_r, c, ldc);
 
-    if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
+    if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
     ptrdiff_t MC0, KC0, NC0;
     qblas_ygemm_blocks(&MC0, &KC0, &NC0);
     ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
 
-    if (K <= KC) {
+    if (k <= KC) {
         const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)K * 2L * (long)sizeof(T));
+        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
             MC = round_up((ptrdiff_t)target_mc, MR);
@@ -108,7 +108,7 @@ static void xher2k_core(
     ptrdiff_t nthreads = 1;
 #endif
 
-    long nnk = (long)N * (long)N * (long)K;
+    long nnk = (long)n * (long)n * (long)k;
     if (nnk < 64L * 64L * 64L) nthreads = 1;
 
     /* Two shared B-packs, two private A-packs per thread, all allocated BEFORE
@@ -139,21 +139,21 @@ static void xher2k_core(
             T *Ap_B = Ap_B_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks. */
-            const ptrdiff_t m_chunk = round_up((N + nth - 1) / nth, MR);
+            const ptrdiff_t m_chunk = round_up((n + nth - 1) / nth, MR);
             const ptrdiff_t m_lo = tid * m_chunk;
             ptrdiff_t m_hi = m_lo + m_chunk;
-            if (m_hi > N) m_hi = N;
+            if (m_hi > n) m_hi = n;
 
-            for (ptrdiff_t js = 0; js < N; js += NC) {
-                const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+            for (ptrdiff_t js = 0; js < n; js += NC) {
+                const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
                 ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
                 ptrdiff_t m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
-                for (ptrdiff_t ls = 0; ls < K; ls += KC) {
-                    const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+                for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                    const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
 
 #ifdef _OPENMP
                     #pragma omp barrier

@@ -234,7 +234,7 @@ __attribute__((noinline)) static bool mtrmv_omp(
 
 static void mtrmv_core(
     char uplo, char trans, char diag,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const T *a, std::ptrdiff_t lda,
     T *x, std::ptrdiff_t incx)
 {
@@ -244,43 +244,43 @@ static void mtrmv_core(
     const char DIAG = up(&diag);
     const bool nounit = (DIAG != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
-    if (N >= MTRMV_OMP_MIN && blas_omp_available()
-        && mtrmv_omp(UPLO == 'U', TR != 'N', nounit, N, a, lda, x, incx))
+    if (n >= MTRMV_OMP_MIN && blas_omp_available()
+        && mtrmv_omp(UPLO == 'U', TR != 'N', nounit, n, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
-        mtrmv_contig(UPLO == 'U', TR != 'N', nounit, N, a, (std::size_t)lda, x);
+        mtrmv_contig(UPLO == 'U', TR != 'N', nounit, n, a, (std::size_t)lda, x);
         return;
     }
 
     /* Strided x: linearize to a contiguous scratch in logical order, run the
      * SIMD contiguous core, scatter back (2N copies vs O(N^2) band work). The
      * in-place strided walk is kept only as the scratch-alloc-failure fallback. */
-    const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
-    T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+    const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(n - 1) * incx : 0;
+    T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (xs) {
-        for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
-        mtrmv_contig(UPLO == 'U', TR != 'N', nounit, N, a, (std::size_t)lda, xs);
-        for (std::ptrdiff_t i = 0; i < N; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
+        for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
+        mtrmv_contig(UPLO == 'U', TR != 'N', nounit, n, a, (std::size_t)lda, xs);
+        for (std::ptrdiff_t i = 0; i < n; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
         std::free(xs);
         return;
     }
 
-    std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+    std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
     if (TR == 'N') {
         if (UPLO == 'L') {
-            for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 const T temp = x[kx + j * incx];
                 if (!eq0(temp))
-                    for (std::ptrdiff_t i = j + 1; i < N; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
+                    for (std::ptrdiff_t i = j + 1; i < n; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
                 if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
             }
         } else {
-            for (std::ptrdiff_t j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T temp = x[kx + j * incx];
                 if (!eq0(temp))
                     for (std::ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
@@ -289,14 +289,14 @@ static void mtrmv_core(
         }
     } else {
         if (UPLO == 'L') {
-            for (std::ptrdiff_t j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 T temp = x[kx + j * incx];
                 if (nounit) temp = temp * A_(j, j);
-                for (std::ptrdiff_t i = j + 1; i < N; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
+                for (std::ptrdiff_t i = j + 1; i < n; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
                 x[kx + j * incx] = temp;
             }
         } else {
-            for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 T temp = x[kx + j * incx];
                 if (nounit) temp = temp * A_(j, j);
                 for (std::ptrdiff_t i = 0; i < j; ++i) temp = temp + A_(i, j) * x[kx + i * incx];

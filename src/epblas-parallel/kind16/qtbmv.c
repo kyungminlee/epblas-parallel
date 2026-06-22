@@ -38,7 +38,7 @@ static ptrdiff_t qtbmv_omp(bool upper, ptrdiff_t trans, bool nounit, ptrdiff_t n
 
 void qtbmv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
@@ -48,31 +48,31 @@ void qtbmv_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
-    if (N >= QTBMV_OMP_MIN && blas_omp_max_threads() > 1
-        && qtbmv_omp(UPLO == 'U', TR == 'T', nounit, N, K, a, lda, x, incx))
+    if (n >= QTBMV_OMP_MIN && blas_omp_max_threads() > 1
+        && qtbmv_omp(UPLO == 'U', TR == 'T', nounit, n, k, a, lda, x, incx))
         return;
 #endif
 
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
                         const T tmp = x[j];
-                        const ptrdiff_t L = K - j;
-                        const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                        const ptrdiff_t L = k - j;
+                        const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = i_lo; i < j; ++i) x[i] += tmp * A_(L + i, j);
-                        if (nounit) x[j] *= A_(K, j);
+                        if (nounit) x[j] *= A_(k, j);
                     }
                 }
             } else {
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
                         const T tmp = x[j];
-                        const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                        const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = i_hi - 1; i > j; --i) x[i] += tmp * A_(i - j, j);
                         if (nounit) x[j] *= A_(0, j);
                     }
@@ -80,19 +80,19 @@ void qtbmv_core(
             }
         } else {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[j];
-                    const ptrdiff_t L = K - j;
-                    if (nounit) tmp *= A_(K, j);
-                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    const ptrdiff_t L = k - j;
+                    if (nounit) tmp *= A_(k, j);
+                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = j - 1; i >= i_lo; --i) tmp += A_(L + i, j) * x[i];
                     x[j] = tmp;
                 }
             } else {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[j];
                     if (nounit) tmp *= A_(0, j);
-                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += A_(i - j, j) * x[i];
                     x[j] = tmp;
                 }
@@ -100,33 +100,33 @@ void qtbmv_core(
         }
     } else {
         /* Non-unit stride — transcribe Netlib. */
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[jx] != zero) {
                         const T tmp = x[jx];
                         ptrdiff_t ix = kx;
-                        const ptrdiff_t L = K - j;
-                        const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                        const ptrdiff_t L = k - j;
+                        const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = i_lo; i < j; ++i) {
                             x[ix] += tmp * A_(L + i, j);
                             ix += incx;
                         }
-                        if (nounit) x[jx] *= A_(K, j);
+                        if (nounit) x[jx] *= A_(k, j);
                     }
                     jx += incx;
-                    if (j >= K) kx += incx;
+                    if (j >= k) kx += incx;
                 }
             } else {
-                kx += (N - 1) * incx;
+                kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[jx] != zero) {
                         const T tmp = x[jx];
                         ptrdiff_t ix = kx;
-                        const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                        const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = i_hi - 1; i > j; --i) {
                             x[ix] += tmp * A_(i - j, j);
                             ix -= incx;
@@ -134,20 +134,20 @@ void qtbmv_core(
                         if (nounit) x[jx] *= A_(0, j);
                     }
                     jx -= incx;
-                    if ((N - 1 - j) >= K) kx -= incx;
+                    if ((n - 1 - j) >= k) kx -= incx;
                 }
             }
         } else {
             if (UPLO == 'U') {
-                kx += (N - 1) * incx;
+                kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     kx -= incx;
                     ptrdiff_t ix = kx;
-                    const ptrdiff_t L = K - j;
-                    if (nounit) tmp *= A_(K, j);
-                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    const ptrdiff_t L = k - j;
+                    if (nounit) tmp *= A_(k, j);
+                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                         tmp += A_(L + i, j) * x[ix];
                         ix -= incx;
@@ -157,12 +157,12 @@ void qtbmv_core(
                 }
             } else {
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[jx];
                     kx += incx;
                     ptrdiff_t ix = kx;
                     if (nounit) tmp *= A_(0, j);
-                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                         tmp += A_(i - j, j) * x[ix];
                         ix += incx;

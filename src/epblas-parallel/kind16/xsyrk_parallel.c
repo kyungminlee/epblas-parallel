@@ -34,7 +34,7 @@ static const T ONE  = 1.0Q + 0.0Qi;
 
 static void xsyrk_core(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *beta_,
@@ -44,7 +44,7 @@ static void xsyrk_core(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own. */
     if (omp_in_parallel()) {
-        xsyrk_serial(uplo, trans, N, K, alpha_, a, lda, beta_, c, ldc);
+        xsyrk_serial(uplo, trans, n, k, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
@@ -52,23 +52,23 @@ static void xsyrk_core(
     const char UPLO = blas_up(uplo);
     const char TR   = blas_up(trans);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (alpha == ZERO || K == 0) {
+    if (alpha == ZERO || k == 0) {
         if (beta == ONE) return;
 #ifdef _OPENMP
-        const bool use_omp = (N >= XSYRK_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (n >= XSYRK_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j)
-            xsyrk_beta_scale(j, j + 1, N, beta, c, ldc, UPLO);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            xsyrk_beta_scale(j, j + 1, n, beta, c, ldc, UPLO);
         return;
     }
 
     ptrdiff_t nb = xsyrk_nb();
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= XSYRK_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (n >= XSYRK_OMP_MIN && blas_omp_max_threads() > 1);
     if (use_omp) {
         /* Use a fine OMP panel so dynamic scheduling can balance the
          * triangular per-block work: the trailing GEMM shrinks from N-jc
@@ -81,16 +81,16 @@ static void xsyrk_core(
          * thread for tiny N. */
         const ptrdiff_t nthr = blas_omp_max_threads();
         nb = XSYRK_OMP_NB;
-        if (nb * nthr > N) {
-            ptrdiff_t want = (N + nthr - 1) / nthr;
+        if (nb * nthr > n) {
+            ptrdiff_t want = (n + nthr - 1) / nthr;
             nb = (want < 2) ? 2 : ((want + 1) / 2) * 2;   /* round up to MR */
         }
     }
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        xsyrk_block(jc, jb, N, K, alpha, beta, a, lda, c, ldc, UPLO, TR);
+    for (ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        xsyrk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TR);
     }
 }
 

@@ -36,7 +36,7 @@ typedef qgemm_T T;
 
 static void qgemm_core(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -47,7 +47,7 @@ static void qgemm_core(
     /* Already inside a team → run serially in this thread, no nested region.
      * qgemm_serial shares the by-value core ABI, so forward the args. */
     if (omp_in_parallel()) {
-        qgemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+        qgemm_serial(transa, transb, m, n, k, alpha_, a, lda,
                      b, ldb, beta_, c, ldc);
         return;
     }
@@ -57,10 +57,10 @@ static void qgemm_core(
     const char ta = qgemm_trans_code(transa);
     const char tb = qgemm_trans_code(transb);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
-    qgemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
-    if (alpha == 0.0Q || K == 0) return;
+    qgemm_beta_prepass(m, n, beta, c, ldc);   /* handles K==0 / alpha==0 */
+    if (alpha == 0.0Q || k == 0) return;
 
     /* TA='T' (≡'C'), TB='N': unpacked stride-1 dot, threaded over columns.
      * For __float128 this beats the blocked packed path at every measured
@@ -72,13 +72,13 @@ static void qgemm_core(
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static)
 #endif
-        for (ptrdiff_t j2 = 0; j2 < N; ++j2)
-            qgemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
+        for (ptrdiff_t j2 = 0; j2 < n; ++j2)
+            qgemm_fast_col(j2, m, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
     ptrdiff_t MC, KC, NC;
-    qgemm_choose_blocks(K, &MC, &KC, &NC);
+    qgemm_choose_blocks(k, &MC, &KC, &NC);
 #ifdef _OPENMP
     /* The ic loop is partitioned across the team via `omp for`, so the number
      * of ic-blocks (ceil(M/MC)) must be >= the team size or threads sit idle.
@@ -86,7 +86,7 @@ static void qgemm_core(
      * a multiple of MR). The cap is local to this threaded entry. */
     const ptrdiff_t nthr = blas_omp_max_threads();
     if (nthr > 1) {
-        ptrdiff_t cap = qgemm_round_up((M + nthr - 1) / nthr, MR);
+        ptrdiff_t cap = qgemm_round_up((m + nthr - 1) / nthr, MR);
         if (cap < MR) cap = MR;
         if (MC > cap) MC = cap;
     }
@@ -104,10 +104,10 @@ static void qgemm_core(
     {
         T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (Ap) {
-            for (ptrdiff_t jc = 0; jc < N; jc += NC) {
-                const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-                for (ptrdiff_t pc = 0; pc < K; pc += KC) {
-                    const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+            for (ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
 #ifdef _OPENMP
                     #pragma omp single
 #endif
@@ -117,8 +117,8 @@ static void qgemm_core(
 #ifdef _OPENMP
                     #pragma omp for schedule(static)
 #endif
-                    for (ptrdiff_t ic = 0; ic < M; ic += MC) {
-                        const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (ptrdiff_t ic = 0; ic < m; ic += MC) {
+                        const ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                         qgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         qgemm_macro_kernel(ib, jb, pb, alpha, Ap, Bp,
                                            &c[(size_t)jc * ldc + ic], ldc);

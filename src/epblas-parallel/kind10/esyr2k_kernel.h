@@ -63,7 +63,7 @@ void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_T alpha,
 /* Pure-serial by-value core (no OpenMP). */
 void esyr2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const esyr2k_T *alpha_,
     const esyr2k_T *a, ptrdiff_t lda,
     const esyr2k_T *b, ptrdiff_t ldb,

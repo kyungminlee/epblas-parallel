@@ -22,26 +22,26 @@ typedef ygemmtr_T T;
 static const T zero = 0.0L + 0.0iL;
 static const T one  = 1.0L + 0.0iL;
 
-void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, bool upper,
+void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, bool upper,
                         T beta, T *c, ptrdiff_t ldc)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         const ptrdiff_t is = upper ? 0 : j;
-        const ptrdiff_t ie = upper ? (j + 1) : N;
+        const ptrdiff_t ie = upper ? (j + 1) : n;
         T *cj = &C_(0, j);
         if (beta == zero) for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
         else              for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
     }
 }
 
-void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
+void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
                  T alpha, T beta,
                  const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                  T *c, ptrdiff_t ldc,
                  bool trans_a, bool conj_a, bool trans_b, bool conj_b)
 {
     const ptrdiff_t is = upper ? 0 : j;
-    const ptrdiff_t ie = upper ? (j + 1) : N;
+    const ptrdiff_t ie = upper ? (j + 1) : n;
     T *cj = &C_(0, j);
 
     if (!trans_a) {
@@ -53,7 +53,7 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
          * this kind10 complex pattern. */
         ptrdiff_t l = 0;
         if (!trans_b) {
-            for (; l + 1 < K; l += 2) {
+            for (; l + 1 < k; l += 2) {
                 const T t0 = alpha * B_(l,     j);
                 const T t1 = alpha * B_(l + 1, j);
                 const T *al0 = &A_(0, l);
@@ -62,7 +62,7 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
                     cj[i] += t0 * al0[i] + t1 * al1[i];
             }
         } else if (!conj_b) {
-            for (; l + 1 < K; l += 2) {
+            for (; l + 1 < k; l += 2) {
                 const T t0 = alpha * B_(j, l);
                 const T t1 = alpha * B_(j, l + 1);
                 const T *al0 = &A_(0, l);
@@ -71,7 +71,7 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
                     cj[i] += t0 * al0[i] + t1 * al1[i];
             }
         } else {
-            for (; l + 1 < K; l += 2) {
+            for (; l + 1 < k; l += 2) {
                 const T t0 = alpha * ~B_(j, l);
                 const T t1 = alpha * ~B_(j, l + 1);
                 const T *al0 = &A_(0, l);
@@ -80,7 +80,7 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
                     cj[i] += t0 * al0[i] + t1 * al1[i];
             }
         }
-        for (; l < K; ++l) {
+        for (; l < k; ++l) {
             T bl;
             if (!trans_b)      bl = B_(l, j);
             else if (!conj_b)  bl = B_(j, l);
@@ -93,14 +93,14 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
         for (ptrdiff_t i = is; i < ie; ++i) {
             T s = zero;
             if (!trans_b) {
-                if (!conj_a) for (ptrdiff_t l = 0; l < K; ++l) s += A_(l, i) * B_(l, j);
-                else         for (ptrdiff_t l = 0; l < K; ++l) s += ~A_(l, i) * B_(l, j);
+                if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i) * B_(l, j);
+                else         for (ptrdiff_t l = 0; l < k; ++l) s += ~A_(l, i) * B_(l, j);
             } else if (!conj_b) {
-                if (!conj_a) for (ptrdiff_t l = 0; l < K; ++l) s += A_(l, i) * B_(j, l);
-                else         for (ptrdiff_t l = 0; l < K; ++l) s += ~A_(l, i) * B_(j, l);
+                if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i) * B_(j, l);
+                else         for (ptrdiff_t l = 0; l < k; ++l) s += ~A_(l, i) * B_(j, l);
             } else {
-                if (!conj_a) for (ptrdiff_t l = 0; l < K; ++l) s += A_(l, i) * ~B_(j, l);
-                else         for (ptrdiff_t l = 0; l < K; ++l) s += ~A_(l, i) * ~B_(j, l);
+                if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i) * ~B_(j, l);
+                else         for (ptrdiff_t l = 0; l < k; ++l) s += ~A_(l, i) * ~B_(j, l);
             }
             cj[i] = (beta == zero) ? alpha * s : alpha * s + beta * cj[i];
         }
@@ -108,7 +108,7 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t N, ptrdiff_t K, bool upper,
 }
 
 void ygemmtr_serial(char uplo, char transa, char transb,
-                    ptrdiff_t N, ptrdiff_t K,
+                    ptrdiff_t n, ptrdiff_t k,
                     const T *alpha_,
                     const T *a, ptrdiff_t lda,
                     const T *b, ptrdiff_t ldb,
@@ -120,21 +120,21 @@ void ygemmtr_serial(char uplo, char transa, char transb,
     const char ta = blas_up(transa);
     const char tb = blas_up(transb);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
     const bool conj_a = (ta == 'C');
     const bool conj_b = (tb == 'C');
     const bool trans_a = (ta != 'N');
     const bool trans_b = (tb != 'N');
 
-    if (alpha == zero || K == 0) {
+    if (alpha == zero || k == 0) {
         if (beta == one) return;
-        ygemmtr_beta_scale(0, N, N, upper, beta, c, ldc);
+        ygemmtr_beta_scale(0, n, n, upper, beta, c, ldc);
         return;
     }
 
-    for (ptrdiff_t j = 0; j < N; ++j)
-        ygemmtr_col(j, N, K, upper, alpha, beta, a, lda, b, ldb, c, ldc,
+    for (ptrdiff_t j = 0; j < n; ++j)
+        ygemmtr_col(j, n, k, upper, alpha, beta, a, lda, b, ldb, c, ldc,
                     trans_a, conj_a, trans_b, conj_b);
 }
 

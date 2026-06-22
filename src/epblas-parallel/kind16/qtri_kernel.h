@@ -49,7 +49,7 @@ void qtri_tcopy(ptrdiff_t m, ptrdiff_t n, const qtri_T *a, ptrdiff_t lda,
  * weights band widths by area instead (narrow at the fat end, wide at the thin
  * end). Boundaries are floored to MR so each thread's packed panels stay
  * MR-aligned; the result tiles [0, N) with no gaps or overlaps. */
-void qtri_row_bounds(char uplo, ptrdiff_t N, ptrdiff_t nth, ptrdiff_t tid,
+void qtri_row_bounds(char uplo, ptrdiff_t n, ptrdiff_t nth, ptrdiff_t tid,
                      ptrdiff_t mr, ptrdiff_t *m_lo, ptrdiff_t *m_hi);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QTRI_KERNEL_H */

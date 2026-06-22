@@ -47,8 +47,8 @@ static T mdot_unit(std::ptrdiff_t n, const T *x, const T *y)
     __m256d a0 = _mm256_setzero_pd();
     __m256d a1 = _mm256_setzero_pd();
     __m256d a2 = _mm256_setzero_pd();
-    constexpr std::ptrdiff_t K = 64;
-    std::ptrdiff_t counter = K;
+    constexpr std::ptrdiff_t k = 64;
+    std::ptrdiff_t counter = k;
     const std::ptrdiff_t n4 = n & ~3;
     for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xh, xl, yh, yl;
@@ -74,7 +74,7 @@ static T mdot_unit(std::ptrdiff_t n, const T *x, const T *y)
             a1 = _mm256_add_pd(a1, a2);
             fast2sum(a0, a1, a0, a1);
             a2 = _mm256_setzero_pd();
-            counter = K;
+            counter = k;
         }
     }
     __m256d t = _mm256_add_pd(a1, a2);

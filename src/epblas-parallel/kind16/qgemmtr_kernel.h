@@ -36,7 +36,7 @@ char qgemmtr_trans_code(const char *p);
  * early-exit path. Scales (or zeros) the UPLO triangle of each column by beta.
  * Only reached when beta != one. */
 void qgemmtr_beta_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper,
     qgemmtr_T beta,
     qgemmtr_T *c, ptrdiff_t ldc);
 
@@ -47,7 +47,7 @@ void qgemmtr_beta_core(
  * Folds the per-column beta scaling inline, matching the original loop body.
  * Each column is owned by exactly one call, so the partition is race-free. */
 void qgemmtr_compute_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper, ptrdiff_t K,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper, ptrdiff_t k,
     char ta, char tb,
     qgemmtr_T alpha, qgemmtr_T beta,
     const qgemmtr_T *a, ptrdiff_t lda,
@@ -59,7 +59,7 @@ void qgemmtr_compute_core(
  * the ptrdiff_t core ABI of qgemmtr_core. */
 void qgemmtr_serial(
     char uplo, char transa, char transb,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const qgemmtr_T *alpha_,
     const qgemmtr_T *a, ptrdiff_t lda,
     const qgemmtr_T *b, ptrdiff_t ldb,

@@ -29,14 +29,14 @@ char xgemmtr_trans_code(char c) {
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
 void xgemmtr_beta_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper,
     T beta,
     T *c, ptrdiff_t ldc)
 {
     const T zero = 0.0Q + 0.0Qi;
     for (ptrdiff_t j = j0; j < j1; ++j) {
         const ptrdiff_t is = upper ? 0 : j;
-        const ptrdiff_t ie = upper ? (j + 1) : N;
+        const ptrdiff_t ie = upper ? (j + 1) : n;
         T *cj = &C_(0, j);
         if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
         else                   for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
@@ -44,7 +44,7 @@ void xgemmtr_beta_core(
 }
 
 void xgemmtr_compute_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper, ptrdiff_t K,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper, ptrdiff_t k,
     bool trans_a, bool trans_b, bool conj_a, bool conj_b,
     T alpha, T beta,
     const T *a, ptrdiff_t lda,
@@ -56,14 +56,14 @@ void xgemmtr_compute_core(
 
     for (ptrdiff_t j = j0; j < j1; ++j) {
         const ptrdiff_t is = upper ? 0 : j;
-        const ptrdiff_t ie = upper ? (j + 1) : N;
+        const ptrdiff_t ie = upper ? (j + 1) : n;
         T *cj = &C_(0, j);
 
         if (!trans_a) {
             /* axpy form */
             if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
             else if (beta != one)  for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
-            for (ptrdiff_t l = 0; l < K; ++l) {
+            for (ptrdiff_t l = 0; l < k; ++l) {
                 T bl;
                 if (!trans_b)      bl = B_(l, j);
                 else if (!conj_b)  bl = B_(j, l);
@@ -79,14 +79,14 @@ void xgemmtr_compute_core(
             for (ptrdiff_t i = is; i < ie; ++i) {
                 T s = zero;
                 if (!trans_b) {
-                    if (!conj_a) for (ptrdiff_t l = 0; l < K; ++l) s += A_(l, i)        * B_(l, j);
-                    else         for (ptrdiff_t l = 0; l < K; ++l) s += conjq(A_(l, i)) * B_(l, j);
+                    if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i)        * B_(l, j);
+                    else         for (ptrdiff_t l = 0; l < k; ++l) s += conjq(A_(l, i)) * B_(l, j);
                 } else if (!conj_b) {
-                    if (!conj_a) for (ptrdiff_t l = 0; l < K; ++l) s += A_(l, i)        * B_(j, l);
-                    else         for (ptrdiff_t l = 0; l < K; ++l) s += conjq(A_(l, i)) * B_(j, l);
+                    if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i)        * B_(j, l);
+                    else         for (ptrdiff_t l = 0; l < k; ++l) s += conjq(A_(l, i)) * B_(j, l);
                 } else {
-                    if (!conj_a) for (ptrdiff_t l = 0; l < K; ++l) s += A_(l, i)        * conjq(B_(j, l));
-                    else         for (ptrdiff_t l = 0; l < K; ++l) s += conjq(A_(l, i)) * conjq(B_(j, l));
+                    if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i)        * conjq(B_(j, l));
+                    else         for (ptrdiff_t l = 0; l < k; ++l) s += conjq(A_(l, i)) * conjq(B_(j, l));
                 }
                 cj[i] = (beta == zero) ? alpha * s : alpha * s + beta * cj[i];
             }
@@ -95,7 +95,7 @@ void xgemmtr_compute_core(
 }
 
 void xgemmtr_serial(char uplo, char transa, char transb,
-                    ptrdiff_t N, ptrdiff_t K,
+                    ptrdiff_t n, ptrdiff_t k,
                     const T *alpha_,
                     const T *a, ptrdiff_t lda,
                     const T *b, ptrdiff_t ldb,
@@ -107,7 +107,7 @@ void xgemmtr_serial(char uplo, char transa, char transb,
     const char ta = xgemmtr_trans_code(transa);
     const char tb = xgemmtr_trans_code(transb);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
     const T zero = 0.0Q + 0.0Qi;
     const T one  = 1.0Q + 0.0Qi;
 
@@ -116,13 +116,13 @@ void xgemmtr_serial(char uplo, char transa, char transb,
     const bool trans_a = (ta != 'N');
     const bool trans_b = (tb != 'N');
 
-    if (alpha == zero || K == 0) {
+    if (alpha == zero || k == 0) {
         if (beta == one) return;
-        xgemmtr_beta_core(0, N, N, upper, beta, c, ldc);
+        xgemmtr_beta_core(0, n, n, upper, beta, c, ldc);
         return;
     }
 
-    xgemmtr_compute_core(0, N, N, upper, K,
+    xgemmtr_compute_core(0, n, n, upper, k,
                          trans_a, trans_b, conj_a, conj_b,
                          alpha, beta, a, lda, b, ldb, c, ldc);
 }

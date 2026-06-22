@@ -39,7 +39,7 @@ namespace {
 
 static void msyr2k_core(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *b, std::ptrdiff_t ldb,
@@ -48,7 +48,7 @@ static void msyr2k_core(
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        msyr2k_serial(uplo, trans, N, K, alpha_, a, lda, b, ldb, beta_,
+        msyr2k_serial(uplo, trans, n, k, alpha_, a, lda, b, ldb, beta_,
                       c, ldc);
         return;
     }
@@ -59,27 +59,27 @@ static void msyr2k_core(
     if (TR == 'C') TR = 'T';
     (void)lda; (void)ldb;
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (eq0(alpha) || K == 0) {
+    if (eq0(alpha) || k == 0) {
         if (eq1(beta)) return;
 #ifdef _OPENMP
-        const bool use_omp = (N >= MSYR2K_OMP_MIN && blas_omp_available());
+        const bool use_omp = (n >= MSYR2K_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) msyr2k_scale_col(j, N, UPLO, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < n; ++j) msyr2k_scale_col(j, n, UPLO, beta, c, ldc);
         return;
     }
 
     const std::ptrdiff_t nb = msyr2k_block_nb();
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= MSYR2K_OMP_MIN && blas_omp_available());
+    const bool use_omp = (n >= MSYR2K_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        msyr2k_block(jc, jb, N, K, UPLO, TR, alpha, beta, a, lda, b, ldb, c, ldc);
+    for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        msyr2k_block(jc, jb, n, k, UPLO, TR, alpha, beta, a, lda, b, ldb, c, ldc);
     }
 }
 

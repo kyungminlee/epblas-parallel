@@ -40,27 +40,27 @@ char xtrsm_uplo(char c);
 /* ── SIDE = 'L' column-range cores ──────────────────────────────────
  * Each solves columns [j_start,j_end) of B against the M×M triangular A.
  * The TC variants handle TRANSA in {'T','C'} via conj_flag (1 = conjugate). */
-void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrsm_T alpha,
+void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrsm_T alpha,
+void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrsm_T alpha,
+void xtrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
                      const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrsm_T alpha,
+void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
                      const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────────
  * Each solves rows [i_start,i_end) of B against the N×N triangular A. */
-void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T alpha,
+void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T alpha,
+void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T alpha,
+void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
                      const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T alpha,
+void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
                      const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
@@ -69,7 +69,7 @@ void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrsm_T al
  * the full column/row range). Shares the ptrdiff_t core ABI of xtrsm_core. */
 void xtrsm_serial(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const xtrsm_T *alpha_,
     const xtrsm_T *a, ptrdiff_t lda,
     xtrsm_T *b, ptrdiff_t ldb);

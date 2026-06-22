@@ -66,7 +66,7 @@ void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_T alpha,
  * clean dot loop ties/beats the reference. β is assumed already applied to C (by
  * qsyrk_beta_{u,l}). Per-column so the parallel entry can `omp for` over j
  * (cyclic) for balanced triangular load with no shared packs or barrier. */
-void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
+void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
                       qsyr2k_T alpha, const qsyr2k_T *a, ptrdiff_t lda,
                       const qsyr2k_T *b, ptrdiff_t ldb,
                       qsyr2k_T *c, ptrdiff_t ldc);
@@ -77,7 +77,7 @@ void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
  * parallel region. */
 void qsyr2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const qsyr2k_T *alpha_,
     const qsyr2k_T *a, ptrdiff_t lda,
     const qsyr2k_T *b, ptrdiff_t ldb,

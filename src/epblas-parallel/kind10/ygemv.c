@@ -46,7 +46,7 @@ static const T ONE  = 1.0L + 0.0Li;
  * retarget) so the trailing GEMV bypasses the by-ref facade. */
 void ygemv_core(
     char trans,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
@@ -56,9 +56,9 @@ void ygemv_core(
     const T alpha = *alpha_, beta = *beta_;
     const char TR = blas_up(trans);
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
-    const ptrdiff_t leny = (TR == 'N') ? M : N;
+    const ptrdiff_t leny = (TR == 'N') ? m : n;
 
     /* β-scale y. */
     if (beta != ONE) {
@@ -79,7 +79,7 @@ void ygemv_core(
 
     if (TR == 'N') {
         if (incx == 1 && incy == 1) {
-            const bool use_omp = (M >= YGEMV_OMP_MIN && blas_omp_should_thread());
+            const bool use_omp = (m >= YGEMV_OMP_MIN && blas_omp_should_thread());
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
              * still outlines the body into a `._omp_fn` function and pays
              * GOMP_parallel + omp_get_* overhead per call (Addendum 16).
@@ -101,10 +101,10 @@ void ygemv_core(
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     const ptrdiff_t nth  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
-                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
+                    const ptrdiff_t i_lo = blas_part_bound(m, tid, nth);
+                    const ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
                     ptrdiff_t j = 0;
-                    for (; j + 1 < N; j += 2) {
+                    for (; j + 1 < n; j += 2) {
                         const T t0 = alpha * x[j];
                         const T t1 = alpha * x[j + 1];
                         const T *a0 = &A_(0, j);
@@ -113,7 +113,7 @@ void ygemv_core(
                             y[i] = (y[i] + t0 * a0[i]) + t1 * a1[i];
                         }
                     }
-                    for (; j < N; ++j) {
+                    for (; j < n; ++j) {
                         const T t = alpha * x[j];
                         const T *aj = &A_(0, j);
                         for (ptrdiff_t i = i_lo; i < i_hi; ++i) y[i] += t * aj[i];
@@ -121,21 +121,21 @@ void ygemv_core(
                 }
 #endif
             } else {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     const T t = alpha * x[j];
                     const T *aj = &A_(0, j);
-                    for (ptrdiff_t i = 0; i < M; ++i) y[i] += t * aj[i];
+                    for (ptrdiff_t i = 0; i < m; ++i) y[i] += t * aj[i];
                 }
             }
         } else if (incy == 1) {
             /* incx != 1, incy == 1: single-column inner — same reason
              * as fast path above. Complex cmul + J-unroll spills a1 on
              * x87 stack; single-column matches migrated. */
-            ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t = alpha * x[jx];
                 const T *aj = &A_(0, j);
-                for (ptrdiff_t i = 0; i < M; ++i) y[i] += t * aj[i];
+                for (ptrdiff_t i = 0; i < m; ++i) y[i] += t * aj[i];
                 jx += incx;
             }
         } else {
@@ -144,12 +144,12 @@ void ygemv_core(
              * Thread over disjoint output-row slices [i_lo,i_hi): each y[iy]
              * is written by one thread in the same j-order as serial →
              * race-free and bit-exact. jx is thread-local (recomputed). */
-            const ptrdiff_t iy0 = (incy < 0) ? -(M - 1) * incy : 0;
-            const bool use_omp = (M >= YGEMV_OMP_MIN && blas_omp_should_thread());
+            const ptrdiff_t iy0 = (incy < 0) ? -(m - 1) * incy : 0;
+            const bool use_omp = (m >= YGEMV_OMP_MIN && blas_omp_should_thread());
 #define YGEMV_N_STRIDED_BODY(i_lo, i_hi) do {                                \
-            ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;                 \
+            ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;                 \
             ptrdiff_t j = 0;                                                 \
-            for (; j + 1 < N; j += 2) {                                      \
+            for (; j + 1 < n; j += 2) {                                      \
                 const T t0 = alpha * x[jx];                                  \
                 const T t1 = alpha * x[jx + incx];                          \
                 /* Decompose the loop-invariant scalars into real/imag      \
@@ -177,7 +177,7 @@ void ygemv_core(
                 }                                                           \
                 jx += 2 * incx;                                             \
             }                                                               \
-            for (; j < N; ++j) {                                            \
+            for (; j < n; ++j) {                                            \
                 const T xj = x[jx];                                         \
                 if (xj != ZERO) {                                          \
                     const T t = alpha * xj;                                 \
@@ -196,13 +196,13 @@ void ygemv_core(
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     const ptrdiff_t nth  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
-                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
+                    const ptrdiff_t i_lo = blas_part_bound(m, tid, nth);
+                    const ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
                     YGEMV_N_STRIDED_BODY(i_lo, i_hi);
                 }
 #endif
             } else {
-                YGEMV_N_STRIDED_BODY(0, M);
+                YGEMV_N_STRIDED_BODY(0, m);
             }
 #undef YGEMV_N_STRIDED_BODY
         }
@@ -213,17 +213,17 @@ void ygemv_core(
          * in ygemm — keep single accumulator). */
         const bool conj_a = (TR == 'C');
         if (incx == 1 && incy == 1) {
-            const bool use_omp = (N >= YGEMV_OMP_MIN && blas_omp_should_thread());
+            const bool use_omp = (n >= YGEMV_OMP_MIN && blas_omp_should_thread());
             /* Branch on use_omp in C source — `if(use_omp)` pragma clause
              * still outlines (see Addendum 16). */
 #define YGEMV_T_BODY                                                         \
-            for (ptrdiff_t j = 0; j < N; ++j) {                                    \
+            for (ptrdiff_t j = 0; j < n; ++j) {                                    \
                 const T *aj = &A_(0, j);                                     \
                 T s = ZERO;                                                  \
                 if (conj_a) {                                                \
-                    for (ptrdiff_t i = 0; i < M; ++i) s += cconj(aj[i]) * x[i];    \
+                    for (ptrdiff_t i = 0; i < m; ++i) s += cconj(aj[i]) * x[i];    \
                 } else {                                                     \
-                    for (ptrdiff_t i = 0; i < M; ++i) s += aj[i] * x[i];           \
+                    for (ptrdiff_t i = 0; i < m; ++i) s += aj[i] * x[i];           \
                 }                                                            \
                 y[j] += alpha * s;                                           \
             }
@@ -239,14 +239,14 @@ void ygemv_core(
         } else {
             /* Strided x/y. Each output y[jy(j)] is disjoint across j → OMP-over-j
              * is race-free and bit-exact (jy recomputed as jy0 + j*incy). */
-            const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
-            const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
-            const bool use_omp = (N >= YGEMV_OMP_MIN && blas_omp_should_thread());
+            const ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
+            const ptrdiff_t ix0 = (incx < 0) ? -(m - 1) * incx : 0;
+            const bool use_omp = (n >= YGEMV_OMP_MIN && blas_omp_should_thread());
 #define YGEMV_T_STRIDED_BODY                                                  \
-            for (ptrdiff_t j = 0; j < N; ++j) {                              \
+            for (ptrdiff_t j = 0; j < n; ++j) {                              \
                 T s = ZERO;                                                  \
                 ptrdiff_t ix = ix0;                                          \
-                for (ptrdiff_t i = 0; i < M; ++i) {                          \
+                for (ptrdiff_t i = 0; i < m; ++i) {                          \
                     s += (conj_a ? cconj(A_(i, j)) : A_(i, j)) * x[ix];      \
                     ix += incx;                                              \
                 }                                                            \

@@ -44,77 +44,77 @@ static const T ZERO = 0.0Q + 0.0Qi;
 
 #ifdef _OPENMP
 #define XTRMM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
-        if (N >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
+        if (n >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
                 ptrdiff_t nth  = omp_get_num_threads();                            \
-                ptrdiff_t js  = blas_part_bound(N, tid, nth);                   \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);             \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit);             \
+                ptrdiff_t js  = blas_part_bound(n, tid, nth);                   \
+                ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);             \
+                core(js, je, m, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
-        } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }            \
+        } else { core(0, n, m, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define XTRMM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
-        if (N >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
+        if (n >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
                 ptrdiff_t nth  = omp_get_num_threads();                            \
-                ptrdiff_t js  = blas_part_bound(N, tid, nth);                   \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);             \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit, cflag);      \
+                ptrdiff_t js  = blas_part_bound(n, tid, nth);                   \
+                ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);             \
+                core(js, je, m, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
-        } else { core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag); }     \
+        } else { core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag); }     \
     }
 #define XTRMM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
-        if (M >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
+        if (m >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
                 ptrdiff_t nth  = omp_get_num_threads();                            \
-                ptrdiff_t is  = blas_part_bound(M, tid, nth);                   \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);             \
-                core(is, ie, N, alpha, a, lda, b, ldb, nounit);             \
+                ptrdiff_t is  = blas_part_bound(m, tid, nth);                   \
+                ptrdiff_t ie  = blas_part_bound(m, tid + 1, nth);             \
+                core(is, ie, n, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
-        } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }            \
+        } else { core(0, m, n, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define XTRMM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
-        if (M >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
+        if (m >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
                 ptrdiff_t nth  = omp_get_num_threads();                            \
-                ptrdiff_t is  = blas_part_bound(M, tid, nth);                   \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);             \
-                core(is, ie, N, alpha, a, lda, b, ldb, nounit, cflag);      \
+                ptrdiff_t is  = blas_part_bound(m, tid, nth);                   \
+                ptrdiff_t ie  = blas_part_bound(m, tid + 1, nth);             \
+                core(is, ie, n, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
-        } else { core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag); }     \
+        } else { core(0, m, n, alpha, a, lda, b, ldb, nounit, cflag); }     \
     }
 #else
 #define XTRMM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
+        core(0, n, m, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRMM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag);                \
+        core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #define XTRMM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
-        core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
+        core(0, m, n, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRMM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
-        core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag);                \
+        core(0, m, n, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #endif
 
@@ -133,7 +133,7 @@ XTRMM_OMP_WRAP_R_TC(xtrmm_ruc, xtrmm_ruTC_core, 1)
 
 static void xtrmm_core(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     T *b, ptrdiff_t ldb)
@@ -144,35 +144,35 @@ static void xtrmm_core(
     const char TR = blas_up(transa);
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     if (alpha == ZERO) {
-        for (ptrdiff_t j = 0; j < N; ++j)
-            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = ZERO;
+        for (ptrdiff_t j = 0; j < n; ++j)
+            for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) = ZERO;
         return;
     }
 
     if (SIDE == 'L') {
         if (TR == 'N') {
-            if (UPLO == 'L') xtrmm_lln(M, N, alpha, a, lda, b, ldb, nounit);
-            else             xtrmm_lun(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') xtrmm_lln(m, n, alpha, a, lda, b, ldb, nounit);
+            else             xtrmm_lun(m, n, alpha, a, lda, b, ldb, nounit);
         } else if (TR == 'T') {
-            if (UPLO == 'L') xtrmm_llt(M, N, alpha, a, lda, b, ldb, nounit);
-            else             xtrmm_lut(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') xtrmm_llt(m, n, alpha, a, lda, b, ldb, nounit);
+            else             xtrmm_lut(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
-            if (UPLO == 'L') xtrmm_llc(M, N, alpha, a, lda, b, ldb, nounit);
-            else             xtrmm_luc(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') xtrmm_llc(m, n, alpha, a, lda, b, ldb, nounit);
+            else             xtrmm_luc(m, n, alpha, a, lda, b, ldb, nounit);
         }
     } else {
         if (TR == 'N') {
-            if (UPLO == 'L') xtrmm_rln(M, N, alpha, a, lda, b, ldb, nounit);
-            else             xtrmm_run(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') xtrmm_rln(m, n, alpha, a, lda, b, ldb, nounit);
+            else             xtrmm_run(m, n, alpha, a, lda, b, ldb, nounit);
         } else if (TR == 'T') {
-            if (UPLO == 'L') xtrmm_rlt(M, N, alpha, a, lda, b, ldb, nounit);
-            else             xtrmm_rut(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') xtrmm_rlt(m, n, alpha, a, lda, b, ldb, nounit);
+            else             xtrmm_rut(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
-            if (UPLO == 'L') xtrmm_rlc(M, N, alpha, a, lda, b, ldb, nounit);
-            else             xtrmm_ruc(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') xtrmm_rlc(m, n, alpha, a, lda, b, ldb, nounit);
+            else             xtrmm_ruc(m, n, alpha, a, lda, b, ldb, nounit);
         }
     }
 }

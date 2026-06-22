@@ -30,7 +30,7 @@ static inline TC cconj(TC z) { return ~z; }
 
 static void yher_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const TR *alpha_,
     const TC *restrict x, ptrdiff_t incx,
     TC *restrict a, ptrdiff_t lda)
@@ -40,14 +40,14 @@ static void yher_core(
     const TC czero = 0.0L + 0.0Li;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == rzero) return;
+    if (n == 0 || alpha == rzero) return;
 
     if (incx == 1) {
-        const bool use_omp = (N >= YHER_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp = (n >= YHER_OMP_MIN && blas_omp_should_thread());
         /* Branch on use_omp at C source level (Add-16). schedule(static, 1)
          * for triangular load balance (Rule 49). */
 #define YHER_BODY                                                            \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < n; ++j) {                                        \
             const TC xj = x[j];                                              \
             if (xj != czero) {                                               \
                 /* t = alpha * conj(x[j]); A(i,j) += t * x[i].               \
@@ -56,7 +56,7 @@ static void yher_core(
                 const TC t = alpha * cconj(xj);                              \
                 TC *aj = &A_(0, j);                                          \
                 if (UPLO == 'L') {                                           \
-                    for (ptrdiff_t i = j + 1; i < N; ++i) aj[i] += t * x[i];       \
+                    for (ptrdiff_t i = j + 1; i < n; ++i) aj[i] += t * x[i];       \
                     aj[j] = __real__ aj[j] + __real__ (t * x[j]);            \
                 } else {                                                     \
                     for (ptrdiff_t i = 0; i < j; ++i) aj[i] += t * x[i];           \
@@ -76,16 +76,16 @@ static void yher_core(
     } else {
         /* General-stride fallback — hoist the matrix column to aj[i] and
          * walk the strided vector with a running index (Class-B fix). */
-        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t jx = kx;
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const TC xj = x[jx];
             if (xj != czero) {
                 const TC t = alpha * cconj(xj);
                 TC *aj = &A_(0, j);
                 if (UPLO == 'L') {
                     ptrdiff_t ix = jx + incx;
-                    for (ptrdiff_t i = j + 1; i < N; ++i) { aj[i] += t * x[ix]; ix += incx; }
+                    for (ptrdiff_t i = j + 1; i < n; ++i) { aj[i] += t * x[ix]; ix += incx; }
                     aj[j] = __real__ aj[j] + __real__ (t * xj);
                 } else {
                     ptrdiff_t ix = kx;

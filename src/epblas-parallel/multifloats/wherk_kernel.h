@@ -56,7 +56,7 @@ void wherk_zero_diag_im(std::ptrdiff_t j, wherk_TC *c, std::ptrdiff_t ldc);
 /* Scale column j's UPLO triangle of C by the real beta (the alpha==0 / K==0
  * early exit, beta!=1). Handles beta==0 (zero-fill); the diagonal cell becomes
  * real (beta·re, 0). The caller handles beta==1 via wherk_zero_diag_im. */
-void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, wherk_TR beta,
+void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, wherk_TR beta,
                      wherk_TC *c, std::ptrdiff_t ldc);
 
 /* One diagonal block [jc, jc+jb) of the rank-k update: beta-scale the block's
@@ -64,14 +64,14 @@ void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, wherk_TR bet
  * (SIMD or scalar), then the trailing conjugate-transpose gemm (routed through
  * wgemm_serial — no nested OpenMP). Each block writes a disjoint column range
  * of C → race-free across blocks. */
-void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR_c,
+void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR_c,
                  wherk_TR alpha, wherk_TR beta,
                  const wherk_TC *a, std::ptrdiff_t lda, wherk_TC *c, std::ptrdiff_t ldc);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wherk_. */
 extern "C" void wherk_serial(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const wherk_TR *alpha_,
     const wherk_TC *a, std::ptrdiff_t lda,
     const wherk_TR *beta_,

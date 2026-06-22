@@ -39,7 +39,7 @@ namespace {
 
 static void whemm_core(
     char side, char uplo,
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *b, std::ptrdiff_t ldb,
@@ -48,7 +48,7 @@ static void whemm_core(
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        whemm_serial(side, uplo, M, N, alpha_, a, lda, b, ldb, beta_, c, ldc);
+        whemm_serial(side, uplo, m, n, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
@@ -57,16 +57,16 @@ static void whemm_core(
     const char UPLO = up(&uplo);
     (void)lda; (void)ldb;
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     if (ceq0(alpha)) {
         if (ceq1(beta)) return;
 #ifdef _OPENMP
-        const std::ptrdiff_t axis = (SIDE == 'L') ? M : N;
+        const std::ptrdiff_t axis = (SIDE == 'L') ? m : n;
         const bool use_omp = (axis >= WHEMM_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) whemm_scale_col(j, M, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < n; ++j) whemm_scale_col(j, m, beta, c, ldc);
         return;
     }
 
@@ -76,28 +76,28 @@ static void whemm_core(
         std::ptrdiff_t pw = nb;
 #ifdef _OPENMP
         const std::ptrdiff_t nthreads = blas_omp_max_threads();
-        const bool use_omp = (M >= WHEMM_OMP_MIN && nthreads > 1);
+        const bool use_omp = (m >= WHEMM_OMP_MIN && nthreads > 1);
         /* Shrink the block step so the team gets ~nthreads panels at small M
          * (M=64, nb=32 -> 2 blocks -> 2 idle threads of 4). Rectangular work
          * (each row block multiplies its rows against full A·B) -> ppt=1. */
-        if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(M, nthreads, nb, 1);
+        if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(m, nthreads, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-        for (std::ptrdiff_t ic = 0; ic < M; ic += pw) {
-            const std::ptrdiff_t ib = (M - ic < pw) ? (M - ic) : pw;
-            whemm_block_L(ic, ib, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
+        for (std::ptrdiff_t ic = 0; ic < m; ic += pw) {
+            const std::ptrdiff_t ib = (m - ic < pw) ? (m - ic) : pw;
+            whemm_block_L(ic, ib, m, n, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     } else {
         std::ptrdiff_t pw = nb;
 #ifdef _OPENMP
         const std::ptrdiff_t nthreads = blas_omp_max_threads();
-        const bool use_omp = (N >= WHEMM_OMP_MIN && nthreads > 1);
-        if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(N, nthreads, nb, 1);
+        const bool use_omp = (n >= WHEMM_OMP_MIN && nthreads > 1);
+        if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(n, nthreads, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-        for (std::ptrdiff_t jc = 0; jc < N; jc += pw) {
-            const std::ptrdiff_t jb = (N - jc < pw) ? (N - jc) : pw;
-            whemm_block_R(jc, jb, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
+        for (std::ptrdiff_t jc = 0; jc < n; jc += pw) {
+            const std::ptrdiff_t jb = (n - jc < pw) ? (n - jc) : pw;
+            whemm_block_R(jc, jb, m, n, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     }
 }

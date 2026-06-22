@@ -139,7 +139,7 @@ whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const T 
  * (column order, bit-identical to the prior inline body) and threaded
  * (private zero buffer, disjoint columns → within DD fuzz tol). */
 static inline __attribute__((always_inline)) void
-whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_t lda, T alpha,
+whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const T *a, std::size_t lda, T alpha,
           const double *x_rh, const double *x_rl,
           const double *x_ih, const double *x_il,
           double *y_rh, double *y_rl, double *y_ih, double *y_il)
@@ -152,7 +152,7 @@ whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_
         yi = cadd(yi, cmul(temp1, aii_re));
         y_rh[i] = yi.re.limbs[0]; y_rl[i] = yi.re.limbs[1];
         y_ih[i] = yi.im.limbs[0]; y_il[i] = yi.im.limbs[1];
-        T temp2 = whemv_inner(i, i + 1, N, a, lda, alpha,
+        T temp2 = whemv_inner(i, i + 1, n, a, lda, alpha,
                               x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
         T yi2{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
         yi2 = cadd(yi2, cmul(alpha, temp2));
@@ -182,7 +182,7 @@ whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_
  * fold. Reorders the per-row sum vs serial -> within DD fuzz tol. Returns true
  * if handled. */
 __attribute__((noinline)) static bool whemv_omp(
-    bool lower, std::ptrdiff_t N, const T *a, std::size_t lda, T alpha,
+    bool lower, std::ptrdiff_t n, const T *a, std::size_t lda, T alpha,
     const double *x_rh, const double *x_rl, const double *x_ih, const double *x_il,
     double *y_rh, double *y_rl, double *y_ih, double *y_il)
 {
@@ -191,11 +191,11 @@ __attribute__((noinline)) static bool whemv_omp(
     if (nthreads > WHEMV_MAX_CPUS) nthreads = WHEMV_MAX_CPUS;
 
     std::ptrdiff_t range[WHEMV_MAX_CPUS + 1];
-    std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(N, nthreads, 3, 4, !lower,
+    std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 3, 4, !lower,
                                        WHEMV_MAX_CPUS, range);
     if (ncpu <= 1) return false;
 
-    const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
+    const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     const std::size_t per = 4 * N_pad;
     double *pool = static_cast<double *>(
         std::aligned_alloc(32, static_cast<std::size_t>(ncpu) * per * sizeof(double)));
@@ -208,7 +208,7 @@ __attribute__((noinline)) static bool whemv_omp(
         double *p = pool + static_cast<std::size_t>(tid) * per;
         double *yp_rh = p, *yp_rl = p + N_pad, *yp_ih = p + 2 * N_pad, *yp_il = p + 3 * N_pad;
         for (std::ptrdiff_t i = (std::ptrdiff_t)range[tid]; i < (std::ptrdiff_t)range[tid + 1]; ++i)
-            whemv_col(lower, i, N, a, lda, alpha,
+            whemv_col(lower, i, n, a, lda, alpha,
                       x_rh, x_rl, x_ih, x_il, yp_rh, yp_rl, yp_ih, yp_il);
     }
 
@@ -217,7 +217,7 @@ __attribute__((noinline)) static bool whemv_omp(
         const double *p = pool + static_cast<std::size_t>(t) * per;
         const double *yp_rh = p, *yp_rl = p + N_pad, *yp_ih = p + 2 * N_pad, *yp_il = p + 3 * N_pad;
         std::ptrdiff_t k_from, k_to;
-        mf_omp::tri_row_window(t, !lower, range, N, k_from, k_to);
+        mf_omp::tri_row_window(t, !lower, range, n, k_from, k_to);
         for (std::ptrdiff_t k = k_from; k < k_to; ++k) {
             T yk{ R{y_rh[k], y_rl[k]}, R{y_ih[k], y_il[k]} };
             yk = cadd(yk, T{ R{yp_rh[k], yp_rl[k]}, R{yp_ih[k], yp_il[k]} });
@@ -234,11 +234,11 @@ __attribute__((noinline)) static bool whemv_omp(
  * already beta-applied. SIMD SoA path (+ threaded private-accumulator) when
  * built with MBLAS_SIMD_DD; faithful scalar column sweep otherwise. Strided
  * callers gather x,y to unit stride around this. */
-static void whemv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t lda, T alpha,
+static void whemv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t lda, T alpha,
                          const T *x, T *y)
 {
 #ifdef MBLAS_SIMD_DD
-    const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
+    const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     double *x_rh = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *x_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *x_ih = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
@@ -247,29 +247,29 @@ static void whemv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t l
     double *y_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *y_ih = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *y_il = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-    for (std::ptrdiff_t i = 0; i < N; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         x_rh[i] = x[i].re.limbs[0]; x_rl[i] = x[i].re.limbs[1];
         x_ih[i] = x[i].im.limbs[0]; x_il[i] = x[i].im.limbs[1];
         y_rh[i] = y[i].re.limbs[0]; y_rl[i] = y[i].re.limbs[1];
         y_ih[i] = y[i].im.limbs[0]; y_il[i] = y[i].im.limbs[1];
     }
-    for (std::size_t i = static_cast<std::size_t>(N); i < N_pad; ++i) {
+    for (std::size_t i = static_cast<std::size_t>(n); i < N_pad; ++i) {
         x_rh[i] = 0.0; x_rl[i] = 0.0; x_ih[i] = 0.0; x_il[i] = 0.0;
         y_rh[i] = 0.0; y_rl[i] = 0.0; y_ih[i] = 0.0; y_il[i] = 0.0;
     }
 
     bool done_omp = false;
 #if defined(_OPENMP)
-    if (N >= WHEMV_OMP_MIN && blas_omp_available())
-        done_omp = whemv_omp(lower, N, a, lda, alpha,
+    if (n >= WHEMV_OMP_MIN && blas_omp_available())
+        done_omp = whemv_omp(lower, n, a, lda, alpha,
                              x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
 #endif
     if (!done_omp)
-        for (std::ptrdiff_t i = 0; i < N; ++i)
-            whemv_col(lower, i, N, a, lda, alpha,
+        for (std::ptrdiff_t i = 0; i < n; ++i)
+            whemv_col(lower, i, n, a, lda, alpha,
                       x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
 
-    for (std::ptrdiff_t i = 0; i < N; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         y[i].re.limbs[0] = y_rh[i]; y[i].re.limbs[1] = y_rl[i];
         y[i].im.limbs[0] = y_ih[i]; y[i].im.limbs[1] = y_il[i];
     }
@@ -277,20 +277,20 @@ static void whemv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t l
     std::free(y_rh); std::free(y_rl); std::free(y_ih); std::free(y_il);
 #else
     if (lower) {
-        for (std::ptrdiff_t i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < n; ++i) {
             const T temp1 = cmul(alpha, x[i]);
             T temp2 = zero_cdd;
             const T *ai = &A_(0, i);
             const T aii_re{ ai[i].re, rzero };
             y[i] = cadd(y[i], cmul(temp1, aii_re));
-            for (std::ptrdiff_t k = i + 1; k < N; ++k) {
+            for (std::ptrdiff_t k = i + 1; k < n; ++k) {
                 y[k]  = cadd(y[k], cmul(temp1, ai[k]));
                 temp2 = cadd(temp2, cmul(cconj(ai[k]), x[k]));
             }
             y[i] = cadd(y[i], cmul(alpha, temp2));
         }
     } else {
-        for (std::ptrdiff_t i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < n; ++i) {
             const T temp1 = cmul(alpha, x[i]);
             T temp2 = zero_cdd;
             const T *ai = &A_(0, i);
@@ -307,7 +307,7 @@ static void whemv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t l
 
 static void whemv_core(
     char uplo,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *x, std::ptrdiff_t incx,
@@ -317,23 +317,23 @@ static void whemv_core(
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    mf_kernels::cscale_y(N, beta, y, incy);
+    mf_kernels::cscale_y(n, beta, y, incy);
     if (ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
-        whemv_contig(UPLO == 'L', N, a, lda, alpha, x, y);
+        whemv_contig(UPLO == 'L', n, a, lda, alpha, x, y);
         return;
     }
     /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
      * core, scatter y back. Handles negative increments; O(N) gather vs the old
      * O(N^2) strided sweep, and lets the strided case thread like contiguous. */
-    std::vector<T> xs(static_cast<std::size_t>(N)), ys(static_cast<std::size_t>(N));
-    mf_kernels::gather_strided(N, x, incx, xs.data());
-    mf_kernels::gather_strided(N, y, incy, ys.data());
-    whemv_contig(UPLO == 'L', N, a, lda, alpha, xs.data(), ys.data());
-    mf_kernels::scatter_strided(N, y, incy, ys.data());
+    std::vector<T> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
+    mf_kernels::gather_strided(n, x, incx, xs.data());
+    mf_kernels::gather_strided(n, y, incy, ys.data());
+    whemv_contig(UPLO == 'L', n, a, lda, alpha, xs.data(), ys.data());
+    mf_kernels::scatter_strided(n, y, incy, ys.data());
 }
 
 extern "C" {

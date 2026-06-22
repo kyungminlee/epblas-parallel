@@ -47,7 +47,7 @@ using wtrmm_T = multifloats::complex64x2;
 std::ptrdiff_t wtrmm_block_nb(void);
 
 /* B := 0 over the full M×N tile (the alpha==0 early-exit). */
-void wtrmm_zero_B(std::ptrdiff_t M, std::ptrdiff_t N, wtrmm_T *b, std::ptrdiff_t ldb);
+void wtrmm_zero_B(std::ptrdiff_t m, std::ptrdiff_t n, wtrmm_T *b, std::ptrdiff_t ldb);
 
 /* One column slice [j_start, j_end) of a SIDE='L' multiply. UPLO/TR select the
  * variant (TR ∈ {'N','T','C'}); use_blocked picks the blocked path
@@ -55,7 +55,7 @@ void wtrmm_zero_B(std::ptrdiff_t M, std::ptrdiff_t N, wtrmm_T *b, std::ptrdiff_t
  * core. Each slice owns a disjoint column range → race-free, bitwise-identical
  * to the serial sweep. */
 void wtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
-                   std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, std::ptrdiff_t nb, wtrmm_T alpha,
+                   std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, std::ptrdiff_t nb, wtrmm_T alpha,
                    const wtrmm_T *a, std::ptrdiff_t lda, wtrmm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* One row slice [row_lo, row_hi) of a SIDE='R' multiply. UPLO/TR select the
@@ -63,13 +63,13 @@ void wtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
  * SIMD diagonal) vs the unblocked SIMD/scalar diagonal over the slice rows.
  * Each slice owns a disjoint row range → race-free. */
 void wtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
-                   std::ptrdiff_t row_lo, std::ptrdiff_t row_hi, std::ptrdiff_t N, std::ptrdiff_t nb, wtrmm_T alpha,
+                   std::ptrdiff_t row_lo, std::ptrdiff_t row_hi, std::ptrdiff_t n, std::ptrdiff_t nb, wtrmm_T alpha,
                    const wtrmm_T *a, std::ptrdiff_t lda, wtrmm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wtrmm_. */
 extern "C" void wtrmm_serial(
     char side, char uplo, char transa, char diag,
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     const wtrmm_T *alpha_,
     const wtrmm_T *a, std::ptrdiff_t lda,
     wtrmm_T *b, std::ptrdiff_t ldb);

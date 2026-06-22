@@ -49,7 +49,7 @@ typedef struct {
 } xgemm_plan_t;
 
 /* Fill *p from the problem dims and the (ta, tb) trans codes. */
-void xgemm_make_plan(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K, char ta, char tb, xgemm_plan_t *p);
+void xgemm_make_plan(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, char ta, char tb, xgemm_plan_t *p);
 
 /* OCOPY(B): pack the (pb × jb) panel at (ls, js) into Bp. */
 void xgemm_pack_B(const xgemm_plan_t *p,
@@ -71,7 +71,7 @@ void xgemm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xgemm_plan_t *p,
  * the symbol name only. */
 void xgemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const xgemm_T *alpha_,
     const xgemm_T *a, ptrdiff_t lda,
     const xgemm_T *b, ptrdiff_t ldb,

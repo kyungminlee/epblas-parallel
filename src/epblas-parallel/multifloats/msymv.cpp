@@ -60,7 +60,7 @@ namespace {
  * the prior inline body) and the threaded path (yacc = a private zero buffer,
  * a disjoint column subset; partials reduced afterwards → within DD fuzz tol). */
 static inline __attribute__((always_inline)) void
-msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_t lda,
+msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const T *a, std::size_t lda,
           const T *x, const double *x_hi, const double *x_lo,
           double *yacc_hi, double *yacc_lo, T alpha)
 {
@@ -78,7 +78,7 @@ msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_
         yacc_hi[i] = yi.limbs[0]; yacc_lo[i] = yi.limbs[1];
         std::ptrdiff_t k = i + 1;
         /* Align to 4-element boundary at start. */
-        for (; k < N && (k & 3) != 0; ++k) {
+        for (; k < n && (k & 3) != 0; ++k) {
             T yk{yacc_hi[k], yacc_lo[k]};
             T aki = ai[k];
             yk = yk + temp1 * aki;
@@ -92,7 +92,7 @@ msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_
             red_h[0] = s.limbs[0]; red_l[0] = s.limbs[1];
             s_h = _mm256_loadu_pd(red_h); s_l = _mm256_loadu_pd(red_l);
         }
-        for (; k + 3 < N; k += 4) {
+        for (; k + 3 < n; k += 4) {
             __m256d a_h, a_l;
             load_dd4(aip + 2 * k, a_h, a_l);
             __m256d yh = _mm256_loadu_pd(yacc_hi + k);
@@ -112,7 +112,7 @@ msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_
             s_h = nsh; s_l = nsl;
         }
         T temp2 = hreduce(s_h, s_l);
-        for (; k < N; ++k) {
+        for (; k < n; ++k) {
             T yk{yacc_hi[k], yacc_lo[k]};
             T aki = ai[k];
             yk = yk + temp1 * aki;
@@ -170,7 +170,7 @@ msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_
  * fold. Reorders the per-row sum vs serial -> within DD fuzz tol. Returns true
  * if handled. */
 __attribute__((noinline)) static bool msymv_omp(
-    bool lower, std::ptrdiff_t N, const T *a, std::size_t lda, const T *x,
+    bool lower, std::ptrdiff_t n, const T *a, std::size_t lda, const T *x,
     const double *x_hi, const double *x_lo,
     double *y_hi, double *y_lo, T alpha)
 {
@@ -179,11 +179,11 @@ __attribute__((noinline)) static bool msymv_omp(
     if (nthreads > MSYMV_MAX_CPUS) nthreads = MSYMV_MAX_CPUS;
 
     std::ptrdiff_t range[MSYMV_MAX_CPUS + 1];
-    std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(N, nthreads, 3, 4, !lower,
+    std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 3, 4, !lower,
                                        MSYMV_MAX_CPUS, range);
     if (ncpu <= 1) return false;
 
-    const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
+    const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     const std::size_t per = 2 * N_pad;
     double *pool = static_cast<double *>(
         std::aligned_alloc(32, static_cast<std::size_t>(ncpu) * per * sizeof(double)));
@@ -196,7 +196,7 @@ __attribute__((noinline)) static bool msymv_omp(
         double *yp_hi = pool + static_cast<std::size_t>(tid) * per;
         double *yp_lo = yp_hi + N_pad;
         for (std::ptrdiff_t i = (std::ptrdiff_t)range[tid]; i < (std::ptrdiff_t)range[tid + 1]; ++i)
-            msymv_col(lower, i, N, a, lda, x, x_hi, x_lo, yp_hi, yp_lo, alpha);
+            msymv_col(lower, i, n, a, lda, x, x_hi, x_lo, yp_hi, yp_lo, alpha);
     }
 
     /* Bounded reduction: fold each thread's populated row window onto y. */
@@ -204,7 +204,7 @@ __attribute__((noinline)) static bool msymv_omp(
         const double *yp_hi = pool + static_cast<std::size_t>(t) * per;
         const double *yp_lo = yp_hi + N_pad;
         std::ptrdiff_t k_from, k_to;
-        mf_omp::tri_row_window(t, !lower, range, N, k_from, k_to);
+        mf_omp::tri_row_window(t, !lower, range, n, k_from, k_to);
         for (std::ptrdiff_t k = k_from; k < k_to; ++k) {
             T yk{y_hi[k], y_lo[k]};
             yk = yk + T{yp_hi[k], yp_lo[k]};
@@ -220,49 +220,49 @@ __attribute__((noinline)) static bool msymv_omp(
  * SIMD build packs x/y to SoA and runs the threaded/serial msymv_col; the scalar
  * fallback build runs the reference column loops. Strided callers gather x/y to
  * contiguous scratch and scatter y back, so this single core serves every case. */
-static void msymv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t lda,
+static void msymv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t lda,
                          const T *x, T *y, T alpha)
 {
 #ifdef MBLAS_SIMD_DD
-    const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
+    const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     double *x_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *x_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *y_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *y_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-    for (std::ptrdiff_t i = 0; i < N; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1];
         y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1];
     }
-    for (std::size_t i = static_cast<std::size_t>(N); i < N_pad; ++i) {
+    for (std::size_t i = static_cast<std::size_t>(n); i < N_pad; ++i) {
         x_hi[i] = 0.0; x_lo[i] = 0.0; y_hi[i] = 0.0; y_lo[i] = 0.0;
     }
     bool done_omp = false;
 #if defined(_OPENMP)
-    if (N >= MSYMV_OMP_MIN && blas_omp_available())
-        done_omp = msymv_omp(lower, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
+    if (n >= MSYMV_OMP_MIN && blas_omp_available())
+        done_omp = msymv_omp(lower, n, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
 #endif
     if (!done_omp)
-        for (std::ptrdiff_t i = 0; i < N; ++i)
-            msymv_col(lower, i, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
-    for (std::ptrdiff_t i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < n; ++i)
+            msymv_col(lower, i, n, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i];
     }
     std::free(x_hi); std::free(x_lo); std::free(y_hi); std::free(y_lo);
 #else
     if (lower) {
-        for (std::ptrdiff_t i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < n; ++i) {
             const T temp1 = alpha * x[i];
             T temp2 = zero_dd;
             const T *ai = &A_(0, i);
             y[i] = y[i] + temp1 * ai[i];
-            for (std::ptrdiff_t k = i + 1; k < N; ++k) {
+            for (std::ptrdiff_t k = i + 1; k < n; ++k) {
                 y[k]  = y[k] + temp1 * ai[k];
                 temp2 = temp2 + ai[k] * x[k];
             }
             y[i] = y[i] + alpha * temp2;
         }
     } else {
-        for (std::ptrdiff_t i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < n; ++i) {
             const T temp1 = alpha * x[i];
             T temp2 = zero_dd;
             const T *ai = &A_(0, i);
@@ -278,7 +278,7 @@ static void msymv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t l
 
 static void msymv_core(
     char uplo,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda_,
     const T *x, std::ptrdiff_t incx,
@@ -289,23 +289,23 @@ static void msymv_core(
     const T alpha = *alpha_, beta = *beta_;
     const bool lower = (up(&uplo) == 'L');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    mf_kernels::scale_y(N, beta, y, incy);
+    mf_kernels::scale_y(n, beta, y, incy);
     if (eq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
-        msymv_contig(lower, N, a, lda, x, y, alpha);
+        msymv_contig(lower, n, a, lda, x, y, alpha);
         return;
     }
 
     /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
      * core, scatter y back. Handles negative increments; O(N) gather vs O(N^2). */
-    std::vector<T> xs(static_cast<std::size_t>(N)), ys(static_cast<std::size_t>(N));
-    mf_kernels::gather_strided(N, x, incx, xs.data());
-    mf_kernels::gather_strided(N, y, incy, ys.data());
-    msymv_contig(lower, N, a, lda, xs.data(), ys.data(), alpha);
-    mf_kernels::scatter_strided(N, y, incy, ys.data());
+    std::vector<T> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
+    mf_kernels::gather_strided(n, x, incx, xs.data());
+    mf_kernels::gather_strided(n, y, incy, ys.data());
+    msymv_contig(lower, n, a, lda, xs.data(), ys.data(), alpha);
+    mf_kernels::scatter_strided(n, y, incy, ys.data());
 }
 
 extern "C" {

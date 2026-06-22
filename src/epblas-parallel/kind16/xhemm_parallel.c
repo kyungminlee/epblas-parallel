@@ -40,7 +40,7 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 
 static void xhemm_core(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const xhemm_T *alpha_,
     const xhemm_T *a, ptrdiff_t lda,
     const xhemm_T *b, ptrdiff_t ldb,
@@ -49,7 +49,7 @@ static void xhemm_core(
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        xhemm_serial(side, uplo, M, N, alpha_, a, lda, b, ldb, beta_, c, ldc);
+        xhemm_serial(side, uplo, m, n, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
@@ -58,10 +58,10 @@ static void xhemm_core(
     const char sd = blas_up(side);
     const char up = blas_up(uplo);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
     R *C = (R *)c;
-    qblas_ygemm_beta(M, N, beta_r, beta_i, C, ldc);
+    qblas_ygemm_beta(m, n, beta_r, beta_i, C, ldc);
     if (alphar == 0.0Q && alphai == 0.0Q) return;
 
     const R *A_eff = (const R *)((sd == 'L') ? a : b);
@@ -70,8 +70,8 @@ static void xhemm_core(
     const ptrdiff_t ldb_eff = (sd == 'L') ? ldb : lda;
 
     xhemm_plan_t p;
-    xhemm_make_plan(M, N, sd, up, &p);
-    if (p.K == 0) return;
+    xhemm_make_plan(m, n, sd, up, &p);
+    if (p.k == 0) return;
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = blas_omp_max_threads();
@@ -80,7 +80,7 @@ static void xhemm_core(
     ptrdiff_t nthreads = 1;
 #endif
 
-    long mnk = (long)M * (long)N * (long)p.K;
+    long mnk = (long)m * (long)n * (long)p.k;
     if (mnk < 64L * 64L * 64L) nthreads = 1;
 
     if (nthreads == 1) {
@@ -88,12 +88,12 @@ static void xhemm_core(
         if (!Ap) return;
         R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
         if (!Bp) { free(Ap); return; }
-        for (ptrdiff_t js = 0; js < N; js += p.NC) {
-            ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
-            for (ptrdiff_t ls = 0; ls < p.K; ls += p.KC) {
-                ptrdiff_t pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
+        for (ptrdiff_t js = 0; js < n; js += p.NC) {
+            ptrdiff_t jb = (n - js < p.NC) ? (n - js) : p.NC;
+            for (ptrdiff_t ls = 0; ls < p.k; ls += p.KC) {
+                ptrdiff_t pb = (p.k - ls < p.KC) ? (p.k - ls) : p.KC;
                 xhemm_pack_B(&p, B_eff, ldb_eff, js, ls, pb, jb, Bp);
-                xhemm_level3_slab(0, M, &p, alphar, alphai,
+                xhemm_level3_slab(0, m, &p, alphar, alphai,
                                   A_eff, lda_eff, Ap, Bp, js, ls, pb, jb, C, ldc);
             }
         }
@@ -129,15 +129,15 @@ static void xhemm_core(
 #endif
         R *Ap = Ap_arr[tid];
 
-        ptrdiff_t m_chunk = round_up((M + nth - 1) / nth, MR);
+        ptrdiff_t m_chunk = round_up((m + nth - 1) / nth, MR);
         ptrdiff_t m_lo = (ptrdiff_t)tid * m_chunk;
         ptrdiff_t m_hi = m_lo + m_chunk;
-        if (m_hi > M) m_hi = M;
+        if (m_hi > m) m_hi = m;
 
-        for (ptrdiff_t js = 0; js < N; js += p.NC) {
-            ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
-            for (ptrdiff_t ls = 0; ls < p.K; ls += p.KC) {
-                ptrdiff_t pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
+        for (ptrdiff_t js = 0; js < n; js += p.NC) {
+            ptrdiff_t jb = (n - js < p.NC) ? (n - js) : p.NC;
+            for (ptrdiff_t ls = 0; ls < p.k; ls += p.KC) {
+                ptrdiff_t pb = (p.k - ls < p.KC) ? (p.k - ls) : p.KC;
 #ifdef _OPENMP
                 #pragma omp barrier
                 #pragma omp single

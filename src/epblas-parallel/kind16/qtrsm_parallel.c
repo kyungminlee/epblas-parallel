@@ -57,13 +57,13 @@ typedef qtrsm_T T;
 
 extern void qtrsv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx);
 
 extern void qgemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -76,13 +76,13 @@ extern void qgemm_serial(
  * Crossover where fast path stops winning vs col-parallel is at
  * nrhs ≈ scaling — hence MAX = scaling - 1 (last nrhs where fast path
  * is still preferred). */
-static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
+static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t m) {
 #ifdef _OPENMP
     const ptrdiff_t max_nt     = blas_omp_max_threads() - 1;
 #else
     const ptrdiff_t max_nt     = 1 - 1;
 #endif
-    const ptrdiff_t max_amdahl = M / QTRSM_QTRSV_LOOP_NB_HINT;
+    const ptrdiff_t max_amdahl = m / QTRSM_QTRSV_LOOP_NB_HINT;
     ptrdiff_t v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
     if (v < 1) v = 1;
     return v;
@@ -96,47 +96,47 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
 
 #ifdef _OPENMP
 #define QTRSM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
-        if (N >= QTRSM_OMP_MIN && blas_omp_max_threads() > 1                \
+        if (n >= QTRSM_OMP_MIN && blas_omp_max_threads() > 1                \
                               && !omp_in_parallel()) {                      \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                            \
                 ptrdiff_t nth  = omp_get_num_threads();                           \
-                ptrdiff_t js  = blas_part_bound(N, tid, nth);               \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);           \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit);            \
+                ptrdiff_t js  = blas_part_bound(n, tid, nth);               \
+                ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);           \
+                core(js, je, m, alpha, a, lda, b, ldb, nounit);            \
             }                                                              \
-        } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }           \
+        } else { core(0, n, m, alpha, a, lda, b, ldb, nounit); }           \
     }
 #define QTRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
-        if (M >= QTRSM_OMP_MIN && blas_omp_max_threads() > 1                \
+        if (m >= QTRSM_OMP_MIN && blas_omp_max_threads() > 1                \
                               && !omp_in_parallel()) {                      \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                            \
                 ptrdiff_t nth  = omp_get_num_threads();                           \
-                ptrdiff_t is  = blas_part_bound(M, tid, nth);               \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);           \
-                core(is, ie, N, alpha, a, lda, b, ldb, nounit);            \
+                ptrdiff_t is  = blas_part_bound(m, tid, nth);               \
+                ptrdiff_t ie  = blas_part_bound(m, tid + 1, nth);           \
+                core(is, ie, n, alpha, a, lda, b, ldb, nounit);            \
             }                                                              \
-        } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }           \
+        } else { core(0, m, n, alpha, a, lda, b, ldb, nounit); }           \
     }
 #else
 #define QTRSM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
+        core(0, n, m, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define QTRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                     \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
-        core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
+        core(0, m, n, alpha, a, lda, b, ldb, nounit);                       \
     }
 #endif
 
@@ -153,7 +153,7 @@ QTRSM_OMP_WRAP_R(qtrsm_rut, qtrsm_rut_core)
 
 static void qtrsm_core(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     T *b, ptrdiff_t ldb)
@@ -165,11 +165,11 @@ static void qtrsm_core(
     if (TR == 'C') TR = 'T';   /* real type: conj-trans ≡ trans */
     const bool nounit = (qtrsm_uplo(diag) != 'U');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     if (alpha == 0.0Q) {
-        for (ptrdiff_t j = 0; j < N; ++j)
-            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = 0.0Q;
+        for (ptrdiff_t j = 0; j < n; ++j)
+            for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) = 0.0Q;
         return;
     }
 
@@ -182,15 +182,15 @@ static void qtrsm_core(
 #else
         const bool xv_in_par = 0;
 #endif
-        const ptrdiff_t xv_max = qtrsm_qtrsv_loop_max(M);
-        if (SIDE == 'L' && N >= 1 && N <= xv_max && M >= QTRSM_QTRSV_LOOP_M_MIN
+        const ptrdiff_t xv_max = qtrsm_qtrsv_loop_max(m);
+        if (SIDE == 'L' && n >= 1 && n <= xv_max && m >= QTRSM_QTRSV_LOOP_M_MIN
             && !xv_in_par) {
             if (alpha != 1.0Q) {
-                for (ptrdiff_t j = 0; j < N; ++j)
-                    for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
+                for (ptrdiff_t j = 0; j < n; ++j)
+                    for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;
             }
-            for (ptrdiff_t j = 0; j < N; ++j) {
-                qtrsv_core(uplo, transa, diag, M, a, lda, &B_(0, j), 1);
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                qtrsv_core(uplo, transa, diag, m, a, lda, &B_(0, j), 1);
             }
             return;
         }
@@ -198,19 +198,19 @@ static void qtrsm_core(
 
     if (SIDE == 'L') {
         if (TR == 'N') {
-            if (UPLO == 'L') qtrsm_lln(M, N, alpha, a, lda, b, ldb, nounit);
-            else             qtrsm_lun(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') qtrsm_lln(m, n, alpha, a, lda, b, ldb, nounit);
+            else             qtrsm_lun(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
-            if (UPLO == 'L') qtrsm_llt(M, N, alpha, a, lda, b, ldb, nounit);
-            else             qtrsm_lut(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') qtrsm_llt(m, n, alpha, a, lda, b, ldb, nounit);
+            else             qtrsm_lut(m, n, alpha, a, lda, b, ldb, nounit);
         }
     } else {
         if (TR == 'N') {
-            if (UPLO == 'L') qtrsm_rln(M, N, alpha, a, lda, b, ldb, nounit);
-            else             qtrsm_run(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') qtrsm_rln(m, n, alpha, a, lda, b, ldb, nounit);
+            else             qtrsm_run(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
-            if (UPLO == 'L') qtrsm_rlt(M, N, alpha, a, lda, b, ldb, nounit);
-            else             qtrsm_rut(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') qtrsm_rlt(m, n, alpha, a, lda, b, ldb, nounit);
+            else             qtrsm_rut(m, n, alpha, a, lda, b, ldb, nounit);
         }
     }
 }
@@ -238,7 +238,7 @@ static ptrdiff_t qtrsm_blocked_nb(void) {
 
 static void qtrsm_blocked_core(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     T *b, ptrdiff_t ldb)
@@ -251,22 +251,22 @@ static void qtrsm_blocked_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (qtrsm_uplo(diag) != 'U');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
-    if (SIDE != 'L' || M < 2 * nb) {
-        qtrsm_core(side, uplo, transa, diag, M, N, alpha_, a, lda, b, ldb);
+    if (SIDE != 'L' || m < 2 * nb) {
+        qtrsm_core(side, uplo, transa, diag, m, n, alpha_, a, lda, b, ldb);
         return;
     }
 
     if (alpha == 0.0Q) {
-        for (ptrdiff_t j = 0; j < N; ++j) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = 0.0Q;
+        for (ptrdiff_t j = 0; j < n; ++j) for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) = 0.0Q;
         return;
     }
 
     const T neg_one = -1.0Q;
     const T one_v = 1.0Q;
 
-    const bool use_omp = (N >= 2 && blas_omp_should_thread());
+    const bool use_omp = (n >= 2 && blas_omp_should_thread());
 
 #ifdef _OPENMP
     #pragma omp parallel if(use_omp)
@@ -276,24 +276,24 @@ static void qtrsm_blocked_core(
 #ifdef _OPENMP
         if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
-        const ptrdiff_t j_lo = blas_part_bound(N, tid, nth);
-        const ptrdiff_t j_hi = blas_part_bound(N, tid + 1, nth);
+        const ptrdiff_t j_lo = blas_part_bound(n, tid, nth);
+        const ptrdiff_t j_hi = blas_part_bound(n, tid + 1, nth);
         const ptrdiff_t n_slice = j_hi - j_lo;
 
         if (n_slice > 0) {
             /* Pre-scale this thread's column slice of B by alpha. */
             if (alpha != 1.0Q) {
                 for (ptrdiff_t j = j_lo; j < j_hi; ++j) {
-                    for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
+                    for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;
                 }
             }
 
             if (TR == 'N' && UPLO == 'L') {
-                for (ptrdiff_t ic = 0; ic < M; ic += nb) {
-                    ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
+                for (ptrdiff_t ic = 0; ic < m; ic += nb) {
+                    ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
                     qtrsm_lln_core(j_lo, j_hi, ib, 1.0Q,
                                    &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-                    ptrdiff_t mt = M - ic - ib;
+                    ptrdiff_t mt = m - ic - ib;
                     if (mt > 0) {
                         ptrdiff_t i0 = ic + ib;
                         qgemm_serial('N', 'N', mt, n_slice, ib, &neg_one,
@@ -303,9 +303,9 @@ static void qtrsm_blocked_core(
                     }
                 }
             } else if (TR == 'N' && UPLO == 'U') {
-                ptrdiff_t ic = ((M - 1) / nb) * nb;
+                ptrdiff_t ic = ((m - 1) / nb) * nb;
                 while (ic >= 0) {
-                    ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
+                    ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
                     qtrsm_lun_core(j_lo, j_hi, ib, 1.0Q,
                                    &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
                     if (ic > 0) {
@@ -318,9 +318,9 @@ static void qtrsm_blocked_core(
                 }
             } else if (UPLO == 'L') {
                 /* L,L,T: bottom-up walk. */
-                ptrdiff_t ic = ((M - 1) / nb) * nb;
+                ptrdiff_t ic = ((m - 1) / nb) * nb;
                 while (ic >= 0) {
-                    ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
+                    ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
                     qtrsm_llt_core(j_lo, j_hi, ib, 1.0Q,
                                    &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
                     if (ic > 0) {
@@ -333,11 +333,11 @@ static void qtrsm_blocked_core(
                 }
             } else {
                 /* L,U,T: top-down walk. */
-                for (ptrdiff_t ic = 0; ic < M; ic += nb) {
-                    ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
+                for (ptrdiff_t ic = 0; ic < m; ic += nb) {
+                    ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
                     qtrsm_lut_core(j_lo, j_hi, ib, 1.0Q,
                                    &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-                    ptrdiff_t mt = M - ic - ib;
+                    ptrdiff_t mt = m - ic - ib;
                     if (mt > 0) {
                         ptrdiff_t i0 = ic + ib;
                         qgemm_serial('T', 'N', mt, n_slice, ib, &neg_one,

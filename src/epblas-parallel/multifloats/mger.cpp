@@ -41,7 +41,7 @@ namespace {
  * to SoA once) and the y read differ between the contiguous and strided drivers,
  * so this one SIMD core serves both. */
 static inline __attribute__((always_inline)) void
-mger_col(std::ptrdiff_t M, const double *x_hi, const double *x_lo, T t, T *ajT)
+mger_col(std::ptrdiff_t m, const double *x_hi, const double *x_lo, T t, T *ajT)
 {
     const __m256d thi = _mm256_set1_pd(t.limbs[0]);
     const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
@@ -51,7 +51,7 @@ mger_col(std::ptrdiff_t M, const double *x_hi, const double *x_lo, T t, T *ajT)
      * EFT latency (no native SIMD for one scalar DD) that a single chain leaves
      * exposed while the column streams from cache. ~7% at N=1024, ~11% cache-
      * resident. Bit-identical — each 4-lane group matches the 4-wide loop. */
-    for (; i + 8 <= M; i += 8) {
+    for (; i + 8 <= m; i += 8) {
         __m256d a0h, a0l, a1h, a1l;
         load_dd4(aj + 2 * i,       a0h, a0l);
         load_dd4(aj + 2 * (i + 4), a1h, a1l);
@@ -64,7 +64,7 @@ mger_col(std::ptrdiff_t M, const double *x_hi, const double *x_lo, T t, T *ajT)
         store_dd4(aj + 2 * i,       n0h, n0l);
         store_dd4(aj + 2 * (i + 4), n1h, n1l);
     }
-    for (; i + 3 < M; i += 4) {
+    for (; i + 3 < m; i += 4) {
         __m256d a_h, a_l;
         load_dd4(aj + 2 * i, a_h, a_l);
         __m256d xh = _mm256_loadu_pd(x_hi + i);
@@ -75,13 +75,13 @@ mger_col(std::ptrdiff_t M, const double *x_hi, const double *x_lo, T t, T *ajT)
         simd_fast::add(a_h, a_l, p_h, p_l, nh, nl);
         store_dd4(aj + 2 * i, nh, nl);
     }
-    for (; i < M; ++i) ajT[i] = ajT[i] + t * T{x_hi[i], x_lo[i]};
+    for (; i < m; ++i) ajT[i] = ajT[i] + t * T{x_hi[i], x_lo[i]};
 }
 }
 #endif
 
 static void mger_core(
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     const T *alpha_,
     const T *x, std::ptrdiff_t incx,
     const T *y, std::ptrdiff_t incy,
@@ -89,30 +89,30 @@ static void mger_core(
 {
     const T alpha = *alpha_;
 
-    if (M == 0 || N == 0 || eq0(alpha)) return;
+    if (m == 0 || n == 0 || eq0(alpha)) return;
 
-    const std::ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
-    const std::ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
+    const std::ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
+    const std::ptrdiff_t ix0 = (incx < 0) ? -(m - 1) * incx : 0;
 #ifdef _OPENMP
-    const bool use_omp = (N >= MGER_OMP_MIN && blas_omp_available());
+    const bool use_omp = (n >= MGER_OMP_MIN && blas_omp_available());
 #endif
 
 #ifdef MBLAS_SIMD_DD
     /* Gather x to a unit-stride SoA pair once (O(M)); the matrix columns are
      * already contiguous, so every column update runs the SIMD core. Columns of A
      * are disjoint -> OMP-over-j is race-free. */
-    const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
+    const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
     double *x_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
     double *x_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < M; ++i) { x_hi[i] = x[ix].limbs[0]; x_lo[i] = x[ix].limbs[1]; ix += incx; } }
-    for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
+    { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < m; ++i) { x_hi[i] = x[ix].limbs[0]; x_lo[i] = x[ix].limbs[1]; ix += incx; } }
+    for (std::size_t i = static_cast<std::size_t>(m); i < M_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
 #ifdef _OPENMP
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
         const T yj = y[jy0 + j * incy];
         if (eq0(yj)) continue;
-        mger_col(M, x_hi, x_lo, alpha * yj, &A_(0, j));
+        mger_col(m, x_hi, x_lo, alpha * yj, &A_(0, j));
     }
     std::free(x_hi); std::free(x_lo);
 #else
@@ -121,20 +121,20 @@ static void mger_core(
     const T *xp = x;
     T *x_buf = NULL;
     if (incx != 1) {
-        x_buf = static_cast<T *>(std::malloc(static_cast<size_t>(M) * sizeof(T)));
-        if (x_buf) { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < M; ++i) { x_buf[i] = x[ix]; ix += incx; } xp = x_buf; }
+        x_buf = static_cast<T *>(std::malloc(static_cast<size_t>(m) * sizeof(T)));
+        if (x_buf) { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < m; ++i) { x_buf[i] = x[ix]; ix += incx; } xp = x_buf; }
     }
     const std::ptrdiff_t x_unit = (incx == 1) || (x_buf != NULL);
 #ifdef _OPENMP
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
         const T yj = y[jy0 + j * incy];
         if (!eq0(yj)) {
             const T t = alpha * yj;
             T *aj = &A_(0, j);
-            if (x_unit) { for (std::ptrdiff_t i = 0; i < M; ++i) aj[i] = aj[i] + t * xp[i]; }
-            else { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < M; ++i) { aj[i] = aj[i] + t * x[ix]; ix += incx; } }
+            if (x_unit) { for (std::ptrdiff_t i = 0; i < m; ++i) aj[i] = aj[i] + t * xp[i]; }
+            else { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < m; ++i) { aj[i] = aj[i] + t * x[ix]; ix += incx; } }
         }
     }
     std::free(x_buf);

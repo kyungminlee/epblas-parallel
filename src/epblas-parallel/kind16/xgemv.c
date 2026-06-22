@@ -35,13 +35,13 @@ static inline T cconj(T z) { return conjq(z); }
 /* Pure serial body for TR='N', stride-1: y[i_lo:i_hi] += alpha * A[i_lo:i_hi, :] * x.
  * Each thread (or the lone serial caller) writes a disjoint slice of y. */
 static void xgemv_n_stride1_slice(
-    ptrdiff_t N, ptrdiff_t i_lo, ptrdiff_t i_hi,
+    ptrdiff_t n, ptrdiff_t i_lo, ptrdiff_t i_hi,
     T alpha,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, T *restrict y)
 {
     const T zero = 0.0Q + 0.0Qi;
-    for (ptrdiff_t j = 0; j < N; ++j) {
+    for (ptrdiff_t j = 0; j < n; ++j) {
         const T xj = x[j];
         if (xj != zero) {
             const T t = alpha * xj;
@@ -54,7 +54,7 @@ static void xgemv_n_stride1_slice(
 /* Pure serial body for TR ∈ {'T','C'}, stride-1: y[j_lo:j_hi] += alpha * (op(A) * x)[j_lo:j_hi].
  * Each thread (or the lone serial caller) writes a disjoint slice of y. */
 static void xgemv_tc_stride1_slice(
-    ptrdiff_t M, ptrdiff_t j_lo, ptrdiff_t j_hi, bool conj_a,
+    ptrdiff_t m, ptrdiff_t j_lo, ptrdiff_t j_hi, bool conj_a,
     T alpha,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, T *restrict y)
@@ -64,9 +64,9 @@ static void xgemv_tc_stride1_slice(
         const T *aj = &A_(0, j);
         T s = zero;
         if (conj_a) {
-            for (ptrdiff_t i = 0; i < M; ++i) s += cconj(aj[i]) * x[i];
+            for (ptrdiff_t i = 0; i < m; ++i) s += cconj(aj[i]) * x[i];
         } else {
-            for (ptrdiff_t i = 0; i < M; ++i) s += aj[i] * x[i];
+            for (ptrdiff_t i = 0; i < m; ++i) s += aj[i] * x[i];
         }
         y[j] += alpha * s;
     }
@@ -77,15 +77,15 @@ static void xgemv_tc_stride1_slice(
  * output element is written by one thread in the same per-element order as the
  * full serial loop → race-free and bit-exact (iy0/jy0/ix recomputed). */
 static void xgemv_general_stride_slice(
-    ptrdiff_t M, ptrdiff_t N, char TR, bool conj_a,
+    ptrdiff_t m, ptrdiff_t n, char TR, bool conj_a,
     T alpha, const T *a, ptrdiff_t lda,
     const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy, ptrdiff_t lo, ptrdiff_t hi)
 {
     const T zero = 0.0Q + 0.0Qi;
     if (TR == 'N') {
-        const ptrdiff_t iy0 = (incy < 0) ? -(M - 1) * incy : 0;
-        ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        const ptrdiff_t iy0 = (incy < 0) ? -(m - 1) * incy : 0;
+        ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const T xj = x[jx];
             if (xj != zero) {
                 const T t = alpha * xj;
@@ -98,11 +98,11 @@ static void xgemv_general_stride_slice(
             jx += incx;
         }
     } else {
-        const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+        const ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
         for (ptrdiff_t j = lo; j < hi; ++j) {
             T s = zero;
-            ptrdiff_t ix = (incx < 0) ? -(M - 1) * incx : 0;
-            for (ptrdiff_t i = 0; i < M; ++i) {
+            ptrdiff_t ix = (incx < 0) ? -(m - 1) * incx : 0;
+            for (ptrdiff_t i = 0; i < m; ++i) {
                 s += (conj_a ? cconj(A_(i, j)) : A_(i, j)) * x[ix];
                 ix += incx;
             }
@@ -130,7 +130,7 @@ static void xgemv_apply_beta(ptrdiff_t leny, ptrdiff_t incy, T beta, T *y)
  * another parallel region. */
 void xgemv_core(
     char trans,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
@@ -140,10 +140,10 @@ void xgemv_core(
     const T alpha = *alpha_, beta = *beta_;
     const char TR = blas_up(trans);
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     const T zero = 0.0Q + 0.0Qi;
-    const ptrdiff_t leny = (TR == 'N') ? M : N;
+    const ptrdiff_t leny = (TR == 'N') ? m : n;
 
     xgemv_apply_beta(leny, incy, beta, y);
 
@@ -157,37 +157,37 @@ void xgemv_core(
 
     if (TR == 'N' && incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const bool use_omp = (M >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
+        const bool use_omp = (m >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
             ptrdiff_t tid = 0, nth = 1;
             if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
-            const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
-            const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
-            xgemv_n_stride1_slice(N, i_lo, i_hi, alpha, a, lda, x, y);
+            const ptrdiff_t i_lo = blas_part_bound(m, tid, nth);
+            const ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
+            xgemv_n_stride1_slice(n, i_lo, i_hi, alpha, a, lda, x, y);
         }
 #else
-        xgemv_n_stride1_slice(N, 0, M, alpha, a, lda, x, y);
+        xgemv_n_stride1_slice(n, 0, m, alpha, a, lda, x, y);
 #endif
     } else if ((TR == 'T' || TR == 'C') && incx == 1 && incy == 1) {
         const bool conj_a = (TR == 'C');
 #ifdef _OPENMP
-        const bool use_omp = (N >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
+        const bool use_omp = (n >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
             ptrdiff_t tid = 0, nth = 1;
             if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
-            const ptrdiff_t j_lo = blas_part_bound(N, tid, nth);
-            const ptrdiff_t j_hi = blas_part_bound(N, tid + 1, nth);
-            xgemv_tc_stride1_slice(M, j_lo, j_hi, conj_a, alpha, a, lda, x, y);
+            const ptrdiff_t j_lo = blas_part_bound(n, tid, nth);
+            const ptrdiff_t j_hi = blas_part_bound(n, tid + 1, nth);
+            xgemv_tc_stride1_slice(m, j_lo, j_hi, conj_a, alpha, a, lda, x, y);
         }
 #else
-        xgemv_tc_stride1_slice(M, 0, N, conj_a, alpha, a, lda, x, y);
+        xgemv_tc_stride1_slice(m, 0, n, conj_a, alpha, a, lda, x, y);
 #endif
     } else {
         const bool conj_a = (TR == 'C');
 #ifdef _OPENMP
-        const ptrdiff_t span = (TR == 'N') ? M : N;
+        const ptrdiff_t span = (TR == 'N') ? m : n;
         const bool use_omp = (span >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
@@ -195,11 +195,11 @@ void xgemv_core(
             if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
             const ptrdiff_t lo = blas_part_bound(span, tid, nth);
             const ptrdiff_t hi = blas_part_bound(span, tid + 1, nth);
-            xgemv_general_stride_slice(M, N, TR, conj_a, alpha, a, lda, x, incx, y, incy, lo, hi);
+            xgemv_general_stride_slice(m, n, TR, conj_a, alpha, a, lda, x, incx, y, incy, lo, hi);
         }
 #else
-        xgemv_general_stride_slice(M, N, TR, conj_a, alpha, a, lda, x, incx, y, incy,
-                                   0, (TR == 'N') ? M : N);
+        xgemv_general_stride_slice(m, n, TR, conj_a, alpha, a, lda, x, incx, y, incy,
+                                   0, (TR == 'N') ? m : n);
 #endif
     }
 }

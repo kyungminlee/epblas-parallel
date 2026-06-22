@@ -34,7 +34,7 @@ static const T ONE  = 1.0L + 0.0Li;
 
 static void ysyr2k_core(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict b, ptrdiff_t ldb,
@@ -45,7 +45,7 @@ static void ysyr2k_core(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        ysyr2k_serial(uplo, trans, N, K, alpha_, a, lda, b, ldb, beta_, c, ldc);
+        ysyr2k_serial(uplo, trans, n, k, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
@@ -54,16 +54,16 @@ static void ysyr2k_core(
     char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (alpha == ZERO || K == 0) {
+    if (alpha == ZERO || k == 0) {
         if (beta == ONE) return;
 #ifdef _OPENMP
-        const bool use_omp = (N >= YSYR2K_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (n >= YSYR2K_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j)
-            ysyr2k_beta_scale(j, j + 1, N, beta, c, ldc, UPLO);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            ysyr2k_beta_scale(j, j + 1, n, beta, c, ldc, UPLO);
         return;
     }
 
@@ -72,16 +72,16 @@ static void ysyr2k_core(
     ptrdiff_t pw = nb;
 #ifdef _OPENMP
     const ptrdiff_t nthreads = blas_omp_max_threads();
-    const bool use_omp = (N >= YSYR2K_OMP_MIN && nthreads > 1);
+    const bool use_omp = (n >= YSYR2K_OMP_MIN && nthreads > 1);
     /* Thin the diagonal blocks so the team can balance the triangular
      * per-block load at small N (N=64, nb=32 -> 2 blocks -> at most 2x);
      * triangular + schedule(dynamic) -> ppt=2 for finer balance. */
-    if (use_omp) pw = blas_omp_panel_width(N, nthreads, nb, 2);
+    if (use_omp) pw = blas_omp_panel_width(n, nthreads, nb, 2);
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (ptrdiff_t jc = 0; jc < N; jc += pw) {
-        const ptrdiff_t jb = (N - jc < pw) ? (N - jc) : pw;
-        ysyr2k_block(jc, jb, N, K, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
+    for (ptrdiff_t jc = 0; jc < n; jc += pw) {
+        const ptrdiff_t jb = (n - jc < pw) ? (n - jc) : pw;
+        ysyr2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
     }
 }
 

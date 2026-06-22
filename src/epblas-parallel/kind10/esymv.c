@@ -70,19 +70,19 @@ T esymv_axpydot_strided(ptrdiff_t cnt, T temp1, const T *restrict ak,
  * strided gather path). Bit-identical column-order accumulation to the
  * direct strided form. */
 __attribute__((noinline)) static
-void esymv_serial_core(char UPLO, ptrdiff_t N, ptrdiff_t lda, T alpha,
+void esymv_serial_core(char UPLO, ptrdiff_t n, ptrdiff_t lda, T alpha,
                        const T *restrict a, const T *restrict x, T *restrict y)
 {
     if (UPLO == 'L') {
-        for (ptrdiff_t i = 0; i < N; ++i) {
+        for (ptrdiff_t i = 0; i < n; ++i) {
             const T temp1 = alpha * x[i];
             const T *ai = &A_(0, i);
             y[i] += temp1 * ai[i];
-            const T temp2 = esymv_axpydot(i + 1, N, temp1, ai, x, y);
+            const T temp2 = esymv_axpydot(i + 1, n, temp1, ai, x, y);
             y[i] += alpha * temp2;
         }
     } else {
-        for (ptrdiff_t i = 0; i < N; ++i) {
+        for (ptrdiff_t i = 0; i < n; ++i) {
             const T temp1 = alpha * x[i];
             const T *ai = &A_(0, i);
             const T temp2 = esymv_axpydot(0, i, temp1, ai, x, y);
@@ -93,7 +93,7 @@ void esymv_serial_core(char UPLO, ptrdiff_t N, ptrdiff_t lda, T alpha,
 
 static void esymv_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
@@ -103,17 +103,17 @@ static void esymv_core(
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
     const T zero = 0.0L, one = 1.0L;
 
     if (beta != one) {
         if (incy == 1) {
-            if (beta == zero) for (ptrdiff_t i = 0; i < N; ++i) y[i] = zero;
-            else              for (ptrdiff_t i = 0; i < N; ++i) y[i] *= beta;
+            if (beta == zero) for (ptrdiff_t i = 0; i < n; ++i) y[i] = zero;
+            else              for (ptrdiff_t i = 0; i < n; ++i) y[i] *= beta;
         } else {
-            ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 if (beta == zero) y[iy] = zero;
                 else              y[iy] *= beta;
                 iy += incy;
@@ -126,7 +126,7 @@ static void esymv_core(
     /* The unit-stride path: stride-1 column walks of A. */
     if (incx == 1 && incy == 1) {
         const ptrdiff_t nthreads = blas_omp_max_threads();
-        const bool use_omp = (N >= ESYMV_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp = (n >= ESYMV_OMP_MIN && blas_omp_should_thread());
         if (use_omp) {
             /* Parallel two-pass with per-thread private y accumulator.
              *
@@ -140,26 +140,26 @@ static void esymv_core(
              * schedule(static, 1) interleaves columns across threads to
              * balance the triangular work (per-column work is linear in
              * (N - j) for L, j for U). */
-            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)N, sizeof(T));
+            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
             if (y_priv_all) {
 #ifdef _OPENMP
                 #pragma omp parallel num_threads(nthreads)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
+                    T *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
-                        for (ptrdiff_t j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < n; ++j) {
                             const T temp1 = alpha * x[j];
                             const T *aj = &A_(0, j);
                             y_priv[j] += temp1 * aj[j];
-                            const T temp2 = esymv_axpydot(j + 1, N, temp1, aj, x, y_priv);
+                            const T temp2 = esymv_axpydot(j + 1, n, temp1, aj, x, y_priv);
                             y_priv[j] += alpha * temp2;
                         }
                     } else {
                         #pragma omp for schedule(static, 1)
-                        for (ptrdiff_t j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < n; ++j) {
                             const T temp1 = alpha * x[j];
                             const T *aj = &A_(0, j);
                             const T temp2 = esymv_axpydot(0, j, temp1, aj, x, y_priv);
@@ -171,10 +171,10 @@ static void esymv_core(
                      * before the reduction begins reading. */
 
                     #pragma omp for schedule(static)
-                    for (ptrdiff_t i = 0; i < N; ++i) {
+                    for (ptrdiff_t i = 0; i < n; ++i) {
                         T s = zero;
                         for (ptrdiff_t t = 0; t < nthreads; ++t)
-                            s += y_priv_all[(size_t)t * N + i];
+                            s += y_priv_all[(size_t)t * n + i];
                         y[i] += s;
                     }
                 }
@@ -184,7 +184,7 @@ static void esymv_core(
             }
             /* aligned_alloc failed — fall through to serial. */
         }
-        esymv_serial_core(UPLO, N, lda, alpha, a, x, y);
+        esymv_serial_core(UPLO, n, lda, alpha, a, x, y);
     } else {
         /* General-stride: gather x and the (already beta-scaled) y into
          * contiguous scratch, run the stride-1 core — which beats both the
@@ -193,46 +193,46 @@ static void esymv_core(
          * work, so it is free past tiny N. Same column-order accumulation as
          * the direct strided walk, so bit-identical. Falls back to the direct
          * strided helper if the scratch allocation fails. */
-        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         /* Stack scratch for the common small-N case avoids malloc latency;
          * spill to the heap for large N. */
         T stackbuf[2 * 512];
         T *heap = NULL;
         T *xc, *yc;
-        if (N <= 512) {
-            xc = stackbuf; yc = stackbuf + N;
+        if (n <= 512) {
+            xc = stackbuf; yc = stackbuf + n;
         } else {
-            heap = (T *)malloc((size_t)2 * N * sizeof(T));
-            xc = heap; yc = heap ? heap + N : NULL;
+            heap = (T *)malloc((size_t)2 * n * sizeof(T));
+            xc = heap; yc = heap ? heap + n : NULL;
         }
         if (xc && yc) {
             ptrdiff_t ix = kx, iy = ky;
-            for (ptrdiff_t k = 0; k < N; ++k) {
+            for (ptrdiff_t k = 0; k < n; ++k) {
                 xc[k] = x[ix]; yc[k] = y[iy];
                 ix += incx; iy += incy;
             }
-            esymv_serial_core(UPLO, N, lda, alpha, a, xc, yc);
+            esymv_serial_core(UPLO, n, lda, alpha, a, xc, yc);
             iy = ky;
-            for (ptrdiff_t k = 0; k < N; ++k) { y[iy] = yc[k]; iy += incy; }
+            for (ptrdiff_t k = 0; k < n; ++k) { y[iy] = yc[k]; iy += incy; }
             free(heap);
             return;
         }
         free(heap);
         if (UPLO == 'L') {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[jx];
                 y[jy] += temp1 * A_(i, i);
                 const T temp2 = esymv_axpydot_strided(
-                    N - (i + 1), temp1, &A_(i + 1, i),
+                    n - (i + 1), temp1, &A_(i + 1, i),
                     x, incx, jx + incx, y, incy, jy + incy);
                 y[jy] += alpha * temp2;
                 jx += incx; jy += incy;
             }
         } else {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[jx];
                 const T temp2 = esymv_axpydot_strided(
                     i, temp1, &A_(0, i),

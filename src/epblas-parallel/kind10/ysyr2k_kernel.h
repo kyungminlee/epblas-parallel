@@ -34,19 +34,19 @@ ptrdiff_t ysyr2k_nb(void);
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's triangular
  * columns, the scalar rank-2k diagonal add, and the two trailing
  * ygemm_serial updates against the rest of the panel. */
-void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, ysyr2k_T alpha, ysyr2k_T beta,
+void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, ysyr2k_T alpha, ysyr2k_T beta,
                   const ysyr2k_T *a, ptrdiff_t lda, const ysyr2k_T *b, ptrdiff_t ldb,
                   ysyr2k_T *c, ptrdiff_t ldc, char UPLO, char TR);
 
 /* C := beta*C over the triangular columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. */
-void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, ysyr2k_T beta,
+void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, ysyr2k_T beta,
                        ysyr2k_T *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ysyr2k_. */
 void ysyr2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const ysyr2k_T *alpha_,
     const ysyr2k_T *a, ptrdiff_t lda,
     const ysyr2k_T *b, ptrdiff_t ldb,

@@ -34,7 +34,7 @@ static inline T cconj(T z) { return ~z; }
 
 static void yhemv_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
@@ -44,15 +44,15 @@ static void yhemv_core(
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
     if (beta != ONE) {
         if (incy == 1) {
-            if (beta == ZERO) for (ptrdiff_t i = 0; i < N; ++i) y[i] = ZERO;
-            else              for (ptrdiff_t i = 0; i < N; ++i) y[i] *= beta;
+            if (beta == ZERO) for (ptrdiff_t i = 0; i < n; ++i) y[i] = ZERO;
+            else              for (ptrdiff_t i = 0; i < n; ++i) y[i] *= beta;
         } else {
-            ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 if (beta == ZERO) y[iy] = ZERO;
                 else              y[iy] *= beta;
                 iy += incy;
@@ -64,27 +64,27 @@ static void yhemv_core(
 
     if (incx == 1 && incy == 1) {
         const ptrdiff_t nthreads = blas_omp_max_threads();
-        const bool use_omp = (N >= YHEMV_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp = (n >= YHEMV_OMP_MIN && blas_omp_should_thread());
         if (use_omp) {
             /* Parallel column-walk with per-thread private y, then reduce.
              * Same pattern as esymv (Addendum 36). Hermitian conjugation
              * stays inside the column loop unchanged. */
-            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)N, sizeof(T));
+            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
             if (y_priv_all) {
 #ifdef _OPENMP
                 #pragma omp parallel num_threads(nthreads)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
+                    T *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
-                        for (ptrdiff_t j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < n; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = ZERO;
                             const T *aj = &A_(0, j);
                             y_priv[j] += temp1 * __real__ aj[j];
-                            for (ptrdiff_t k = j + 1; k < N; ++k) {
+                            for (ptrdiff_t k = j + 1; k < n; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += cconj(aj[k]) * x[k];
                             }
@@ -92,7 +92,7 @@ static void yhemv_core(
                         }
                     } else {
                         #pragma omp for schedule(static, 1)
-                        for (ptrdiff_t j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < n; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = ZERO;
                             const T *aj = &A_(0, j);
@@ -105,10 +105,10 @@ static void yhemv_core(
                     }
 
                     #pragma omp for schedule(static)
-                    for (ptrdiff_t i = 0; i < N; ++i) {
+                    for (ptrdiff_t i = 0; i < n; ++i) {
                         T s = ZERO;
                         for (ptrdiff_t t = 0; t < nthreads; ++t)
-                            s += y_priv_all[(size_t)t * N + i];
+                            s += y_priv_all[(size_t)t * n + i];
                         y[i] += s;
                     }
                 }
@@ -118,19 +118,19 @@ static void yhemv_core(
             }
         }
         if (UPLO == 'L') {
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = ZERO;
                 const T *ai = &A_(0, i);
                 y[i] += temp1 * __real__ ai[i];
-                for (ptrdiff_t k = i + 1; k < N; ++k) {
+                for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += cconj(ai[k]) * x[k];
                 }
                 y[i] += alpha * temp2;
             }
         } else {
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = ZERO;
                 const T *ai = &A_(0, i);
@@ -144,17 +144,17 @@ static void yhemv_core(
     } else {
         /* General-stride fallback — hoist the matrix column to ai[k] and
          * walk the strided vectors with running indices (Class-B fix). */
-        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         if (UPLO == 'L') {
             ptrdiff_t ix = kx, iy = ky;
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[ix];
                 T temp2 = ZERO;
                 const T *ai = &A_(0, i);
                 y[iy] += temp1 * __real__ ai[i];
                 ptrdiff_t jx = ix + incx, jy = iy + incy;
-                for (ptrdiff_t k = i + 1; k < N; ++k) {
+                for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[jy] += temp1 * ai[k];
                     temp2 += cconj(ai[k]) * x[jx];
                     jx += incx; jy += incy;
@@ -164,7 +164,7 @@ static void yhemv_core(
             }
         } else {
             ptrdiff_t ix = kx, iy = ky;
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[ix];
                 T temp2 = ZERO;
                 const T *ai = &A_(0, i);

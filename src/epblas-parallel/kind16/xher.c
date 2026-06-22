@@ -23,7 +23,7 @@ typedef __float128   TR;
 
 void xher_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const TR *alpha_,
     const TC *restrict x, ptrdiff_t incx,
     TC *restrict a, ptrdiff_t lda)
@@ -33,20 +33,20 @@ void xher_core(
     const TC czero = 0.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == rzero) return;
+    if (n == 0 || alpha == rzero) return;
 
     if (incx == 1) {
 #ifdef _OPENMP
-        const bool use_omp = (N >= XHER_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp = (n >= XHER_OMP_MIN && blas_omp_should_thread());
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const TC xj = x[j];
             if (xj != czero) {
                 const TC t = alpha * conjq(xj);
                 TC *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (ptrdiff_t i = j + 1; i < N; ++i) aj[i] += t * x[i];
+                    for (ptrdiff_t i = j + 1; i < n; ++i) aj[i] += t * x[i];
                     aj[j] = crealq(aj[j]) + crealq(t * x[j]);
                 } else {
                     for (ptrdiff_t i = 0; i < j; ++i) aj[i] += t * x[i];
@@ -55,13 +55,13 @@ void xher_core(
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const TC xj = x[kx + (ptrdiff_t)j * incx];
             if (xj != czero) {
                 const TC t = alpha * conjq(xj);
                 if (UPLO == 'L') {
-                    for (ptrdiff_t i = j + 1; i < N; ++i) A_(i, j) += t * x[kx + (ptrdiff_t)i * incx];
+                    for (ptrdiff_t i = j + 1; i < n; ++i) A_(i, j) += t * x[kx + (ptrdiff_t)i * incx];
                     A_(j, j) = crealq(A_(j, j)) + crealq(t * x[kx + (ptrdiff_t)j * incx]);
                 } else {
                     for (ptrdiff_t i = 0; i < j; ++i) A_(i, j) += t * x[kx + (ptrdiff_t)i * incx];

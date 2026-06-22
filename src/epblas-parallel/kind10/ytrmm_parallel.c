@@ -40,121 +40,121 @@ static const T ZERO = 0.0L + 0.0Li;
 
 /* ── Blocked dispatchers: one outer `omp parallel` partitions B's
  *    columns (SIDE='L') or rows (SIDE='R') across the team. ──────── */
-static void blocked_dispatch_L(enum ytrmm_variant_L V, ptrdiff_t M, ptrdiff_t N, T alpha,
+static void blocked_dispatch_L(enum ytrmm_variant_L V, ptrdiff_t m, ptrdiff_t n, T alpha,
                                const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t nb = ytrmm_nb();
 #ifdef _OPENMP
-    if (N >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {
+    if (n >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {
         #pragma omp parallel
         {
             ptrdiff_t tid = omp_get_thread_num();
             ptrdiff_t nth  = omp_get_num_threads();
-            ptrdiff_t js  = blas_part_bound(N, tid, nth);
-            ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);
-            ytrmm_blocked_chunk_L(V, js, je, M, nb, alpha, a, lda, b, ldb, nounit);
+            ptrdiff_t js  = blas_part_bound(n, tid, nth);
+            ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);
+            ytrmm_blocked_chunk_L(V, js, je, m, nb, alpha, a, lda, b, ldb, nounit);
         }
         return;
     }
 #endif
-    ytrmm_blocked_chunk_L(V, 0, N, M, nb, alpha, a, lda, b, ldb, nounit);
+    ytrmm_blocked_chunk_L(V, 0, n, m, nb, alpha, a, lda, b, ldb, nounit);
 }
 
-static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N, T alpha,
+static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t m, ptrdiff_t n, T alpha,
                                const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t nb = ytrmm_nb();
 #ifdef _OPENMP
-    if (M >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {
+    if (m >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {
         #pragma omp parallel
         {
             ptrdiff_t tid = omp_get_thread_num();
             ptrdiff_t nth  = omp_get_num_threads();
-            ptrdiff_t is  = blas_part_bound(M, tid, nth);
-            ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);
-            ytrmm_blocked_chunk_R(V, is, ie, N, nb, alpha, a, lda, b, ldb, nounit);
+            ptrdiff_t is  = blas_part_bound(m, tid, nth);
+            ptrdiff_t ie  = blas_part_bound(m, tid + 1, nth);
+            ytrmm_blocked_chunk_R(V, is, ie, n, nb, alpha, a, lda, b, ldb, nounit);
         }
         return;
     }
 #endif
-    ytrmm_blocked_chunk_R(V, 0, M, N, nb, alpha, a, lda, b, ldb, nounit);
+    ytrmm_blocked_chunk_R(V, 0, m, n, nb, alpha, a, lda, b, ldb, nounit);
 }
 
 /* ── Standalone OMP wrappers (unblocked fallback for small M/N). ──── */
 
 #ifdef _OPENMP
 #define YTRMM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                 \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
-        if (N >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
+        if (n >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
                 ptrdiff_t nth  = omp_get_num_threads();                            \
-                ptrdiff_t js  = blas_part_bound(N, tid, nth);                   \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);             \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit);             \
+                ptrdiff_t js  = blas_part_bound(n, tid, nth);                   \
+                ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);             \
+                core(js, je, m, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
-        } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }            \
+        } else { core(0, n, m, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define YTRMM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                 \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
-        if (N >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
+        if (n >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
                 ptrdiff_t nth  = omp_get_num_threads();                            \
-                ptrdiff_t js  = blas_part_bound(N, tid, nth);                   \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);             \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit, cflag);      \
+                ptrdiff_t js  = blas_part_bound(n, tid, nth);                   \
+                ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);             \
+                core(js, je, m, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
-        } else { core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag); }     \
+        } else { core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag); }     \
     }
 #define YTRMM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                 \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
-        if (M >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
+        if (m >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
                 ptrdiff_t nth  = omp_get_num_threads();                            \
-                ptrdiff_t is  = blas_part_bound(M, tid, nth);                   \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);             \
-                core(is, ie, N, alpha, a, lda, b, ldb, nounit);             \
+                ptrdiff_t is  = blas_part_bound(m, tid, nth);                   \
+                ptrdiff_t ie  = blas_part_bound(m, tid + 1, nth);             \
+                core(is, ie, n, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
-        } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }            \
+        } else { core(0, m, n, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define YTRMM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                 \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
-        if (M >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
+        if (m >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
                 ptrdiff_t nth  = omp_get_num_threads();                            \
-                ptrdiff_t is  = blas_part_bound(M, tid, nth);                   \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);             \
-                core(is, ie, N, alpha, a, lda, b, ldb, nounit, cflag);      \
+                ptrdiff_t is  = blas_part_bound(m, tid, nth);                   \
+                ptrdiff_t ie  = blas_part_bound(m, tid + 1, nth);             \
+                core(is, ie, n, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
-        } else { core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag); }     \
+        } else { core(0, m, n, alpha, a, lda, b, ldb, nounit, cflag); }     \
     }
 #else
 #define YTRMM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                 \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit);                       \
+        core(0, n, m, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define YTRMM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                 \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag);                \
+        core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #define YTRMM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                 \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
-        core(0, M, N, alpha, a, lda, b, ldb, nounit);                       \
+        core(0, m, n, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define YTRMM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                 \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                 \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {      \
-        core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag);                \
+        core(0, m, n, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #endif
 
@@ -173,7 +173,7 @@ YTRMM_OMP_WRAP_R_TC(ytrmm_ruc, ytrmm_ruTC_core, 1)
 
 static void ytrmm_core(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     T *b, ptrdiff_t ldb)
@@ -182,7 +182,7 @@ static void ytrmm_core(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        ytrmm_serial(side, uplo, transa, diag, M, N, alpha_, a, lda, b, ldb);
+        ytrmm_serial(side, uplo, transa, diag, m, n, alpha_, a, lda, b, ldb);
         return;
     }
 #endif
@@ -192,68 +192,68 @@ static void ytrmm_core(
     const char TR = blas_up(transa);
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     if (alpha == ZERO) {
-        for (ptrdiff_t j = 0; j < N; ++j)
-            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = ZERO;
+        for (ptrdiff_t j = 0; j < n; ++j)
+            for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) = ZERO;
         return;
     }
 
     const ptrdiff_t nb = ytrmm_nb();
 
     if (SIDE == 'L') {
-        const ptrdiff_t use_blocked = (M >= 2 * nb);
+        const ptrdiff_t use_blocked = (m >= 2 * nb);
         if (TR == 'N') {
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_L(YLLN, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_lln(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_L(YLLN, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_lln(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch_L(YLUN, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_lun(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_L(YLUN, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_lun(m, n, alpha, a, lda, b, ldb, nounit);
             }
         } else if (TR == 'T') {
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_L(YLLT, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_llt(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_L(YLLT, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_llt(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch_L(YLUT, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_lut(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_L(YLUT, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_lut(m, n, alpha, a, lda, b, ldb, nounit);
             }
         } else { /* 'C' */
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_L(YLLC, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_llc(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_L(YLLC, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_llc(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch_L(YLUC, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_luc(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_L(YLUC, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_luc(m, n, alpha, a, lda, b, ldb, nounit);
             }
         }
     } else {
-        const ptrdiff_t use_blocked = (N >= 2 * nb);
+        const ptrdiff_t use_blocked = (n >= 2 * nb);
         if (TR == 'N') {
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_R(YRLN, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_rln(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_R(YRLN, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_rln(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch_R(YRUN, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_run(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_R(YRUN, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_run(m, n, alpha, a, lda, b, ldb, nounit);
             }
         } else if (TR == 'T') {
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_R(YRLT, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_rlt(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_R(YRLT, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_rlt(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch_R(YRUT, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_rut(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_R(YRUT, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_rut(m, n, alpha, a, lda, b, ldb, nounit);
             }
         } else {
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch_R(YRLC, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_rlc(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_R(YRLC, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_rlc(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch_R(YRUC, M, N, alpha, a, lda, b, ldb, nounit);
-                else             ytrmm_ruc(M, N, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch_R(YRUC, m, n, alpha, a, lda, b, ldb, nounit);
+                else             ytrmm_ruc(m, n, alpha, a, lda, b, ldb, nounit);
             }
         }
     }

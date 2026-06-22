@@ -63,11 +63,11 @@ void etrsv_serial_(
 
 void etrsv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
     const bool in_par = omp_in_parallel();
@@ -82,14 +82,14 @@ void etrsv_core(
      * dispatch regressed it to 0.80x. Bumping to 3*NB (192) keeps
      * N=128 on the (faster) serial path while N=256+ still goes
      * blocked-parallel and wins. */
-    if (incx == 1 && N >= 3 * etrsv_blocked_nb() && !in_par
+    if (incx == 1 && n >= 3 * etrsv_blocked_nb() && !in_par
         && blas_omp_max_threads() > 1) {
-        etrsv_blocked_(&uplo_c, &trans_c, &diag_c, &N, a, &lda, x, &incx,
+        etrsv_blocked_(&uplo_c, &trans_c, &diag_c, &n, a, &lda, x, &incx,
                        1, 1, 1);
         return;
     }
 
-    etrsv_serial_(&uplo_c, &trans_c, &diag_c, &N, a, &lda, x, &incx,
+    etrsv_serial_(&uplo_c, &trans_c, &diag_c, &n, a, &lda, x, &incx,
                   1, 1, 1);
 }
 
@@ -104,7 +104,7 @@ void etrsv_serial_(
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_;
+    const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = blas_up(*uplo);
     char TR = blas_up(*trans);
@@ -112,7 +112,7 @@ void etrsv_serial_(
     const char DIAG = blas_up(*diag);
     const bool nounit = (DIAG != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
     const T zero = 0.0L;
 
@@ -128,7 +128,7 @@ void etrsv_serial_(
                  * the AXPY-style inner — same trick as egemv N-branch.
                  * Inner becomes `x[k] = (x[k] - xi*a0[k]) - xi1*a1[k]`. */
                 ptrdiff_t i = 0;
-                for (; i + 1 < N; i += 2) {
+                for (; i + 1 < n; i += 2) {
                     if (nounit) x[i] /= A_(i, i);
                     const T xi = x[i];
                     /* Apply column i's contribution to x[i+1] before solving it. */
@@ -137,15 +137,15 @@ void etrsv_serial_(
                     const T xi1 = x[i + 1];
                     const T *a0 = &A_(0, i);
                     const T *a1 = &A_(0, i + 1);
-                    for (ptrdiff_t k = i + 2; k < N; ++k) {
+                    for (ptrdiff_t k = i + 2; k < n; ++k) {
                         x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
                     }
                 }
-                if (i < N) {
+                if (i < n) {
                     if (nounit) x[i] /= A_(i, i);
                     const T xi = x[i];
                     const T *ai = &A_(0, i);
-                    for (ptrdiff_t k = i + 1; k < N; ++k) x[k] -= xi * ai[k];
+                    for (ptrdiff_t k = i + 1; k < n; ++k) x[k] -= xi * ai[k];
                 }
             } else {
                 /* UPLO='U': back substitution iterates i backward.
@@ -154,7 +154,7 @@ void etrsv_serial_(
                  * J-unroll-by-2 (same trick as LN branch, descending): pair
                  * (i, i-1) so the inner k = 0..i-2 walk loads/stores each
                  * x[k] once for both columns' contributions. */
-                ptrdiff_t i = N - 1;
+                ptrdiff_t i = n - 1;
                 for (; i - 1 >= 0; i -= 2) {
                     if (nounit) x[i] /= A_(i, i);
                     const T xi = x[i];
@@ -194,10 +194,10 @@ void etrsv_serial_(
                  * K-unroll-by-2 with split accumulators (t0, t1) breaks the
                  * single-acc fmul→fadd dep chain (same x87-latency fix as
                  * etrmv TRANS='T' and ytrsv U-T; Addendum 19 / Rule 22). */
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     T t0 = x[i], t1 = zero;
                     const T *ai = &A_(0, i);
-                    ptrdiff_t k = N - 1;
+                    ptrdiff_t k = n - 1;
                     for (; k - 1 > i; k -= 2) {
                         t0 -= ai[k]     * x[k];
                         t1 -= ai[k - 1] * x[k - 1];
@@ -213,7 +213,7 @@ void etrsv_serial_(
                  *
                  * K-unroll-by-2 with split accumulators — see LT branch
                  * note above. */
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     T t0 = x[i], t1 = zero;
                     const T *ai = &A_(0, i);
                     ptrdiff_t k = 0;
@@ -231,17 +231,17 @@ void etrsv_serial_(
     } else {
         /* General-stride fallback — hoist matrix column to ai[k] and
          * walk the strided vector with a running index (Class-B fix). */
-        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'L') {
                 ptrdiff_t ix = kx;
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     const T *ai = &A_(0, i);
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= ai[i];
                         const T xi = x[ix];
                         ptrdiff_t kk = ix + incx;
-                        for (ptrdiff_t k = i + 1; k < N; ++k) {
+                        for (ptrdiff_t k = i + 1; k < n; ++k) {
                             x[kk] -= xi * ai[k];
                             kk += incx;
                         }
@@ -249,8 +249,8 @@ void etrsv_serial_(
                     ix += incx;
                 }
             } else {
-                ptrdiff_t ix = kx + (N - 1) * incx;
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                ptrdiff_t ix = kx + (n - 1) * incx;
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     const T *ai = &A_(0, i);
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= ai[i];
@@ -270,12 +270,12 @@ void etrsv_serial_(
                  * cache-direction reasoning as the incx=1 LT path above
                  * (Addendum 18 / Rule 21). K-unroll-by-2 with split
                  * accumulators (Addendum 19 / Rule 22). */
-                ptrdiff_t ix = kx + (N - 1) * incx;
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                ptrdiff_t ix = kx + (n - 1) * incx;
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     const T *ai = &A_(0, i);
                     T t0 = x[ix], t1 = zero;
-                    ptrdiff_t k = N - 1;
-                    ptrdiff_t xk = kx + (N - 1) * incx;
+                    ptrdiff_t k = n - 1;
+                    ptrdiff_t xk = kx + (n - 1) * incx;
                     for (; k - 1 > i; k -= 2) {
                         t0 -= ai[k]     * x[xk];
                         t1 -= ai[k - 1] * x[xk - incx];
@@ -290,7 +290,7 @@ void etrsv_serial_(
             } else {
                 /* K-unroll-by-2 with split accumulators. */
                 ptrdiff_t ix = kx;
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     const T *ai = &A_(0, i);
                     T t0 = x[ix], t1 = zero;
                     ptrdiff_t k = 0;
@@ -340,15 +340,15 @@ void etrsv_blocked_(
     T *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
-    const ptrdiff_t N = *n_;
+    const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = etrsv_blocked_nb();
     const char UPLO = blas_up(*uplo);
     char TR = blas_up(*trans);
     if (TR == 'C') TR = 'T';
 
-    if (N == 0) return;
-    if (incx != 1 || N < 2 * nb) {
+    if (n == 0) return;
+    if (incx != 1 || n < 2 * nb) {
         const ptrdiff_t n_pt = *n_, lda_pt = *lda_, incx_pt = *incx_;
         etrsv_serial_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt,
                       uplo_len, trans_len, diag_len);
@@ -373,8 +373,8 @@ void etrsv_blocked_(
 #endif
 
         if (TR == 'N' && UPLO == 'L') {
-            for (ptrdiff_t j = 0; j < N; j += nb) {
-                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
+            for (ptrdiff_t j = 0; j < n; j += nb) {
+                ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
@@ -385,7 +385,7 @@ void etrsv_blocked_(
                     #pragma omp barrier
                 }
 #endif
-                ptrdiff_t mt = N - j - jb;
+                ptrdiff_t mt = n - j - jb;
                 if (mt > 0) {
                     ptrdiff_t j2 = j + jb;
                     long long lo = blas_part_bound(mt, tid, nth);
@@ -406,9 +406,9 @@ void etrsv_blocked_(
 #endif
             }
         } else if (TR == 'N' && UPLO == 'U') {
-            ptrdiff_t j = ((N - 1) / nb) * nb;
+            ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
-                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
+                ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
@@ -439,9 +439,9 @@ void etrsv_blocked_(
                 j -= nb;
             }
         } else if (TR == 'T' && UPLO == 'L') {
-            ptrdiff_t j = ((N - 1) / nb) * nb;
+            ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
-                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
+                ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
@@ -473,8 +473,8 @@ void etrsv_blocked_(
             }
         } else {
             /* TR == 'T' && UPLO == 'U' */
-            for (ptrdiff_t j = 0; j < N; j += nb) {
-                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
+            for (ptrdiff_t j = 0; j < n; j += nb) {
+                ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
@@ -485,7 +485,7 @@ void etrsv_blocked_(
                     #pragma omp barrier
                 }
 #endif
-                ptrdiff_t mt = N - j - jb;
+                ptrdiff_t mt = n - j - jb;
                 if (mt > 0) {
                     ptrdiff_t j2 = j + jb;
                     long long lo = blas_part_bound(mt, tid, nth);

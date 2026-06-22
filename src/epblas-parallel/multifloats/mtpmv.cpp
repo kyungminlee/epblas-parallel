@@ -192,7 +192,7 @@ __attribute__((noinline)) static bool mtpmv_omp(
 
 static void mtpmv_core(
     char uplo, char trans, char diag,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const T *ap,
     T *x, std::ptrdiff_t incx)
 {
@@ -201,11 +201,11 @@ static void mtpmv_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (up(&diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
-    if (N >= MTPMV_OMP_MIN && blas_omp_available()
-        && mtpmv_omp(UPLO == 'U', TR != 'N', nounit != 0, N, ap, x, incx))
+    if (n >= MTPMV_OMP_MIN && blas_omp_available()
+        && mtpmv_omp(UPLO == 'U', TR != 'N', nounit != 0, n, ap, x, incx))
         return;
 #endif
 
@@ -213,7 +213,7 @@ static void mtpmv_core(
     const bool is_trans = (TR != 'N');
 
     if (incx == 1) {
-        mtpmv_serial_contig(is_upper, is_trans, nounit != 0, N, ap, x);
+        mtpmv_serial_contig(is_upper, is_trans, nounit != 0, n, ap, x);
         return;
     }
 
@@ -224,7 +224,7 @@ static void mtpmv_core(
      * heap past it. Falls back to the direct strided walk only if the heap
      * alloc fails. */
     {
-        const std::ptrdiff_t n = N, sx = incx;
+        const std::ptrdiff_t sx = incx;
         const std::ptrdiff_t kx = (sx < 0) ? -(n - 1) * sx : 0;
         T stackbuf[512];
         T *heap = NULL;
@@ -246,7 +246,7 @@ static void mtpmv_core(
         /* Direct strided fallback (heap alloc failed). ptrdiff_t indices so the
          * packed (ap[k]) and strided x (x[ix]) walks need no per-element sign
          * extension. */
-        const std::ptrdiff_t n = N, sx = incx;
+        const std::ptrdiff_t sx = incx;
         std::ptrdiff_t kx = (sx < 0) ? -(n - 1) * sx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {

@@ -40,41 +40,41 @@ typedef qtrmm_T T;
 
 #ifdef _OPENMP
 #define QTRMM_OMP_WRAP_L(name, core)                                       \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
-        if (N >= QTRMM_OMP_MIN && blas_omp_should_thread()) {             \
+        if (n >= QTRMM_OMP_MIN && blas_omp_should_thread()) {             \
             _Pragma("omp parallel") {                                      \
                 ptrdiff_t tid = omp_get_thread_num();                            \
                 ptrdiff_t nth  = omp_get_num_threads();                           \
-                ptrdiff_t js  = blas_part_bound(N, tid, nth);                  \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);            \
-                core(js, je, M, alpha, a, lda, b, ldb, nounit);            \
+                ptrdiff_t js  = blas_part_bound(n, tid, nth);                  \
+                ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);            \
+                core(js, je, m, alpha, a, lda, b, ldb, nounit);            \
             }                                                              \
-        } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }           \
+        } else { core(0, n, m, alpha, a, lda, b, ldb, nounit); }           \
     }
 #define QTRMM_OMP_WRAP_R(name, core)                                       \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
-        if (M >= QTRMM_OMP_MIN && blas_omp_should_thread()) {             \
+        if (m >= QTRMM_OMP_MIN && blas_omp_should_thread()) {             \
             _Pragma("omp parallel") {                                      \
                 ptrdiff_t tid = omp_get_thread_num();                            \
                 ptrdiff_t nth  = omp_get_num_threads();                           \
-                ptrdiff_t is  = blas_part_bound(M, tid, nth);                  \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);            \
-                core(is, ie, N, alpha, a, lda, b, ldb, nounit);            \
+                ptrdiff_t is  = blas_part_bound(m, tid, nth);                  \
+                ptrdiff_t ie  = blas_part_bound(m, tid + 1, nth);            \
+                core(is, ie, n, alpha, a, lda, b, ldb, nounit);            \
             }                                                              \
-        } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }           \
+        } else { core(0, m, n, alpha, a, lda, b, ldb, nounit); }           \
     }
 #else
 #define QTRMM_OMP_WRAP_L(name, core)                                       \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
-        core(0, N, M, alpha, a, lda, b, ldb, nounit);                      \
+        core(0, n, m, alpha, a, lda, b, ldb, nounit);                      \
     }
 #define QTRMM_OMP_WRAP_R(name, core)                                       \
-    static void name(ptrdiff_t M, ptrdiff_t N, T alpha,                                \
+    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                \
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
-        core(0, M, N, alpha, a, lda, b, ldb, nounit);                      \
+        core(0, m, n, alpha, a, lda, b, ldb, nounit);                      \
     }
 #endif
 
@@ -89,7 +89,7 @@ QTRMM_OMP_WRAP_R(trmm_rut, trmm_rut_core)
 
 static void qtrmm_core(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     T *b, ptrdiff_t ldb)
@@ -101,29 +101,29 @@ static void qtrmm_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     if (alpha == 0.0Q) {
-        for (ptrdiff_t j = 0; j < N; ++j)
-            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = 0.0Q;
+        for (ptrdiff_t j = 0; j < n; ++j)
+            for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) = 0.0Q;
         return;
     }
 
     if (SIDE == 'L') {
         if (TR == 'N') {
-            if (UPLO == 'L') trmm_lln(M, N, alpha, a, lda, b, ldb, nounit);
-            else             trmm_lun(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') trmm_lln(m, n, alpha, a, lda, b, ldb, nounit);
+            else             trmm_lun(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
-            if (UPLO == 'L') trmm_llt(M, N, alpha, a, lda, b, ldb, nounit);
-            else             trmm_lut(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') trmm_llt(m, n, alpha, a, lda, b, ldb, nounit);
+            else             trmm_lut(m, n, alpha, a, lda, b, ldb, nounit);
         }
     } else {
         if (TR == 'N') {
-            if (UPLO == 'L') trmm_rln(M, N, alpha, a, lda, b, ldb, nounit);
-            else             trmm_run(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') trmm_rln(m, n, alpha, a, lda, b, ldb, nounit);
+            else             trmm_run(m, n, alpha, a, lda, b, ldb, nounit);
         } else {
-            if (UPLO == 'L') trmm_rlt(M, N, alpha, a, lda, b, ldb, nounit);
-            else             trmm_rut(M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') trmm_rlt(m, n, alpha, a, lda, b, ldb, nounit);
+            else             trmm_rut(m, n, alpha, a, lda, b, ldb, nounit);
         }
     }
 }

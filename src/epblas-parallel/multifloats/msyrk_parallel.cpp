@@ -37,7 +37,7 @@ namespace {
 
 static void msyrk_core(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *beta_,
@@ -45,7 +45,7 @@ static void msyrk_core(
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        msyrk_serial(uplo, trans, N, K, alpha_, a, lda, beta_, c, ldc);
+        msyrk_serial(uplo, trans, n, k, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
@@ -54,15 +54,15 @@ static void msyrk_core(
     char TR = up(&trans);
     if (TR == 'C') TR = 'T';
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (eq0(alpha) || K == 0) {
+    if (eq0(alpha) || k == 0) {
         if (eq1(beta)) return;
 #ifdef _OPENMP
-        const bool use_omp = (N >= MSYRK_OMP_MIN && blas_omp_available());
+        const bool use_omp = (n >= MSYRK_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) msyrk_scale_col(j, N, UPLO, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < n; ++j) msyrk_scale_col(j, n, UPLO, beta, c, ldc);
         return;
     }
 
@@ -71,16 +71,16 @@ static void msyrk_core(
     std::ptrdiff_t pw = nb;
 #ifdef _OPENMP
     const std::ptrdiff_t nthreads = blas_omp_max_threads();
-    const bool use_omp = (N >= MSYRK_OMP_MIN && nthreads > 1);
+    const bool use_omp = (n >= MSYRK_OMP_MIN && nthreads > 1);
     /* Shrink the block step so the team gets ~2·nthreads panels at small N
      * (N=64, nb=32 -> 2 blocks -> idle threads). Triangular C output makes the
      * per-block work uneven, so oversubscribe for dynamic balance -> ppt=2. */
-    if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(N, nthreads, nb, 2);
+    if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(n, nthreads, nb, 2);
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (std::ptrdiff_t jc = 0; jc < N; jc += pw) {
-        const std::ptrdiff_t jb = (N - jc < pw) ? (N - jc) : pw;
-        msyrk_block(jc, jb, N, K, UPLO, TR, alpha, beta, a, lda, c, ldc);
+    for (std::ptrdiff_t jc = 0; jc < n; jc += pw) {
+        const std::ptrdiff_t jb = (n - jc < pw) ? (n - jc) : pw;
+        msyrk_block(jc, jb, n, k, UPLO, TR, alpha, beta, a, lda, c, ldc);
     }
 }
 

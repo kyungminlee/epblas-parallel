@@ -24,7 +24,7 @@ static const T ZERO = 0.0L + 0.0Li;
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 static void ygeru_core(
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *restrict x, ptrdiff_t incx,
     const T *restrict y, ptrdiff_t incy,
@@ -32,18 +32,18 @@ static void ygeru_core(
 {
     const T alpha = *alpha_;
 
-    if (M == 0 || N == 0 || alpha == ZERO) return;
+    if (m == 0 || n == 0 || alpha == ZERO) return;
 
     if (incx == 1 && incy == 1) {
-        const bool use_omp = (N >= YGERU_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp = (n >= YGERU_OMP_MIN && blas_omp_should_thread());
         /* C-source branch on use_omp (Add-16). */
 #define YGERU_BODY                                                           \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < n; ++j) {                                        \
             const T yj = y[j];                                               \
             if (yj != ZERO) {                                                \
                 const T t = alpha * yj;                                      \
                 T *aj = &A_(0, j);                                           \
-                for (ptrdiff_t i = 0; i < M; ++i) aj[i] += t * x[i];               \
+                for (ptrdiff_t i = 0; i < m; ++i) aj[i] += t * x[i];               \
             }                                                                \
         }
         if (use_omp) {
@@ -58,17 +58,17 @@ static void ygeru_core(
     } else {
         /* Strided x/y. Columns of A are disjoint → OMP-over-j race-free and
          * bit-exact (jy recomputed as jy0 + j*incy, same as carried add). */
-        const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
-        const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
-        const bool use_omp = (N >= YGERU_OMP_MIN && blas_omp_should_thread());
+        const ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
+        const ptrdiff_t ix0 = (incx < 0) ? -(m - 1) * incx : 0;
+        const bool use_omp = (n >= YGERU_OMP_MIN && blas_omp_should_thread());
 #define YGERU_STRIDED_BODY                                                   \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                  \
+        for (ptrdiff_t j = 0; j < n; ++j) {                                  \
             const T yj = y[jy0 + j * incy];                                  \
             if (yj != ZERO) {                                                \
                 const T t = alpha * yj;                                      \
                 ptrdiff_t ix = ix0;                                          \
                 T *aj = &A_(0, j);                                           \
-                for (ptrdiff_t i = 0; i < M; ++i) {                          \
+                for (ptrdiff_t i = 0; i < m; ++i) {                          \
                     aj[i] += t * x[ix];                                      \
                     ix += incx;                                              \
                 }                                                            \

@@ -50,7 +50,7 @@ typedef __float128 xsyr2k_T;
  * beta pointers are interleaved (re,im) __float128; alpha_/beta_ stay pointers. */
 void xsyr2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const xsyr2k_T *alpha_,
     const xsyr2k_T *a, ptrdiff_t lda,
     const xsyr2k_T *b, ptrdiff_t ldb,

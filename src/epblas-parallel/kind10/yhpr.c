@@ -26,7 +26,7 @@ static inline T cconj(T z) { return ~z; }
 
 static void yhpr_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const TR *alpha_,
     const T *restrict x, ptrdiff_t incx,
     T *restrict ap)
@@ -36,7 +36,7 @@ static void yhpr_core(
     const T czero = 0.0L + 0.0Li;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == rzero) return;
+    if (n == 0 || alpha == rzero) return;
 
     if (incx == 1) {
         /* schedule(static, 1): plain static dumps the heavy triangle end on one
@@ -51,10 +51,10 @@ static void yhpr_core(
          * noinline carve-out is needed (unlike yhpr2). */
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const bool use_omp = (N >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (n >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = (j * (j + 1)) / 2;
                 if (x[j] != czero) {
                     const T tmp = alpha * cconj(x[j]);
@@ -66,26 +66,26 @@ static void yhpr_core(
             }
         } else {
 #ifdef _OPENMP
-            const bool use_omp = (N >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (n >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-            for (ptrdiff_t j = 0; j < N; ++j) {
-                const ptrdiff_t kk = j * N - (j * (j - 1)) / 2;
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
                 if (x[j] != czero) {
                     const T tmp = alpha * cconj(x[j]);
                     ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (tmp * x[j]);
-                    for (ptrdiff_t i = j + 1; i < N; ++i) ap[kk + (i - j)] += x[i] * tmp;
+                    for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
                 } else {
                     ap[kk] = (TR)__real__ ap[kk];
                 }
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t kk = 0;
         if (UPLO == 'U') {
             ptrdiff_t jx = kx;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != czero) {
                     const T tmp = alpha * cconj(x[jx]);
                     ptrdiff_t ix = kx;
@@ -102,12 +102,12 @@ static void yhpr_core(
             }
         } else {
             ptrdiff_t jx = kx;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != czero) {
                     const T tmp = alpha * cconj(x[jx]);
                     ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (tmp * x[jx]);
                     ptrdiff_t ix = jx;
-                    for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
+                    for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                         ix += incx;
                         ap[k] += x[ix] * tmp;
                     }
@@ -115,7 +115,7 @@ static void yhpr_core(
                     ap[kk] = (TR)__real__ ap[kk];
                 }
                 jx += incx;
-                kk += N - j;
+                kk += n - j;
             }
         }
     }

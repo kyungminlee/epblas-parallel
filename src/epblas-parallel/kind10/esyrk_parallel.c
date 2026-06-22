@@ -41,7 +41,7 @@ typedef esyrk_T T;
 
 static void esyrk_core(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *beta_,
@@ -50,7 +50,7 @@ static void esyrk_core(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        esyrk_serial(uplo, trans, N, K, alpha_, a, lda, beta_, c, ldc);
+        esyrk_serial(uplo, trans, n, k, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
@@ -58,16 +58,16 @@ static void esyrk_core(
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
     /* Triangular beta pre-pass on the UPLO triangle of C only. */
-    if (UPLO == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
-    else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    if (UPLO == 'U') esyrk_beta_u((ptrdiff_t)n, beta, c, (ptrdiff_t)ldc);
+    else             esyrk_beta_l((ptrdiff_t)n, beta, c, (ptrdiff_t)ldc);
 
-    if (K == 0 || alpha == 0.0L) return;
+    if (k == 0 || alpha == 0.0L) return;
 
     ptrdiff_t MC, KC, NC;
-    egemm_choose_blocks(K, &MC, &KC, &NC);
+    egemm_choose_blocks(k, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
@@ -80,7 +80,7 @@ static void esyrk_core(
 #endif
 
     /* SYRK does ~ N^2 · K / 2 flops; tiny-cutoff sized to match egemm. */
-    long nnk = (long)N * (long)N * (long)K;
+    long nnk = (long)n * (long)n * (long)k;
     if (nnk < 64L * 64L * 64L) nthreads = 1;
 
     /* Shared Bp, one private Ap per thread, allocated BEFORE the region: a
@@ -107,13 +107,13 @@ static void esyrk_core(
             T *Ap = Ap_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks. */
-            const ptrdiff_t m_chunk = egemm_round_up((N + nth - 1) / nth, MR);
+            const ptrdiff_t m_chunk = egemm_round_up((n + nth - 1) / nth, MR);
             const ptrdiff_t m_lo = tid * m_chunk;
             ptrdiff_t m_hi = m_lo + m_chunk;
-            if (m_hi > N) m_hi = N;
+            if (m_hi > n) m_hi = n;
 
-            for (ptrdiff_t js = 0; js < N; js += NC) {
-                const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+            for (ptrdiff_t js = 0; js < n; js += NC) {
+                const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
                 /* UPLO clip of this thread's [m_lo, m_hi] for this js-band. */
                 ptrdiff_t m_lo_eff = (UPLO == 'L' && m_lo < js) ? js : m_lo;
@@ -121,8 +121,8 @@ static void esyrk_core(
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
-                for (ptrdiff_t ls = 0; ls < K; ls += KC) {
-                    const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+                for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                    const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
 
                     /* Pack the shared Bp = the same A in OCOPY shape. */
 #ifdef _OPENMP

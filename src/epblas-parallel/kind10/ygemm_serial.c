@@ -40,11 +40,11 @@ static ptrdiff_t trans_code(char c) {
 
 /* ── beta pre-pass ────────────────────────────────────────────── */
 
-void ygemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, T beta, T *c, ptrdiff_t ldc) {
-    for (ptrdiff_t j = 0; j < N; ++j) {
+void ygemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+    for (ptrdiff_t j = 0; j < n; ++j) {
         T *cj = &c[(size_t)j * ldc];
-        if (beta == zero)      for (ptrdiff_t i = 0; i < M; ++i) cj[i]  = zero;
-        else if (beta != one)  for (ptrdiff_t i = 0; i < M; ++i) cj[i] *= beta;
+        if (beta == zero)      for (ptrdiff_t i = 0; i < m; ++i) cj[i]  = zero;
+        else if (beta != one)  for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
 }
 
@@ -61,25 +61,25 @@ void ygemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, T beta, T *c, ptrdiff_t ldc) {
  */
 
 /* TA='N', TB='N': C[i,j] += sum_l (alpha*B[l,j]) * A[i,l]. */
-void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, T alpha,
+void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, T alpha,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                    T *c, ptrdiff_t ldc)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
         T *cj = &c[(size_t)j2 * ldc];
         ptrdiff_t l = 0;
-        for (; l + 1 < K; l += 2) {
+        for (; l + 1 < k; l += 2) {
             const T t0 = alpha * b[(size_t)j2 * ldb + l];
             const T t1 = alpha * b[(size_t)j2 * ldb + l + 1];
             const T *al0 = &a[(size_t)l       * lda];
             const T *al1 = &a[(size_t)(l + 1) * lda];
-            for (ptrdiff_t i2 = 0; i2 < M; ++i2)
+            for (ptrdiff_t i2 = 0; i2 < m; ++i2)
                 cj[i2] += t0 * al0[i2] + t1 * al1[i2];
         }
-        for (; l < K; ++l) {
+        for (; l < k; ++l) {
             const T t = alpha * b[(size_t)j2 * ldb + l];
             const T *al = &a[(size_t)l * lda];
-            for (ptrdiff_t i2 = 0; i2 < M; ++i2) cj[i2] += t * al[i2];
+            for (ptrdiff_t i2 = 0; i2 < m; ++i2) cj[i2] += t * al[i2];
         }
     }
 }
@@ -99,25 +99,25 @@ void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
  * trailing update through; parity on the plain transpose path ygemm uses.
  * (K-unrolling with a single complex acc instead REGRESSES ~16% and is
  * NOT bit-exact — it reorders the dot.) See `ygemm_tn_core` disasm. */
-void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, T alpha,
+void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, T alpha,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                    T *c, ptrdiff_t ldc, bool conj_a)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
         T *cj = &c[(size_t)j2 * ldc];
         const long double *bj = (const long double *)&b[(size_t)j2 * ldb];
-        for (ptrdiff_t i2 = 0; i2 < M; ++i2) {
+        for (ptrdiff_t i2 = 0; i2 < m; ++i2) {
             const long double *ai = (const long double *)&a[(size_t)i2 * lda];
             long double acc_re = 0.0L, acc_im = 0.0L;
             if (conj_a) {
-                for (ptrdiff_t l = 0; l < K; ++l) {
+                for (ptrdiff_t l = 0; l < k; ++l) {
                     const long double ar = ai[2*l], aim = ai[2*l+1];
                     const long double br = bj[2*l], bim = bj[2*l+1];
                     acc_re += ar * br + aim * bim;
                     acc_im += ar * bim - aim * br;
                 }
             } else {
-                for (ptrdiff_t l = 0; l < K; ++l) {
+                for (ptrdiff_t l = 0; l < k; ++l) {
                     const long double ar = ai[2*l], aim = ai[2*l+1];
                     const long double br = bj[2*l], bim = bj[2*l+1];
                     acc_re += ar * br - aim * bim;
@@ -131,28 +131,28 @@ void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
 
 /* TA='N', TB in {'T','C'}: B^op[l,j] = B[j,l] (or conj). Rank-1 update
  * over l, K-unrolled. */
-void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, T alpha,
+void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, T alpha,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                    T *c, ptrdiff_t ldc, bool conj_b)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
         T *cj = &c[(size_t)j2 * ldc];
         ptrdiff_t l = 0;
-        for (; l + 1 < K; l += 2) {
+        for (; l + 1 < k; l += 2) {
             const T b0 = b[(size_t)l       * ldb + j2];
             const T b1 = b[(size_t)(l + 1) * ldb + j2];
             const T t0 = alpha * (conj_b ? ~b0 : b0);
             const T t1 = alpha * (conj_b ? ~b1 : b1);
             const T *al0 = &a[(size_t)l       * lda];
             const T *al1 = &a[(size_t)(l + 1) * lda];
-            for (ptrdiff_t i2 = 0; i2 < M; ++i2)
+            for (ptrdiff_t i2 = 0; i2 < m; ++i2)
                 cj[i2] += t0 * al0[i2] + t1 * al1[i2];
         }
-        for (; l < K; ++l) {
+        for (; l < k; ++l) {
             const T blj = b[(size_t)l * ldb + j2];
             const T t   = alpha * (conj_b ? ~blj : blj);
             const T *al = &a[(size_t)l * lda];
-            for (ptrdiff_t i2 = 0; i2 < M; ++i2) cj[i2] += t * al[i2];
+            for (ptrdiff_t i2 = 0; i2 < m; ++i2) cj[i2] += t * al[i2];
         }
     }
 }
@@ -160,16 +160,16 @@ void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
 /* Both transposed: A col i × B row j. Dot-product form — single
  * accumulator (same reason as the T*N path; the conditional on
  * conj_a/conj_b inside an unrolled hot loop wrecks codegen). */
-void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K, T alpha,
+void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, T alpha,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                    T *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
         T *cj = &c[(size_t)j2 * ldc];
-        for (ptrdiff_t i2 = 0; i2 < M; ++i2) {
+        for (ptrdiff_t i2 = 0; i2 < m; ++i2) {
             const T *ai = &a[(size_t)i2 * lda];
             T acc = zero;
-            for (ptrdiff_t l = 0; l < K; ++l) {
+            for (ptrdiff_t l = 0; l < k; ++l) {
                 const T av = conj_a ? ~ai[l] : ai[l];
                 const T bv = b[(size_t)l * ldb + j2];
                 acc += av * (conj_b ? ~bv : bv);
@@ -183,7 +183,7 @@ void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
 
 void ygemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -194,21 +194,21 @@ void ygemm_serial(
     const char ta = trans_code(transa);
     const char tb = trans_code(transb);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
-    ygemm_beta_prepass(M, N, beta, c, ldc);
-    if (alpha == zero || K == 0) return;
+    ygemm_beta_prepass(m, n, beta, c, ldc);
+    if (alpha == zero || k == 0) return;
 
     const bool conj_a = (ta == 'C');
     const bool conj_b = (tb == 'C');
 
     if (ta == 'N' && tb == 'N') {
-        ygemm_nn_core(0, N, M, K, alpha, a, lda, b, ldb, c, ldc);
+        ygemm_nn_core(0, n, m, k, alpha, a, lda, b, ldb, c, ldc);
     } else if ((ta == 'T' || ta == 'C') && tb == 'N') {
-        ygemm_tn_core(0, N, M, K, alpha, a, lda, b, ldb, c, ldc, conj_a);
+        ygemm_tn_core(0, n, m, k, alpha, a, lda, b, ldb, c, ldc, conj_a);
     } else if (ta == 'N' && (tb == 'T' || tb == 'C')) {
-        ygemm_nt_core(0, N, M, K, alpha, a, lda, b, ldb, c, ldc, conj_b);
+        ygemm_nt_core(0, n, m, k, alpha, a, lda, b, ldb, c, ldc, conj_b);
     } else {
-        ygemm_tt_core(0, N, M, K, alpha, a, lda, b, ldb, c, ldc, conj_a, conj_b);
+        ygemm_tt_core(0, n, m, k, alpha, a, lda, b, ldb, c, ldc, conj_a, conj_b);
     }
 }

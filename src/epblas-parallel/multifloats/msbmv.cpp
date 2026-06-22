@@ -178,7 +178,7 @@ __attribute__((noinline)) static bool msbmv_omp(
 
 static void msbmv_core(
     char uplo,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *x, std::ptrdiff_t incx,
@@ -188,64 +188,64 @@ static void msbmv_core(
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
 
-    if (N == 0 || (eq0(alpha) && eq1(beta))) return;
+    if (n == 0 || (eq0(alpha) && eq1(beta))) return;
 
-    mf_kernels::scale_y(N, beta, y, incy);
+    mf_kernels::scale_y(n, beta, y, incy);
     if (eq0(alpha)) return;
 
 #ifdef _OPENMP
-    if (N >= MSBMV_OMP_MIN && blas_omp_available()
-        && msbmv_omp(UPLO == 'U', N, K, a, lda, x, incx, alpha, y, incy))
+    if (n >= MSBMV_OMP_MIN && blas_omp_available()
+        && msbmv_omp(UPLO == 'U', n, k, a, lda, x, incx, alpha, y, incy))
         return;
 #endif
 
     if (incx == 1 && incy == 1) {
-        msbmv_contig(UPLO == 'U', N, K, a, (std::size_t)lda, x, alpha, y);
+        msbmv_contig(UPLO == 'U', n, k, a, (std::size_t)lda, x, alpha, y);
         return;
     }
 
     /* Strided: gather x and the beta-scaled y into contiguous scratch, run the
      * SIMD contiguous core (y += alpha*A*x), scatter y back. O(N) gather/scatter
      * vs O(N*K) band work; the in-place strided walk is the alloc-fail fallback. */
-    T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
-    T *ys = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+    T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    T *ys = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (xs && ys) {
-        mf_kernels::gather_strided(N, x, incx, xs);
-        mf_kernels::gather_strided(N, y, incy, ys);
-        msbmv_contig(UPLO == 'U', N, K, a, (std::size_t)lda, xs, alpha, ys);
-        mf_kernels::scatter_strided(N, y, incy, ys);
+        mf_kernels::gather_strided(n, x, incx, xs);
+        mf_kernels::gather_strided(n, y, incy, ys);
+        msbmv_contig(UPLO == 'U', n, k, a, (std::size_t)lda, xs, alpha, ys);
+        mf_kernels::scatter_strided(n, y, incy, ys);
         std::free(xs); std::free(ys);
         return;
     }
     std::free(xs); std::free(ys);
 
-    std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-    std::ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+    std::ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+    std::ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
     if (UPLO == 'U') {
         std::ptrdiff_t jx = kx, jy = ky;
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T t1 = alpha * x[jx];
             T t2 = zero_dd;
             std::ptrdiff_t ix = kx, iy = ky;
-            const std::ptrdiff_t L = K - j;
-            const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+            const std::ptrdiff_t L = k - j;
+            const std::ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
             for (std::ptrdiff_t i = i_lo; i < j; ++i) {
                 y[iy] = y[iy] + t1 * A_(L + i, j);
                 t2 = t2 + A_(L + i, j) * x[ix];
                 ix += incx; iy += incy;
             }
-            y[jy] = y[jy] + t1 * A_(K, j) + alpha * t2;
+            y[jy] = y[jy] + t1 * A_(k, j) + alpha * t2;
             jx += incx; jy += incy;
-            if (j >= K) { kx += incx; ky += incy; }
+            if (j >= k) { kx += incx; ky += incy; }
         }
     } else {
         std::ptrdiff_t jx = kx, jy = ky;
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T t1 = alpha * x[jx];
             T t2 = zero_dd;
             y[jy] = y[jy] + t1 * A_(0, j);
             std::ptrdiff_t ix = jx, iy = jy;
-            const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+            const std::ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
             for (std::ptrdiff_t i = j + 1; i < i_hi; ++i) {
                 ix += incx; iy += incy;
                 y[iy] = y[iy] + t1 * A_(i - j, j);

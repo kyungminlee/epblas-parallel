@@ -181,12 +181,12 @@ void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * A,B are K×N so all dot operands are unit-stride over the K axis. β is already
  * applied. Each C(i,j) is accumulated in a register and written once — packing
  * has nothing to save here, so the clean unpacked loop matches the reference. */
-void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
+void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
                       T alpha, const T *a, ptrdiff_t lda,
                       const T *b, ptrdiff_t ldb, T *c, ptrdiff_t ldc)
 {
     const ptrdiff_t i_lo = (uplo == 'L') ? j : 0;
-    const ptrdiff_t i_hi = (uplo == 'L') ? N : j + 1;
+    const ptrdiff_t i_hi = (uplo == 'L') ? n : j + 1;
     const T *Aj = a + j * lda;
     const T *Bj = b + j * ldb;
     T *cj = c + j * ldc;
@@ -199,7 +199,7 @@ void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
          * and each add is a serial soft-float call, so a single fused `s`
          * chain is latency-bound; splitting hides it (~4-8% on Transpose). */
         T s1 = 0.0Q, s2 = 0.0Q;
-        for (ptrdiff_t l = 0; l < K; ++l) {
+        for (ptrdiff_t l = 0; l < k; ++l) {
             s1 += Ai[l] * Bj[l];
             s2 += Bi[l] * Aj[l];
         }
@@ -215,7 +215,7 @@ void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
  * pass 1 = (Ap_A, Bp_B, flag=1), pass 2 = (Ap_B, Bp_A, flag=0). */
 void qsyr2k_serial(
     char uplo_c, char trans_c,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -227,22 +227,22 @@ void qsyr2k_serial(
     char trans = blas_up(trans_c);
     if (trans == 'C') trans = 'T';
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
-    if (uplo == 'U') qsyrk_beta_u(N, beta, c, ldc);
-    else             qsyrk_beta_l(N, beta, c, ldc);
+    if (uplo == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    else             qsyrk_beta_l(n, beta, c, ldc);
 
-    if (K == 0 || alpha == 0.0Q) return;
+    if (k == 0 || alpha == 0.0Q) return;
 
     /* Transpose: netlib-style unpacked inner-product (no packing overhead). */
     if (trans != 'N') {
-        for (ptrdiff_t j = 0; j < N; ++j)
-            qsyr2k_trans_col(j, uplo, N, K, alpha, a, lda, b, ldb, c, ldc);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            qsyr2k_trans_col(j, uplo, n, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
     ptrdiff_t MC, KC, NC;
-    qgemm_choose_blocks(K, &MC, &KC, &NC);
+    qgemm_choose_blocks(k, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(T);
@@ -251,18 +251,18 @@ void qsyr2k_serial(
     T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap_A && Ap_B && Bp_A && Bp_B) {
-        for (ptrdiff_t js = 0; js < N; js += NC) {
-            const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+        for (ptrdiff_t js = 0; js < n; js += NC) {
+            const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
             /* UPLO clip of the [0, N] row range for this js-band:
              *   UPPER: only rows up to js+jb contribute.
              *   LOWER: only rows from js onwards. */
             ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
-            ptrdiff_t m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            ptrdiff_t m_hi_eff = (uplo == 'U' && n > js + jb) ? (js + jb) : n;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
-            for (ptrdiff_t ls = 0; ls < K; ls += KC) {
-                const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+            for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
 
                 /* Pack both B-side panels (A and B in OCOPY shape). NoTrans
                  * only — the Transpose path is handled above, unpacked. */

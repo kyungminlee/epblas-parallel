@@ -58,7 +58,7 @@ static ptrdiff_t etbmv_omp(bool upper, bool trans, bool nounit, ptrdiff_t n, ptr
 
 static void etbmv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
@@ -67,14 +67,14 @@ static void etbmv_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
     /* Cheap inline gate first: at OMP=1 (or below threshold) short-circuit
      * before the noinline call's argument marshalling (outlining tax). */
     const ptrdiff_t omp_min = (TR == 'T') ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
-    if (N >= omp_min && blas_omp_max_threads() > 1
-        && etbmv_omp(UPLO == 'U', TR == 'T', nounit, N, K, a, lda, x, incx))
+    if (n >= omp_min && blas_omp_max_threads() > 1
+        && etbmv_omp(UPLO == 'U', TR == 'T', nounit, n, k, a, lda, x, incx))
         return;
 #endif
 
@@ -88,17 +88,17 @@ static void etbmv_core(
              * an unread input. base[k +- d*s1] walks the lda-1 anti-diagonal. */
             const ptrdiff_t s1 = lda - 1;
             if (UPLO == 'U') {
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     const T *base = &A_(0, i);
-                    const ptrdiff_t len = (N - 1 - i < K) ? (N - 1 - i) : K;
-                    T s = nounit ? base[K] * x[i] : x[i];
-                    for (ptrdiff_t d = 1; d <= len; ++d) s += base[K + (ptrdiff_t)d * s1] * x[i + d];
+                    const ptrdiff_t len = (n - 1 - i < k) ? (n - 1 - i) : k;
+                    T s = nounit ? base[k] * x[i] : x[i];
+                    for (ptrdiff_t d = 1; d <= len; ++d) s += base[k + (ptrdiff_t)d * s1] * x[i + d];
                     x[i] = s;
                 }
             } else {
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     const T *base = &A_(0, i);
-                    const ptrdiff_t len = (i < K) ? i : K;
+                    const ptrdiff_t len = (i < k) ? i : k;
                     T s = nounit ? base[0] * x[i] : x[i];
                     for (ptrdiff_t d = 1; d <= len; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
                     x[i] = s;
@@ -106,19 +106,19 @@ static void etbmv_core(
             }
         } else {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[j];
-                    const ptrdiff_t L = K - j;
-                    if (nounit) tmp *= A_(K, j);
-                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    const ptrdiff_t L = k - j;
+                    if (nounit) tmp *= A_(k, j);
+                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = j - 1; i >= i_lo; --i) tmp += A_(L + i, j) * x[i];
                     x[j] = tmp;
                 }
             } else {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[j];
                     if (nounit) tmp *= A_(0, j);
-                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += A_(i - j, j) * x[i];
                     x[j] = tmp;
                 }
@@ -130,22 +130,22 @@ static void etbmv_core(
              * index i lives at x[off0 + i*incx], off0 placing logical 0 for
              * incx<0). Register-resident accumulator; upper ASCENDING / lower
              * DESCENDING keeps the in-place write safe. */
-            const ptrdiff_t off0 = (incx < 0) ? -(ptrdiff_t)(N - 1) * incx : 0;
+            const ptrdiff_t off0 = (incx < 0) ? -(ptrdiff_t)(n - 1) * incx : 0;
             const ptrdiff_t s1 = lda - 1;
             if (UPLO == 'U') {
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     const T *base = &A_(0, i);
-                    const ptrdiff_t len = (N - 1 - i < K) ? (N - 1 - i) : K;
+                    const ptrdiff_t len = (n - 1 - i < k) ? (n - 1 - i) : k;
                     const ptrdiff_t ii = off0 + (ptrdiff_t)i * incx;
-                    T s = nounit ? base[K] * x[ii] : x[ii];
+                    T s = nounit ? base[k] * x[ii] : x[ii];
                     ptrdiff_t ix = ii + incx;
-                    for (ptrdiff_t d = 1; d <= len; ++d) { s += base[K + (ptrdiff_t)d * s1] * x[ix]; ix += incx; }
+                    for (ptrdiff_t d = 1; d <= len; ++d) { s += base[k + (ptrdiff_t)d * s1] * x[ix]; ix += incx; }
                     x[ii] = s;
                 }
             } else {
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     const T *base = &A_(0, i);
-                    const ptrdiff_t len = (i < K) ? i : K;
+                    const ptrdiff_t len = (i < k) ? i : k;
                     const ptrdiff_t ii = off0 + (ptrdiff_t)i * incx;
                     T s = nounit ? base[0] * x[ii] : x[ii];
                     ptrdiff_t ix = ii - incx;
@@ -154,17 +154,17 @@ static void etbmv_core(
                 }
             }
         } else {
-            ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+            ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
             if (UPLO == 'U') {
-                kx += (N - 1) * incx;
+                kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     kx -= incx;
                     ptrdiff_t ix = kx;
-                    const ptrdiff_t L = K - j;
-                    if (nounit) tmp *= A_(K, j);
-                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    const ptrdiff_t L = k - j;
+                    if (nounit) tmp *= A_(k, j);
+                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                         tmp += A_(L + i, j) * x[ix];
                         ix -= incx;
@@ -174,12 +174,12 @@ static void etbmv_core(
                 }
             } else {
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[jx];
                     kx += incx;
                     ptrdiff_t ix = kx;
                     if (nounit) tmp *= A_(0, j);
-                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                         tmp += A_(i - j, j) * x[ix];
                         ix += incx;

@@ -38,21 +38,21 @@ using mf_kernels::rcmul;
  * updating one triangle. The off-diagonal column run is a SIMD column-AXPY
  * (caxpy_add, bit-exact); the diagonal stays real. Columns disjoint -> OMP-over-j
  * race-free. Strided callers gather x to unit stride around this. */
-static void wher_contig(char UPLO, std::ptrdiff_t N, R alpha, T *a, std::size_t lda, const T *x)
+static void wher_contig(char UPLO, std::ptrdiff_t n, R alpha, T *a, std::size_t lda, const T *x)
 {
 #ifdef _OPENMP
-    const bool use_omp = (N >= WHER_OMP_MIN && blas_omp_available());
+    const bool use_omp = (n >= WHER_OMP_MIN && blas_omp_available());
     /* static,1: cyclic interleave balances the triangular column skew; mirrors
      * the yher twin. */
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
         const T xj = x[j];
         if (!ceq0(xj)) {
             const T t = rcmul(alpha, cconj(xj));
             T *aj = &A_(0, j);
             if (UPLO == 'L') {
-                mf_kernels::caxpy_add(N - (j + 1), &aj[j + 1], &x[j + 1], t);
+                mf_kernels::caxpy_add(n - (j + 1), &aj[j + 1], &x[j + 1], t);
             } else {
                 mf_kernels::caxpy_add(j, &aj[0], &x[0], t);
             }
@@ -65,7 +65,7 @@ static void wher_contig(char UPLO, std::ptrdiff_t N, R alpha, T *a, std::size_t 
 
 static void wher_core(
     char uplo,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const R *alpha_,
     const T *x, std::ptrdiff_t incx,
     T *a, std::ptrdiff_t lda)
@@ -73,18 +73,18 @@ static void wher_core(
     const R alpha = *alpha_;
     const char UPLO = up(&uplo);
 
-    if (N == 0 || eq0(alpha)) return;
+    if (n == 0 || eq0(alpha)) return;
 
     if (incx == 1) {
-        wher_contig(UPLO, N, alpha, a, lda, x);
+        wher_contig(UPLO, n, alpha, a, lda, x);
         return;
     }
     /* Strided x: gather to unit-stride scratch, run the SIMD core (A is
      * column-major/lda regardless of x's stride). */
-    const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(N - 1) * incx : x;
-    std::vector<T> xs(static_cast<std::size_t>(N));
-    for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
-    wher_contig(UPLO, N, alpha, a, lda, xs.data());
+    const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
+    std::vector<T> xs(static_cast<std::size_t>(n));
+    for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
+    wher_contig(UPLO, n, alpha, a, lda, xs.data());
 }
 
 extern "C" {

@@ -41,7 +41,7 @@ namespace {
 
 static void wherk_core(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const TR *alpha_,
     const TC *a, std::ptrdiff_t lda,
     const TR *beta_,
@@ -49,7 +49,7 @@ static void wherk_core(
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        wherk_serial(uplo, trans, N, K, alpha_, a, lda, beta_, c, ldc);
+        wherk_serial(uplo, trans, n, k, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
@@ -57,30 +57,30 @@ static void wherk_core(
     const char UPLO = up(&uplo);
     const char TR_c = up(&trans);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (eq0(alpha) || K == 0) {
+    if (eq0(alpha) || k == 0) {
         if (eq1(beta)) {
-            for (std::ptrdiff_t j = 0; j < N; ++j) wherk_zero_diag_im(j, c, ldc);
+            for (std::ptrdiff_t j = 0; j < n; ++j) wherk_zero_diag_im(j, c, ldc);
             return;
         }
 #ifdef _OPENMP
-        const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_available());
+        const bool use_omp = (n >= WHERK_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) wherk_scale_col(j, N, UPLO, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < n; ++j) wherk_scale_col(j, n, UPLO, beta, c, ldc);
         return;
     }
 
     const std::ptrdiff_t nb = wherk_block_nb();
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_available());
+    const bool use_omp = (n >= WHERK_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        wherk_block(jc, jb, N, K, UPLO, TR_c, alpha, beta, a, lda, c, ldc);
+    for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        wherk_block(jc, jb, n, k, UPLO, TR_c, alpha, beta, a, lda, c, ldc);
     }
 }
 

@@ -34,31 +34,31 @@ ptrdiff_t yhemm_nb(void);
 
 /* alpha==0 quick path: C := beta*C over columns [j_start, j_end), rows
  * [0, M). */
-void yhemm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, yhemm_T beta,
+void yhemm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, yhemm_T beta,
                      yhemm_T *c, ptrdiff_t ldc);
 
 /* SIDE='L', M <= nb single-block fast path, one column range [j_start,
  * j_end): inlined scalar ZHEMM with beta folded into the diagonal write. */
-void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
+void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m,
                          yhemm_T alpha, yhemm_T beta,
                          const yhemm_T *a, ptrdiff_t lda,
                          const yhemm_T *b, ptrdiff_t ldb,
                          yhemm_T *c, ptrdiff_t ldc, char UPLO);
 
 /* SIDE='L' general path, one column panel [jc, jc+jb). */
-void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, yhemm_T alpha, yhemm_T beta,
+void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, yhemm_T alpha, yhemm_T beta,
                    const yhemm_T *a, ptrdiff_t lda, const yhemm_T *b, ptrdiff_t ldb,
                    yhemm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
 /* SIDE='R' general path, one row panel [ic, ic+ib). */
-void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, yhemm_T alpha, yhemm_T beta,
+void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, yhemm_T alpha, yhemm_T beta,
                    const yhemm_T *a, ptrdiff_t lda, const yhemm_T *b, ptrdiff_t ldb,
                    yhemm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
 /* Pure-serial by-value core (no OpenMP). */
 void yhemm_serial(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const yhemm_T *alpha_,
     const yhemm_T *a, ptrdiff_t lda,
     const yhemm_T *b, ptrdiff_t ldb,

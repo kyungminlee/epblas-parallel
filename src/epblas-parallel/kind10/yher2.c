@@ -66,7 +66,7 @@ static void yher2_contig_U(ptrdiff_t j0, ptrdiff_t j1, T alpha,
 }
 
 __attribute__((noinline))
-static void yher2_contig_L(ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, T alpha,
+static void yher2_contig_L(ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, T alpha,
                            const T *restrict x, const T *restrict y,
                            T *restrict a, ptrdiff_t lda)
 {
@@ -76,7 +76,7 @@ static void yher2_contig_L(ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, T alpha,
             const T t1 = alpha * cconj(y[j]);
             const T t2 = cconj(alpha * x[j]);
             aj[j] = __real__ aj[j] + __real__ (x[j] * t1 + y[j] * t2);
-            for (ptrdiff_t i = j + 1; i < N; ++i) aj[i] += x[i] * t1 + y[i] * t2;
+            for (ptrdiff_t i = j + 1; i < n; ++i) aj[i] += x[i] * t1 + y[i] * t2;
         }
     }
 }
@@ -97,7 +97,7 @@ static void yher2_strided_run(ptrdiff_t cnt, T t1, T t2, T *restrict aj,
 
 static void yher2_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict x, ptrdiff_t incx,
     const T *restrict y, ptrdiff_t incy,
@@ -106,10 +106,10 @@ static void yher2_core(
     const T alpha = *alpha_;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == ZERO) return;
+    if (n == 0 || alpha == ZERO) return;
 
     if (incx == 1 && incy == 1) {
-        const bool use_omp = (N >= YHER2_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp = (n >= YHER2_OMP_MIN && blas_omp_should_thread());
         /* All column work runs through yher2_contig_{U,L}().  The serial path
          * issues ONE call over [0,N) — the hot loop is inlined there with no
          * per-column overhead.  The OMP path round-robins single columns:
@@ -122,18 +122,18 @@ static void yher2_core(
 #ifdef _OPENMP
             if (UPLO == 'L') {
                 #pragma omp parallel for schedule(static, 1)
-                for (ptrdiff_t j = 0; j < N; ++j)
-                    yher2_contig_L(j, j + 1, N, alpha, x, y, a, lda);
+                for (ptrdiff_t j = 0; j < n; ++j)
+                    yher2_contig_L(j, j + 1, n, alpha, x, y, a, lda);
             } else {
                 #pragma omp parallel for schedule(static, 1)
-                for (ptrdiff_t j = 0; j < N; ++j)
+                for (ptrdiff_t j = 0; j < n; ++j)
                     yher2_contig_U(j, j + 1, alpha, x, y, a, lda);
             }
 #endif
         } else if (UPLO == 'L') {
-            yher2_contig_L(0, N, N, alpha, x, y, a, lda);
+            yher2_contig_L(0, n, n, alpha, x, y, a, lda);
         } else {
-            yher2_contig_U(0, N, alpha, x, y, a, lda);
+            yher2_contig_U(0, n, alpha, x, y, a, lda);
         }
     } else {
         /* General-stride fallback — hoist the matrix column to aj[i] and
@@ -143,10 +143,10 @@ static void yher2_core(
          * strided/uplo scaffolding gcc spills the complex temporaries t1/t2,
          * costing ~5-10% on UPPER (and LOWER); in isolation they stay on the
          * x87 stack. Bit-identical to the inline form. */
-        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t jx = kx, jy = ky;
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const T xj = x[jx];
             const T yj = y[jy];
             if (xj != ZERO || yj != ZERO) {
@@ -154,7 +154,7 @@ static void yher2_core(
                 const T temp2 = cconj(alpha * xj);
                 T *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    yher2_strided_run(N - j - 1, temp1, temp2, aj + j + 1,
+                    yher2_strided_run(n - j - 1, temp1, temp2, aj + j + 1,
                                       x, incx, jx + incx, y, incy, jy + incy);
                     aj[j] = __real__ aj[j] + __real__ (xj * temp1 + yj * temp2);
                 } else {

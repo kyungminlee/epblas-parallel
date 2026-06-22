@@ -75,24 +75,24 @@ T espmv_axpydot_strided(ptrdiff_t cnt, T t1, const T *restrict ap,
  * strided gather path). Bit-identical column-order accumulation to the direct
  * strided form. */
 __attribute__((noinline)) static
-void espmv_serial_core(char UPLO, ptrdiff_t N, T alpha,
+void espmv_serial_core(char UPLO, ptrdiff_t n, T alpha,
                        const T *restrict ap, const T *restrict x, T *restrict y)
 {
     ptrdiff_t kk = 0;
     if (UPLO == 'U') {
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const T t1 = alpha * x[j];
             const T t2 = espmv_axpydot(j, t1, &ap[kk], x, y);
             y[j] += t1 * ap[kk + j] + alpha * t2;
             kk += j + 1;
         }
     } else {
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const T t1 = alpha * x[j];
             y[j] += t1 * ap[kk];
-            const T t2 = espmv_axpydot(N - 1 - j, t1, &ap[kk + 1], &x[j + 1], &y[j + 1]);
+            const T t2 = espmv_axpydot(n - 1 - j, t1, &ap[kk + 1], &x[j + 1], &y[j + 1]);
             y[j] += alpha * t2;
-            kk += N - j;
+            kk += n - j;
         }
     }
 }
@@ -136,7 +136,7 @@ static ptrdiff_t espmv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, pt
 
 static void espmv_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict ap,
     const T *restrict x, ptrdiff_t incx,
@@ -147,14 +147,14 @@ static void espmv_core(
     const T zero = 0.0L, one = 1.0L;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || (alpha == zero && beta == one)) return;
+    if (n == 0 || (alpha == zero && beta == one)) return;
 
     if (beta != one) {
-        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
         if (beta == zero) {
-            for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
+            for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = zero; iy += incy; }
         } else {
-            for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+            for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += incy; }
         }
     }
     if (alpha == zero) return;
@@ -162,16 +162,15 @@ static void espmv_core(
     ptrdiff_t kk = 0;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        if ((size_t)N * (size_t)N > ESPMV_OMP_MIN
+        if ((size_t)n * (size_t)n > ESPMV_OMP_MIN
             && blas_omp_should_thread()) {
             ptrdiff_t nthreads = blas_omp_max_threads();
             if (nthreads > ESPMV_MAX_CPUS) nthreads = ESPMV_MAX_CPUS;
             ptrdiff_t range[ESPMV_MAX_CPUS + 1];
-            ptrdiff_t num_cpu = espmv_partition(UPLO == 'U', N, nthreads, range);
+            ptrdiff_t num_cpu = espmv_partition(UPLO == 'U', n, nthreads, range);
             T *buf = (num_cpu > 1)
-                ? (T *)calloc((size_t)num_cpu * (size_t)N, sizeof(T)) : NULL;
+                ? (T *)calloc((size_t)num_cpu * (size_t)n, sizeof(T)) : NULL;
             if (buf) {
-                const ptrdiff_t n = N;
                 #pragma omp parallel num_threads(num_cpu)
                 {
                     ptrdiff_t t = omp_get_thread_num();
@@ -222,7 +221,7 @@ static void espmv_core(
             free(buf);
         }
 #endif
-        espmv_serial_core(UPLO, N, alpha, ap, x, y);
+        espmv_serial_core(UPLO, n, alpha, ap, x, y);
     } else {
         /* General-stride: gather x and the (already beta-scaled) y into
          * contiguous scratch, run the stride-1 packed core — which beats both
@@ -231,35 +230,35 @@ static void espmv_core(
          * work, so free past tiny N. Same column-order accumulation as the
          * direct strided walk, so bit-identical. Falls back to the direct
          * strided helper if the scratch allocation fails. */
-        const ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        const ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         /* Stack scratch for the common small-N case avoids malloc latency;
          * spill to the heap for large N. */
         T stackbuf[2 * 512];
         T *heap = NULL;
         T *xc, *yc;
-        if (N <= 512) {
-            xc = stackbuf; yc = stackbuf + N;
+        if (n <= 512) {
+            xc = stackbuf; yc = stackbuf + n;
         } else {
-            heap = (T *)malloc((size_t)2 * N * sizeof(T));
-            xc = heap; yc = heap ? heap + N : NULL;
+            heap = (T *)malloc((size_t)2 * n * sizeof(T));
+            xc = heap; yc = heap ? heap + n : NULL;
         }
         if (xc && yc) {
             ptrdiff_t ix = kx, iy = ky;
-            for (ptrdiff_t k = 0; k < N; ++k) {
+            for (ptrdiff_t k = 0; k < n; ++k) {
                 xc[k] = x[ix]; yc[k] = y[iy];
                 ix += incx; iy += incy;
             }
-            espmv_serial_core(UPLO, N, alpha, ap, xc, yc);
+            espmv_serial_core(UPLO, n, alpha, ap, xc, yc);
             iy = ky;
-            for (ptrdiff_t k = 0; k < N; ++k) { y[iy] = yc[k]; iy += incy; }
+            for (ptrdiff_t k = 0; k < n; ++k) { y[iy] = yc[k]; iy += incy; }
             free(heap);
             return;
         }
         free(heap);
         if (UPLO == 'U') {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[jx];
                 const T t2 = espmv_axpydot_strided(
                     j, t1, &ap[kk], x, incx, kx, y, incy, ky);
@@ -269,15 +268,15 @@ static void espmv_core(
             }
         } else {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[jx];
                 y[jy] += t1 * ap[kk];
                 const T t2 = espmv_axpydot_strided(
-                    N - j - 1, t1, &ap[kk + 1],
+                    n - j - 1, t1, &ap[kk + 1],
                     x, incx, jx + incx, y, incy, jy + incy);
                 y[jy] += alpha * t2;
                 jx += incx; jy += incy;
-                kk += N - j;
+                kk += n - j;
             }
         }
     }

@@ -62,7 +62,7 @@ typedef xher2k_T   xher2k_TR;   /* real operand: beta */
  * name only; mirrors xgemm_serial. alpha_/beta_ stay pointers. */
 void xher2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const xher2k_T *alpha_,
     const xher2k_T *a, ptrdiff_t lda,
     const xher2k_T *b, ptrdiff_t ldb,

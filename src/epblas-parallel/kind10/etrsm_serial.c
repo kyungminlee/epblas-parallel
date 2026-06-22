@@ -92,14 +92,13 @@ static inline void pack_trsm_a_rside_backward(bool upper, bool trans, bool unit,
 
 /* ── SIDE='L' driver: port of trsm_L.c for one N-band [js0..js1) ───── */
 void etrsm_L_band(bool upper, bool trans, bool unit,
-                        ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
+                        ptrdiff_t m, ptrdiff_t js0, ptrdiff_t js1,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                         const T *a, ptrdiff_t lda,
                         T *b, ptrdiff_t ldb,
                         T *Ap, T *Bp)
 {
     const T dm1 = -1.0L;
-    ptrdiff_t m = M;
     /* Pick which (uplo, trans) branch (forward vs backward ls). Forward
      * = !UPPER+!TRANS || UPPER+TRANS (ls walks 0..m). */
     const ptrdiff_t forward = (!upper && !trans) || (upper && trans);
@@ -251,7 +250,7 @@ void etrsm_L_band(bool upper, bool trans, bool unit,
 
 /* ── SIDE='R' driver: port of trsm_R.c for one M-band [m_lo..m_hi) ──── */
 void etrsm_R_band(bool upper, bool trans, bool unit,
-                        ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
+                        ptrdiff_t n, ptrdiff_t m_lo, ptrdiff_t m_hi,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                         const T *a, ptrdiff_t lda,
                         T *b, ptrdiff_t ldb,
@@ -273,8 +272,8 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
 
     if (forward) {
         /* trsm_R.c lines 115-229 (forward js walk). */
-        for (ptrdiff_t js = 0; js < N; js += NC) {
-            ptrdiff_t min_j = N - js;
+        for (ptrdiff_t js = 0; js < n; js += NC) {
+            ptrdiff_t min_j = n - js;
             if (min_j > NC) min_j = NC;
 
             /* ls loop part 1: A-cols [ls, ls+min_l) entirely above the
@@ -378,14 +377,14 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
         }
     } else {
         /* trsm_R.c lines 232-352 (backward js walk: js from N down). */
-        for (ptrdiff_t js = N; js > 0; js -= NC) {
+        for (ptrdiff_t js = n; js > 0; js -= NC) {
             ptrdiff_t min_j = js;
             if (min_j > NC) min_j = NC;
 
             /* ls loop part 1: A-cols [ls, ls+min_l) entirely below the
              * diagonal of B's js-band — pure GEMM. */
-            for (ptrdiff_t ls = js; ls < N; ls += KC) {
-                ptrdiff_t min_l = N - ls;
+            for (ptrdiff_t ls = js; ls < n; ls += KC) {
+                ptrdiff_t min_l = n - ls;
                 if (min_l > KC) min_l = KC;
                 ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
@@ -501,7 +500,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
  */
 void etrsm_serial(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     T *b, ptrdiff_t ldb)
@@ -514,13 +513,13 @@ void etrsm_serial(
     const bool trans = (TR == 'T' || TR == 'C');   /* real: 'C' ≡ 'T' */
     const bool unit  = (blas_up(diag) == 'U');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     /* α pre-scale of B (mirrors trsm_{L,R}.c GEMM_BETA pass). */
-    if (alpha != 1.0L) egemm_beta_prepass(M, N, alpha, b, ldb);
+    if (alpha != 1.0L) egemm_beta_prepass(m, n, alpha, b, ldb);
     if (alpha == 0.0L) return;
 
-    const ptrdiff_t K_eff = lside ? M : N;
+    const ptrdiff_t K_eff = lside ? m : n;
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
@@ -529,9 +528,9 @@ void etrsm_serial(
     T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
-        if (lside) etrsm_L_band(upper, trans, unit, M, 0, N,
+        if (lside) etrsm_L_band(upper, trans, unit, m, 0, n,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
-        else       etrsm_R_band(upper, trans, unit, N, 0, M,
+        else       etrsm_R_band(upper, trans, unit, n, 0, m,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
     }
     free(Ap);

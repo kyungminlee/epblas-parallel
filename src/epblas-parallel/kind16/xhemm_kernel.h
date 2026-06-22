@@ -42,10 +42,10 @@ typedef struct {
     size_t ap_bytes, bp_bytes;
     char side;   /* 'L' / 'R' */
     char uplo;   /* 'U' / 'L' */
-    ptrdiff_t K;
+    ptrdiff_t k;
 } xhemm_plan_t;
 
-void xhemm_make_plan(ptrdiff_t M, ptrdiff_t N, char side, char uplo, xhemm_plan_t *p);
+void xhemm_make_plan(ptrdiff_t m, ptrdiff_t n, char side, char uplo, xhemm_plan_t *p);
 
 /* OCOPY(B): pack the (pb × jb) panel at (ls, js) into Bp. For SIDE=L the
  * regular factor B goes through the standard GEMM ncopy; for SIDE=R the
@@ -69,7 +69,7 @@ void xhemm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xhemm_plan_t *p,
  * name only. */
 void xhemm_serial(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const xhemm_T *alpha_,
     const xhemm_T *a, ptrdiff_t lda,
     const xhemm_T *b, ptrdiff_t ldb,

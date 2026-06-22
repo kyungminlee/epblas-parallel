@@ -37,20 +37,20 @@ ptrdiff_t yher2k_nb(void);
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's columns
  * (diagonal kept real), the scalar Hermitian rank-2 diagonal add, and the
  * two trailing ygemm_serial conjugate-transpose updates. */
-void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, yher2k_TC alpha, yher2k_TR beta,
+void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, yher2k_TC alpha, yher2k_TR beta,
                   const yher2k_TC *a, ptrdiff_t lda, const yher2k_TC *b, ptrdiff_t ldb,
                   yher2k_TC *c, ptrdiff_t ldc, char UPLO, char TR_c);
 
 /* C := beta*C over the columns [j_start, j_end) keeping the diagonal real —
  * the alpha==0 / K==0 quick path (and the per-block pre-scale). beta==1
  * realifies only the diagonal entry. */
-void yher2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, yher2k_TR beta,
+void yher2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, yher2k_TR beta,
                        yher2k_TC *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as yher2k_. */
 void yher2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const yher2k_TC *alpha_,
     const yher2k_TC *a, ptrdiff_t lda,
     const yher2k_TC *b, ptrdiff_t ldb,

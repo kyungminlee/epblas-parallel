@@ -31,7 +31,7 @@ typedef __float128 T;
 
 void qsymv_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
@@ -42,11 +42,11 @@ void qsymv_core(
     const char UPLO = blas_up(uplo);
     const T zero = 0.0Q, one = 1.0Q;
 
-    if (N == 0) return;
+    if (n == 0) return;
 
     if (beta != one) {
-        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
-        for (ptrdiff_t i = 0; i < N; ++i) {
+        ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
+        for (ptrdiff_t i = 0; i < n; ++i) {
             if (beta == zero) y[iy] = zero;
             else              y[iy] *= beta;
             iy += incy;
@@ -57,25 +57,25 @@ void qsymv_core(
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         const ptrdiff_t nthreads = blas_omp_max_threads();
-        if (N >= QSYMV_OMP_MIN && blas_omp_should_thread()) {
+        if (n >= QSYMV_OMP_MIN && blas_omp_should_thread()) {
             /* Parallel two-pass with per-thread private y accumulator;
              * schedule(static,1) interleaves columns to balance the
              * triangular per-column work (linear in N-j for L, j for U). */
-            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)N, sizeof(T));
+            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
             if (y_priv_all) {
                 #pragma omp parallel num_threads(nthreads)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
+                    T *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
-                        for (ptrdiff_t j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < n; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = zero;
                             const T *aj = &A_(0, j);
                             y_priv[j] += temp1 * aj[j];
-                            for (ptrdiff_t k = j + 1; k < N; ++k) {
+                            for (ptrdiff_t k = j + 1; k < n; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += aj[k] * x[k];
                             }
@@ -83,7 +83,7 @@ void qsymv_core(
                         }
                     } else {
                         #pragma omp for schedule(static, 1)
-                        for (ptrdiff_t j = 0; j < N; ++j) {
+                        for (ptrdiff_t j = 0; j < n; ++j) {
                             const T temp1 = alpha * x[j];
                             T temp2 = zero;
                             const T *aj = &A_(0, j);
@@ -97,10 +97,10 @@ void qsymv_core(
                     /* Implicit barrier after `omp for` orders the writes
                      * before the reduction reads. */
                     #pragma omp for schedule(static)
-                    for (ptrdiff_t i = 0; i < N; ++i) {
+                    for (ptrdiff_t i = 0; i < n; ++i) {
                         T s = zero;
                         for (ptrdiff_t t = 0; t < nthreads; ++t)
-                            s += y_priv_all[(size_t)t * N + i];
+                            s += y_priv_all[(size_t)t * n + i];
                         y[i] += s;
                     }
                 }
@@ -111,19 +111,19 @@ void qsymv_core(
         }
 #endif
         if (UPLO == 'L') {
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = zero;
                 const T *ai = &A_(0, i);
                 y[i] += temp1 * ai[i];
-                for (ptrdiff_t k = i + 1; k < N; ++k) {
+                for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += ai[k] * x[k];
                 }
                 y[i] += alpha * temp2;
             }
         } else {
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[i];
                 T temp2 = zero;
                 const T *ai = &A_(0, i);
@@ -137,16 +137,16 @@ void qsymv_core(
     } else {
         /* General-stride fallback: walks ix/iy by incrementing (matches
          * Netlib reference's IX=IX+INCX, not k*incx recomputation). */
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         if (UPLO == 'L') {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[jx];
                 T temp2 = zero;
                 y[jy] += temp1 * A_(i, i);
                 ptrdiff_t ix = jx, iy = jy;
-                for (ptrdiff_t k = i + 1; k < N; ++k) {
+                for (ptrdiff_t k = i + 1; k < n; ++k) {
                     ix += incx; iy += incy;
                     y[iy] += temp1 * A_(k, i);
                     temp2 += A_(k, i) * x[ix];
@@ -156,7 +156,7 @@ void qsymv_core(
             }
         } else {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T temp1 = alpha * x[jx];
                 T temp2 = zero;
                 ptrdiff_t ix = kx, iy = ky;

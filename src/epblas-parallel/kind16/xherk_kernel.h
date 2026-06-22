@@ -46,7 +46,7 @@ ptrdiff_t xherk_nb(void);
  * (diagonal kept real), the scalar Hermitian diagonal rank-k add, and the
  * trailing xgemm_serial conjugate-transpose update against the rest of the
  * panel. */
-void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K,
+void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k,
                  xherk_TR alpha, xherk_TR beta,
                  const xherk_TC *a, ptrdiff_t lda, xherk_TC *c, ptrdiff_t ldc,
                  char UPLO, char TR_c);
@@ -54,13 +54,13 @@ void xherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K,
 /* C := beta*C over the columns [j_start, j_end) keeping the diagonal real —
  * the alpha==0 / K==0 quick path (and the per-block pre-scale). beta==1
  * realifies only the diagonal entry. */
-void xherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, xherk_TR beta,
+void xherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, xherk_TR beta,
                       xherk_TC *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial by-value core (no OpenMP). */
 void xherk_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const xherk_TR *alpha_,
     const xherk_TC *a, ptrdiff_t lda,
     const xherk_TR *beta_,

@@ -23,7 +23,7 @@ typedef __complex128 T;
 
 void xher2_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict x, ptrdiff_t incx,
     const T *restrict y, ptrdiff_t incy,
@@ -33,21 +33,21 @@ void xher2_core(
     const T zero = 0.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == zero) return;
+    if (n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const bool use_omp = (N >= XHER2_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp = (n >= XHER2_OMP_MIN && blas_omp_should_thread());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const T xj = x[j], yj = y[j];
             if (xj != zero || yj != zero) {
                 const T temp1 = alpha * conjq(yj);
                 const T temp2 = conjq(alpha * xj);
                 T *aj = &A_(0, j);
                 if (UPLO == 'L') {
-                    for (ptrdiff_t i = j + 1; i < N; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
+                    for (ptrdiff_t i = j + 1; i < n; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
                     aj[j] = crealq(aj[j]) + crealq(x[j] * temp1 + y[j] * temp2);
                 } else {
                     for (ptrdiff_t i = 0; i < j; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
@@ -56,16 +56,16 @@ void xher2_core(
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const T xj = x[kx + (ptrdiff_t)j * incx];
             const T yj = y[ky + (ptrdiff_t)j * incy];
             if (xj != zero || yj != zero) {
                 const T temp1 = alpha * conjq(yj);
                 const T temp2 = conjq(alpha * xj);
                 if (UPLO == 'L') {
-                    for (ptrdiff_t i = j + 1; i < N; ++i)
+                    for (ptrdiff_t i = j + 1; i < n; ++i)
                         A_(i, j) += x[kx + (ptrdiff_t)i * incx] * temp1 + y[ky + (ptrdiff_t)i * incy] * temp2;
                     A_(j, j) = crealq(A_(j, j)) + crealq(xj * temp1 + yj * temp2);
                 } else {

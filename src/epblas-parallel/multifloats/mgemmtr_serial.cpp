@@ -46,7 +46,7 @@ const T one_dd {1.0, 0.0};
 
 /* Scalar update of the jb×jb diagonal triangle at (jc, jc).
  * Assumes beta-scaling on C[is..ie, j] already done. */
-inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alpha,
+inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
                      const T *a, std::ptrdiff_t lda,
                      const T *b, std::ptrdiff_t ldb,
                      T *c, std::ptrdiff_t ldc,
@@ -59,14 +59,14 @@ inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T a
 
         if (ta == 'N') {
             if (tb == 'N') {
-                for (std::ptrdiff_t l = 0; l < K; ++l) {
+                for (std::ptrdiff_t l = 0; l < k; ++l) {
                     const T t = alpha * B_(l, j);
                     if (eq0(t)) continue;
                     const T *al = &A_(0, l);
                     for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
                 }
             } else {
-                for (std::ptrdiff_t l = 0; l < K; ++l) {
+                for (std::ptrdiff_t l = 0; l < k; ++l) {
                     const T t = alpha * B_(j, l);
                     if (eq0(t)) continue;
                     const T *al = &A_(0, l);
@@ -77,13 +77,13 @@ inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T a
             if (tb == 'N') {
                 for (std::ptrdiff_t i = is; i < ie; ++i) {
                     T s = zero_dd;
-                    for (std::ptrdiff_t l = 0; l < K; ++l) s = s + A_(l, i) * B_(l, j);
+                    for (std::ptrdiff_t l = 0; l < k; ++l) s = s + A_(l, i) * B_(l, j);
                     cj[i] = cj[i] + alpha * s;
                 }
             } else {
                 for (std::ptrdiff_t i = is; i < ie; ++i) {
                     T s = zero_dd;
-                    for (std::ptrdiff_t l = 0; l < K; ++l) s = s + A_(l, i) * B_(j, l);
+                    for (std::ptrdiff_t l = 0; l < k; ++l) s = s + A_(l, i) * B_(j, l);
                     cj[i] = cj[i] + alpha * s;
                 }
             }
@@ -111,19 +111,19 @@ std::ptrdiff_t mgemmtr_block_nb(void) {
     return nb;
 }
 
-void mgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, bool upper,
+void mgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, bool upper,
                        T beta, T *c, std::ptrdiff_t ldc)
 {
     for (std::ptrdiff_t j = j0; j < j1; ++j) {
         const std::ptrdiff_t is = upper ? 0 : j;
-        const std::ptrdiff_t ie = upper ? (j + 1) : N;
+        const std::ptrdiff_t ie = upper ? (j + 1) : n;
         T *cj = &C_(0, j);
         if (eq0(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_dd;
         else                 for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] * beta;
     }
 }
 
-void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K,
+void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k,
                         T alpha, T beta,
                         const T *a, std::ptrdiff_t lda,
                         const T *b, std::ptrdiff_t ldb,
@@ -133,14 +133,14 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
     /* Beta-scale the triangle slice for cols [jc, jc+jb). */
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t is = upper ? 0 : j;
-        const std::ptrdiff_t ie = upper ? (j + 1) : N;
+        const std::ptrdiff_t ie = upper ? (j + 1) : n;
         T *cj = &C_(0, j);
         if (eq0(beta))      for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_dd;
         else if (!eq1(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] * beta;
     }
 
     /* Diagonal jb×jb triangle: scalar. */
-    diag_add(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, upper, ta, tb);
+    diag_add(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, upper, ta, tb);
 
     /* Off-diagonal rectangle: routed through mgemm_serial (SIMD). */
     if (upper) {
@@ -148,17 +148,17 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
             const std::ptrdiff_t m = jc;
             const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            mgemm_serial(ta, tb, m, jb, K, &alpha,
+            mgemm_serial(ta, tb, m, jb, k, &alpha,
                          ablk, lda, bblk, ldb,
                          &one_dd, &C_(0, jc), ldc);
         }
     } else {
-        const std::ptrdiff_t trailing = N - jc - jb;
+        const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t r0 = jc + jb;
             const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            mgemm_serial(ta, tb, trailing, jb, K, &alpha,
+            mgemm_serial(ta, tb, trailing, jb, k, &alpha,
                          ablk, lda, bblk, ldb,
                          &one_dd, &C_(r0, jc), ldc);
         }
@@ -167,7 +167,7 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
 
 extern "C" void mgemmtr_serial(
     char uplo, char transa, char transb,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *b, std::ptrdiff_t ldb,
@@ -179,18 +179,18 @@ extern "C" void mgemmtr_serial(
     char ta = up(&transa); if (ta == 'C') ta = 'T';
     char tb = up(&transb); if (tb == 'C') tb = 'T';
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
-    if (eq0(alpha) || K == 0) {
+    if (eq0(alpha) || k == 0) {
         if (eq1(beta)) return;
-        mgemmtr_beta_core(0, N, N, upper, beta, c, ldc);
+        mgemmtr_beta_core(0, n, n, upper, beta, c, ldc);
         return;
     }
 
     const std::ptrdiff_t nb = mgemmtr_block_nb();
-    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        mgemmtr_block_core(jc, jb, N, K, alpha, beta,
+    for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        mgemmtr_block_core(jc, jb, n, k, alpha, beta,
                            a, lda, b, ldb, c, ldc, upper, ta, tb);
     }
 }

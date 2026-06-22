@@ -135,7 +135,7 @@ void esymm_pack_b_sym(const T *a, ptrdiff_t lda,
 
 void esymm_serial(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -146,26 +146,26 @@ void esymm_serial(
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
-    egemm_beta_prepass(M, N, beta, c, ldc);   /* C := beta*C (handles beta 0/1) */
+    egemm_beta_prepass(m, n, beta, c, ldc);   /* C := beta*C (handles beta 0/1) */
     if (alpha == 0.0L) return;
 
     /* K is the contraction dim = the symmetric matrix's side. */
-    const ptrdiff_t K = (SIDE == 'L') ? M : N;
+    const ptrdiff_t k = (SIDE == 'L') ? m : n;
 
     ptrdiff_t MC, KC, NC;
-    egemm_choose_blocks(K, &MC, &KC, &NC);
+    egemm_choose_blocks(k, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * egemm_round_up(NC, NR) * sizeof(T);
     T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
-        for (ptrdiff_t jc = 0; jc < N; jc += NC) {
-            const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-            for (ptrdiff_t pc = 0; pc < K; pc += KC) {
-                const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+        for (ptrdiff_t jc = 0; jc < n; jc += NC) {
+            const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+            for (ptrdiff_t pc = 0; pc < k; pc += KC) {
+                const ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
                 /* Pack the K×N (jc-band) right operand. SIDE='L': regular B.
                  * SIDE='R': the symmetric A goes in the B slot. */
                 if (SIDE == 'L')
@@ -173,8 +173,8 @@ void esymm_serial(
                 else
                     esymm_pack_b_sym(a, lda, pc, jc, pb, jb, UPLO, Bp);
 
-                for (ptrdiff_t ic = 0; ic < M; ic += MC) {
-                    const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                for (ptrdiff_t ic = 0; ic < m; ic += MC) {
+                    const ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                     /* Pack the M×K (ic-block) left operand. SIDE='L': the
                      * symmetric A. SIDE='R': regular B in the A slot. */
                     if (SIDE == 'L')

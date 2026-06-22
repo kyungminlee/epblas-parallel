@@ -20,7 +20,7 @@ typedef __float128 T;
 
 void qspr2_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict x, ptrdiff_t incx,
     const T *restrict y, ptrdiff_t incy,
@@ -30,15 +30,15 @@ void qspr2_core(
     const T zero = 0.0Q;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == zero) return;
+    if (n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const bool use_omp = (N >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (n >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != zero || y[j] != zero) {
                     const T t1 = alpha * y[j];
                     const T t2 = alpha * x[j];
@@ -48,25 +48,25 @@ void qspr2_core(
             }
         } else {
 #ifdef _OPENMP
-            const bool use_omp = (N >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (n >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != zero || y[j] != zero) {
                     const T t1 = alpha * y[j];
                     const T t2 = alpha * x[j];
-                    const ptrdiff_t kk = j * N - (j * (j - 1)) / 2;
-                    for (ptrdiff_t i = j; i < N; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
+                    const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
+                    for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
                 }
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t kk = 0;
         ptrdiff_t jx = kx, jy = ky;
         if (UPLO == 'U') {
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const T t1 = alpha * y[jy];
                     const T t2 = alpha * x[jx];
@@ -80,18 +80,18 @@ void qspr2_core(
                 kk += j + 1;
             }
         } else {
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const T t1 = alpha * y[jy];
                     const T t2 = alpha * x[jx];
                     ptrdiff_t ix = jx, iy = jy;
-                    for (ptrdiff_t k = kk; k < kk + N - j; ++k) {
+                    for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
                         ix += incx; iy += incy;
                     }
                 }
                 jx += incx; jy += incy;
-                kk += N - j;
+                kk += n - j;
             }
         }
     }

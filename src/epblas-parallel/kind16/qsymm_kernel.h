@@ -50,7 +50,7 @@ void qsymm_pack_b_sym(const qsymm_T *a, ptrdiff_t lda,
 /* Pure-serial by-value entry (no OpenMP); shares the ptrdiff_t core ABI. */
 void qsymm_serial(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const qsymm_T *alpha_,
     const qsymm_T *a, ptrdiff_t lda,
     const qsymm_T *b, ptrdiff_t ldb,

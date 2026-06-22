@@ -35,18 +35,18 @@ typedef __float128 R;
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 /* ── Block plan (mirrors ob xsymm.c lines 85-101) ───────────────── */
-void xsymm_make_plan(ptrdiff_t M, ptrdiff_t N, char side, char uplo, xsymm_plan_t *p)
+void xsymm_make_plan(ptrdiff_t m, ptrdiff_t n, char side, char uplo, xsymm_plan_t *p)
 {
-    const ptrdiff_t K = (side == 'L') ? M : N;
+    const ptrdiff_t k = (side == 'L') ? m : n;
     ptrdiff_t MC0, KC, NC;
     qblas_ygemm_blocks(&MC0, &KC, &NC);
 
     /* Adaptive MC for small K, sized to keep Ap inside L2.
      * Complex __float128 is 2 * sizeof(__float128) = 32 B/element. */
     ptrdiff_t MC = MC0;
-    if (K > 0 && K <= KC) {
+    if (k > 0 && k <= KC) {
         const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)K * (long)(2 * sizeof(R)));
+        long target_mc = L2_TARGET_BYTES / ((long)k * (long)(2 * sizeof(R)));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
             MC = round_up((ptrdiff_t)target_mc, MR);
@@ -57,7 +57,7 @@ void xsymm_make_plan(ptrdiff_t M, ptrdiff_t N, char side, char uplo, xsymm_plan_
     p->MC = MC; p->KC = KC; p->NC = NC;
     p->ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(R);
     p->bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(R);
-    p->side = side; p->uplo = uplo; p->K = K;
+    p->side = side; p->uplo = uplo; p->k = k;
 }
 
 /* OCOPY(B). SIDE=L: regular factor → standard NCOPY (conj=0). SIDE=R: the
@@ -109,7 +109,7 @@ void xsymm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xsymm_plan_t *p,
 /* ── Single-thread entry (by-value ptrdiff_t core ABI) ────────── */
 void xsymm_serial(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const xsymm_T *alpha_,
     const xsymm_T *a, ptrdiff_t lda,
     const xsymm_T *b, ptrdiff_t ldb,
@@ -121,10 +121,10 @@ void xsymm_serial(
     const char sd = blas_up(side);
     const char up = blas_up(uplo);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
     R *C = (R *)c;
-    qblas_ygemm_beta(M, N, beta_r, beta_i, C, ldc);
+    qblas_ygemm_beta(m, n, beta_r, beta_i, C, ldc);
     if (alphar == 0.0Q && alphai == 0.0Q) return;
 
     const R *A_eff = (const R *)((sd == 'L') ? a : b);
@@ -133,20 +133,20 @@ void xsymm_serial(
     const ptrdiff_t ldb_eff = (sd == 'L') ? ldb : lda;
 
     xsymm_plan_t p;
-    xsymm_make_plan(M, N, sd, up, &p);
-    if (p.K == 0) return;
+    xsymm_make_plan(m, n, sd, up, &p);
+    if (p.k == 0) return;
 
     R *Ap = aligned_alloc(64, (p.ap_bytes + 63) & ~(size_t)63);
     if (!Ap) return;
     R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
     if (!Bp) { free(Ap); return; }
 
-    for (ptrdiff_t js = 0; js < N; js += p.NC) {
-        ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
-        for (ptrdiff_t ls = 0; ls < p.K; ls += p.KC) {
-            ptrdiff_t pb = (p.K - ls < p.KC) ? (p.K - ls) : p.KC;
+    for (ptrdiff_t js = 0; js < n; js += p.NC) {
+        ptrdiff_t jb = (n - js < p.NC) ? (n - js) : p.NC;
+        for (ptrdiff_t ls = 0; ls < p.k; ls += p.KC) {
+            ptrdiff_t pb = (p.k - ls < p.KC) ? (p.k - ls) : p.KC;
             xsymm_pack_B(&p, B_eff, ldb_eff, js, ls, pb, jb, Bp);
-            xsymm_level3_slab(0, M, &p, alphar, alphai,
+            xsymm_level3_slab(0, m, &p, alphar, alphai,
                               A_eff, lda_eff, Ap, Bp, js, ls, pb, jb, C, ldc);
         }
     }

@@ -35,7 +35,7 @@ typedef long double T;
  * cross-call retarget) so the trailing GEMV bypasses the by-ref facade. */
 void egemv_core(
     char trans,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
@@ -46,12 +46,12 @@ void egemv_core(
     char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     const T zero = 0.0L, one = 1.0L;
 
     /* Output length: M for TRANS='N', N for TRANS='T'. */
-    const ptrdiff_t leny = (TR == 'N') ? M : N;
+    const ptrdiff_t leny = (TR == 'N') ? m : n;
 
     /* Beta-scale y (or zero) first — independent of A·x update. */
     if (beta != one) {
@@ -92,7 +92,7 @@ void egemv_core(
 #define EGEMV_N_BODY(i_lo, i_hi) do {                                       \
                 const ptrdiff_t span = (i_hi) - (i_lo);                           \
                 ptrdiff_t j = 0;                                                  \
-                for (; j + 1 < N; j += 2) {                                 \
+                for (; j + 1 < n; j += 2) {                                 \
                     const T t0 = alpha * x[j];                              \
                     const T t1 = alpha * x[j + 1];                          \
                     char *restrict yp = (char *)(y + (i_lo));               \
@@ -106,26 +106,26 @@ void egemv_core(
                         *yk = (*yk + t0 * *a0k) + t1 * *a1k;                \
                     }                                                       \
                 }                                                           \
-                for (; j < N; ++j) {                                        \
+                for (; j < n; ++j) {                                        \
                     const T t = alpha * x[j];                               \
                     const T *aj = &A_(0, j);                                \
                     for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) y[i] += t * aj[i];\
                 }                                                           \
             } while (0)
-            const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
+            const bool use_omp = (m >= EGEMV_OMP_MIN && blas_omp_should_thread());
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     const ptrdiff_t nth  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
-                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
+                    const ptrdiff_t i_lo = blas_part_bound(m, tid, nth);
+                    const ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
                     EGEMV_N_BODY(i_lo, i_hi);
                 }
 #endif
             } else {
-                EGEMV_N_BODY(0, M);
+                EGEMV_N_BODY(0, m);
             }
 #undef EGEMV_N_BODY
         } else if (incy == 1) {
@@ -138,9 +138,9 @@ void egemv_core(
              * owns a disjoint y-slice and walks all columns, so it's
              * race-free and bit-exact. jx is thread-local (recomputed). */
 #define EGEMV_N_INCY1_BODY(i_lo, i_hi) do {                                  \
-                ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;            \
+                ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;            \
                 ptrdiff_t j = 0;                                            \
-                for (; j + 1 < N; j += 2) {                                 \
+                for (; j + 1 < n; j += 2) {                                 \
                     const T t0 = alpha * x[jx];                             \
                     const T t1 = alpha * x[jx + incx];                      \
                     const T *a0 = &A_(0, j);                                \
@@ -149,27 +149,27 @@ void egemv_core(
                         y[i] = (y[i] + t0 * a0[i]) + t1 * a1[i];            \
                     jx += 2 * incx;                                         \
                 }                                                           \
-                for (; j < N; ++j) {                                        \
+                for (; j < n; ++j) {                                        \
                     const T t = alpha * x[jx];                              \
                     const T *aj = &A_(0, j);                                \
                     for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) y[i] += t * aj[i]; \
                     jx += incx;                                             \
                 }                                                           \
             } while (0)
-            const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
+            const bool use_omp = (m >= EGEMV_OMP_MIN && blas_omp_should_thread());
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     const ptrdiff_t nth  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
-                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
+                    const ptrdiff_t i_lo = blas_part_bound(m, tid, nth);
+                    const ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
                     EGEMV_N_INCY1_BODY(i_lo, i_hi);
                 }
 #endif
             } else {
-                EGEMV_N_INCY1_BODY(0, M);
+                EGEMV_N_INCY1_BODY(0, m);
             }
 #undef EGEMV_N_INCY1_BODY
         } else {
@@ -180,11 +180,11 @@ void egemv_core(
              * memory traffic, which is the dominant cost.
              * Thread by partitioning OUTPUT rows [i_lo,i_hi): each thread's
              * y-slice is disjoint, iy starts at iy0 + i_lo*incy. Bit-exact. */
-            const ptrdiff_t iy0 = (incy < 0) ? -(M - 1) * incy : 0;
+            const ptrdiff_t iy0 = (incy < 0) ? -(m - 1) * incy : 0;
 #define EGEMV_N_STRIDED_BODY(i_lo, i_hi) do {                                \
-                ptrdiff_t jx = (incx < 0) ? -(N - 1) * incx : 0;            \
+                ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;            \
                 ptrdiff_t j = 0;                                            \
-                for (; j + 1 < N; j += 2) {                                 \
+                for (; j + 1 < n; j += 2) {                                 \
                     const T t0 = alpha * x[jx];                             \
                     const T t1 = alpha * x[jx + incx];                      \
                     const T *a0 = &A_(0, j);                                \
@@ -196,7 +196,7 @@ void egemv_core(
                     }                                                       \
                     jx += 2 * incx;                                         \
                 }                                                           \
-                for (; j < N; ++j) {                                        \
+                for (; j < n; ++j) {                                        \
                     const T xj = x[jx];                                     \
                     if (xj != zero) {                                       \
                         const T t = alpha * xj;                             \
@@ -209,20 +209,20 @@ void egemv_core(
                     jx += incx;                                             \
                 }                                                           \
             } while (0)
-            const bool use_omp = (M >= EGEMV_OMP_MIN && blas_omp_should_thread());
+            const bool use_omp = (m >= EGEMV_OMP_MIN && blas_omp_should_thread());
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     const ptrdiff_t nth  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
-                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
+                    const ptrdiff_t i_lo = blas_part_bound(m, tid, nth);
+                    const ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
                     EGEMV_N_STRIDED_BODY(i_lo, i_hi);
                 }
 #endif
             } else {
-                EGEMV_N_STRIDED_BODY(0, M);
+                EGEMV_N_STRIDED_BODY(0, m);
             }
 #undef EGEMV_N_STRIDED_BODY
         }
@@ -232,33 +232,33 @@ void egemv_core(
              * (Addendum 16). Body is a macro to share between the
              * parallel and serial paths. */
 #define EGEMV_T_BODY do {                                                   \
-                for (ptrdiff_t j = 0; j < N; ++j) {                               \
+                for (ptrdiff_t j = 0; j < n; ++j) {                               \
                     const T *aj = &A_(0, j);                                \
                     T s0 = zero, s1 = zero;                                 \
                     ptrdiff_t i = 0;                                              \
-                    for (; i + 1 < M; i += 2) {                             \
+                    for (; i + 1 < m; i += 2) {                             \
                         s0 += aj[i]     * x[i];                             \
                         s1 += aj[i + 1] * x[i + 1];                         \
                     }                                                       \
                     T s = s0 + s1;                                          \
-                    for (; i < M; ++i) s += aj[i] * x[i];                   \
+                    for (; i < m; ++i) s += aj[i] * x[i];                   \
                     y[j] += alpha * s;                                      \
                 }                                                           \
             } while (0)
-            const bool use_omp = (N >= EGEMV_OMP_MIN && blas_omp_should_thread());
+            const bool use_omp = (n >= EGEMV_OMP_MIN && blas_omp_should_thread());
             if (use_omp) {
 #ifdef _OPENMP
                 #pragma omp parallel for schedule(static)
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     const T *aj = &A_(0, j);
                     T s0 = zero, s1 = zero;
                     ptrdiff_t i = 0;
-                    for (; i + 1 < M; i += 2) {
+                    for (; i + 1 < m; i += 2) {
                         s0 += aj[i]     * x[i];
                         s1 += aj[i + 1] * x[i + 1];
                     }
                     T s = s0 + s1;
-                    for (; i < M; ++i) s += aj[i] * x[i];
+                    for (; i < m; ++i) s += aj[i] * x[i];
                     y[j] += alpha * s;
                 }
 #endif
@@ -269,14 +269,14 @@ void egemv_core(
         } else {
             /* Strided x/y. Each output y[jy(j)] is disjoint across j → OMP-over-j
              * is race-free and bit-exact (jy recomputed as jy0 + j*incy). */
-            const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
-            const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
-            const bool use_omp = (N >= EGEMV_OMP_MIN && blas_omp_should_thread());
+            const ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
+            const ptrdiff_t ix0 = (incx < 0) ? -(m - 1) * incx : 0;
+            const bool use_omp = (n >= EGEMV_OMP_MIN && blas_omp_should_thread());
 #define EGEMV_T_STRIDED_BODY                                                 \
-            for (ptrdiff_t j = 0; j < N; ++j) {                              \
+            for (ptrdiff_t j = 0; j < n; ++j) {                              \
                 T s = zero;                                                  \
                 ptrdiff_t ix = ix0;                                          \
-                for (ptrdiff_t i = 0; i < M; ++i) {                          \
+                for (ptrdiff_t i = 0; i < m; ++i) {                          \
                     s += A_(i, j) * x[ix];                                   \
                     ix += incx;                                              \
                 }                                                            \

@@ -133,17 +133,16 @@ static void tpmv_kernel_T(bool upper, bool nounit, ptrdiff_t n,
  * block crowded the x87 allocation and slowed the UPPER NoTrans serial sweep
  * ~14%). */
 __attribute__((noinline))
-static ptrdiff_t etpmv_omp(bool upper, bool is_t, bool nounit, ptrdiff_t N, ptrdiff_t incx,
+static ptrdiff_t etpmv_omp(bool upper, bool is_t, bool nounit, ptrdiff_t n, ptrdiff_t incx,
                      const T *restrict ap, T *restrict x)
 {
     ptrdiff_t nthreads = 1;
-    if (N >= 50 && !omp_in_parallel()) {
+    if (n >= 50 && !omp_in_parallel()) {
         nthreads = blas_omp_max_threads();
-        if (N < 500 && nthreads > 2) nthreads = 2;
+        if (n < 500 && nthreads > 2) nthreads = 2;
     }
     if (nthreads <= 1) return 0;
 
-    const ptrdiff_t n = N;
     const ptrdiff_t kx = (incx < 0) ? -(n - 1) * (ptrdiff_t)incx : 0;
     T *buf_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
     ptrdiff_t *range_m = (ptrdiff_t *)malloc((size_t)(nthreads + 1) * sizeof(ptrdiff_t));
@@ -198,7 +197,7 @@ static ptrdiff_t etpmv_omp(bool upper, bool is_t, bool nounit, ptrdiff_t N, ptrd
 
 static void etpmv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *restrict ap,
     T *restrict x, ptrdiff_t incx)
 {
@@ -208,17 +207,17 @@ static void etpmv_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
-    if (etpmv_omp(UPLO == 'U', TR == 'T', nounit, N, incx, ap, x)) return;
+    if (etpmv_omp(UPLO == 'U', TR == 'T', nounit, n, incx, ap, x)) return;
 #endif
 
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = 0;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
                         const T tmp = x[j];
                         ptrdiff_t k = kk;
@@ -228,21 +227,21 @@ static void etpmv_core(
                     kk += j + 1;
                 }
             } else {
-                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
                         const T tmp = x[j];
                         ptrdiff_t k = kk;
-                        for (ptrdiff_t i = N - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
-                        if (nounit) x[j] *= ap[kk - (N - 1 - j)];
+                        for (ptrdiff_t i = n - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
+                        if (nounit) x[j] *= ap[kk - (n - 1 - j)];
                     }
-                    kk -= (N - j);
+                    kk -= (n - j);
                 }
             }
         } else {
             if (UPLO == 'U') {
-                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[j];
                     if (nounit) tmp *= ap[kk];
                     ptrdiff_t k = kk - 1;
@@ -252,23 +251,23 @@ static void etpmv_core(
                 }
             } else {
                 ptrdiff_t kk = 0;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[j];
                     if (nounit) tmp *= ap[kk];
                     ptrdiff_t k = kk + 1;
-                    for (ptrdiff_t i = j + 1; i < N; ++i) { tmp += ap[k] * x[i]; ++k; }
+                    for (ptrdiff_t i = j + 1; i < n; ++i) { tmp += ap[k] * x[i]; ++k; }
                     x[j] = tmp;
-                    kk += N - j;
+                    kk += n - j;
                 }
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
                 ptrdiff_t kk = 0;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[jx] != zero) {
                         const T tmp = x[jx];
                         ptrdiff_t ix = kx;
@@ -282,28 +281,28 @@ static void etpmv_core(
                     kk += j + 1;
                 }
             } else {
-                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
-                kx += (N - 1) * incx;
+                ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+                kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[jx] != zero) {
                         const T tmp = x[jx];
                         ptrdiff_t ix = kx;
-                        for (ptrdiff_t k = kk; k > kk - (N - 1 - j); --k) {
+                        for (ptrdiff_t k = kk; k > kk - (n - 1 - j); --k) {
                             x[ix] += tmp * ap[k];
                             ix -= incx;
                         }
-                        if (nounit) x[jx] *= ap[kk - (N - 1 - j)];
+                        if (nounit) x[jx] *= ap[kk - (n - 1 - j)];
                     }
                     jx -= incx;
-                    kk -= (N - j);
+                    kk -= (n - j);
                 }
             }
         } else {
             if (UPLO == 'U') {
-                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
-                ptrdiff_t jx = kx + (N - 1) * incx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+                ptrdiff_t jx = kx + (n - 1) * incx;
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = jx;
                     if (nounit) tmp *= ap[kk];
@@ -318,17 +317,17 @@ static void etpmv_core(
             } else {
                 ptrdiff_t kk = 0;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = jx;
                     if (nounit) tmp *= ap[kk];
-                    for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
+                    for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                         ix += incx;
                         tmp += ap[k] * x[ix];
                     }
                     x[jx] = tmp;
                     jx += incx;
-                    kk += N - j;
+                    kk += n - j;
                 }
             }
         }

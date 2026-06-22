@@ -32,16 +32,16 @@ typedef xtrsm_T T;
 
 extern void xtrsv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx);
 
 /* Maximum nrhs at which the xtrsv-loop fast path beats column-parallel
  * xtrsm. In the serial entry no team is available, so the heuristic floors
  * at 1. */
-static ptrdiff_t xtrsm_xtrsv_loop_max(ptrdiff_t M) {
+static ptrdiff_t xtrsm_xtrsv_loop_max(ptrdiff_t m) {
     const ptrdiff_t max_nt     = 1 - 1;
-    const ptrdiff_t max_amdahl = M / XTRSM_XTRSV_LOOP_NB_HINT;
+    const ptrdiff_t max_amdahl = m / XTRSM_XTRSV_LOOP_NB_HINT;
     ptrdiff_t v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
     if (v < 1) v = 1;
     return v;
@@ -65,28 +65,28 @@ static inline T A_op(const T *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, bo
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
 
-void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        if (alpha != ONE) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (ptrdiff_t k = 0; k < M; ++k) {
+        if (alpha != ONE) for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;
+        for (ptrdiff_t k = 0; k < m; ++k) {
             if (B_(k, j) != ZERO) {
                 if (nounit) B_(k, j) /= A_(k, k);
                 const T bk = B_(k, j);
-                for (ptrdiff_t i = k + 1; i < M; ++i)
+                for (ptrdiff_t i = k + 1; i < m; ++i)
                     B_(i, j) -= bk * A_(i, k);
             }
         }
     }
 }
 
-void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        if (alpha != ONE) for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
-        for (ptrdiff_t k = M - 1; k >= 0; --k) {
+        if (alpha != ONE) for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;
+        for (ptrdiff_t k = m - 1; k >= 0; --k) {
             if (B_(k, j) != ZERO) {
                 if (nounit) B_(k, j) /= A_(k, k);
                 const T bk = B_(k, j);
@@ -97,26 +97,26 @@ void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
     }
 }
 
-void xtrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+void xtrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        for (ptrdiff_t i = M - 1; i >= 0; --i) {
+        for (ptrdiff_t i = m - 1; i >= 0; --i) {
             T t = alpha * B_(i, j);
-            for (ptrdiff_t k = i + 1; k < M; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
+            for (ptrdiff_t k = i + 1; k < m; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
             if (nounit) t /= A_op(a, lda, i, i, conj_flag);
             B_(i, j) = t;
         }
     }
 }
 
-void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
+void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        for (ptrdiff_t i = 0; i < M; ++i) {
+        for (ptrdiff_t i = 0; i < m; ++i) {
             T t = alpha * B_(i, j);
             for (ptrdiff_t k = 0; k < i; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
             if (nounit) t /= A_op(a, lda, i, i, conj_flag);
@@ -127,12 +127,12 @@ void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T alpha,
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
 
-void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
-    for (ptrdiff_t j = N - 1; j >= 0; --j) {
+    for (ptrdiff_t j = n - 1; j >= 0; --j) {
         if (alpha != ONE) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
-        for (ptrdiff_t k = j + 1; k < N; ++k) {
+        for (ptrdiff_t k = j + 1; k < n; ++k) {
             if (A_(k, j) != ZERO) {
                 const T akj = A_(k, j);
                 for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
@@ -145,10 +145,10 @@ void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
     }
 }
 
-void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
 {
-    for (ptrdiff_t j = 0; j < N; ++j) {
+    for (ptrdiff_t j = 0; j < n; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
         for (ptrdiff_t k = 0; k < j; ++k) {
             if (A_(k, j) != ZERO) {
@@ -163,16 +163,16 @@ void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
     }
 }
 
-void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
-    for (ptrdiff_t k = 0; k < N; ++k) {
+    for (ptrdiff_t k = 0; k < n; ++k) {
         if (nounit) {
             const T inv = ONE / A_op(a, lda, k, k, conj_flag);
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= inv;
         }
-        for (ptrdiff_t j = k + 1; j < N; ++j) {
+        for (ptrdiff_t j = k + 1; j < n; ++j) {
             const T ajk = A_op(a, lda, j, k, conj_flag);
             if (ajk != ZERO) {
                 for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
@@ -182,11 +182,11 @@ void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
     }
 }
 
-void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
+void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
                      const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
-    for (ptrdiff_t k = N - 1; k >= 0; --k) {
+    for (ptrdiff_t k = n - 1; k >= 0; --k) {
         if (nounit) {
             const T inv = ONE / A_op(a, lda, k, k, conj_flag);
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= inv;
@@ -211,7 +211,7 @@ void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, T alpha,
  */
 void xtrsm_serial(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     T *b, ptrdiff_t ldb)
@@ -223,24 +223,24 @@ void xtrsm_serial(
     const bool nounit = (xtrsm_uplo(diag) != 'U');
     const bool cflag = (TR == 'C') ? 1 : 0;
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     if (alpha == ZERO) {
-        for (ptrdiff_t j = 0; j < N; ++j)
-            for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) = ZERO;
+        for (ptrdiff_t j = 0; j < n; ++j)
+            for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) = ZERO;
         return;
     }
 
     /* xtrsv-loop fast path (serial: nrhs sequential xtrsv solves). */
     {
-        const ptrdiff_t xv_max = xtrsm_xtrsv_loop_max(M);
-        if (SIDE == 'L' && N >= 1 && N <= xv_max && M >= XTRSM_XTRSV_LOOP_M_MIN) {
+        const ptrdiff_t xv_max = xtrsm_xtrsv_loop_max(m);
+        if (SIDE == 'L' && n >= 1 && n <= xv_max && m >= XTRSM_XTRSV_LOOP_M_MIN) {
             if (alpha != ONE) {
-                for (ptrdiff_t j = 0; j < N; ++j)
-                    for (ptrdiff_t i = 0; i < M; ++i) B_(i, j) *= alpha;
+                for (ptrdiff_t j = 0; j < n; ++j)
+                    for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;
             }
-            for (ptrdiff_t j = 0; j < N; ++j) {
-                xtrsv_core(uplo, transa, diag, M, a, lda, &B_(0, j), 1);
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                xtrsv_core(uplo, transa, diag, m, a, lda, &B_(0, j), 1);
             }
             return;
         }
@@ -248,25 +248,25 @@ void xtrsm_serial(
 
     if (SIDE == 'L') {
         if (TR == 'N') {
-            if (UPLO == 'L') xtrsm_lln_core(0, N, M, alpha, a, lda, b, ldb, nounit);
-            else             xtrsm_lun_core(0, N, M, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') xtrsm_lln_core(0, n, m, alpha, a, lda, b, ldb, nounit);
+            else             xtrsm_lun_core(0, n, m, alpha, a, lda, b, ldb, nounit);
         } else if (TR == 'T') {
-            if (UPLO == 'L') xtrsm_llTC_core(0, N, M, alpha, a, lda, b, ldb, nounit, 0);
-            else             xtrsm_luTC_core(0, N, M, alpha, a, lda, b, ldb, nounit, 0);
+            if (UPLO == 'L') xtrsm_llTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, 0);
+            else             xtrsm_luTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, 0);
         } else { /* 'C' */
-            if (UPLO == 'L') xtrsm_llTC_core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag);
-            else             xtrsm_luTC_core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag);
+            if (UPLO == 'L') xtrsm_llTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag);
+            else             xtrsm_luTC_core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag);
         }
     } else {
         if (TR == 'N') {
-            if (UPLO == 'L') xtrsm_rln_core(0, M, N, alpha, a, lda, b, ldb, nounit);
-            else             xtrsm_run_core(0, M, N, alpha, a, lda, b, ldb, nounit);
+            if (UPLO == 'L') xtrsm_rln_core(0, m, n, alpha, a, lda, b, ldb, nounit);
+            else             xtrsm_run_core(0, m, n, alpha, a, lda, b, ldb, nounit);
         } else if (TR == 'T') {
-            if (UPLO == 'L') xtrsm_rlTC_core(0, M, N, alpha, a, lda, b, ldb, nounit, 0);
-            else             xtrsm_ruTC_core(0, M, N, alpha, a, lda, b, ldb, nounit, 0);
+            if (UPLO == 'L') xtrsm_rlTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, 0);
+            else             xtrsm_ruTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, 0);
         } else {
-            if (UPLO == 'L') xtrsm_rlTC_core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag);
-            else             xtrsm_ruTC_core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag);
+            if (UPLO == 'L') xtrsm_rlTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, cflag);
+            else             xtrsm_ruTC_core(0, m, n, alpha, a, lda, b, ldb, nounit, cflag);
         }
     }
 }

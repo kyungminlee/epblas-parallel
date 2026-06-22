@@ -22,7 +22,7 @@ typedef __float128 T;
 
 void qsyr_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict x, ptrdiff_t incx,
     T *restrict a, ptrdiff_t lda)
@@ -31,20 +31,20 @@ void qsyr_core(
     const T zero = 0.0Q;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == zero) return;
+    if (n == 0 || alpha == zero) return;
 
     if (incx == 1) {
-        const bool use_omp = (N >= QSYR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (n >= QSYR_OMP_MIN && blas_omp_max_threads() > 1);
         /* Branch on use_omp at C source level — `#pragma omp parallel for
          * if(use_omp)` outlines unconditionally. */
 #define QSYR_BODY                                                            \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < n; ++j) {                                        \
             const T xj = x[j];                                               \
             if (xj != zero) {                                                \
                 const T t = alpha * xj;                                      \
                 T *aj = &A_(0, j);                                           \
                 if (UPLO == 'L') {                                           \
-                    for (ptrdiff_t i = j; i < N; ++i) aj[i] += t * x[i];           \
+                    for (ptrdiff_t i = j; i < n; ++i) aj[i] += t * x[i];           \
                 } else {                                                     \
                     for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += t * x[i];          \
                 }                                                            \
@@ -63,13 +63,13 @@ void qsyr_core(
         }
 #undef QSYR_BODY
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        for (ptrdiff_t j = 0; j < n; ++j) {
             const T xj = x[kx + j * incx];
             if (xj != zero) {
                 const T t = alpha * xj;
                 if (UPLO == 'L') {
-                    for (ptrdiff_t i = j; i < N; ++i) A_(i, j) += t * x[kx + i * incx];
+                    for (ptrdiff_t i = j; i < n; ++i) A_(i, j) += t * x[kx + i * incx];
                 } else {
                     for (ptrdiff_t i = 0; i <= j; ++i) A_(i, j) += t * x[kx + i * incx];
                 }

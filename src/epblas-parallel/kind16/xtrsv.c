@@ -56,11 +56,11 @@ void xtrsv_serial_(
 
 void xtrsv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
     const ptrdiff_t in_par = omp_in_parallel();
@@ -68,14 +68,14 @@ void xtrsv_core(
     const ptrdiff_t in_par = 0;
 #endif
     const char uplo_c = uplo, trans_c = trans, diag_c = diag;
-    if (incx == 1 && N >= 2 * xtrsv_blocked_nb() && !in_par
+    if (incx == 1 && n >= 2 * xtrsv_blocked_nb() && !in_par
         && blas_omp_max_threads() > 1) {
-        xtrsv_blocked_(&uplo_c, &trans_c, &diag_c, &N, a, &lda, x, &incx,
+        xtrsv_blocked_(&uplo_c, &trans_c, &diag_c, &n, a, &lda, x, &incx,
                        1, 1, 1);
         return;
     }
 
-    xtrsv_serial_(&uplo_c, &trans_c, &diag_c, &N, a, &lda, x, &incx,
+    xtrsv_serial_(&uplo_c, &trans_c, &diag_c, &n, a, &lda, x, &incx,
                   1, 1, 1);
 }
 
@@ -88,30 +88,30 @@ void xtrsv_serial_(
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_;
+    const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = blas_up(*uplo);
     const char TR   = blas_up(*trans);
     const char DIAG = blas_up(*diag);
     const bool nounit = (DIAG != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
     const T zero = 0.0Q + 0.0Qi;
 
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     if (x[i] != zero) {
                         if (nounit) x[i] /= A_(i, i);
                         const T xi = x[i];
                         const T *ai = &A_(0, i);
-                        for (ptrdiff_t k = i + 1; k < N; ++k) x[k] -= xi * ai[k];
+                        for (ptrdiff_t k = i + 1; k < n; ++k) x[k] -= xi * ai[k];
                     }
                 }
             } else {
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     if (x[i] != zero) {
                         if (nounit) x[i] /= A_(i, i);
                         const T xi = x[i];
@@ -123,20 +123,20 @@ void xtrsv_serial_(
         } else {
             const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     T t = x[i];
                     const T *ai = &A_(0, i);
                     if (conj_a) {
-                        for (ptrdiff_t k = i + 1; k < N; ++k) t -= conjq(ai[k]) * x[k];
+                        for (ptrdiff_t k = i + 1; k < n; ++k) t -= conjq(ai[k]) * x[k];
                         if (nounit) t /= conjq(ai[i]);
                     } else {
-                        for (ptrdiff_t k = i + 1; k < N; ++k) t -= ai[k] * x[k];
+                        for (ptrdiff_t k = i + 1; k < n; ++k) t -= ai[k] * x[k];
                         if (nounit) t /= ai[i];
                     }
                     x[i] = t;
                 }
             } else {
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     T t = x[i];
                     const T *ai = &A_(0, i);
                     if (conj_a) {
@@ -151,19 +151,19 @@ void xtrsv_serial_(
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     const ptrdiff_t ix = kx + i * incx;
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= A_(i, i);
                         const T xi = x[ix];
-                        for (ptrdiff_t k = i + 1; k < N; ++k) x[kx + k * incx] -= xi * A_(k, i);
+                        for (ptrdiff_t k = i + 1; k < n; ++k) x[kx + k * incx] -= xi * A_(k, i);
                     }
                 }
             } else {
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     const ptrdiff_t ix = kx + i * incx;
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= A_(i, i);
@@ -175,9 +175,9 @@ void xtrsv_serial_(
         } else {
             const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
-                for (ptrdiff_t i = N - 1; i >= 0; --i) {
+                for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     T t = x[kx + i * incx];
-                    for (ptrdiff_t k = i + 1; k < N; ++k) {
+                    for (ptrdiff_t k = i + 1; k < n; ++k) {
                         const T aki = conj_a ? conjq(A_(k, i)) : A_(k, i);
                         t -= aki * x[kx + k * incx];
                     }
@@ -185,7 +185,7 @@ void xtrsv_serial_(
                     x[kx + i * incx] = t;
                 }
             } else {
-                for (ptrdiff_t i = 0; i < N; ++i) {
+                for (ptrdiff_t i = 0; i < n; ++i) {
                     T t = x[kx + i * incx];
                     for (ptrdiff_t k = 0; k < i; ++k) {
                         const T aki = conj_a ? conjq(A_(k, i)) : A_(k, i);
@@ -222,14 +222,14 @@ void xtrsv_blocked_(
     T *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
-    const ptrdiff_t N = *n_;
+    const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const ptrdiff_t nb = xtrsv_blocked_nb();
     const char UPLO = blas_up(*uplo);
     const char TR   = blas_up(*trans);
 
-    if (N == 0) return;
-    if (incx != 1 || N < 2 * nb) {
+    if (n == 0) return;
+    if (incx != 1 || n < 2 * nb) {
         const ptrdiff_t n_pt = *n_, lda_pt = *lda_, incx_pt = *incx_;
         xtrsv_serial_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt,
                       uplo_len, trans_len, diag_len);
@@ -255,8 +255,8 @@ void xtrsv_blocked_(
 
         if (TR == 'N' && UPLO == 'L') {
             /* Forward: solve A11 x1 = b1, then x2 -= A21 x1, repeat. */
-            for (ptrdiff_t j = 0; j < N; j += nb) {
-                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
+            for (ptrdiff_t j = 0; j < n; j += nb) {
+                ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     xtrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
@@ -267,7 +267,7 @@ void xtrsv_blocked_(
                     #pragma omp barrier
                 }
 #endif
-                ptrdiff_t mt = N - j - jb;
+                ptrdiff_t mt = n - j - jb;
                 if (mt > 0) {
                     ptrdiff_t j2 = j + jb;
                     ptrdiff_t lo = blas_part_bound(mt, tid, nth);
@@ -289,9 +289,9 @@ void xtrsv_blocked_(
             }
         } else if (TR == 'N' && UPLO == 'U') {
             /* Backward: solve A22 x2 = b2, then x1 -= A12 x2, repeat. */
-            ptrdiff_t j = ((N - 1) / nb) * nb;
+            ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
-                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
+                ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     xtrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
@@ -326,9 +326,9 @@ void xtrsv_blocked_(
              *  x[0:j] -= op(A[j:j+jb, 0:j]) * x[j:j+jb].
              *  xgemv(op, M=jb, N=j) on submatrix &A_(j, 0).
              *  Parallel axis is the output (N=j); partition that. */
-            ptrdiff_t j = ((N - 1) / nb) * nb;
+            ptrdiff_t j = ((n - 1) / nb) * nb;
             while (j >= 0) {
-                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
+                ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     xtrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
@@ -360,8 +360,8 @@ void xtrsv_blocked_(
             }
         } else {
             /* L,U,T/C: iterate top-down. */
-            for (ptrdiff_t j = 0; j < N; j += nb) {
-                ptrdiff_t jb = (N - j < nb) ? (N - j) : nb;
+            for (ptrdiff_t j = 0; j < n; j += nb) {
+                ptrdiff_t jb = (n - j < nb) ? (n - j) : nb;
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     xtrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
@@ -372,7 +372,7 @@ void xtrsv_blocked_(
                     #pragma omp barrier
                 }
 #endif
-                ptrdiff_t mt = N - j - jb;
+                ptrdiff_t mt = n - j - jb;
                 if (mt > 0) {
                     ptrdiff_t j2 = j + jb;
                     ptrdiff_t lo = blas_part_bound(mt, tid, nth);

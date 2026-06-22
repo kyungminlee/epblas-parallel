@@ -41,18 +41,18 @@ static bool op_is_trans(char c) { return (c == 'T' || c == 'C') ? 1 : 0; }
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 /* ── Block plan (mirrors ob xgemm.c lines 136-155) ──────────────── */
-void xgemm_make_plan(ptrdiff_t M, ptrdiff_t N, ptrdiff_t K, char ta, char tb, xgemm_plan_t *p)
+void xgemm_make_plan(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, char ta, char tb, xgemm_plan_t *p)
 {
-    (void)M; (void)N;
+    (void)m; (void)n;
     ptrdiff_t MC0, KC, NC;
     qblas_ygemm_blocks(&MC0, &KC, &NC);
 
     /* Adaptive MC for small K, sized to keep Ap inside L2.
      * Complex __float128 is 2 * sizeof(__float128) = 32 B/element. */
     ptrdiff_t MC = MC0;
-    if (K <= KC) {
+    if (k <= KC) {
         const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)K * (long)(2 * sizeof(R)));
+        long target_mc = L2_TARGET_BYTES / ((long)k * (long)(2 * sizeof(R)));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
             MC = round_up((ptrdiff_t)target_mc, MR);
@@ -116,7 +116,7 @@ void xgemm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xgemm_plan_t *p,
 /* ── Single-thread by-value entry ─────────────────────────────── */
 void xgemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const xgemm_T *alpha_,
     const xgemm_T *a, ptrdiff_t lda,
     const xgemm_T *b, ptrdiff_t ldb,
@@ -128,29 +128,29 @@ void xgemm_serial(
     const char ta = xgemm_trans_code(transa);
     const char tb = xgemm_trans_code(transb);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
     const R *A = (const R *)a;
     const R *B = (const R *)b;
     R *C = (R *)c;
 
-    qblas_ygemm_beta(M, N, beta_r, beta_i, C, ldc);
-    if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
+    qblas_ygemm_beta(m, n, beta_r, beta_i, C, ldc);
+    if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
     xgemm_plan_t p;
-    xgemm_make_plan(M, N, K, ta, tb, &p);
+    xgemm_make_plan(m, n, k, ta, tb, &p);
 
     R *Ap = aligned_alloc(64, (p.ap_bytes + 63) & ~(size_t)63);
     if (!Ap) return;
     R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
     if (!Bp) { free(Ap); return; }
 
-    for (ptrdiff_t js = 0; js < N; js += p.NC) {
-        ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
-        for (ptrdiff_t ls = 0; ls < K; ls += p.KC) {
-            ptrdiff_t pb = (K - ls < p.KC) ? (K - ls) : p.KC;
+    for (ptrdiff_t js = 0; js < n; js += p.NC) {
+        ptrdiff_t jb = (n - js < p.NC) ? (n - js) : p.NC;
+        for (ptrdiff_t ls = 0; ls < k; ls += p.KC) {
+            ptrdiff_t pb = (k - ls < p.KC) ? (k - ls) : p.KC;
             xgemm_pack_B(&p, B, ldb, js, ls, pb, jb, Bp);
-            xgemm_level3_slab(0, M, &p, alphar, alphai,
+            xgemm_level3_slab(0, m, &p, alphar, alphai,
                               A, lda, Ap, Bp, js, ls, pb, jb, C, ldc);
         }
     }

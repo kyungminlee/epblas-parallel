@@ -29,11 +29,11 @@ typedef long double T;
  * per-element increment/compare/branch cost and recovers it. restrict re-states
  * the aj/x no-alias fact the caller has but a plain helper would lose, so the
  * aj[i] store can't force an x[i] reload. Bit-exact: each aj[i] is independent. */
-static void eger_col_unit(ptrdiff_t M, T t, const T *restrict x, T *restrict aj)
+static void eger_col_unit(ptrdiff_t m, T t, const T *restrict x, T *restrict aj)
 {
-    const ptrdiff_t rem = M % 8;
+    const ptrdiff_t rem = m % 8;
     for (ptrdiff_t i = 0; i < rem; ++i) aj[i] += t * x[i];
-    for (ptrdiff_t i = rem; i < M; i += 8) {
+    for (ptrdiff_t i = rem; i < m; i += 8) {
         aj[i    ] += t * x[i    ];
         aj[i + 1] += t * x[i + 1];
         aj[i + 2] += t * x[i + 2];
@@ -46,7 +46,7 @@ static void eger_col_unit(ptrdiff_t M, T t, const T *restrict x, T *restrict aj)
 }
 
 static void eger_core(
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *restrict x, ptrdiff_t incx,
     const T *restrict y, ptrdiff_t incy,
@@ -55,15 +55,15 @@ static void eger_core(
     const T alpha = *alpha_;
     const T zero = 0.0L;
 
-    if (M == 0 || N == 0 || alpha == zero) return;
+    if (m == 0 || n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
-        const bool use_omp = (N >= EGER_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp = (n >= EGER_OMP_MIN && blas_omp_should_thread());
         /* C-source branch on use_omp to dodge Add-16 outlining tax. */
 #define EGER_BODY                                                            \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                  \
+        for (ptrdiff_t j = 0; j < n; ++j) {                                  \
             const T yj = y[j];                                               \
-            if (yj != zero) eger_col_unit(M, alpha * yj, x, &A_(0, j));      \
+            if (yj != zero) eger_col_unit(m, alpha * yj, x, &A_(0, j));      \
         }
         if (use_omp) {
 #ifdef _OPENMP
@@ -79,9 +79,9 @@ static void eger_core(
          * and bit-exact (each column's inner loop runs in one thread, same
          * order as serial). jy is recomputed as jy0 + j*incy — arithmetically
          * identical to the carried `jy += incy` but parallelizable. */
-        const ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
-        const ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
-        const bool use_omp = (N >= EGER_OMP_MIN && blas_omp_should_thread());
+        const ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
+        const ptrdiff_t ix0 = (incx < 0) ? -(m - 1) * incx : 0;
+        const bool use_omp = (n >= EGER_OMP_MIN && blas_omp_should_thread());
         /* Threaded + strided x: copy x once to a unit-stride buffer so every
          * thread streams x[] at stride 1 (mirrors ob ger_thread.c). Bit-exact —
          * same values copied in order, same per-column accumulation. Serial keeps
@@ -90,25 +90,25 @@ static void eger_core(
         const T *xp = x;
         T *x_buf = NULL;
         if (use_omp && incx != 1) {
-            x_buf = malloc((size_t)M * sizeof(T));
+            x_buf = malloc((size_t)m * sizeof(T));
             if (x_buf) {
                 ptrdiff_t ix = ix0;
-                for (ptrdiff_t i = 0; i < M; ++i) { x_buf[i] = x[ix]; ix += incx; }
+                for (ptrdiff_t i = 0; i < m; ++i) { x_buf[i] = x[ix]; ix += incx; }
                 xp = x_buf;
             }
         }
         const bool x_unit = (incx == 1) || (x_buf != NULL);
 #define EGER_STRIDED_BODY                                                    \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                  \
+        for (ptrdiff_t j = 0; j < n; ++j) {                                  \
             const T yj = y[jy0 + j * incy];                                  \
             if (yj != zero) {                                                \
                 const T t = alpha * yj;                                      \
                 T *aj = &A_(0, j);                                           \
                 if (x_unit) {                                                \
-                    eger_col_unit(M, t, xp, aj);                             \
+                    eger_col_unit(m, t, xp, aj);                             \
                 } else {                                                     \
                     ptrdiff_t ix = ix0;                                      \
-                    for (ptrdiff_t i = 0; i < M; ++i) {                      \
+                    for (ptrdiff_t i = 0; i < m; ++i) {                      \
                         aj[i] += t * x[ix];                                  \
                         ix += incx;                                          \
                     }                                                        \

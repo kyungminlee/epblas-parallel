@@ -63,7 +63,7 @@ void wgemm_inner_kernel_simd_complex(std::ptrdiff_t ib, std::ptrdiff_t jb, std::
  * swap the symbol name only. */
 extern "C" void wgemm_serial(
     char transa, char transb,
-    std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t k,
     const wgemm_T *alpha_,
     const wgemm_T *a, std::ptrdiff_t lda,
     const wgemm_T *b, std::ptrdiff_t ldb,

@@ -80,8 +80,8 @@ static R mwnrm2_ssq_unit(std::ptrdiff_t n, const T *x, R scale)
     __m256d a0 = _mm256_setzero_pd();
     __m256d a1 = _mm256_setzero_pd();
     __m256d a2 = _mm256_setzero_pd();
-    constexpr std::ptrdiff_t K = 64;
-    std::ptrdiff_t counter = K;
+    constexpr std::ptrdiff_t k = 64;
+    std::ptrdiff_t counter = k;
     const std::ptrdiff_t n4 = n & ~3;
     auto sq_into = [&](__m256d xh, __m256d xl) {
         /* t = x · inv */
@@ -101,7 +101,7 @@ static R mwnrm2_ssq_unit(std::ptrdiff_t n, const T *x, R scale)
         cload4(&x[i], rh, rl, ih, il);
         sq_into(rh, rl);
         sq_into(ih, il);
-        if (--counter == 0) { renorm3(a0, a1, a2); counter = K; }
+        if (--counter == 0) { renorm3(a0, a1, a2); counter = k; }
     }
     __m256d t = _mm256_add_pd(a1, a2);
     s = horizontal_dd(a0, t);

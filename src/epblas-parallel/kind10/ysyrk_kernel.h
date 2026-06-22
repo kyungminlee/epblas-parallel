@@ -35,19 +35,19 @@ ptrdiff_t ysyrk_nb(void);
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's triangular
  * columns, the scalar diagonal rank-k add, and the trailing ygemm_serial
  * update against the rest of the panel. */
-void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, ysyrk_T alpha, ysyrk_T beta,
+void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, ysyrk_T alpha, ysyrk_T beta,
                  const ysyrk_T *a, ptrdiff_t lda, ysyrk_T *c, ptrdiff_t ldc,
                  char UPLO, char TR);
 
 /* C := beta*C over the triangular columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. */
-void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, ysyrk_T beta,
+void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, ysyrk_T beta,
                       ysyrk_T *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial by-value core (no OpenMP). */
 void ysyrk_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const ysyrk_T *alpha_,
     const ysyrk_T *a, ptrdiff_t lda,
     const ysyrk_T *beta_,

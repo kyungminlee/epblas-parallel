@@ -31,7 +31,7 @@ static inline void band_msub(T *restrict x, const T *restrict cb, T tmp,
 
 static void etbsv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
@@ -41,7 +41,7 @@ static void etbsv_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
     if (incx == 1) {
         /* incx==1 hot path: hoist the column base pointer so the two array
@@ -62,34 +62,34 @@ static void etbsv_core(
          * reference (mig) on every incx==1 cell. */
         if (TR == 'N') {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
                         const T *restrict col = &a[(size_t)j * lda];
-                        const ptrdiff_t off = K - j;
-                        if (nounit) x[j] /= col[K];
+                        const ptrdiff_t off = k - j;
+                        if (nounit) x[j] /= col[k];
                         const T tmp = x[j];
-                        const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                        const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         band_msub(x, col + off, tmp, i_lo, j);
                     }
                 }
             } else {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
                         const T *restrict col = &a[(size_t)j * lda];
                         const ptrdiff_t off = -j;
                         if (nounit) x[j] /= col[0];
                         const T tmp = x[j];
-                        const ptrdiff_t i_hi = (j + K < N - 1) ? (j + K) : (N - 1);
+                        const ptrdiff_t i_hi = (j + k < n - 1) ? (j + k) : (n - 1);
                         band_msub(x, col + off, tmp, j + 1, i_hi + 1);
                     }
                 }
             }
         } else {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[j];
                     const T *restrict col = &a[(size_t)j * lda];
-                    const ptrdiff_t off = K - j;
+                    const ptrdiff_t off = k - j;
                     /* (j > K), not the equivalent (j - K > 0): the unconditional
                      * j-K subtraction spawns an extra induction variable that
                      * blocks GCC from fusing &a[j*lda]+(K-j) into the single
@@ -98,17 +98,17 @@ static void etbsv_core(
                      * the fusion happen → UTN par/ob 1.05->1.01, UTU ->0.97.
                      * (Opposite for the NoTrans store-loop above, which prefers
                      * the subtraction form — measured per-shape, do not unify.) */
-                    const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
+                    const ptrdiff_t i_lo = (j > k) ? (j - k) : 0;
                     for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= col[off + i] * x[i];
-                    if (nounit) tmp /= col[K];
+                    if (nounit) tmp /= col[k];
                     x[j] = tmp;
                 }
             } else {
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[j];
                     const T *restrict col = &a[(size_t)j * lda];
                     const ptrdiff_t off = -j;
-                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= col[off + i] * x[i];
                     if (nounit) tmp /= col[0];
                     x[j] = tmp;
@@ -125,7 +125,7 @@ static void etbsv_core(
          * band element through the A_(i,j) macro re-derived (size_t)j*lda at
          * each access and left par ~4% behind ob on the strided Upper cells.
          * Hoisting the pointer brings every strided cell to parity-or-better. */
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
                 /* Upper NoTrans: the band x-window for column j ends just above
@@ -138,15 +138,15 @@ static void etbsv_core(
                  * nounit column (the UNN strided gap; the unit path skips the
                  * divide block, so only nounit was hit). Specializing per diag
                  * removes the per-column test so both pointers stay resident. */
-                T *restrict xj = &x[kx + (N - 1) * incx];
+                T *restrict xj = &x[kx + (n - 1) * incx];
                 if (nounit) {
-                    for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                    for (ptrdiff_t j = n - 1; j >= 0; --j) {
                         if (*xj != zero) {
                             const T *restrict col = &a[(size_t)j * lda];
-                            const ptrdiff_t off = K - j;
-                            *xj /= col[K];
+                            const ptrdiff_t off = k - j;
+                            *xj /= col[k];
                             const T tmp = *xj;
-                            const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
+                            const ptrdiff_t i_lo = (j > k) ? (j - k) : 0;
                             T *restrict xi = xj - incx;
                             for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                                 *xi -= tmp * col[off + i];
@@ -156,12 +156,12 @@ static void etbsv_core(
                         xj -= incx;
                     }
                 } else {
-                    for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                    for (ptrdiff_t j = n - 1; j >= 0; --j) {
                         if (*xj != zero) {
                             const T *restrict col = &a[(size_t)j * lda];
-                            const ptrdiff_t off = K - j;
+                            const ptrdiff_t off = k - j;
                             const T tmp = *xj;
-                            const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
+                            const ptrdiff_t i_lo = (j > k) ? (j - k) : 0;
                             T *restrict xi = xj - incx;
                             for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                                 *xi -= tmp * col[off + i];
@@ -179,14 +179,14 @@ static void etbsv_core(
                  * which lets the column bound stay in a register instead of
                  * spilling to the stack each column (the LNU unit-diag gap). */
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[jx] != zero) {
                         ptrdiff_t ix = jx + incx;
                         const T *restrict col = &a[(size_t)j * lda];
                         const ptrdiff_t off = -j;
                         if (nounit) x[jx] /= col[0];
                         const T tmp = x[jx];
-                        const ptrdiff_t i_hi = (j + K < N - 1) ? (j + K) : (N - 1);
+                        const ptrdiff_t i_hi = (j + k < n - 1) ? (j + k) : (n - 1);
                         for (ptrdiff_t i = j + 1; i <= i_hi; ++i) {
                             x[ix] -= tmp * col[off + i];
                             ix += incx;
@@ -206,29 +206,29 @@ static void etbsv_core(
                  * both the running kx and the cmov; the bound stays in a
                  * register. (i ascends for bit-exact accumulation order.) */
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[jx];
                     const T *restrict col = &a[(size_t)j * lda];
-                    const ptrdiff_t off = K - j;
-                    const ptrdiff_t i_lo = (j > K) ? (j - K) : 0;
+                    const ptrdiff_t off = k - j;
+                    const ptrdiff_t i_lo = (j > k) ? (j - k) : 0;
                     ptrdiff_t ix = jx - (j - i_lo) * incx;
                     for (ptrdiff_t i = i_lo; i < j; ++i) {
                         tmp -= col[off + i] * x[ix];
                         ix += incx;
                     }
-                    if (nounit) tmp /= col[K];
+                    if (nounit) tmp /= col[k];
                     x[jx] = tmp;
                     jx += incx;
                 }
             } else {
-                kx += (N - 1) * incx;
+                kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = kx;
                     const T *restrict col = &a[(size_t)j * lda];
                     const ptrdiff_t off = -j;
-                    const ptrdiff_t i_hi = (j + K < N - 1) ? (j + K) : (N - 1);
+                    const ptrdiff_t i_hi = (j + k < n - 1) ? (j + k) : (n - 1);
                     for (ptrdiff_t i = i_hi; i > j; --i) {
                         tmp -= col[off + i] * x[ix];
                         ix -= incx;
@@ -236,7 +236,7 @@ static void etbsv_core(
                     if (nounit) tmp /= col[0];
                     x[jx] = tmp;
                     jx -= incx;
-                    if ((N - 1 - j) >= K) kx -= incx;
+                    if ((n - 1 - j) >= k) kx -= incx;
                 }
             }
         }

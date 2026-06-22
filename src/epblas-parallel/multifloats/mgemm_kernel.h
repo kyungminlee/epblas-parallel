@@ -69,7 +69,7 @@ void mgemm_inner_kernel_simd(std::ptrdiff_t ib, std::ptrdiff_t jb, std::ptrdiff_
  * Called directly by the L3 routines' trailing updates and by mgemm_core. */
 extern "C" void mgemm_serial(
     char transa, char transb,
-    std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t k,
     const mgemm_T *alpha_,
     const mgemm_T *a, std::ptrdiff_t lda,
     const mgemm_T *b, std::ptrdiff_t ldb,

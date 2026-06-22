@@ -269,19 +269,19 @@ void qtri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, T alpha,
  * W(r) = (t/nth)·T, i.e. the positive root of a quadratic. Rounding each
  * boundary independently to MR keeps the sequence monotone (W is increasing),
  * so the per-thread ranges still tile [0,N) exactly. */
-static ptrdiff_t tri_boundary(char uplo, ptrdiff_t N, ptrdiff_t nth,
+static ptrdiff_t tri_boundary(char uplo, ptrdiff_t n, ptrdiff_t nth,
                               ptrdiff_t t, ptrdiff_t mr)
 {
     if (t <= 0)   return 0;
-    if (t >= nth) return N;
+    if (t >= nth) return n;
 
-    const double total  = (double)N * (double)(N + 1) * 0.5;
+    const double total  = (double)n * (double)(n + 1) * 0.5;
     const double target = total * (double)t / (double)nth;
 
     double r;
     if (uplo == 'U') {
         /* r² - (2N+1)r + 2·target = 0, take the smaller root (r ≤ N). */
-        const double b = 2.0 * (double)N + 1.0;
+        const double b = 2.0 * (double)n + 1.0;
         double disc = b * b - 8.0 * target;
         if (disc < 0.0) disc = 0.0;
         r = (b - sqrt(disc)) * 0.5;
@@ -293,15 +293,15 @@ static ptrdiff_t tri_boundary(char uplo, ptrdiff_t N, ptrdiff_t nth,
     ptrdiff_t rr = (ptrdiff_t)(r + 0.5);
     rr -= rr % mr;                 /* floor to MR for panel alignment */
     if (rr < 0) rr = 0;
-    if (rr > N) rr = N;
+    if (rr > n) rr = n;
     return rr;
 }
 
-void qtri_row_bounds(char uplo, ptrdiff_t N, ptrdiff_t nth, ptrdiff_t tid,
+void qtri_row_bounds(char uplo, ptrdiff_t n, ptrdiff_t nth, ptrdiff_t tid,
                      ptrdiff_t mr, ptrdiff_t *m_lo, ptrdiff_t *m_hi)
 {
-    ptrdiff_t lo = tri_boundary(uplo, N, nth, tid, mr);
-    ptrdiff_t hi = tri_boundary(uplo, N, nth, tid + 1, mr);
+    ptrdiff_t lo = tri_boundary(uplo, n, nth, tid, mr);
+    ptrdiff_t hi = tri_boundary(uplo, n, nth, tid + 1, mr);
     if (hi < lo) hi = lo;
     *m_lo = lo;
     *m_hi = hi;

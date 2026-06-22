@@ -34,7 +34,7 @@ static const T ONE  = 1.0L + 0.0Li;
 
 static void yhemm_core(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict b, ptrdiff_t ldb,
@@ -45,7 +45,7 @@ static void yhemm_core(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        yhemm_serial(side, uplo, M, N, alpha_, a, lda, b, ldb, beta_, c, ldc);
+        yhemm_serial(side, uplo, m, n, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
@@ -53,17 +53,17 @@ static void yhemm_core(
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     if (alpha == ZERO) {
         if (beta == ONE) return;
 #ifdef _OPENMP
-        const ptrdiff_t axis = (SIDE == 'L') ? N : M;
+        const ptrdiff_t axis = (SIDE == 'L') ? n : m;
         const bool use_omp = (axis >= YHEMM_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j)
-            yhemm_beta_only(j, j + 1, M, beta, c, ldc);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            yhemm_beta_only(j, j + 1, m, beta, c, ldc);
         return;
     }
 
@@ -73,40 +73,40 @@ static void yhemm_core(
 #endif
     const ptrdiff_t nb = yhemm_nb();
 
-    if (SIDE == 'L' && M <= nb) {
+    if (SIDE == 'L' && m <= nb) {
 #ifdef _OPENMP
-        const bool use_omp = (N >= YHEMM_OMP_MIN && nthreads > 1);
+        const bool use_omp = (n >= YHEMM_OMP_MIN && nthreads > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j)
-            yhemm_L_singleblock(j, j + 1, M, alpha, beta, a, lda, b, ldb, c, ldc, UPLO);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            yhemm_L_singleblock(j, j + 1, m, alpha, beta, a, lda, b, ldb, c, ldc, UPLO);
         return;
     }
 
     if (SIDE == 'L') {
         ptrdiff_t pw = nb;
 #ifdef _OPENMP
-        const bool use_omp = (N >= YHEMM_OMP_MIN && nthreads > 1);
+        const bool use_omp = (n >= YHEMM_OMP_MIN && nthreads > 1);
         /* Thin the column panels so the team has ~1 panel/thread at small N
          * (N=64, nb=32 -> 2 panels -> 2 idle threads); inner nb is preserved
          * for the trailing-GEMM blocking. Rectangular work -> ppt=1, static. */
-        if (use_omp) pw = blas_omp_panel_width(N, nthreads, nb, 1);
+        if (use_omp) pw = blas_omp_panel_width(n, nthreads, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t jc = 0; jc < N; jc += pw) {
-            const ptrdiff_t jb = (N - jc < pw) ? (N - jc) : pw;
-            yhemm_L_panel(jc, jb, M, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
+        for (ptrdiff_t jc = 0; jc < n; jc += pw) {
+            const ptrdiff_t jb = (n - jc < pw) ? (n - jc) : pw;
+            yhemm_L_panel(jc, jb, m, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
         }
     } else {
         ptrdiff_t pw = nb;
 #ifdef _OPENMP
-        const bool use_omp = (M >= YHEMM_OMP_MIN && nthreads > 1);
-        if (use_omp) pw = blas_omp_panel_width(M, nthreads, nb, 1);
+        const bool use_omp = (m >= YHEMM_OMP_MIN && nthreads > 1);
+        if (use_omp) pw = blas_omp_panel_width(m, nthreads, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (ptrdiff_t ic = 0; ic < M; ic += pw) {
-            const ptrdiff_t ib = (M - ic < pw) ? (M - ic) : pw;
-            yhemm_R_panel(ic, ib, N, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
+        for (ptrdiff_t ic = 0; ic < m; ic += pw) {
+            const ptrdiff_t ib = (m - ic < pw) ? (m - ic) : pw;
+            yhemm_R_panel(ic, ib, n, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
         }
     }
 }

@@ -65,12 +65,12 @@ void etrmm_kernel(bool left, bool trans,
  * [js0, js1) of B for SIDE='L', or a row band [m_lo, m_hi) for SIDE='R'.
  * Ap/Bp are caller-owned per-thread scratch. */
 void etrmm_L_band(bool upper, bool trans, bool unit,
-                  ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
+                  ptrdiff_t m, ptrdiff_t js0, ptrdiff_t js1,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                   const etrmm_T *a, ptrdiff_t lda, etrmm_T *b, ptrdiff_t ldb,
                   etrmm_T *Ap, etrmm_T *Bp);
 void etrmm_R_band(bool upper, bool trans, bool unit,
-                  ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
+                  ptrdiff_t n, ptrdiff_t m_lo, ptrdiff_t m_hi,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                   const etrmm_T *a, ptrdiff_t lda, etrmm_T *b, ptrdiff_t ldb,
                   etrmm_T *Ap, etrmm_T *Bp);
@@ -78,7 +78,7 @@ void etrmm_R_band(bool upper, bool trans, bool unit,
 /* Pure-serial by-value core (no OpenMP). Same shape as etrmm_core. */
 void etrmm_serial(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const etrmm_T *alpha_,
     const etrmm_T *a, ptrdiff_t lda,
     etrmm_T *b, ptrdiff_t ldb);

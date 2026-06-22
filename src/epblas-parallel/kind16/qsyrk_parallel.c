@@ -44,7 +44,7 @@ typedef qsyrk_T T;
 
 static void qsyrk_core(
     char uplo_c, char trans_c,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *beta_,
@@ -53,7 +53,7 @@ static void qsyrk_core(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        qsyrk_serial(uplo_c, trans_c, N, K, alpha_, a, lda, beta_, c, ldc);
+        qsyrk_serial(uplo_c, trans_c, n, k, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
@@ -61,16 +61,16 @@ static void qsyrk_core(
     const char uplo  = blas_up(uplo_c);
     const char trans = blas_up(trans_c);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
     /* Triangular beta pre-pass on the UPLO triangle of C only. */
-    if (uplo == 'U') qsyrk_beta_u(N, beta, c, ldc);
-    else             qsyrk_beta_l(N, beta, c, ldc);
+    if (uplo == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    else             qsyrk_beta_l(n, beta, c, ldc);
 
-    if (K == 0 || alpha == 0.0Q) return;
+    if (k == 0 || alpha == 0.0Q) return;
 
     ptrdiff_t MC, KC, NC;
-    qgemm_choose_blocks(K, &MC, &KC, &NC);
+    qgemm_choose_blocks(k, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(T);
@@ -83,7 +83,7 @@ static void qsyrk_core(
 #endif
 
     /* SYRK does ~ N^2 · K / 2 flops; tiny-cutoff sized to match qgemm. */
-    long nnk = (long)N * (long)N * (long)K;
+    long nnk = (long)n * (long)n * (long)k;
     if (nnk < 64L * 64L * 64L) nthreads = 1;
 
     /* Transpose: netlib-style unpacked inner-product, embarrassingly parallel
@@ -93,8 +93,8 @@ static void qsyrk_core(
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static, 1) num_threads(nthreads)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j)
-            qsyrk_trans_col(j, uplo, N, K, alpha, a, lda, c, ldc);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            qsyrk_trans_col(j, uplo, n, k, alpha, a, lda, c, ldc);
         return;
     }
 
@@ -126,10 +126,10 @@ static void qsyrk_core(
              * row split caps the speedup at ~16/7 — the fat-end thread hogs
              * 7/16 of a triangular output). */
             ptrdiff_t m_lo, m_hi;
-            qtri_row_bounds(uplo, N, nth, tid, MR, &m_lo, &m_hi);
+            qtri_row_bounds(uplo, n, nth, tid, MR, &m_lo, &m_hi);
 
-            for (ptrdiff_t js = 0; js < N; js += NC) {
-                const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+            for (ptrdiff_t js = 0; js < n; js += NC) {
+                const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
                 /* UPLO clip of this thread's [m_lo, m_hi] for this js-band. */
                 ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
@@ -137,8 +137,8 @@ static void qsyrk_core(
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
-                for (ptrdiff_t ls = 0; ls < K; ls += KC) {
-                    const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+                for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                    const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
 
                     /* Pack the shared Bp = the same A in OCOPY shape. */
 #ifdef _OPENMP

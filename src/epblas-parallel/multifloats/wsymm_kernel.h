@@ -42,13 +42,13 @@ std::ptrdiff_t wsymm_block_nb(void);
 
 /* Scale column j of C (rows 0..M) by beta — the alpha==0 early exit. Handles
  * beta==0 (zero-fill). The caller skips this entirely for beta==1. */
-void wsymm_scale_col(std::ptrdiff_t j, std::ptrdiff_t M, wsymm_T beta, wsymm_T *c, std::ptrdiff_t ldc);
+void wsymm_scale_col(std::ptrdiff_t j, std::ptrdiff_t m, wsymm_T beta, wsymm_T *c, std::ptrdiff_t ldc);
 
 /* SIDE='L' row block [ic, ic+ib): beta-scale the block's rows across all N
  * columns, then the leading gemm wing, the symmetric diagonal block, and the
  * trailing gemm wing (both wings routed through wgemm_serial — no nested
  * OpenMP). Writes only rows [ic, ic+ib) of C → row-disjoint across blocks. */
-void wsymm_block_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t M, std::ptrdiff_t N, char UPLO,
+void wsymm_block_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t m, std::ptrdiff_t n, char UPLO,
                    wsymm_T alpha, wsymm_T beta,
                    const wsymm_T *a, std::ptrdiff_t lda, const wsymm_T *b, std::ptrdiff_t ldb,
                    wsymm_T *c, std::ptrdiff_t ldc);
@@ -57,7 +57,7 @@ void wsymm_block_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t M, std::
  * rows, then the leading gemm wing, the symmetric diagonal block, and the
  * trailing gemm wing. Writes only columns [jc, jc+jb) of C → column-disjoint
  * across blocks. */
-void wsymm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::ptrdiff_t N, char UPLO,
+void wsymm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t m, std::ptrdiff_t n, char UPLO,
                    wsymm_T alpha, wsymm_T beta,
                    const wsymm_T *a, std::ptrdiff_t lda, const wsymm_T *b, std::ptrdiff_t ldb,
                    wsymm_T *c, std::ptrdiff_t ldc);
@@ -65,7 +65,7 @@ void wsymm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wsymm_. */
 extern "C" void wsymm_serial(
     char side, char uplo,
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     const wsymm_T *alpha_,
     const wsymm_T *a, std::ptrdiff_t lda,
     const wsymm_T *b, std::ptrdiff_t ldb,

@@ -78,11 +78,11 @@ ptrdiff_t qgemm_round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * 
  * OpenBLAS-style adaptive MC: when K fits in one panel, grow MC so
  * MC*KC stays roughly L2-sized (rounded to MR).
  */
-void qgemm_choose_blocks(ptrdiff_t K, ptrdiff_t *MC_out, ptrdiff_t *KC_out, ptrdiff_t *NC_out) {
+void qgemm_choose_blocks(ptrdiff_t k, ptrdiff_t *MC_out, ptrdiff_t *KC_out, ptrdiff_t *NC_out) {
     init_blocks();
     ptrdiff_t MC = g_mc, KC = g_kc, NC = g_nc;
-    if (K > 0 && K <= KC) {
-        long target_mc = g_l2_bytes / ((long)K * (long)sizeof(T));
+    if (k > 0 && k <= KC) {
+        long target_mc = g_l2_bytes / ((long)k * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * g_mc) target_mc = 4L * g_mc;
             MC = qgemm_round_up((ptrdiff_t)target_mc, MR);
@@ -94,11 +94,11 @@ void qgemm_choose_blocks(ptrdiff_t K, ptrdiff_t *MC_out, ptrdiff_t *KC_out, ptrd
 
 /* ── beta pre-pass ────────────────────────────────────────────── */
 
-void qgemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, T beta, T *c, ptrdiff_t ldc) {
-    for (ptrdiff_t j = 0; j < N; ++j) {
+void qgemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+    for (ptrdiff_t j = 0; j < n; ++j) {
         T *cj = &c[(size_t)j * ldc];
-        if (beta == 0.0Q)      for (ptrdiff_t i = 0; i < M; ++i) cj[i]  = 0.0Q;
-        else if (beta != 1.0Q) for (ptrdiff_t i = 0; i < M; ++i) cj[i] *= beta;
+        if (beta == 0.0Q)      for (ptrdiff_t i = 0; i < m; ++i) cj[i]  = 0.0Q;
+        else if (beta != 1.0Q) for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
 }
 
@@ -245,16 +245,16 @@ void qgemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, T alpha,
 }
 
 /* ── Fast path: TA = 'T' (≡ 'C' for real), TB = 'N', one C-column ── */
-void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, T alpha,
+void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, T alpha,
                     const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                     T *c, ptrdiff_t ldc)
 {
     T *cj = &c[(size_t)j2 * ldc];
     const T *bj = &b[(size_t)j2 * ldb];
-    for (ptrdiff_t i2 = 0; i2 < M; ++i2) {
+    for (ptrdiff_t i2 = 0; i2 < m; ++i2) {
         const T *ai = &a[(size_t)i2 * lda];
         T acc = 0.0Q;
-        for (ptrdiff_t l = 0; l < K; ++l) acc += ai[l] * bj[l];
+        for (ptrdiff_t l = 0; l < k; ++l) acc += ai[l] * bj[l];
         cj[i2] += alpha * acc;
     }
 }
@@ -263,7 +263,7 @@ void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, T alpha,
 
 void qgemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -274,35 +274,35 @@ void qgemm_serial(
     const char ta = qgemm_trans_code(transa);
     const char tb = qgemm_trans_code(transb);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
-    qgemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
-    if (alpha == 0.0Q || K == 0) return;
+    qgemm_beta_prepass(m, n, beta, c, ldc);   /* handles K==0 / alpha==0 */
+    if (alpha == 0.0Q || k == 0) return;
 
     /* TN: unpacked stride-1 dot — for __float128 this beats the blocked packed
      * path at every K and size (packing is pure overhead, no SIMD; see the
      * qgemm_ parallel entry for the measured ratios). */
     if (ta == 'T' && tb == 'N') {
-        for (ptrdiff_t j2 = 0; j2 < N; ++j2)
-            qgemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
+        for (ptrdiff_t j2 = 0; j2 < n; ++j2)
+            qgemm_fast_col(j2, m, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
     ptrdiff_t MC, KC, NC;
-    qgemm_choose_blocks(K, &MC, &KC, &NC);
+    qgemm_choose_blocks(k, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(T);
     T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
-        for (ptrdiff_t jc = 0; jc < N; jc += NC) {
-            const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-            for (ptrdiff_t pc = 0; pc < K; pc += KC) {
-                const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+        for (ptrdiff_t jc = 0; jc < n; jc += NC) {
+            const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+            for (ptrdiff_t pc = 0; pc < k; pc += KC) {
+                const ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
                 qgemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                for (ptrdiff_t ic = 0; ic < M; ic += MC) {
-                    const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                for (ptrdiff_t ic = 0; ic < m; ic += MC) {
+                    const ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                     qgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                     qgemm_macro_kernel(ib, jb, pb, alpha, Ap, Bp,
                                        &c[(size_t)jc * ldc + ic], ldc);

@@ -58,7 +58,7 @@ void wher2k_zero_diag_im(std::ptrdiff_t j, wher2k_TC *c, std::ptrdiff_t ldc);
 /* Scale column j's UPLO triangle of C by the real beta (the alpha==0 / K==0
  * early exit, beta!=1). Handles beta==0 (zero-fill); the diagonal cell becomes
  * real (beta·re, 0). The caller handles beta==1 via wher2k_zero_diag_im. */
-void wher2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, wher2k_TR beta,
+void wher2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, wher2k_TR beta,
                       wher2k_TC *c, std::ptrdiff_t ldc);
 
 /* One diagonal block [jc, jc+jb) of the rank-2k update: beta-scale the block's
@@ -66,7 +66,7 @@ void wher2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, wher2k_TR b
  * (SIMD or scalar), then the two trailing conjugate-transpose gemm calls
  * (routed through wgemm_serial — no nested OpenMP). Each block writes a
  * disjoint column range of C → race-free across blocks. */
-void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR_c,
+void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR_c,
                   wher2k_TC alpha, wher2k_TR beta,
                   const wher2k_TC *a, std::ptrdiff_t lda, const wher2k_TC *b, std::ptrdiff_t ldb,
                   wher2k_TC *c, std::ptrdiff_t ldc);
@@ -75,7 +75,7 @@ void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::p
  * core ABI of wher2k_core. */
 extern "C" void wher2k_serial(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const wher2k_TC *alpha_,
     const wher2k_TC *a, std::ptrdiff_t lda,
     const wher2k_TC *b, std::ptrdiff_t ldb,

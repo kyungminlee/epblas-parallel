@@ -34,25 +34,25 @@ char qtrmm_uplo(char c);
 /* ── SIDE = 'L' column-range cores ────────────────────────────────
  * B := alpha · op(A) · B, A is M×M, B is M×N.
  * Each call owns a column slice [j_start, j_end) of B. */
-void trmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
+void trmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, qtrmm_T alpha,
                    const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void trmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
+void trmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, qtrmm_T alpha,
                    const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void trmm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
+void trmm_llt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, qtrmm_T alpha,
                    const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void trmm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, qtrmm_T alpha,
+void trmm_lut_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, qtrmm_T alpha,
                    const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 
 /* ── SIDE = 'R' row-range cores ────────────────────────────────────
  * B := alpha · B · op(A), A is N×N, B is M×N.
  * Each call owns a row slice [i_start, i_end) of B. */
-void trmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
+void trmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, qtrmm_T alpha,
                    const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void trmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
+void trmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, qtrmm_T alpha,
                    const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void trmm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
+void trmm_rlt_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, qtrmm_T alpha,
                    const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void trmm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alpha,
+void trmm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, qtrmm_T alpha,
                    const qtrmm_T *a, ptrdiff_t lda, qtrmm_T *b, ptrdiff_t ldb, bool nounit);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
@@ -60,7 +60,7 @@ void trmm_rut_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, qtrmm_T alph
  * the ptrdiff_t core ABI of qtrmm_core. */
 void qtrmm_serial(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const qtrmm_T *alpha_,
     const qtrmm_T *a, ptrdiff_t lda,
     qtrmm_T *b, ptrdiff_t ldb);

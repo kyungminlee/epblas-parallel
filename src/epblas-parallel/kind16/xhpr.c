@@ -21,7 +21,7 @@ typedef __float128 TR;
 
 void xhpr_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const TR *alpha_,
     const T *restrict x, ptrdiff_t incx,
     T *restrict ap)
@@ -31,15 +31,15 @@ void xhpr_core(
     const T czero = 0.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == rzero) return;
+    if (n == 0 || alpha == rzero) return;
 
     if (incx == 1) {
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const bool use_omp = (N >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (n >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = (j * (j + 1)) / 2;
                 if (x[j] != czero) {
                     const T tmp = alpha * conjq(x[j]);
@@ -51,26 +51,26 @@ void xhpr_core(
             }
         } else {
 #ifdef _OPENMP
-            const bool use_omp = (N >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (n >= XHPR_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-            for (ptrdiff_t j = 0; j < N; ++j) {
-                const ptrdiff_t kk = j * N - (j * (j - 1)) / 2;
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
                 if (x[j] != czero) {
                     const T tmp = alpha * conjq(x[j]);
                     ap[kk] = (TR)crealq(ap[kk]) + (TR)crealq(tmp * x[j]);
-                    for (ptrdiff_t i = j + 1; i < N; ++i) ap[kk + (i - j)] += x[i] * tmp;
+                    for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
                 } else {
                     ap[kk] = (TR)crealq(ap[kk]);
                 }
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t kk = 0;
         if (UPLO == 'U') {
             ptrdiff_t jx = kx;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != czero) {
                     const T tmp = alpha * conjq(x[jx]);
                     ptrdiff_t ix = kx;
@@ -87,12 +87,12 @@ void xhpr_core(
             }
         } else {
             ptrdiff_t jx = kx;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != czero) {
                     const T tmp = alpha * conjq(x[jx]);
                     ap[kk] = (TR)crealq(ap[kk]) + (TR)crealq(tmp * x[jx]);
                     ptrdiff_t ix = jx;
-                    for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
+                    for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                         ix += incx;
                         ap[k] += x[ix] * tmp;
                     }
@@ -100,7 +100,7 @@ void xhpr_core(
                     ap[kk] = (TR)crealq(ap[kk]);
                 }
                 jx += incx;
-                kk += N - j;
+                kk += n - j;
             }
         }
     }

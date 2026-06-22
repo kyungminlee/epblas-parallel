@@ -56,7 +56,7 @@ void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyrk_T alpha,
 /* Pure-serial by-value core (no OpenMP). Same shape as esyrk_core. */
 void esyrk_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const esyrk_T *alpha_,
     const esyrk_T *a, ptrdiff_t lda,
     const esyrk_T *beta_,

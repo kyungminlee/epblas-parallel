@@ -71,7 +71,7 @@ static ptrdiff_t egbmv_t_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t k
 
 static void egbmv_core(
     char trans,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     ptrdiff_t KL, ptrdiff_t KU,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
@@ -84,10 +84,10 @@ static void egbmv_core(
     char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
 
-    if (M == 0 || N == 0 || (alpha == zero && beta == one)) return;
+    if (m == 0 || n == 0 || (alpha == zero && beta == one)) return;
 
-    const ptrdiff_t leny = (TR == 'N') ? M : N;
-    const ptrdiff_t lenx = (TR == 'N') ? N : M;
+    const ptrdiff_t leny = (TR == 'N') ? m : n;
+    const ptrdiff_t lenx = (TR == 'N') ? n : m;
 
     if (beta != one) {
         ptrdiff_t iy = (incy < 0) ? -(leny - 1) * incy : 0;
@@ -105,17 +105,17 @@ static void egbmv_core(
 #ifdef _OPENMP
         /* Cheap inline gate before the noinline call's marshalling, so the serial
          * gather below keeps its unperturbed register allocation (outlining tax). */
-        if (M >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1
-            && egbmv_n_omp(M, N, KL, KU, a, lda, x, incx, alpha, y, incy))
+        if (m >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1
+            && egbmv_n_omp(m, n, KL, KU, a, lda, x, incx, alpha, y, incy))
             return;
 #endif
         /* Serial NoTrans row-gather: y[i] = alpha * Σ_j A(i,j)*x[j], accumulated
          * in a register-resident x87 scalar. A(i,j) = base[j*s1], base = a+(KU+i),
          * an lda-1 anti-diagonal walk; j ranges over row i's band. */
         if (incx == 1 && incy == 1) {
-            for (ptrdiff_t i = 0; i < M; ++i) {
+            for (ptrdiff_t i = 0; i < m; ++i) {
                 const ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
-                const ptrdiff_t j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
+                const ptrdiff_t j_hi = (i + KU + 1 < n) ? (i + KU + 1) : n;
                 const T *base = a + (KU + i);
                 T s = zero;
                 for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += base[(ptrdiff_t)j * s1] * x[j];
@@ -124,9 +124,9 @@ static void egbmv_core(
         } else {
             const ptrdiff_t ix0 = (incx < 0) ? -(ptrdiff_t)(lenx - 1) * incx : 0;
             const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(leny - 1) * incy : 0;
-            for (ptrdiff_t i = 0; i < M; ++i) {
+            for (ptrdiff_t i = 0; i < m; ++i) {
                 const ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
-                const ptrdiff_t j_hi = (i + KU + 1 < N) ? (i + KU + 1) : N;
+                const ptrdiff_t j_hi = (i + KU + 1 < n) ? (i + KU + 1) : n;
                 const T *base = a + (KU + i);
                 T s = zero;
                 ptrdiff_t xx = ix0 + (ptrdiff_t)j_lo * incx;
@@ -135,14 +135,14 @@ static void egbmv_core(
             }
         }
     } else if (incx == 1 && incy == 1) {
-        const bool use_omp = (N >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp = (n >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1);
         /* Branch on use_omp in C source — `if(use_omp)` on the pragma
          * still outlines (see Addendum 16). */
 #define EGBMV_T_BODY                                                         \
-        for (ptrdiff_t j = 0; j < N; ++j) {                                        \
+        for (ptrdiff_t j = 0; j < n; ++j) {                                        \
             T s = zero;                                                      \
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;                    \
-            const ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;            \
+            const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;            \
             const ptrdiff_t k = KU - j;                                            \
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += A_(k + i, j) * x[i];      \
             y[j] += alpha * s;                                               \
@@ -161,19 +161,19 @@ static void egbmv_core(
         /* Thread the strided Trans gather too (the contiguous Trans path above
          * already threads). Each y[j] is a disjoint dot over column j, so it
          * partitions over j with no race; strided x is gathered to contiguous. */
-        if (N >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1
-            && egbmv_t_omp(M, N, KL, KU, a, lda, x, incx, alpha, y, incy))
+        if (n >= EGBMV_OMP_MIN && blas_omp_max_threads() > 1
+            && egbmv_t_omp(m, n, KL, KU, a, lda, x, incx, alpha, y, incy))
             return;
 #endif
         /* Strided Trans gather (serial). */
         ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
         ptrdiff_t jy = ky;
-        for (ptrdiff_t j = 0; j < N; ++j) {
+        for (ptrdiff_t j = 0; j < n; ++j) {
             T s = zero;
             ptrdiff_t ix = kx;
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
-            const ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+            const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;
             const ptrdiff_t k = KU - j;
             /* Hoist column to a running pointer so the contiguous A read is one
              * `*col++` (single IV) instead of recomputing A_(k+i,j) each row,

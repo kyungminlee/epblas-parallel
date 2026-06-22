@@ -40,7 +40,7 @@ static ptrdiff_t xhbmv_omp(bool upper, ptrdiff_t n, ptrdiff_t k,
 
 void xhbmv_core(
     char uplo,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
@@ -51,40 +51,40 @@ void xhbmv_core(
     const T zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || (alpha == zero && beta == one)) return;
+    if (n == 0 || (alpha == zero && beta == one)) return;
 
     if (beta != one) {
-        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
-        if (beta == zero) for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
-        else              for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+        ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
+        if (beta == zero) for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = zero; iy += incy; }
+        else              for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += incy; }
     }
     if (alpha == zero) return;
 
 #ifdef _OPENMP
-    if (N >= XHBMV_OMP_MIN && blas_omp_max_threads() > 1
-        && xhbmv_omp(UPLO == 'U', N, K, a, lda, x, incx, alpha, y, incy))
+    if (n >= XHBMV_OMP_MIN && blas_omp_max_threads() > 1
+        && xhbmv_omp(UPLO == 'U', n, k, a, lda, x, incx, alpha, y, incy))
         return;
 #endif
 
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[j];
                 T t2 = zero;
-                const ptrdiff_t L = K - j;
-                const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                const ptrdiff_t L = k - j;
+                const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                 for (ptrdiff_t i = i_lo; i < j; ++i) {
                     y[i] += t1 * A_(L + i, j);
                     t2 += conjq(A_(L + i, j)) * x[i];
                 }
-                y[j] += t1 * (TR)crealq(A_(K, j)) + alpha * t2;
+                y[j] += t1 * (TR)crealq(A_(k, j)) + alpha * t2;
             }
         } else {
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[j];
                 T t2 = zero;
                 y[j] += t1 * (TR)crealq(A_(0, j));
-                const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                 for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                     y[i] += t1 * A_(i - j, j);
                     t2 += conjq(A_(i - j, j)) * x[i];
@@ -93,33 +93,33 @@ void xhbmv_core(
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         if (UPLO == 'U') {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero;
                 ptrdiff_t ix = kx, iy = ky;
-                const ptrdiff_t L = K - j;
-                const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                const ptrdiff_t L = k - j;
+                const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                 for (ptrdiff_t i = i_lo; i < j; ++i) {
                     y[iy] += t1 * A_(L + i, j);
                     t2 += conjq(A_(L + i, j)) * x[ix];
                     ix += incx; iy += incy;
                 }
-                y[jy] += t1 * (TR)crealq(A_(K, j)) + alpha * t2;
+                y[jy] += t1 * (TR)crealq(A_(k, j)) + alpha * t2;
                 jx += incx; jy += incy;
-                if (j >= K) { kx += incx; ky += incy; }
+                if (j >= k) { kx += incx; ky += incy; }
             }
         } else {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero;
                 y[jy] += t1 * (TR)crealq(A_(0, j));
                 ptrdiff_t ix = jx, iy = jy;
-                const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                 for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                     ix += incx; iy += incy;
                     y[iy] += t1 * A_(i - j, j);

@@ -28,8 +28,8 @@ static inline T xelem(T a, bool noconj) {
 /* Column base offsets into the packed array (column-major triangle).
  *   Lower: column j starts at its diagonal (row j); element (i,j) i>=j at base+(i-j).
  *   Upper: column j starts at row 0;            element (i,j) i<=j at base+i.       */
-static inline size_t cbL(ptrdiff_t j, ptrdiff_t N) {
-    return (size_t)j * (size_t)N - (size_t)j * (size_t)(j - 1) / 2;
+static inline size_t cbL(ptrdiff_t j, ptrdiff_t n) {
+    return (size_t)j * (size_t)n - (size_t)j * (size_t)(j - 1) / 2;
 }
 static inline size_t cbU(ptrdiff_t j) {
     return (size_t)j * (size_t)(j + 1) / 2;
@@ -39,14 +39,14 @@ static inline size_t cbU(ptrdiff_t j) {
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
  * incx!=1 fallback. noconj = (TR=='T'); NoTrans never conjugates. */
 static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
-                         ptrdiff_t N, const T *restrict ap, T *restrict x, ptrdiff_t incx)
+                         ptrdiff_t n, const T *restrict ap, T *restrict x, ptrdiff_t incx)
 {
     const T zero = 0.0Q + 0.0Qi;
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
                         if (nounit) x[j] /= ap[kk];
                         const T tmp = x[j];
@@ -57,20 +57,20 @@ static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
                 }
             } else {
                 ptrdiff_t kk = 0;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
                         if (nounit) x[j] /= ap[kk];
                         const T tmp = x[j];
                         ptrdiff_t k = kk + 1;
-                        for (ptrdiff_t i = j + 1; i < N; ++i) { x[i] -= tmp * ap[k]; ++k; }
+                        for (ptrdiff_t i = j + 1; i < n; ++i) { x[i] -= tmp * ap[k]; ++k; }
                     }
-                    kk += N - j;
+                    kk += n - j;
                 }
             }
         } else {
             if (UPLO == 'U') {
                 ptrdiff_t kk = 0;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[j];
                     ptrdiff_t k = kk;
                     if (noconj) for (ptrdiff_t i = 0; i < j; ++i) { tmp -= ap[k] * x[i]; ++k; }
@@ -80,25 +80,25 @@ static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
                     kk += j + 1;
                 }
             } else {
-                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[j];
                     ptrdiff_t k = kk;
-                    if (noconj) for (ptrdiff_t i = N - 1; i > j; --i) { tmp -= ap[k] * x[i]; --k; }
-                    else        for (ptrdiff_t i = N - 1; i > j; --i) { tmp -= conjq(ap[k]) * x[i]; --k; }
-                    if (nounit) tmp /= (noconj ? ap[kk - (N - 1 - j)] : conjq(ap[kk - (N - 1 - j)]));
+                    if (noconj) for (ptrdiff_t i = n - 1; i > j; --i) { tmp -= ap[k] * x[i]; --k; }
+                    else        for (ptrdiff_t i = n - 1; i > j; --i) { tmp -= conjq(ap[k]) * x[i]; --k; }
+                    if (nounit) tmp /= (noconj ? ap[kk - (n - 1 - j)] : conjq(ap[kk - (n - 1 - j)]));
                     x[j] = tmp;
-                    kk -= (N - j);
+                    kk -= (n - j);
                 }
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
-                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
-                ptrdiff_t jx = kx + (N - 1) * incx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+                ptrdiff_t jx = kx + (n - 1) * incx;
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[jx] != zero) {
                         if (nounit) x[jx] /= ap[kk];
                         const T tmp = x[jx];
@@ -114,25 +114,25 @@ static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
             } else {
                 ptrdiff_t kk = 0;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[jx] != zero) {
                         if (nounit) x[jx] /= ap[kk];
                         const T tmp = x[jx];
                         ptrdiff_t ix = jx;
-                        for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
+                        for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                             ix += incx;
                             x[ix] -= tmp * ap[k];
                         }
                     }
                     jx += incx;
-                    kk += N - j;
+                    kk += n - j;
                 }
             }
         } else {
             if (UPLO == 'U') {
                 ptrdiff_t kk = 0;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = kx;
                     for (ptrdiff_t k = kk; k < kk + j; ++k) {
@@ -145,20 +145,20 @@ static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
                     kk += j + 1;
                 }
             } else {
-                ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
-                kx += (N - 1) * incx;
+                ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+                kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = kx;
-                    for (ptrdiff_t k = kk; k > kk - (N - 1 - j); --k) {
+                    for (ptrdiff_t k = kk; k > kk - (n - 1 - j); --k) {
                         tmp -= (noconj ? ap[k] : conjq(ap[k])) * x[ix];
                         ix -= incx;
                     }
-                    if (nounit) tmp /= (noconj ? ap[kk - (N - 1 - j)] : conjq(ap[kk - (N - 1 - j)]));
+                    if (nounit) tmp /= (noconj ? ap[kk - (n - 1 - j)] : conjq(ap[kk - (n - 1 - j)]));
                     x[jx] = tmp;
                     jx -= incx;
-                    kk -= (N - j);
+                    kk -= (n - j);
                 }
             }
         }
@@ -169,7 +169,7 @@ static void xtpsv_serial(char UPLO, char TR, bool noconj, bool nounit,
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within fp128 fuzz tol. */
 static void xtpsv_block(char UPLO, char TR, bool noconj, bool nounit,
-                        ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, const T *restrict ap, T *restrict x)
+                        ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, const T *restrict ap, T *restrict x)
 {
     const T zero = 0.0Q + 0.0Qi;
     const bool lower = (UPLO == 'L');
@@ -185,7 +185,7 @@ static void xtpsv_block(char UPLO, char TR, bool noconj, bool nounit,
         } else {                                        /* Lower: forward */
             for (ptrdiff_t j = j0; j < j1; ++j) {
                 if (x[j] == zero) continue;
-                const size_t b = cbL(j, N);
+                const size_t b = cbL(j, n);
                 if (nounit) x[j] /= ap[b];
                 const T tmp = x[j];
                 for (ptrdiff_t i = j + 1; i < j1; ++i) x[i] -= tmp * ap[b + (i - j)];
@@ -202,7 +202,7 @@ static void xtpsv_block(char UPLO, char TR, bool noconj, bool nounit,
             }
         } else {                                        /* Lower^T/H: backward, k>j */
             for (ptrdiff_t j = j1 - 1; j >= j0; --j) {
-                const size_t b = cbL(j, N);
+                const size_t b = cbL(j, n);
                 T tmp = x[j];
                 for (ptrdiff_t i = j + 1; i < j1; ++i) tmp -= xelem(ap[b + (i - j)], noconj) * x[i];
                 if (nounit) tmp /= xelem(ap[b], noconj);
@@ -217,10 +217,10 @@ static void xtpsv_block(char UPLO, char TR, bool noconj, bool nounit,
  * off-diagonal coupling is threaded over disjoint output rows. Returns 1 if it
  * handled the call. */
 __attribute__((noinline)) static bool xtpsv_omp(
-    char UPLO, char TR, bool noconj, bool nounit, ptrdiff_t N,
+    char UPLO, char TR, bool noconj, bool nounit, ptrdiff_t n,
     const T *restrict ap, T *restrict x)
 {
-    if (N < XTPSV_OMP_MIN || !blas_omp_should_thread())
+    if (n < XTPSV_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > XTPSV_MAX_CPUS) nthreads = XTPSV_MAX_CPUS;
@@ -230,27 +230,27 @@ __attribute__((noinline)) static bool xtpsv_omp(
 
     if (!trans) {
         if (lower) {
-            for (ptrdiff_t j0 = 0; j0 < N; j0 += XTPSV_BLK) {
-                ptrdiff_t j1 = j0 + XTPSV_BLK; if (j1 > N) j1 = N;
-                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, N, ap, x);
-                if (j1 >= N) break;
+            for (ptrdiff_t j0 = 0; j0 < n; j0 += XTPSV_BLK) {
+                ptrdiff_t j1 = j0 + XTPSV_BLK; if (j1 > n) j1 = n;
+                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
+                if (j1 >= n) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
                     ptrdiff_t tid = omp_get_thread_num();
-                    ptrdiff_t rlo = j1 + blas_part_bound(N - j1, tid, nthreads);
-                    ptrdiff_t rhi = j1 + blas_part_bound(N - j1, tid + 1, nthreads);
+                    ptrdiff_t rlo = j1 + blas_part_bound(n - j1, tid, nthreads);
+                    ptrdiff_t rhi = j1 + blas_part_bound(n - j1, tid + 1, nthreads);
                     for (ptrdiff_t i = j0; i < j1; ++i) {
                         const T xi = x[i];
                         if (xi == zero) continue;
-                        const T *restrict col = &ap[cbL(i, N)];     /* col[k-i] = A(k,i) */
+                        const T *restrict col = &ap[cbL(i, n)];     /* col[k-i] = A(k,i) */
                         for (ptrdiff_t k = rlo; k < rhi; ++k) x[k] -= xi * col[k - i];
                     }
                 }
             }
         } else {
-            for (ptrdiff_t j1 = N; j1 > 0; j1 -= XTPSV_BLK) {
+            for (ptrdiff_t j1 = n; j1 > 0; j1 -= XTPSV_BLK) {
                 ptrdiff_t j0 = j1 - XTPSV_BLK; if (j0 < 0) j0 = 0;
-                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, N, ap, x);
+                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
@@ -268,27 +268,27 @@ __attribute__((noinline)) static bool xtpsv_omp(
         }
     } else {
         if (lower) {                                       /* backward, k > j */
-            for (ptrdiff_t j1 = N; j1 > 0; j1 -= XTPSV_BLK) {
+            for (ptrdiff_t j1 = n; j1 > 0; j1 -= XTPSV_BLK) {
                 ptrdiff_t j0 = j1 - XTPSV_BLK; if (j0 < 0) j0 = 0;
-                if (j1 < N) {
+                if (j1 < n) {
                     #pragma omp parallel num_threads(nthreads)
                     {
                         ptrdiff_t tid = omp_get_thread_num();
                         ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, nthreads);
                         ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, nthreads);
                         for (ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *restrict col = &ap[cbL(i, N)];
+                            const T *restrict col = &ap[cbL(i, n)];
                             T s = zero;
-                            for (ptrdiff_t k = j1; k < N; ++k) s += xelem(col[k - i], noconj) * x[k];
+                            for (ptrdiff_t k = j1; k < n; ++k) s += xelem(col[k - i], noconj) * x[k];
                             x[i] -= s;
                         }
                     }
                 }
-                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, N, ap, x);
+                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
             }
         } else {                                           /* forward, k < j */
-            for (ptrdiff_t j0 = 0; j0 < N; j0 += XTPSV_BLK) {
-                ptrdiff_t j1 = j0 + XTPSV_BLK; if (j1 > N) j1 = N;
+            for (ptrdiff_t j0 = 0; j0 < n; j0 += XTPSV_BLK) {
+                ptrdiff_t j1 = j0 + XTPSV_BLK; if (j1 > n) j1 = n;
                 if (j0 > 0) {
                     #pragma omp parallel num_threads(nthreads)
                     {
@@ -303,7 +303,7 @@ __attribute__((noinline)) static bool xtpsv_omp(
                         }
                     }
                 }
-                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, N, ap, x);
+                xtpsv_block(UPLO, TR, noconj, nounit, j0, j1, n, ap, x);
             }
         }
     }
@@ -313,7 +313,7 @@ __attribute__((noinline)) static bool xtpsv_omp(
 
 void xtpsv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *restrict ap,
     T *restrict x, ptrdiff_t incx)
 {
@@ -322,15 +322,15 @@ void xtpsv_core(
     const bool noconj = (TR == 'T');
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
 #ifdef _OPENMP
-    if (incx == 1 && N >= XTPSV_OMP_MIN && blas_omp_max_threads() > 1
-        && xtpsv_omp(UPLO, TR, noconj, nounit, N, ap, x))
+    if (incx == 1 && n >= XTPSV_OMP_MIN && blas_omp_max_threads() > 1
+        && xtpsv_omp(UPLO, TR, noconj, nounit, n, ap, x))
         return;
 #endif
 
-    xtpsv_serial(UPLO, TR, noconj, nounit, N, ap, x, incx);
+    xtpsv_serial(UPLO, TR, noconj, nounit, n, ap, x, incx);
 }
 
 EPBLAS_FACADE_TPMV(xtpsv, T)

@@ -185,7 +185,7 @@ void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * pass 1 = (Ap_A, Bp_B, flag=1), pass 2 = (Ap_B, Bp_A, flag=0). */
 void esyr2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -196,15 +196,15 @@ void esyr2k_serial(
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
-    if (UPLO == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
-    else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    if (UPLO == 'U') esyrk_beta_u((ptrdiff_t)n, beta, c, (ptrdiff_t)ldc);
+    else             esyrk_beta_l((ptrdiff_t)n, beta, c, (ptrdiff_t)ldc);
 
-    if (K == 0 || alpha == 0.0L) return;
+    if (k == 0 || alpha == 0.0L) return;
 
     ptrdiff_t MC, KC, NC;
-    egemm_choose_blocks(K, &MC, &KC, &NC);
+    egemm_choose_blocks(k, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
@@ -213,18 +213,18 @@ void esyr2k_serial(
     T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap_A && Ap_B && Bp_A && Bp_B) {
-        for (ptrdiff_t js = 0; js < N; js += NC) {
-            const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+        for (ptrdiff_t js = 0; js < n; js += NC) {
+            const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
             /* UPLO clip of the [0, N] row range for this js-band:
              *   UPPER: only rows up to js+jb contribute.
              *   LOWER: only rows from js onwards. */
             ptrdiff_t m_lo_eff = (UPLO == 'L') ? js : 0;
-            ptrdiff_t m_hi_eff = (UPLO == 'U' && N > js + jb) ? (js + jb) : N;
+            ptrdiff_t m_hi_eff = (UPLO == 'U' && n > js + jb) ? (js + jb) : n;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
-            for (ptrdiff_t ls = 0; ls < K; ls += KC) {
-                const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+            for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
 
                 /* Pack both B-side panels (A and B in OCOPY shape). */
                 if (TRANS == 'N') {

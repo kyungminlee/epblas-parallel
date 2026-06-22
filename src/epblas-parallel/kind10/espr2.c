@@ -31,15 +31,15 @@ static void espr2_col_upper(ptrdiff_t j, T t1, T t2,
 }
 
 __attribute__((noinline))
-static void espr2_col_lower(ptrdiff_t j, ptrdiff_t N, T t1, T t2,
+static void espr2_col_lower(ptrdiff_t j, ptrdiff_t n, T t1, T t2,
                             const T *restrict x, const T *restrict y, T *restrict ap) {
-    T *restrict c = ap + ((size_t)j * N - (size_t)j * (j - 1) / 2) - j;
-    for (ptrdiff_t i = j; i < N; ++i) c[i] += x[i] * t1 + y[i] * t2;
+    T *restrict c = ap + ((size_t)j * n - (size_t)j * (j - 1) / 2) - j;
+    for (ptrdiff_t i = j; i < n; ++i) c[i] += x[i] * t1 + y[i] * t2;
 }
 
 static void espr2_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict x, ptrdiff_t incx,
     const T *restrict y, ptrdiff_t incy,
@@ -49,7 +49,7 @@ static void espr2_core(
     const T zero = 0.0L;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || alpha == zero) return;
+    if (n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
         /* schedule(static, 8): column j touches j+1 (upper) or N-j (lower)
@@ -65,30 +65,30 @@ static void espr2_core(
          * uses static,8. */
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const bool use_omp = (N >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (n >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != zero || y[j] != zero)
                     espr2_col_upper(j, alpha * y[j], alpha * x[j], x, y, ap);
             }
         } else {
 #ifdef _OPENMP
-            const bool use_omp = (N >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
+            const bool use_omp = (n >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != zero || y[j] != zero)
-                    espr2_col_lower(j, N, alpha * y[j], alpha * x[j], x, y, ap);
+                    espr2_col_lower(j, n, alpha * y[j], alpha * x[j], x, y, ap);
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t kk = 0;
         ptrdiff_t jx = kx, jy = ky;
         if (UPLO == 'U') {
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const T t1 = alpha * y[jy];
                     const T t2 = alpha * x[jx];
@@ -102,18 +102,18 @@ static void espr2_core(
                 kk += j + 1;
             }
         } else {
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const T t1 = alpha * y[jy];
                     const T t2 = alpha * x[jx];
                     ptrdiff_t ix = jx, iy = jy;
-                    for (ptrdiff_t k = kk; k < kk + N - j; ++k) {
+                    for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
                         ix += incx; iy += incy;
                     }
                 }
                 jx += incx; jy += incy;
-                kk += N - j;
+                kk += n - j;
             }
         }
     }

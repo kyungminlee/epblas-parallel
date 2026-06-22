@@ -78,11 +78,11 @@ ptrdiff_t egemm_round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * 
  * MC*KC stays roughly L2-sized (rounded to MR). Helps small-K shapes
  * where the default MC under-uses cache.
  */
-void egemm_choose_blocks(ptrdiff_t K, ptrdiff_t *MC_out, ptrdiff_t *KC_out, ptrdiff_t *NC_out) {
+void egemm_choose_blocks(ptrdiff_t k, ptrdiff_t *MC_out, ptrdiff_t *KC_out, ptrdiff_t *NC_out) {
     init_blocks();
     ptrdiff_t MC = g_mc, KC = g_kc, NC = g_nc;
-    if (K > 0 && K <= KC) {
-        long target_mc = g_l2_bytes / ((long)K * (long)sizeof(T));
+    if (k > 0 && k <= KC) {
+        long target_mc = g_l2_bytes / ((long)k * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * g_mc) target_mc = 4L * g_mc;
             MC = egemm_round_up((ptrdiff_t)target_mc, MR);
@@ -94,11 +94,11 @@ void egemm_choose_blocks(ptrdiff_t K, ptrdiff_t *MC_out, ptrdiff_t *KC_out, ptrd
 
 /* ── beta pre-pass ────────────────────────────────────────────── */
 
-void egemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, T beta, T *c, ptrdiff_t ldc) {
-    for (ptrdiff_t j = 0; j < N; ++j) {
+void egemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+    for (ptrdiff_t j = 0; j < n; ++j) {
         T *cj = &c[(size_t)j * ldc];
-        if (beta == 0.0L)      for (ptrdiff_t i = 0; i < M; ++i) cj[i]  = 0.0L;
-        else if (beta != 1.0L) for (ptrdiff_t i = 0; i < M; ++i) cj[i] *= beta;
+        if (beta == 0.0L)      for (ptrdiff_t i = 0; i < m; ++i) cj[i]  = 0.0L;
+        else if (beta != 1.0L) for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
 }
 
@@ -267,16 +267,16 @@ void egemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, T alpha,
  * overhead the blocked path can never recover here; this explicit
  * reference body matches migrated at ~1.0× across all sizes.
  */
-void egemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, T alpha,
+void egemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, T alpha,
                     const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                     T *c, ptrdiff_t ldc)
 {
     T *cj = &c[(size_t)j2 * ldc];
     const T *bj = &b[(size_t)j2 * ldb];
-    for (ptrdiff_t i2 = 0; i2 < M; ++i2) {
+    for (ptrdiff_t i2 = 0; i2 < m; ++i2) {
         const T *ai = &a[(size_t)i2 * lda];
         T acc = 0.0L;
-        for (ptrdiff_t l = 0; l < K; ++l) acc += ai[l] * bj[l];
+        for (ptrdiff_t l = 0; l < k; ++l) acc += ai[l] * bj[l];
         cj[i2] += alpha * acc;
     }
 }
@@ -285,7 +285,7 @@ void egemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, T alpha,
 
 void egemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -296,34 +296,34 @@ void egemm_serial(
     const char ta = egemm_trans_code(transa);
     const char tb = egemm_trans_code(transb);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
-    egemm_beta_prepass(M, N, beta, c, ldc);   /* handles K==0 / alpha==0 */
-    if (alpha == 0.0L || K == 0) return;
+    egemm_beta_prepass(m, n, beta, c, ldc);   /* handles K==0 / alpha==0 */
+    if (alpha == 0.0L || k == 0) return;
 
     /* TN no-pack fast path only for skinny problems; otherwise the blocked
      * packed path below is faster per FLOP (4-way accumulator ILP). */
-    if (ta == 'T' && tb == 'N' && egemm_tn_use_fast(M, N, K)) {
-        for (ptrdiff_t j2 = 0; j2 < N; ++j2)
-            egemm_fast_col(j2, M, K, alpha, a, lda, b, ldb, c, ldc);
+    if (ta == 'T' && tb == 'N' && egemm_tn_use_fast(m, n, k)) {
+        for (ptrdiff_t j2 = 0; j2 < n; ++j2)
+            egemm_fast_col(j2, m, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
     ptrdiff_t MC, KC, NC;
-    egemm_choose_blocks(K, &MC, &KC, &NC);
+    egemm_choose_blocks(k, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * egemm_round_up(NC, NR) * sizeof(T);
     T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
-        for (ptrdiff_t jc = 0; jc < N; jc += NC) {
-            const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-            for (ptrdiff_t pc = 0; pc < K; pc += KC) {
-                const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+        for (ptrdiff_t jc = 0; jc < n; jc += NC) {
+            const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+            for (ptrdiff_t pc = 0; pc < k; pc += KC) {
+                const ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
                 egemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                for (ptrdiff_t ic = 0; ic < M; ic += MC) {
-                    const ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                for (ptrdiff_t ic = 0; ic < m; ic += MC) {
+                    const ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                     egemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                     egemm_macro_kernel(ib, jb, pb, alpha, Ap, Bp,
                                        &c[(size_t)jc * ldc + ic], ldc);

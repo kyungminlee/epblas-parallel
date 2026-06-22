@@ -16,7 +16,7 @@ typedef __float128 T;
 
 void qtbsv_core(
     char uplo, char trans, char diag,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *restrict a, ptrdiff_t lda,
     T *restrict x, ptrdiff_t incx)
 {
@@ -26,44 +26,44 @@ void qtbsv_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (blas_up(diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
-                        const ptrdiff_t L = K - j;
-                        if (nounit) x[j] /= A_(K, j);
+                        const ptrdiff_t L = k - j;
+                        if (nounit) x[j] /= A_(k, j);
                         const T tmp = x[j];
-                        const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                        const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = j - 1; i >= i_lo; --i) x[i] -= tmp * A_(L + i, j);
                     }
                 }
             } else {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
                         if (nounit) x[j] /= A_(0, j);
                         const T tmp = x[j];
-                        const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                        const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = j + 1; i < i_hi; ++i) x[i] -= tmp * A_(i - j, j);
                     }
                 }
             }
         } else {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[j];
-                    const ptrdiff_t L = K - j;
-                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    const ptrdiff_t L = k - j;
+                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= A_(L + i, j) * x[i];
-                    if (nounit) tmp /= A_(K, j);
+                    if (nounit) tmp /= A_(k, j);
                     x[j] = tmp;
                 }
             } else {
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[j];
-                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= A_(i - j, j) * x[i];
                     if (nounit) tmp /= A_(0, j);
                     x[j] = tmp;
@@ -71,19 +71,19 @@ void qtbsv_core(
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
-                kx += (N - 1) * incx;
+                kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     kx -= incx;
                     if (x[jx] != zero) {
                         ptrdiff_t ix = kx;
-                        const ptrdiff_t L = K - j;
-                        if (nounit) x[jx] /= A_(K, j);
+                        const ptrdiff_t L = k - j;
+                        if (nounit) x[jx] /= A_(k, j);
                         const T tmp = x[jx];
-                        const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                        const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                             x[ix] -= tmp * A_(L + i, j);
                             ix -= incx;
@@ -93,13 +93,13 @@ void qtbsv_core(
                 }
             } else {
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     kx += incx;
                     if (x[jx] != zero) {
                         ptrdiff_t ix = kx;
                         if (nounit) x[jx] /= A_(0, j);
                         const T tmp = x[jx];
-                        const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                        const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                             x[ix] -= tmp * A_(i - j, j);
                             ix += incx;
@@ -111,27 +111,27 @@ void qtbsv_core(
         } else {
             if (UPLO == 'U') {
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = kx;
-                    const ptrdiff_t L = K - j;
-                    const ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    const ptrdiff_t L = k - j;
+                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = i_lo; i < j; ++i) {
                         tmp -= A_(L + i, j) * x[ix];
                         ix += incx;
                     }
-                    if (nounit) tmp /= A_(K, j);
+                    if (nounit) tmp /= A_(k, j);
                     x[jx] = tmp;
                     jx += incx;
-                    if (j >= K) kx += incx;
+                    if (j >= k) kx += incx;
                 }
             } else {
-                kx += (N - 1) * incx;
+                kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
-                for (ptrdiff_t j = N - 1; j >= 0; --j) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     ptrdiff_t ix = kx;
-                    const ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = i_hi - 1; i > j; --i) {
                         tmp -= A_(i - j, j) * x[ix];
                         ix -= incx;
@@ -139,7 +139,7 @@ void qtbsv_core(
                     if (nounit) tmp /= A_(0, j);
                     x[jx] = tmp;
                     jx -= incx;
-                    if ((N - 1 - j) >= K) kx -= incx;
+                    if ((n - 1 - j) >= k) kx -= incx;
                 }
             }
         }

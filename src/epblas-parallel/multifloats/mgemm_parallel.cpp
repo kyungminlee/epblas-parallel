@@ -40,7 +40,7 @@ const T one_dd {1.0, 0.0};
 
 static void mgemm_core(
     char transa, char transb,
-    std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t k,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *b, std::ptrdiff_t ldb,
@@ -50,7 +50,7 @@ static void mgemm_core(
 #ifdef _OPENMP
     /* Already inside a team → run serially in this thread, no nested region. */
     if (omp_in_parallel()) {
-        mgemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+        mgemm_serial(transa, transb, m, n, k, alpha_, a, lda,
                      b, ldb, beta_, c, ldc);
         return;
     }
@@ -60,19 +60,19 @@ static void mgemm_core(
     const std::ptrdiff_t ta = mgemm_trans_code(&transa, 1);
     const std::ptrdiff_t tb = mgemm_trans_code(&transb, 1);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
     /* beta pre-pass runs serially in the calling thread (matches the
      * pre-split mgemm_). */
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
         T *cj = &c[static_cast<std::size_t>(j) * ldc];
         if (beta == zero_dd) {
-            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = zero_dd;
+            for (std::ptrdiff_t i = 0; i < m; ++i) cj[i] = zero_dd;
         } else if (beta != one_dd) {
-            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cj[i] * beta;
+            for (std::ptrdiff_t i = 0; i < m; ++i) cj[i] = cj[i] * beta;
         }
     }
-    if (alpha == zero_dd || K == 0) return;
+    if (alpha == zero_dd || k == 0) return;
 
     std::ptrdiff_t MC, KC, NC;
     mgemm_choose_blocks(&MC, &KC, &NC);
@@ -95,13 +95,13 @@ static void mgemm_core(
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
-            for (std::ptrdiff_t jc = 0; jc < N; jc += NC) {
-                const std::ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-                for (std::ptrdiff_t pc = 0; pc < K; pc += KC) {
-                    const std::ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+            for (std::ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const std::ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (std::ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const std::ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
                     mgemm_pack_B_soa(b, ldb, pc, jc, pb, jb, tb, Bp_hi, Bp_lo);
-                    for (std::ptrdiff_t ic = 0; ic < M; ic += MC) {
-                        const std::ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (std::ptrdiff_t ic = 0; ic < m; ic += MC) {
+                        const std::ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                         mgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         mgemm_inner_kernel_simd(ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo,
                                                 &c[static_cast<std::size_t>(jc) * ldc + ic],
@@ -120,13 +120,13 @@ static void mgemm_core(
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
-            for (std::ptrdiff_t jc = 0; jc < N; jc += NC) {
-                const std::ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-                for (std::ptrdiff_t pc = 0; pc < K; pc += KC) {
-                    const std::ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+            for (std::ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const std::ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (std::ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const std::ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
                     mgemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                    for (std::ptrdiff_t ic = 0; ic < M; ic += MC) {
-                        const std::ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (std::ptrdiff_t ic = 0; ic < m; ic += MC) {
+                        const std::ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                         mgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         mgemm_inner_kernel(ib, jb, pb, alpha, Ap, Bp,
                                            &c[static_cast<std::size_t>(jc) * ldc + ic],

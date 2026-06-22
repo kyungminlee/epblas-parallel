@@ -41,26 +41,26 @@ using mtrsm_T = multifloats::float64x2;
 std::ptrdiff_t mtrsm_block_nb(void);
 
 /* B := 0 over the full M×N tile (the alpha==0 early-exit). */
-void mtrsm_zero_B(std::ptrdiff_t M, std::ptrdiff_t N, mtrsm_T *b, std::ptrdiff_t ldb);
+void mtrsm_zero_B(std::ptrdiff_t m, std::ptrdiff_t n, mtrsm_T *b, std::ptrdiff_t ldb);
 
 /* One column slice [j_start, j_end) of a SIDE='L' solve. UPLO/TR select the
  * variant; use_blocked picks the blocked path (mgemm_serial trailing update +
  * SIMD diagonal) vs the scalar unblocked core. Each slice owns a disjoint
  * column range → race-free, bitwise-identical to the serial sweep. */
 void mtrsm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
-                   std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, std::ptrdiff_t nb, mtrsm_T alpha,
+                   std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, std::ptrdiff_t nb, mtrsm_T alpha,
                    const mtrsm_T *a, std::ptrdiff_t lda, mtrsm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* One row slice [row_lo, row_hi) of a SIDE='R' solve (SIMD 4-row chunks +
  * scalar tail). Each slice owns a disjoint row range → race-free. */
 void mtrsm_R_slice(char UPLO, char TR, std::ptrdiff_t row_lo, std::ptrdiff_t row_hi,
-                   std::ptrdiff_t N, mtrsm_T alpha,
+                   std::ptrdiff_t n, mtrsm_T alpha,
                    const mtrsm_T *a, std::ptrdiff_t lda, mtrsm_T *b, std::ptrdiff_t ldb, bool nounit);
 
 /* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void mtrsm_serial(
     char side, char uplo, char transa, char diag,
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     const mtrsm_T *alpha_,
     const mtrsm_T *a, std::ptrdiff_t lda,
     mtrsm_T *b, std::ptrdiff_t ldb);

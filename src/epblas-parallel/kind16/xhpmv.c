@@ -62,7 +62,7 @@ static ptrdiff_t xhpmv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, pt
 
 void xhpmv_core(
     char uplo,
-    ptrdiff_t N,
+    ptrdiff_t n,
     const T *alpha_,
     const T *restrict ap,
     const T *restrict x, ptrdiff_t incx,
@@ -73,28 +73,27 @@ void xhpmv_core(
     const T zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || (alpha == zero && beta == one)) return;
+    if (n == 0 || (alpha == zero && beta == one)) return;
 
     if (beta != one) {
-        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
-        if (beta == zero) for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
-        else              for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+        ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
+        if (beta == zero) for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = zero; iy += incy; }
+        else              for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += incy; }
     }
     if (alpha == zero) return;
 
     ptrdiff_t kk = 0;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        if ((size_t)N * (size_t)N > XHPMV_OMP_MIN
+        if ((size_t)n * (size_t)n > XHPMV_OMP_MIN
             && blas_omp_should_thread()) {
             ptrdiff_t nthreads = blas_omp_max_threads();
             if (nthreads > XHPMV_MAX_CPUS) nthreads = XHPMV_MAX_CPUS;
             ptrdiff_t range[XHPMV_MAX_CPUS + 1];
-            ptrdiff_t num_cpu = xhpmv_partition(UPLO == 'U', N, nthreads, range);
+            ptrdiff_t num_cpu = xhpmv_partition(UPLO == 'U', n, nthreads, range);
             T *buf = (num_cpu > 1)
-                ? (T *)calloc((size_t)num_cpu * (size_t)N, sizeof(T)) : NULL;
+                ? (T *)calloc((size_t)num_cpu * (size_t)n, sizeof(T)) : NULL;
             if (buf) {
-                const ptrdiff_t n = N;
                 #pragma omp parallel num_threads(num_cpu)
                 {
                     ptrdiff_t t = omp_get_thread_num();
@@ -150,7 +149,7 @@ void xhpmv_core(
         }
 #endif
         if (UPLO == 'U') {
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[j];
                 T t2 = zero;
                 ptrdiff_t k = kk;
@@ -163,26 +162,26 @@ void xhpmv_core(
                 kk += j + 1;
             }
         } else {
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[j];
                 T t2 = zero;
                 y[j] += t1 * (TR)crealq(ap[kk]);
                 ptrdiff_t k = kk + 1;
-                for (ptrdiff_t i = j + 1; i < N; ++i) {
+                for (ptrdiff_t i = j + 1; i < n; ++i) {
                     y[i] += t1 * ap[k];
                     t2 += conjq(ap[k]) * x[i];
                     ++k;
                 }
                 y[j] += alpha * t2;
-                kk += N - j;
+                kk += n - j;
             }
         }
     } else {
-        ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         if (UPLO == 'U') {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero;
                 ptrdiff_t ix = kx, iy = ky;
@@ -197,19 +196,19 @@ void xhpmv_core(
             }
         } else {
             ptrdiff_t jx = kx, jy = ky;
-            for (ptrdiff_t j = 0; j < N; ++j) {
+            for (ptrdiff_t j = 0; j < n; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero;
                 y[jy] += t1 * (TR)crealq(ap[kk]);
                 ptrdiff_t ix = jx, iy = jy;
-                for (ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
+                for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                     ix += incx; iy += incy;
                     y[iy] += t1 * ap[k];
                     t2 += conjq(ap[k]) * x[ix];
                 }
                 y[jy] += alpha * t2;
                 jx += incx; jy += incy;
-                kk += N - j;
+                kk += n - j;
             }
         }
     }

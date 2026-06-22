@@ -29,14 +29,14 @@ char qgemmtr_trans_code(const char *p) {
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
 void qgemmtr_beta_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper,
     T beta,
     T *c, ptrdiff_t ldc)
 {
     const T zero = 0.0Q;
     for (ptrdiff_t j = j0; j < j1; ++j) {
         const ptrdiff_t is = upper ? 0 : j;
-        const ptrdiff_t ie = upper ? (j + 1) : N;
+        const ptrdiff_t ie = upper ? (j + 1) : n;
         T *cj = &C_(0, j);
         if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
         else                   for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
@@ -44,7 +44,7 @@ void qgemmtr_beta_core(
 }
 
 void qgemmtr_compute_core(
-    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t N, bool upper, ptrdiff_t K,
+    ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper, ptrdiff_t k,
     char ta, char tb,
     T alpha, T beta,
     const T *a, ptrdiff_t lda,
@@ -55,14 +55,14 @@ void qgemmtr_compute_core(
 
     for (ptrdiff_t j = j0; j < j1; ++j) {
         const ptrdiff_t is = upper ? 0 : j;
-        const ptrdiff_t ie = upper ? (j + 1) : N;
+        const ptrdiff_t ie = upper ? (j + 1) : n;
         T *cj = &C_(0, j);
 
         if (ta == 'N') {
             if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
             else if (beta != one)  for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
             if (tb == 'N') {
-                for (ptrdiff_t p = 0; p < K; ++p) {
+                for (ptrdiff_t p = 0; p < k; ++p) {
                     const T bkj = B_(p, j);
                     if (bkj != zero) {
                         const T t = alpha * bkj;
@@ -71,7 +71,7 @@ void qgemmtr_compute_core(
                     }
                 }
             } else {
-                for (ptrdiff_t p = 0; p < K; ++p) {
+                for (ptrdiff_t p = 0; p < k; ++p) {
                     const T bjk = B_(j, p);
                     if (bjk != zero) {
                         const T t = alpha * bjk;
@@ -84,13 +84,13 @@ void qgemmtr_compute_core(
             if (tb == 'N') {
                 for (ptrdiff_t i = is; i < ie; ++i) {
                     T s = zero;
-                    for (ptrdiff_t p = 0; p < K; ++p) s += A_(p, i) * B_(p, j);
+                    for (ptrdiff_t p = 0; p < k; ++p) s += A_(p, i) * B_(p, j);
                     cj[i] = (beta == zero) ? alpha * s : alpha * s + beta * cj[i];
                 }
             } else {
                 for (ptrdiff_t i = is; i < ie; ++i) {
                     T s = zero;
-                    for (ptrdiff_t p = 0; p < K; ++p) s += A_(p, i) * B_(j, p);
+                    for (ptrdiff_t p = 0; p < k; ++p) s += A_(p, i) * B_(j, p);
                     cj[i] = (beta == zero) ? alpha * s : alpha * s + beta * cj[i];
                 }
             }
@@ -99,7 +99,7 @@ void qgemmtr_compute_core(
 }
 
 void qgemmtr_serial(char uplo, char transa, char transb,
-                    ptrdiff_t N, ptrdiff_t K,
+                    ptrdiff_t n, ptrdiff_t k,
                     const T *alpha_,
                     const T *a, ptrdiff_t lda,
                     const T *b, ptrdiff_t ldb,
@@ -111,16 +111,16 @@ void qgemmtr_serial(char uplo, char transa, char transb,
     const char ta = qgemmtr_trans_code(&transa);
     const char tb = qgemmtr_trans_code(&transb);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
     const T zero = 0.0Q, one = 1.0Q;
 
-    if (alpha == zero || K == 0) {
+    if (alpha == zero || k == 0) {
         if (beta == one) return;
-        qgemmtr_beta_core(0, N, N, upper, beta, c, ldc);
+        qgemmtr_beta_core(0, n, n, upper, beta, c, ldc);
         return;
     }
 
-    qgemmtr_compute_core(0, N, N, upper, K, ta, tb,
+    qgemmtr_compute_core(0, n, n, upper, k, ta, tb,
                          alpha, beta, a, lda, b, ldb, c, ldc);
 }
 

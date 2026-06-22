@@ -37,7 +37,7 @@
 typedef xgemmtr_T T;
 
 static void xgemmtr_core(char uplo, char transa, char transb,
-              ptrdiff_t N, ptrdiff_t K,
+              ptrdiff_t n, ptrdiff_t k,
               const T *alpha_,
               const T *a, ptrdiff_t lda,
               const T *b, ptrdiff_t ldb,
@@ -48,7 +48,7 @@ static void xgemmtr_core(char uplo, char transa, char transb,
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        xgemmtr_serial(uplo, transa, transb, N, K, alpha_, a, lda, b, ldb, beta_, c, ldc);
+        xgemmtr_serial(uplo, transa, transb, n, k, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
@@ -57,7 +57,7 @@ static void xgemmtr_core(char uplo, char transa, char transb,
     const char ta = xgemmtr_trans_code(transa);
     const char tb = xgemmtr_trans_code(transb);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
     const T zero = 0.0Q + 0.0Qi;
     const T one  = 1.0Q + 0.0Qi;
 
@@ -66,23 +66,23 @@ static void xgemmtr_core(char uplo, char transa, char transb,
     const bool trans_a = (ta != 'N');
     const bool trans_b = (tb != 'N');
 
-    if (alpha == zero || K == 0) {
+    if (alpha == zero || k == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const bool use_omp0 = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+        const bool use_omp0 = (n >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j)
-            xgemmtr_beta_core(j, j + 1, N, upper, beta, c, ldc);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            xgemmtr_beta_core(j, j + 1, n, upper, beta, c, ldc);
         return;
     }
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
+    const bool use_omp = (n >= XGEMMTR_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-    for (ptrdiff_t j = 0; j < N; ++j)
-        xgemmtr_compute_core(j, j + 1, N, upper, K,
+    for (ptrdiff_t j = 0; j < n; ++j)
+        xgemmtr_compute_core(j, j + 1, n, upper, k,
                              trans_a, trans_b, conj_a, conj_b,
                              alpha, beta, a, lda, b, ldb, c, ldc);
 }

@@ -33,7 +33,7 @@ typedef qsymm_T T;
 
 static void qsymm_core(
     char side_c, char uplo_c,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict b, ptrdiff_t ldb,
@@ -43,7 +43,7 @@ static void qsymm_core(
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        qsymm_serial(side_c, uplo_c, M, N, alpha_, a, lda, b, ldb, beta_,
+        qsymm_serial(side_c, uplo_c, m, n, alpha_, a, lda, b, ldb, beta_,
                      c, ldc);
         return;
     }
@@ -52,20 +52,20 @@ static void qsymm_core(
     const char SIDE = blas_up(side_c);
     const char UPLO = blas_up(uplo_c);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
     /* alpha == 0 ⇒ pure C := beta*C, no GEMM. Rare; not worth a team. */
-    if (alpha == 0.0Q) { qgemm_beta_prepass(M, N, beta, c, ldc); return; }
+    if (alpha == 0.0Q) { qgemm_beta_prepass(m, n, beta, c, ldc); return; }
 
     /* The C := beta*C pre-pass is NOT done here: each thread applies it to
      * its own M-row slice inside the region, so it scales with the team. A
      * thread only ever touches its own rows — for both the beta pass and the
      * kernel writes — so no barrier is needed between them. */
 
-    const ptrdiff_t K = (SIDE == 'L') ? M : N;
+    const ptrdiff_t k = (SIDE == 'L') ? m : n;
 
     ptrdiff_t MC, KC, NC;
-    qgemm_choose_blocks(K, &MC, &KC, &NC);
+    qgemm_choose_blocks(k, &MC, &KC, &NC);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = blas_omp_max_threads();
@@ -74,7 +74,7 @@ static void qsymm_core(
     ptrdiff_t nthreads = 1;
 #endif
     /* Tiny problems: the team setup + Bp barrier cost outweighs the split. */
-    if ((long)M * (long)N * (long)K < 64L * 64L * 64L) nthreads = 1;
+    if ((long)m * (long)n * (long)k < 64L * 64L * 64L) nthreads = 1;
 
     const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(T);
@@ -102,24 +102,24 @@ static void qsymm_core(
 #endif
             T *Ap = Ap_arr[tid];
 
-            const ptrdiff_t m_chunk = qgemm_round_up((M + nth - 1) / nth, MR);
+            const ptrdiff_t m_chunk = qgemm_round_up((m + nth - 1) / nth, MR);
             const ptrdiff_t m_lo = tid * m_chunk;
             ptrdiff_t m_hi = m_lo + m_chunk;
-            if (m_hi > M) m_hi = M;
+            if (m_hi > m) m_hi = m;
 
             /* C := beta*C over this thread's rows only (handles beta 0/1). */
             if (beta != 1.0Q && m_lo < m_hi) {
-                for (ptrdiff_t j = 0; j < N; ++j) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
                     T *cj = &c[(size_t)j * ldc];
                     if (beta == 0.0Q) for (ptrdiff_t i = m_lo; i < m_hi; ++i) cj[i]  = 0.0Q;
                     else              for (ptrdiff_t i = m_lo; i < m_hi; ++i) cj[i] *= beta;
                 }
             }
 
-            for (ptrdiff_t jc = 0; jc < N; jc += NC) {
-                const ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-                for (ptrdiff_t pc = 0; pc < K; pc += KC) {
-                    const ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+            for (ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
 #ifdef _OPENMP
                     #pragma omp barrier
                     #pragma omp single

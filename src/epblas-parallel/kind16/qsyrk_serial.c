@@ -214,11 +214,11 @@ void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * Unlike the NoTrans outer product (which RMW-streams C K times per column),
  * each C(i,j) is accumulated in a register and written once — packing has
  * nothing to save here, so the clean unpacked loop matches the reference. */
-void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
+void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
                      T alpha, const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc)
 {
     const ptrdiff_t i_lo = (uplo == 'L') ? j : 0;
-    const ptrdiff_t i_hi = (uplo == 'L') ? N : j + 1;
+    const ptrdiff_t i_hi = (uplo == 'L') ? n : j + 1;
     const T *Aj = a + j * lda;
     T *cj = c + j * ldc;
     for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
@@ -229,7 +229,7 @@ void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
          * any independent chain to overlap, and measured slower (unlike syr2k,
          * whose two distinct products genuinely overlap). */
         T s = 0.0Q;
-        for (ptrdiff_t l = 0; l < K; ++l) s += Ai[l] * Aj[l];
+        for (ptrdiff_t l = 0; l < k; ++l) s += Ai[l] * Aj[l];
         cj[i] += alpha * s;
     }
 }
@@ -240,7 +240,7 @@ void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t N, ptrdiff_t K,
  * range so the kernel only ever writes the requested triangle. */
 void qsyrk_serial(
     char uplo_c, char trans_c,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *beta_,
@@ -250,40 +250,40 @@ void qsyrk_serial(
     const char uplo  = blas_up(uplo_c);
     const char trans = blas_up(trans_c);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
-    if (uplo == 'U') qsyrk_beta_u(N, beta, c, ldc);
-    else             qsyrk_beta_l(N, beta, c, ldc);
+    if (uplo == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    else             qsyrk_beta_l(n, beta, c, ldc);
 
-    if (K == 0 || alpha == 0.0Q) return;
+    if (k == 0 || alpha == 0.0Q) return;
 
     /* Transpose: netlib-style unpacked inner-product (no packing overhead). */
     if (trans != 'N') {
-        for (ptrdiff_t j = 0; j < N; ++j)
-            qsyrk_trans_col(j, uplo, N, K, alpha, a, lda, c, ldc);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            qsyrk_trans_col(j, uplo, n, k, alpha, a, lda, c, ldc);
         return;
     }
 
     ptrdiff_t MC, KC, NC;
-    qgemm_choose_blocks(K, &MC, &KC, &NC);
+    qgemm_choose_blocks(k, &MC, &KC, &NC);
 
     const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(T);
     T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
-        for (ptrdiff_t js = 0; js < N; js += NC) {
-            const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+        for (ptrdiff_t js = 0; js < n; js += NC) {
+            const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
             /* UPLO clip of the [0, N] row range for this js-band:
              *   UPPER: only rows up to js+jb contribute.
              *   LOWER: only rows from js onwards. */
             ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
-            ptrdiff_t m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            ptrdiff_t m_hi_eff = (uplo == 'U' && n > js + jb) ? (js + jb) : n;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
-            for (ptrdiff_t ls = 0; ls < K; ls += KC) {
-                const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+            for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
 
                 /* Pack Bp = the same A in OCOPY shape (A doubles as B). NoTrans
                  * only — the Transpose path is handled above, unpacked. */

@@ -38,40 +38,40 @@ inline T cdiv(T const &a, T const &b) {
  * dot (cdot, reorders -> within fuzz tol). The cross-column recurrence stays
  * scalar. Strided callers gather x to a contiguous scratch around this. */
 static void wtbsv_serial_contig(char UPLO, char TR, bool noconj, bool nounit,
-                                std::ptrdiff_t N, std::ptrdiff_t K, const T *a, std::size_t lda, T *x)
+                                std::ptrdiff_t n, std::ptrdiff_t k, const T *a, std::size_t lda, T *x)
 {
     const bool conj = (noconj == 0);
     if (TR == 'N') {
         if (UPLO == 'U') {
-            for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 if (!ceq0(x[j])) {
-                    const std::ptrdiff_t L = K - j;
-                    if (nounit) x[j] = cdiv(x[j], A_(K, j));
-                    const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    const std::ptrdiff_t L = k - j;
+                    if (nounit) x[j] = cdiv(x[j], A_(k, j));
+                    const std::ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     mf_kernels::caxpy_sub(j - i_lo, &x[i_lo], &A_(L + i_lo, j), x[j]);
                 }
             }
         } else {
-            for (std::ptrdiff_t j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 if (!ceq0(x[j])) {
                     if (nounit) x[j] = cdiv(x[j], A_(0, j));
-                    const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const std::ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     mf_kernels::caxpy_sub(i_hi - (j + 1), &x[j + 1], &A_(1, j), x[j]);
                 }
             }
         }
     } else {
         if (UPLO == 'U') {
-            for (std::ptrdiff_t j = 0; j < N; ++j) {
-                const std::ptrdiff_t L = K - j;
-                const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
+                const std::ptrdiff_t L = k - j;
+                const std::ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                 T tmp = csub(x[j], mf_kernels::cdot(j - i_lo, &A_(L + i_lo, j), &x[i_lo], conj));
-                if (nounit) tmp = cdiv(tmp, (noconj ? A_(K, j) : cconj(A_(K, j))));
+                if (nounit) tmp = cdiv(tmp, (noconj ? A_(k, j) : cconj(A_(k, j))));
                 x[j] = tmp;
             }
         } else {
-            for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
-                const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
+                const std::ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                 T tmp = csub(x[j], mf_kernels::cdot(i_hi - (j + 1), &A_(1, j), &x[j + 1], conj));
                 if (nounit) tmp = cdiv(tmp, (noconj ? A_(0, j) : cconj(A_(0, j))));
                 x[j] = tmp;
@@ -82,29 +82,28 @@ static void wtbsv_serial_contig(char UPLO, char TR, bool noconj, bool nounit,
 
 static void wtbsv_core(
     char uplo, char trans, char diag,
-    std::ptrdiff_t N, std::ptrdiff_t k,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *a, std::ptrdiff_t lda,
     T *x, std::ptrdiff_t incx)
 {
-    const std::ptrdiff_t K = k;
     const char UPLO = up(&uplo);
     const char TR = up(&trans);
     const bool noconj = (TR == 'T');
     const bool nounit = (up(&diag) != 'U');
 
-    if (N == 0) return;
+    if (n == 0) return;
 
     if (incx == 1) {
-        wtbsv_serial_contig(UPLO, TR, noconj, nounit, N, K, a, lda, x);
+        wtbsv_serial_contig(UPLO, TR, noconj, nounit, n, k, a, lda, x);
         return;
     }
 
     /* Strided: gather x to a contiguous scratch, run the SIMD core, scatter. */
-    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
-    std::vector<T> xs(static_cast<std::size_t>(N));
-    for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
-    wtbsv_serial_contig(UPLO, TR, noconj, nounit, N, K, a, lda, xs.data());
-    for (std::ptrdiff_t i = 0; i < N; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
+    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
+    std::vector<T> xs(static_cast<std::size_t>(n));
+    for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
+    wtbsv_serial_contig(UPLO, TR, noconj, nounit, n, k, a, lda, xs.data());
+    for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
 }
 
 extern "C" {

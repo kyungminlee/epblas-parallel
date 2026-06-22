@@ -42,27 +42,27 @@ using simd_exact::cstore4;
 /* Contiguous (unit-stride) core: A += alpha * x * y^T, x length M, y length N.
  * SIMD column-AXPY (cmul/cadd) when MBLAS_SIMD_DD; columns of A disjoint
  * so OMP-over-j is race-free and bit-exact. Strided callers gather x/y around it. */
-static void wgeru_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, T *a, std::size_t lda,
+static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, T *a, std::size_t lda,
                          const T *x, const T *y)
 {
 #ifdef MBLAS_SIMD_DD
-        const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
+        const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
         double *x_rh = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
         double *x_rl = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
         double *x_ih = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
         double *x_il = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-        for (std::ptrdiff_t i = 0; i < M; ++i) {
+        for (std::ptrdiff_t i = 0; i < m; ++i) {
             x_rh[i] = x[i].re.limbs[0]; x_rl[i] = x[i].re.limbs[1];
             x_ih[i] = x[i].im.limbs[0]; x_il[i] = x[i].im.limbs[1];
         }
-        for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) {
+        for (std::size_t i = static_cast<std::size_t>(m); i < M_pad; ++i) {
             x_rh[i] = 0.0; x_rl[i] = 0.0; x_ih[i] = 0.0; x_il[i] = 0.0;
         }
 #ifdef _OPENMP
-        const bool use_omp = (N >= WGERU_OMP_MIN && blas_omp_available());
+        const bool use_omp = (n >= WGERU_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T yj = y[j];
             if (ceq0(yj)) continue;
             const T t = cmul(alpha, yj);
@@ -72,7 +72,7 @@ static void wgeru_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, T *a, std:
             const __m256d til = _mm256_set1_pd(t.im.limbs[1]);
             double *aj = reinterpret_cast<double *>(&A_(0, j));
             std::ptrdiff_t i = 0;
-            for (; i + 3 < M; i += 4) {
+            for (; i + 3 < m; i += 4) {
                 __m256d a_rh, a_rl, a_ih, a_il;
                 cload4(aj + 4 * i, a_rh, a_rl, a_ih, a_il);
                 __m256d xrh = _mm256_loadu_pd(x_rh + i);
@@ -88,27 +88,27 @@ static void wgeru_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, T *a, std:
                 cstore4(aj + 4 * i, nrh, nrl, nih, nil);
             }
             T *ajs = &A_(0, j);
-            for (; i < M; ++i) ajs[i] = cadd(ajs[i], cmul(t, x[i]));
+            for (; i < m; ++i) ajs[i] = cadd(ajs[i], cmul(t, x[i]));
         }
         std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
 #else
 #ifdef _OPENMP
-        const bool use_omp = (N >= WGERU_OMP_MIN && blas_omp_available());
+        const bool use_omp = (n >= WGERU_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T yj = y[j];
             if (!ceq0(yj)) {
                 const T t = cmul(alpha, yj);
                 T *aj = &A_(0, j);
-                for (std::ptrdiff_t i = 0; i < M; ++i) aj[i] = cadd(aj[i], cmul(t, x[i]));
+                for (std::ptrdiff_t i = 0; i < m; ++i) aj[i] = cadd(aj[i], cmul(t, x[i]));
             }
         }
 #endif
 }
 
 static void wgeru_core(
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     const T *alpha_,
     const T *x, std::ptrdiff_t incx,
     const T *y, std::ptrdiff_t incy,
@@ -116,20 +116,20 @@ static void wgeru_core(
 {
     const T alpha = *alpha_;
 
-    if (M == 0 || N == 0 || ceq0(alpha)) return;
+    if (m == 0 || n == 0 || ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
-        wgeru_contig(M, N, alpha, a, lda, x, y);
+        wgeru_contig(m, n, alpha, a, lda, x, y);
         return;
     }
     /* Strided: gather x (len M) and y (len N) to unit-stride scratch, run the
      * SIMD core (A is column-major/lda regardless of vector strides). */
-    const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(M - 1) * incx : x;
-    const T *ybase = (incy < 0) ? y - static_cast<std::ptrdiff_t>(N - 1) * incy : y;
-    std::vector<T> xs(static_cast<std::size_t>(M)), ys(static_cast<std::size_t>(N));
-    for (std::ptrdiff_t i = 0; i < M; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
-    for (std::ptrdiff_t j = 0; j < N; ++j) ys[j] = ybase[static_cast<std::ptrdiff_t>(j) * incy];
-    wgeru_contig(M, N, alpha, a, lda, xs.data(), ys.data());
+    const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(m - 1) * incx : x;
+    const T *ybase = (incy < 0) ? y - static_cast<std::ptrdiff_t>(n - 1) * incy : y;
+    std::vector<T> xs(static_cast<std::size_t>(m)), ys(static_cast<std::size_t>(n));
+    for (std::ptrdiff_t i = 0; i < m; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
+    for (std::ptrdiff_t j = 0; j < n; ++j) ys[j] = ybase[static_cast<std::ptrdiff_t>(j) * incy];
+    wgeru_contig(m, n, alpha, a, lda, xs.data(), ys.data());
 }
 
 extern "C" {

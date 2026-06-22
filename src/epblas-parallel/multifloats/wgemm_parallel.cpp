@@ -40,7 +40,7 @@ const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 
 static void wgemm_core(
     char transa, char transb,
-    std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t k,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *b, std::ptrdiff_t ldb,
@@ -50,7 +50,7 @@ static void wgemm_core(
 #ifdef _OPENMP
     /* Already inside a team → run serially in this thread, no nested region. */
     if (omp_in_parallel()) {
-        wgemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+        wgemm_serial(transa, transb, m, n, k, alpha_, a, lda,
                      b, ldb, beta_, c, ldc);
         return;
     }
@@ -60,19 +60,19 @@ static void wgemm_core(
     const std::ptrdiff_t ta = wgemm_trans_code(&transa, 1);
     const std::ptrdiff_t tb = wgemm_trans_code(&transb, 1);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
     /* beta pre-pass runs serially in the calling thread (matches the
      * pre-split wgemm_). */
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
         T *cj = &c[static_cast<std::size_t>(j) * ldc];
         if (ceq0(beta)) {
-            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = zero_cdd;
+            for (std::ptrdiff_t i = 0; i < m; ++i) cj[i] = zero_cdd;
         } else if (!ceq1(beta)) {
-            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
+            for (std::ptrdiff_t i = 0; i < m; ++i) cj[i] = cmul(cj[i], beta);
         }
     }
-    if (ceq0(alpha) || K == 0) return;
+    if (ceq0(alpha) || k == 0) return;
 
     std::ptrdiff_t MC, KC, NC;
     wgemm_choose_blocks(&MC, &KC, &NC);
@@ -98,14 +98,14 @@ static void wgemm_core(
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
-            for (std::ptrdiff_t jc = 0; jc < N; jc += NC) {
-                const std::ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-                for (std::ptrdiff_t pc = 0; pc < K; pc += KC) {
-                    const std::ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+            for (std::ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const std::ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (std::ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const std::ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
                     wgemm_pack_B_soa_complex(b, ldb, pc, jc, pb, jb, tb,
                                              Bp_rh, Bp_rl, Bp_ih, Bp_il);
-                    for (std::ptrdiff_t ic = 0; ic < M; ic += MC) {
-                        const std::ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (std::ptrdiff_t ic = 0; ic < m; ic += MC) {
+                        const std::ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                         wgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         wgemm_inner_kernel_simd_complex(ib, jb, pb, alpha, Ap,
                                                         Bp_rh, Bp_rl, Bp_ih, Bp_il,
@@ -127,13 +127,13 @@ static void wgemm_core(
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
-            for (std::ptrdiff_t jc = 0; jc < N; jc += NC) {
-                const std::ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
-                for (std::ptrdiff_t pc = 0; pc < K; pc += KC) {
-                    const std::ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
+            for (std::ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const std::ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (std::ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const std::ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
                     wgemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                    for (std::ptrdiff_t ic = 0; ic < M; ic += MC) {
-                        const std::ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (std::ptrdiff_t ic = 0; ic < m; ic += MC) {
+                        const std::ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
                         wgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         wgemm_inner_kernel(ib, jb, pb, alpha, Ap, Bp,
                                            &c[static_cast<std::size_t>(jc) * ldc + ic],

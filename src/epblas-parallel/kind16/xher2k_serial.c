@@ -43,7 +43,7 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 
 void xher2k_serial(
     char uplo_c, char trans_c,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -55,12 +55,12 @@ void xher2k_serial(
     const char uplo  = blas_up(uplo_c);
     const char trans = blas_up(trans_c);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
-    if (uplo == 'U') qblas_yherk_beta_u(N, beta_r, c, ldc);
-    else             qblas_yherk_beta_l(N, beta_r, c, ldc);
+    if (uplo == 'U') qblas_yherk_beta_u(n, beta_r, c, ldc);
+    else             qblas_yherk_beta_l(n, beta_r, c, ldc);
 
-    if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
+    if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
     ptrdiff_t MC0, KC0, NC0;
     qblas_ygemm_blocks(&MC0, &KC0, &NC0);
@@ -68,9 +68,9 @@ void xher2k_serial(
 
     /* Grow MC toward an L2-sized panel when K is small (complex doubles the
      * per-element footprint), capped at 4×MC0 and rounded to MR. */
-    if (K <= KC) {
+    if (k <= KC) {
         const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)K * 2L * (long)sizeof(T));
+        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
             MC = round_up((ptrdiff_t)target_mc, MR);
@@ -90,16 +90,16 @@ void xher2k_serial(
     T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap_A && Ap_B && Bp_A && Bp_B) {
-        for (ptrdiff_t js = 0; js < N; js += NC) {
-            const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
+        for (ptrdiff_t js = 0; js < n; js += NC) {
+            const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
             /* UPLO clip of the [0, N] row range for this js-band. */
             ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
-            ptrdiff_t m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            ptrdiff_t m_hi_eff = (uplo == 'U' && n > js + jb) ? (js + jb) : n;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
-            for (ptrdiff_t ls = 0; ls < K; ls += KC) {
-                const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
+            for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
 
                 if (trans == 'N') {
                     qblas_ygemm_tcopy(pb, jb, conj_b_pack, &a[((size_t)ls * lda + js) * 2], lda, Bp_A);

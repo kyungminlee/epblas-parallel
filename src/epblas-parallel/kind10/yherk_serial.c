@@ -24,7 +24,7 @@ ptrdiff_t yherk_nb(void) { return 32; }
 
 extern void ygemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const TC *alpha,
     const TC *a, ptrdiff_t lda,
     const TC *b, ptrdiff_t ldb,
@@ -41,7 +41,7 @@ static const TR rzero = 0.0L, rone = 1.0L;
 
 /* Diagonal jb×jb block rank-k add, keeping diagonal entries real.
  * No beta scaling (caller pre-scales). */
-static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TR alpha,
+static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TR alpha,
                           const TC *restrict a, ptrdiff_t lda,
                           TC *restrict c, ptrdiff_t ldc,
                           char UPLO, char TR_c)
@@ -51,7 +51,7 @@ static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TR alpha,
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
             TC *cj = c + (size_t)j * ldc;
-            for (ptrdiff_t l = 0; l < K; ++l) {
+            for (ptrdiff_t l = 0; l < k; ++l) {
                 const TC ajl = A_(j, l);
                 if (ajl != czero) {
                     const TC t = alpha * cconj(ajl);
@@ -76,7 +76,7 @@ static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TR alpha,
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
                 const long double *Ai = (const long double *)(a + (size_t)i * lda);
                 long double sr = 0.0L, si = 0.0L;
-                for (ptrdiff_t l = 0; l < K; ++l) {
+                for (ptrdiff_t l = 0; l < k; ++l) {
                     const long double ar = Ai[2*l], aim = Ai[2*l+1];
                     const long double br = Aj[2*l], bim = Aj[2*l+1];
                     sr += ar * br + aim * bim;
@@ -90,12 +90,12 @@ static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TR alpha,
     }
 }
 
-void yherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, TR beta,
+void yherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TR beta,
                       TC *c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
         TC *cj = c + (size_t)j * ldc;
         if (beta == rzero) {
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
@@ -110,25 +110,25 @@ void yherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, TR beta,
     }
 }
 
-void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TR alpha, TR beta,
+void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TR alpha, TR beta,
                  const TC *a, ptrdiff_t lda, TC *c, ptrdiff_t ldc, char UPLO, char TR_c)
 {
     const TC cone    = 1.0L + 0.0Li;
     const TC alpha_c = alpha + 0.0Li;
-    yherk_beta_scale(jc, jc + jb, N, beta, c, ldc, UPLO);
+    yherk_beta_scale(jc, jc + jb, n, beta, c, ldc, UPLO);
 
-    herk_diag_add(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
+    herk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TR_c);
 
     if (UPLO == 'L') {
-        const ptrdiff_t trailing = N - jc - jb;
+        const ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
             if (TR_c == 'N') {
-                ygemm_serial('N', 'C', trailing, jb, K, &alpha_c,
+                ygemm_serial('N', 'C', trailing, jb, k, &alpha_c,
                              &A_(j0, 0), lda, &A_(jc, 0), lda,
                              &cone, &C_(j0, jc), ldc);
             } else {
-                ygemm_serial('C', 'N', trailing, jb, K, &alpha_c,
+                ygemm_serial('C', 'N', trailing, jb, k, &alpha_c,
                              &A_(0, j0), lda, &A_(0, jc), lda,
                              &cone, &C_(j0, jc), ldc);
             }
@@ -136,11 +136,11 @@ void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TR alpha,
     } else {
         if (jc > 0) {
             if (TR_c == 'N') {
-                ygemm_serial('N', 'C', jc, jb, K, &alpha_c,
+                ygemm_serial('N', 'C', jc, jb, k, &alpha_c,
                              &A_(0, 0), lda, &A_(jc, 0), lda,
                              &cone, &C_(0, jc), ldc);
             } else {
-                ygemm_serial('C', 'N', jc, jb, K, &alpha_c,
+                ygemm_serial('C', 'N', jc, jb, k, &alpha_c,
                              &A_(0, 0), lda, &A_(0, jc), lda,
                              &cone, &C_(0, jc), ldc);
             }
@@ -150,7 +150,7 @@ void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TR alpha,
 
 void yherk_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const TR *alpha_,
     const TC *a, ptrdiff_t lda,
     const TR *beta_,
@@ -160,21 +160,21 @@ void yherk_serial(
     const char UPLO = blas_up(uplo);
     const char TR_c = blas_up(trans);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (alpha == rzero || K == 0) {
+    if (alpha == rzero || k == 0) {
         if (beta == rone) {
-            for (ptrdiff_t j = 0; j < N; ++j) c[(size_t)j * ldc + j] = __real__ c[(size_t)j * ldc + j];
+            for (ptrdiff_t j = 0; j < n; ++j) c[(size_t)j * ldc + j] = __real__ c[(size_t)j * ldc + j];
             return;
         }
-        yherk_beta_scale(0, N, N, beta, c, ldc, UPLO);
+        yherk_beta_scale(0, n, n, beta, c, ldc, UPLO);
         return;
     }
 
     const ptrdiff_t nb = yherk_nb();
-    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        yherk_block(jc, jb, N, K, alpha, beta, a, lda, c, ldc, UPLO, TR_c);
+    for (ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        yherk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TR_c);
     }
 }
 

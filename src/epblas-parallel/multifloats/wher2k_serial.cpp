@@ -108,7 +108,7 @@ using simd_exact::vbcast;
 /* TR_c='N': t1 = α · conj(B(j_panel..+4, l)),
  *         t2 = conj(α) · conj(A(j_panel..+4, l));
  * C[i, panel] += A(i,l)·t1 + B(i,l)·t2 over i ∈ diag block. */
-inline void simd_her2k_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TC alpha,
+inline void simd_her2k_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
                                const TC *a, std::ptrdiff_t lda, const TC *b, std::ptrdiff_t ldb,
                                std::ptrdiff_t j_panel, std::ptrdiff_t j_count,
                                double *crh, double *crl,
@@ -121,7 +121,7 @@ inline void simd_her2k_diag_tn(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdif
     __m256d ac_il = _mm256_sub_pd(zero_v, a_il);
     alignas(32) double aj_rh[kSimdLane], aj_rl[kSimdLane], aj_ih[kSimdLane], aj_il[kSimdLane];
     alignas(32) double bj_rh[kSimdLane], bj_rl[kSimdLane], bj_ih[kSimdLane], bj_il[kSimdLane];
-    for (std::ptrdiff_t ll = 0; ll < K; ++ll) {
+    for (std::ptrdiff_t ll = 0; ll < k; ++ll) {
         for (std::ptrdiff_t j = 0; j < j_count; ++j) {
             const TC av = A_(j_panel + j, ll);
             const TC bv = B_(j_panel + j, ll);
@@ -251,7 +251,7 @@ inline void simd_her2k_diag_tc_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::
     }
 }
 
-inline void simd_her2k_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TC alpha,
+inline void simd_her2k_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
                                    const TC *a, std::ptrdiff_t lda, const TC *b, std::ptrdiff_t ldb,
                                    TC *c, std::ptrdiff_t ldc, char UPLO, char TR_c)
 {
@@ -273,7 +273,7 @@ inline void simd_her2k_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
         pack_4col_cdd(jb, jc, c, ldc, j, jcount, crh, crl, cih, cil);
         if (TR_c == 'N') {
             /* TR_c='N' reads A/B directly per l — K-independent, no scratch cap. */
-            simd_her2k_diag_tn(jc, jb, K, alpha, a, lda, b, ldb, j, jcount,
+            simd_her2k_diag_tn(jc, jb, k, alpha, a, lda, b, ldb, j, jcount,
                                crh, crl, cih, cil);
         } else {
             const __m256d zv = _mm256_setzero_pd();
@@ -288,8 +288,8 @@ inline void simd_her2k_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
                 _mm256_store_pd(&acc2_il[ir * kSimdLane], zv);
             }
             /* KC-tile over K so any K fits the bounded pre-pack scratch. */
-            for (std::ptrdiff_t l0 = 0; l0 < K; l0 += kMaxK) {
-                const std::ptrdiff_t kc = (K - l0 < kMaxK) ? (K - l0) : kMaxK;
+            for (std::ptrdiff_t l0 = 0; l0 < k; l0 += kMaxK) {
+                const std::ptrdiff_t kc = (k - l0 < kMaxK) ? (k - l0) : kMaxK;
                 for (std::ptrdiff_t jj = 0; jj < jcount; ++jj) {
                     const TC *acol = a + static_cast<std::size_t>(j + jj) * lda;
                     const TC *bcol = b + static_cast<std::size_t>(j + jj) * ldb;
@@ -361,7 +361,7 @@ inline void simd_her2k_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
 
 #endif  /* MBLAS_SIMD_DD */
 
-void her2k_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TC alpha,
+void her2k_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
                     const TC *a, std::ptrdiff_t lda,
                     const TC *b, std::ptrdiff_t ldb,
                     TC *c, std::ptrdiff_t ldc,
@@ -374,7 +374,7 @@ void her2k_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TC a
             const std::ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const std::ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
             TC *cj = c + static_cast<std::size_t>(j) * ldc;
-            for (std::ptrdiff_t l = 0; l < K; ++l) {
+            for (std::ptrdiff_t l = 0; l < k; ++l) {
                 const TC t1 = cmul(alpha,       cconj(B_(j, l)));
                 const TC t2 = cmul(alpha_conj,  cconj(A_(j, l)));
                 for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
@@ -395,7 +395,7 @@ void her2k_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TC a
                 const TC *Ai = a + static_cast<std::size_t>(i) * lda;
                 const TC *Bi = b + static_cast<std::size_t>(i) * ldb;
                 TC s1 = czero, s2 = czero;
-                for (std::ptrdiff_t l = 0; l < K; ++l) {
+                for (std::ptrdiff_t l = 0; l < k; ++l) {
                     s1 = cadd(s1, cmul(cconj(Ai[l]), Bj[l]));
                     s2 = cadd(s2, cmul(cconj(Bi[l]), Aj[l]));
                 }
@@ -407,17 +407,17 @@ void her2k_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TC a
     }
 }
 
-inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TC alpha,
+inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
                           const TC *a, std::ptrdiff_t lda, const TC *b, std::ptrdiff_t ldb,
                           TC *c, std::ptrdiff_t ldc, char UPLO, char TR_c)
 {
 #ifdef MBLAS_SIMD_DD
     if (jb <= kMaxBlockM) {
-        simd_her2k_diag_panels(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+        simd_her2k_diag_panels(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
         return;
     }
 #endif
-    her2k_diag_add(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+    her2k_diag_add(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
 }
 
 } /* anonymous namespace */
@@ -432,9 +432,9 @@ void wher2k_zero_diag_im(std::ptrdiff_t j, TC *c, std::ptrdiff_t ldc) {
     c[static_cast<std::size_t>(j) * ldc + j].im = rzero;
 }
 
-void wher2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, TR beta, TC *c, std::ptrdiff_t ldc) {
+void wher2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t n, char UPLO, TR beta, TC *c, std::ptrdiff_t ldc) {
     const std::ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-    const std::ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+    const std::ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
     TC *cj = c + static_cast<std::size_t>(j) * ldc;
     if (eq0(beta)) for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
     else {
@@ -445,14 +445,14 @@ void wher2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, TR beta, TC
     }
 }
 
-void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR_c,
+void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k, char UPLO, char TR_c,
                   TC alpha, TR beta, const TC *a, std::ptrdiff_t lda, const TC *b, std::ptrdiff_t ldb,
                   TC *c, std::ptrdiff_t ldc)
 {
     /* Beta-scale this block's own triangle columns (real-diag preservation). */
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const std::ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+        const std::ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
         TC *cj = c + static_cast<std::size_t>(j) * ldc;
         if (eq0(beta)) {
             for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
@@ -466,32 +466,32 @@ void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::p
         }
     }
 
-    diag_dispatch(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+    diag_dispatch(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
 
     const char NN[1] = {'N'};
     const char CN[1] = {'C'};
     const TC alpha_conj = cconj(alpha);
 
     if (UPLO == 'L') {
-        const std::ptrdiff_t trailing = N - jc - jb;
+        const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
             if (TR_c == 'N') {
-                wgemm_serial(NN[0], CN[0], trailing, jb, K, &alpha, &A_(j0, 0), lda, &B_(jc, 0), ldb, &cone, &C_(j0, jc), ldc);
-                wgemm_serial(NN[0], CN[0], trailing, jb, K, &alpha_conj, &B_(j0, 0), ldb, &A_(jc, 0), lda, &cone, &C_(j0, jc), ldc);
+                wgemm_serial(NN[0], CN[0], trailing, jb, k, &alpha, &A_(j0, 0), lda, &B_(jc, 0), ldb, &cone, &C_(j0, jc), ldc);
+                wgemm_serial(NN[0], CN[0], trailing, jb, k, &alpha_conj, &B_(j0, 0), ldb, &A_(jc, 0), lda, &cone, &C_(j0, jc), ldc);
             } else {
-                wgemm_serial(CN[0], NN[0], trailing, jb, K, &alpha, &A_(0, j0), lda, &B_(0, jc), ldb, &cone, &C_(j0, jc), ldc);
-                wgemm_serial(CN[0], NN[0], trailing, jb, K, &alpha_conj, &B_(0, j0), ldb, &A_(0, jc), lda, &cone, &C_(j0, jc), ldc);
+                wgemm_serial(CN[0], NN[0], trailing, jb, k, &alpha, &A_(0, j0), lda, &B_(0, jc), ldb, &cone, &C_(j0, jc), ldc);
+                wgemm_serial(CN[0], NN[0], trailing, jb, k, &alpha_conj, &B_(0, j0), ldb, &A_(0, jc), lda, &cone, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR_c == 'N') {
-                wgemm_serial(NN[0], CN[0], jc, jb, K, &alpha, &A_(0, 0), lda, &B_(jc, 0), ldb, &cone, &C_(0, jc), ldc);
-                wgemm_serial(NN[0], CN[0], jc, jb, K, &alpha_conj, &B_(0, 0), ldb, &A_(jc, 0), lda, &cone, &C_(0, jc), ldc);
+                wgemm_serial(NN[0], CN[0], jc, jb, k, &alpha, &A_(0, 0), lda, &B_(jc, 0), ldb, &cone, &C_(0, jc), ldc);
+                wgemm_serial(NN[0], CN[0], jc, jb, k, &alpha_conj, &B_(0, 0), ldb, &A_(jc, 0), lda, &cone, &C_(0, jc), ldc);
             } else {
-                wgemm_serial(CN[0], NN[0], jc, jb, K, &alpha, &A_(0, 0), lda, &B_(0, jc), ldb, &cone, &C_(0, jc), ldc);
-                wgemm_serial(CN[0], NN[0], jc, jb, K, &alpha_conj, &B_(0, 0), ldb, &A_(0, jc), lda, &cone, &C_(0, jc), ldc);
+                wgemm_serial(CN[0], NN[0], jc, jb, k, &alpha, &A_(0, 0), lda, &B_(0, jc), ldb, &cone, &C_(0, jc), ldc);
+                wgemm_serial(CN[0], NN[0], jc, jb, k, &alpha_conj, &B_(0, 0), ldb, &A_(0, jc), lda, &cone, &C_(0, jc), ldc);
             }
         }
     }
@@ -499,7 +499,7 @@ void wher2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::p
 
 extern "C" void wher2k_serial(
     char uplo, char trans,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const TC *alpha_,
     const TC *a, std::ptrdiff_t lda,
     const TC *b, std::ptrdiff_t ldb,
@@ -511,21 +511,21 @@ extern "C" void wher2k_serial(
     const char UPLO = up(&uplo);
     const char TR_c = up(&trans);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if ((eq0(alpha.re) && eq0(alpha.im)) || K == 0) {
+    if ((eq0(alpha.re) && eq0(alpha.im)) || k == 0) {
         if (eq1(beta)) {
-            for (std::ptrdiff_t j = 0; j < N; ++j) wher2k_zero_diag_im(j, c, ldc);
+            for (std::ptrdiff_t j = 0; j < n; ++j) wher2k_zero_diag_im(j, c, ldc);
             return;
         }
-        for (std::ptrdiff_t j = 0; j < N; ++j) wher2k_scale_col(j, N, UPLO, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < n; ++j) wher2k_scale_col(j, n, UPLO, beta, c, ldc);
         return;
     }
 
     const std::ptrdiff_t nb = wher2k_block_nb();
-    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        wher2k_block(jc, jb, N, K, UPLO, TR_c, alpha, beta, a, lda, b, ldb, c, ldc);
+    for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        wher2k_block(jc, jb, n, k, UPLO, TR_c, alpha, beta, a, lda, b, ldb, c, ldc);
     }
 }
 

@@ -25,7 +25,7 @@ ptrdiff_t yher2k_nb(void) { return 32; }
 
 extern void ygemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const TC *alpha,
     const TC *a, ptrdiff_t lda,
     const TC *b, ptrdiff_t ldb,
@@ -42,7 +42,7 @@ static const TC czero = 0.0L + 0.0Li;
 static const TR rzero = 0.0L, rone = 1.0L;
 
 /* Scalar Hermitian rank-2 diagonal block. Caller pre-scales β. */
-static void her2k_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TC alpha,
+static void her2k_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TC alpha,
                            const TC *restrict a, ptrdiff_t lda,
                            const TC *restrict b, ptrdiff_t ldb,
                            TC *restrict c, ptrdiff_t ldc,
@@ -53,7 +53,7 @@ static void her2k_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TC alpha,
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
             TC *cj = c + (size_t)j * ldc;
-            for (ptrdiff_t l = 0; l < K; ++l) {
+            for (ptrdiff_t l = 0; l < k; ++l) {
                 const TC t1 = alpha        * cconj(B_(j, l));
                 const TC t2 = cconj(alpha) * cconj(A_(j, l));
                 for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
@@ -74,7 +74,7 @@ static void her2k_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TC alpha,
                 const TC *Bi = b + (size_t)i * ldb;
                 TC s1 = czero;
                 TC s2 = czero;
-                for (ptrdiff_t l = 0; l < K; ++l) {
+                for (ptrdiff_t l = 0; l < k; ++l) {
                     s1 += cconj(Ai[l]) * Bj[l];
                     s2 += cconj(Bi[l]) * Aj[l];
                 }
@@ -85,12 +85,12 @@ static void her2k_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, TC alpha,
     }
 }
 
-void yher2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, TR beta,
+void yher2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TR beta,
                        TC *c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
         TC *cj = c + (size_t)j * ldc;
         if (beta == rzero) {
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
@@ -105,33 +105,33 @@ void yher2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, TR beta,
     }
 }
 
-void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TC alpha, TR beta,
+void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha, TR beta,
                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
                   TC *c, ptrdiff_t ldc, char UPLO, char TR_c)
 {
     const TC cone       = 1.0L + 0.0Li;
     const TC alpha_conj = cconj(alpha);
 
-    yher2k_beta_scale(jc, jc + jb, N, beta, c, ldc, UPLO);
+    yher2k_beta_scale(jc, jc + jb, n, beta, c, ldc, UPLO);
 
-    her2k_diag_add(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+    her2k_diag_add(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TR_c);
 
     if (UPLO == 'L') {
-        const ptrdiff_t trailing = N - jc - jb;
+        const ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
             if (TR_c == 'N') {
-                ygemm_serial('N', 'C', trailing, jb, K, &alpha,
+                ygemm_serial('N', 'C', trailing, jb, k, &alpha,
                              &A_(j0, 0), lda, &B_(jc, 0), ldb,
                              &cone, &C_(j0, jc), ldc);
-                ygemm_serial('N', 'C', trailing, jb, K, &alpha_conj,
+                ygemm_serial('N', 'C', trailing, jb, k, &alpha_conj,
                              &B_(j0, 0), ldb, &A_(jc, 0), lda,
                              &cone, &C_(j0, jc), ldc);
             } else {
-                ygemm_serial('C', 'N', trailing, jb, K, &alpha,
+                ygemm_serial('C', 'N', trailing, jb, k, &alpha,
                              &A_(0, j0), lda, &B_(0, jc), ldb,
                              &cone, &C_(j0, jc), ldc);
-                ygemm_serial('C', 'N', trailing, jb, K, &alpha_conj,
+                ygemm_serial('C', 'N', trailing, jb, k, &alpha_conj,
                              &B_(0, j0), ldb, &A_(0, jc), lda,
                              &cone, &C_(j0, jc), ldc);
             }
@@ -139,17 +139,17 @@ void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TC alpha
     } else {
         if (jc > 0) {
             if (TR_c == 'N') {
-                ygemm_serial('N', 'C', jc, jb, K, &alpha,
+                ygemm_serial('N', 'C', jc, jb, k, &alpha,
                              &A_(0, 0), lda, &B_(jc, 0), ldb,
                              &cone, &C_(0, jc), ldc);
-                ygemm_serial('N', 'C', jc, jb, K, &alpha_conj,
+                ygemm_serial('N', 'C', jc, jb, k, &alpha_conj,
                              &B_(0, 0), ldb, &A_(jc, 0), lda,
                              &cone, &C_(0, jc), ldc);
             } else {
-                ygemm_serial('C', 'N', jc, jb, K, &alpha,
+                ygemm_serial('C', 'N', jc, jb, k, &alpha,
                              &A_(0, 0), lda, &B_(0, jc), ldb,
                              &cone, &C_(0, jc), ldc);
-                ygemm_serial('C', 'N', jc, jb, K, &alpha_conj,
+                ygemm_serial('C', 'N', jc, jb, k, &alpha_conj,
                              &B_(0, 0), ldb, &A_(0, jc), lda,
                              &cone, &C_(0, jc), ldc);
             }
@@ -159,7 +159,7 @@ void yher2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TC alpha
 
 void yher2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const TC *alpha_,
     const TC *a, ptrdiff_t lda,
     const TC *b, ptrdiff_t ldb,
@@ -171,21 +171,21 @@ void yher2k_serial(
     const char UPLO = blas_up(uplo);
     const char TR_c = blas_up(trans);
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if ((alpha == czero) || K == 0) {
+    if ((alpha == czero) || k == 0) {
         if (beta == rone) {
-            for (ptrdiff_t j = 0; j < N; ++j) c[(size_t)j * ldc + j] = __real__ c[(size_t)j * ldc + j];
+            for (ptrdiff_t j = 0; j < n; ++j) c[(size_t)j * ldc + j] = __real__ c[(size_t)j * ldc + j];
             return;
         }
-        yher2k_beta_scale(0, N, N, beta, c, ldc, UPLO);
+        yher2k_beta_scale(0, n, n, beta, c, ldc, UPLO);
         return;
     }
 
     const ptrdiff_t nb = yher2k_nb();
-    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        yher2k_block(jc, jb, N, K, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR_c);
+    for (ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        yher2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR_c);
     }
 }
 

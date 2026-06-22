@@ -37,7 +37,7 @@ namespace {
 
 static void msyr_core(
     char uplo,
-    std::ptrdiff_t N,
+    std::ptrdiff_t n,
     const T *alpha_,
     const T *x, std::ptrdiff_t incx,
     T *a, std::ptrdiff_t lda)
@@ -45,14 +45,14 @@ static void msyr_core(
     const T alpha = *alpha_;
     const char UPLO = up(&uplo);
 
-    if (N == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
+    if (n == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
 
     /* Gather x in logical order 0..N-1 and split into SoA limbs. O(N); also
      * the strided->contiguous fix (only x is strided — A is full storage). */
-    std::vector<double> xh(N), xl(N);
+    std::vector<double> xh(n), xl(n);
     {
-        std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(n - 1) * incx : 0;
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             xh[j] = x[ix].limbs[0];
             xl[j] = x[ix].limbs[1];
             ix += incx;
@@ -62,7 +62,7 @@ static void msyr_core(
     const double *xlp = xl.data();
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= MSYR_OMP_MIN && blas_omp_available());
+    const bool use_omp = (n >= MSYR_OMP_MIN && blas_omp_available());
     /* static,1 cyclic interleave balances the triangular column skew (column
      * j writes j+1 (U) / N-j (L) elems); full storage → columns lda apart, no
      * false sharing. The hot inner loop is mf_kernels::dd_axpy, so the per-
@@ -73,16 +73,16 @@ static void msyr_core(
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
             const T t = alpha * T{xhp[j], xlp[j]};
-            mf_kernels::dd_axpy(N - j, xhp + j, xlp + j, t.limbs[0], t.limbs[1], &A_(j, j));
+            mf_kernels::dd_axpy(n - j, xhp + j, xlp + j, t.limbs[0], t.limbs[1], &A_(j, j));
         }
     } else {
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
             const T t = alpha * T{xhp[j], xlp[j]};
             mf_kernels::dd_axpy(j + 1, xhp, xlp, t.limbs[0], t.limbs[1], &A_(0, j));

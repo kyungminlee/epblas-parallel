@@ -40,9 +40,9 @@ const T zero_dd{0.0, 0.0};
  * against x — the same stride-1 kernels used by the triangular twins. (The OMP paths
  * thread over ptrdiff_t rows and clamp the band to the owned range inline, so they
  * keep their own bounds.) */
-static inline void mgbmv_band(std::ptrdiff_t j, std::ptrdiff_t M, std::ptrdiff_t KL, std::ptrdiff_t KU, std::ptrdiff_t &i_lo, std::ptrdiff_t &i_hi) {
+static inline void mgbmv_band(std::ptrdiff_t j, std::ptrdiff_t m, std::ptrdiff_t KL, std::ptrdiff_t KU, std::ptrdiff_t &i_lo, std::ptrdiff_t &i_hi) {
     i_lo = (j - KU > 0) ? (j - KU) : 0;
-    i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+    i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;
 }
 
 namespace {
@@ -51,21 +51,21 @@ namespace {
  * (y[i] += tmp*col[i], distinct rows, ascending j -> bit-exact). Trans reduces it
  * against x via a vector dot (within DD fuzz tol). The strided entries gather
  * x/y to scratch and reuse these. */
-void mgbmv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
+void mgbmv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                     const T *a, std::size_t lda, const T *x, T *y)
 {
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
         const T tmp = alpha * x[j];
-        std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
+        std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, m, KL, KU, i_lo, i_hi);
         const std::ptrdiff_t k = KU - j;
         if (i_hi > i_lo) mf_kernels::axpy_add(i_hi - i_lo, &y[i_lo], &A_(k + i_lo, j), tmp);
     }
 }
-void mgbmv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
+void mgbmv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                     const T *a, std::size_t lda, const T *x, T *y)
 {
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
-        std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
+        std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, m, KL, KU, i_lo, i_hi);
         const std::ptrdiff_t k = KU - j;
         const T s = (i_hi > i_lo) ? mf_kernels::dot(i_hi - i_lo, &A_(k + i_lo, j), &x[i_lo]) : zero_dd;
         y[j] = y[j] + alpha * s;
@@ -84,26 +84,26 @@ void mgbmv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::
  * the serial/netlib scatter (bit-exact). alpha*x[j] is recomputed per column
  * (read-only x), which removes the shared ax buffer and its barrier. NoTrans
  * reads N of x, writes M of y. Returns true if handled. */
-static bool mgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
+static bool mgbmv_n_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                         const T *a, std::ptrdiff_t lda,
                         const T *x, std::ptrdiff_t incx, T *y, std::ptrdiff_t incy)
 {
-    if (M < MGBMV_OMP_MIN || !blas_omp_should_thread())
+    if (m < MGBMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
 
-    const std::ptrdiff_t ix0 = (incx < 0) ? -(N - 1) * incx : 0;
-    const std::ptrdiff_t iy0 = (incy < 0) ? -static_cast<std::ptrdiff_t>(M - 1) * incy : 0;
+    const std::ptrdiff_t ix0 = (incx < 0) ? -(n - 1) * incx : 0;
+    const std::ptrdiff_t iy0 = (incy < 0) ? -static_cast<std::ptrdiff_t>(m - 1) * incy : 0;
 
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t lo = blas_part_bound(M, tid, nthreads);
-        std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nthreads);
+        std::ptrdiff_t lo = blas_part_bound(m, tid, nthreads);
+        std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nthreads);
         /* columns whose band [j-KU, j+KL] intersects owned rows [lo,hi) */
         std::ptrdiff_t jlo = (lo - KL > 0) ? (lo - KL) : 0;
-        std::ptrdiff_t jhi = (hi - 1 + KU + 1 < N) ? (hi + KU) : N;
+        std::ptrdiff_t jhi = (hi - 1 + KU + 1 < n) ? (hi + KU) : n;
         for (std::ptrdiff_t j = jlo; j < jhi; ++j) {
             const T tmp = alpha * x[ix0 + j * incx];
             std::ptrdiff_t i_lo = (j - KU > lo) ? (j - KU) : lo;
@@ -126,34 +126,34 @@ static bool mgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
  * Output columns partition across threads (each y[j]=alpha*Σ_i A(i,j)*x[i] disjoint).
  * Strided x gathered to contiguous so the inner dot reads x[i] directly. Trans reads
  * M of x, writes N of y. Bit-identical to the serial strided gather (ascending-i). */
-static bool mgbmv_t_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
+static bool mgbmv_t_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                         const T *a, std::ptrdiff_t lda,
                         const T *x, std::ptrdiff_t incx, T *y, std::ptrdiff_t incy)
 {
-    if (N < MGBMV_OMP_MIN || !blas_omp_should_thread())
+    if (n < MGBMV_OMP_MIN || !blas_omp_should_thread())
         return false;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
 
-    if (incy < 0) y -= static_cast<std::ptrdiff_t>(N - 1) * incy;
+    if (incy < 0) y -= static_cast<std::ptrdiff_t>(n - 1) * incy;
 
     const T *xptr = x;
     T *xbuf = nullptr;
     if (incx != 1) {
-        xbuf = static_cast<T *>(std::malloc(static_cast<std::size_t>(M) * sizeof(T)));
+        xbuf = static_cast<T *>(std::malloc(static_cast<std::size_t>(m) * sizeof(T)));
         if (!xbuf) return false;
-        mf_kernels::gather_strided(M, x, incx, xbuf);
+        mf_kernels::gather_strided(m, x, incx, xbuf);
         xptr = xbuf;
     }
 
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t lo = blas_part_bound(N, tid, nthreads);
-        std::ptrdiff_t hi = blas_part_bound(N, tid + 1, nthreads);
+        std::ptrdiff_t lo = blas_part_bound(n, tid, nthreads);
+        std::ptrdiff_t hi = blas_part_bound(n, tid + 1, nthreads);
         for (std::ptrdiff_t j = lo; j < hi; ++j) {
             std::ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
-            std::ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
+            std::ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;
             std::ptrdiff_t k = KU - j;
             const T *col = &A_(k + i_lo, j);
             T s = mf_kernels::dot(i_hi - i_lo, col, &xptr[i_lo]);
@@ -167,7 +167,7 @@ static bool mgbmv_t_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
 
 static void mgbmv_core(
     char trans,
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     std::ptrdiff_t KL, std::ptrdiff_t KU,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
@@ -179,10 +179,10 @@ static void mgbmv_core(
     char TR = up(&trans);
     if (TR == 'C') TR = 'T';
 
-    if (M == 0 || N == 0 || (eq0(alpha) && eq1(beta))) return;
+    if (m == 0 || n == 0 || (eq0(alpha) && eq1(beta))) return;
 
-    const std::ptrdiff_t leny = (TR == 'N') ? M : N;
-    const std::ptrdiff_t lenx = (TR == 'N') ? N : M;
+    const std::ptrdiff_t leny = (TR == 'N') ? m : n;
+    const std::ptrdiff_t lenx = (TR == 'N') ? n : m;
 
     mf_kernels::scale_y(leny, beta, y, incy);
     if (eq0(alpha)) return;
@@ -191,25 +191,25 @@ static void mgbmv_core(
 #ifdef _OPENMP
         /* NoTrans threads for contiguous AND strided x/y (the helper gathers strided
          * x and writes strided y); bit-identical to the serial scatter (ascending-j). */
-        if (M >= MGBMV_OMP_MIN && blas_omp_available()
-            && mgbmv_n_omp(M, N, KL, KU, alpha, a, lda, x, incx, y, incy))
+        if (m >= MGBMV_OMP_MIN && blas_omp_available()
+            && mgbmv_n_omp(m, n, KL, KU, alpha, a, lda, x, incx, y, incy))
             return;
 #endif
         if (incx == 1 && incy == 1) {
-            mgbmv_n_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, x, y);
+            mgbmv_n_contig(m, n, KL, KU, alpha, a, (std::size_t)lda, x, y);
             return;
         }
         /* Strided: gather x (len N) and beta-scaled y (len M) to contiguous
          * scratch, run the SIMD scatter core, scatter y back. O(M+N) gather vs
          * O(M*band) work; the in-place strided walk is the alloc-fail fallback. */
         {
-            T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
-            T *ys = static_cast<T *>(std::malloc((std::size_t)M * sizeof(T)));
+            T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+            T *ys = static_cast<T *>(std::malloc((std::size_t)m * sizeof(T)));
             if (xs && ys) {
-                mf_kernels::gather_strided(N, x, incx, xs);
-                mf_kernels::gather_strided(M, y, incy, ys);
-                mgbmv_n_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, xs, ys);
-                mf_kernels::scatter_strided(M, y, incy, ys);
+                mf_kernels::gather_strided(n, x, incx, xs);
+                mf_kernels::gather_strided(m, y, incy, ys);
+                mgbmv_n_contig(m, n, KL, KU, alpha, a, (std::size_t)lda, xs, ys);
+                mf_kernels::scatter_strided(m, y, incy, ys);
                 std::free(xs); std::free(ys);
                 return;
             }
@@ -219,10 +219,10 @@ static void mgbmv_core(
             std::ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
             std::ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
             std::ptrdiff_t jx = kx;
-            for (std::ptrdiff_t j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T tmp = alpha * x[jx];
                 std::ptrdiff_t iy = ky;
-                std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
+                std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, m, KL, KU, i_lo, i_hi);
                 const std::ptrdiff_t k = KU - j;
                 for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
                     y[iy] = y[iy] + tmp * A_(k + i, j);
@@ -236,24 +236,24 @@ static void mgbmv_core(
 #ifdef _OPENMP
         /* Trans threads for contiguous AND strided x/y (the helper gathers strided
          * x and writes strided y). */
-        if (N >= MGBMV_OMP_MIN && blas_omp_available()
-            && mgbmv_t_omp(M, N, KL, KU, alpha, a, lda, x, incx, y, incy))
+        if (n >= MGBMV_OMP_MIN && blas_omp_available()
+            && mgbmv_t_omp(m, n, KL, KU, alpha, a, lda, x, incx, y, incy))
             return;
 #endif
         if (incx == 1 && incy == 1) {
-            mgbmv_t_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, x, y);
+            mgbmv_t_contig(m, n, KL, KU, alpha, a, (std::size_t)lda, x, y);
             return;
         }
         /* Strided: gather x (len M) and beta-scaled y (len N), run the SIMD dot
          * core, scatter y back; the in-place strided walk is the alloc-fail fallback. */
         {
-            T *xs = static_cast<T *>(std::malloc((std::size_t)M * sizeof(T)));
-            T *ys = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
+            T *xs = static_cast<T *>(std::malloc((std::size_t)m * sizeof(T)));
+            T *ys = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
             if (xs && ys) {
-                mf_kernels::gather_strided(M, x, incx, xs);
-                mf_kernels::gather_strided(N, y, incy, ys);
-                mgbmv_t_contig(M, N, KL, KU, alpha, a, (std::size_t)lda, xs, ys);
-                mf_kernels::scatter_strided(N, y, incy, ys);
+                mf_kernels::gather_strided(m, x, incx, xs);
+                mf_kernels::gather_strided(n, y, incy, ys);
+                mgbmv_t_contig(m, n, KL, KU, alpha, a, (std::size_t)lda, xs, ys);
+                mf_kernels::scatter_strided(n, y, incy, ys);
                 std::free(xs); std::free(ys);
                 return;
             }
@@ -263,10 +263,10 @@ static void mgbmv_core(
             std::ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
             std::ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
             std::ptrdiff_t jy = ky;
-            for (std::ptrdiff_t j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 T s = zero_dd;
                 std::ptrdiff_t ix = kx;
-                std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
+                std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, m, KL, KU, i_lo, i_hi);
                 const std::ptrdiff_t k = KU - j;
                 for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
                     s = s + A_(k + i, j) * x[ix];

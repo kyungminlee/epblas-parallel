@@ -23,7 +23,7 @@ ptrdiff_t ysyr2k_nb(void) { return 32; }
 
 extern void ygemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -40,7 +40,7 @@ static const T ONE  = 1.0L + 0.0Li;
 /* TRANS='T' diagonal-block update (dot form: each C element accumulates in
  * a register over the K axis). Only the Trans path uses this; the NoTrans
  * path runs a flat per-column rank-1 sweep inline in ysyr2k_block. */
-static void syr2k_diag_add_t(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, T alpha,
+static void syr2k_diag_add_t(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, T alpha,
                              const T *restrict a, ptrdiff_t lda,
                              const T *restrict b, ptrdiff_t ldb,
                              T *restrict c, ptrdiff_t ldc, char UPLO)
@@ -55,31 +55,31 @@ static void syr2k_diag_add_t(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t K, T alpha,
             const T *Ai = a + (size_t)i * lda;
             const T *Bi = b + (size_t)i * ldb;
             T s = ZERO;
-            for (ptrdiff_t l = 0; l < K; ++l) s += Ai[l] * Bj[l] + Bi[l] * Aj[l];
+            for (ptrdiff_t l = 0; l < k; ++l) s += Ai[l] * Bj[l] + Bi[l] * Aj[l];
             cj[i] += alpha * s;
         }
     }
 }
 
-void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, T beta,
+void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, T beta,
                        T *c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
         T *cj = c + (size_t)j * ldc;
         if (beta == ZERO) for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = ZERO;
         else              for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
     }
 }
 
-void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha, T beta,
+void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, T alpha, T beta,
                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                   T *c, ptrdiff_t ldc, char UPLO, char TR)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
         T *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i]  = ZERO;
         else if (beta != ONE)  for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
@@ -98,9 +98,9 @@ void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha,
     if (TR == 'N') {
         for (ptrdiff_t j = jc; j < jc + jb; ++j) {
             const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-            const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
+            const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
             T *cj = c + (size_t)j * ldc;
-            for (ptrdiff_t l = 0; l < K; ++l) {
+            for (ptrdiff_t l = 0; l < k; ++l) {
                 const T t1 = alpha * A_(j, l);
                 const T t2 = alpha * B_(j, l);
                 const T *al = a + (size_t)l * lda, *bl = b + (size_t)l * ldb;
@@ -111,25 +111,25 @@ void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha,
         return;
     }
 
-    syr2k_diag_add_t(jc, jb, K, alpha, a, lda, b, ldb, c, ldc, UPLO);
+    syr2k_diag_add_t(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO);
 
     if (UPLO == 'L') {
-        const ptrdiff_t trailing = N - jc - jb;
+        const ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
-            ygemm_serial('T', 'N', trailing, jb, K, &alpha,
+            ygemm_serial('T', 'N', trailing, jb, k, &alpha,
                          &A_(0, j0), lda, &B_(0, jc), ldb, &ONE,
                          &C_(j0, jc), ldc);
-            ygemm_serial('T', 'N', trailing, jb, K, &alpha,
+            ygemm_serial('T', 'N', trailing, jb, k, &alpha,
                          &B_(0, j0), ldb, &A_(0, jc), lda, &ONE,
                          &C_(j0, jc), ldc);
         }
     } else {
         if (jc > 0) {
-            ygemm_serial('T', 'N', jc, jb, K, &alpha,
+            ygemm_serial('T', 'N', jc, jb, k, &alpha,
                          &A_(0, 0), lda, &B_(0, jc), ldb, &ONE,
                          &C_(0, jc), ldc);
-            ygemm_serial('T', 'N', jc, jb, K, &alpha,
+            ygemm_serial('T', 'N', jc, jb, k, &alpha,
                          &B_(0, 0), ldb, &A_(0, jc), lda, &ONE,
                          &C_(0, jc), ldc);
         }
@@ -138,7 +138,7 @@ void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha,
 
 void ysyr2k_serial(
     char uplo, char trans,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -150,18 +150,18 @@ void ysyr2k_serial(
     char TR = blas_up(trans);
     if (TR == 'C') TR = 'T';
 
-    if (N == 0) return;
+    if (n == 0) return;
 
-    if (alpha == ZERO || K == 0) {
+    if (alpha == ZERO || k == 0) {
         if (beta == ONE) return;
-        ysyr2k_beta_scale(0, N, N, beta, c, ldc, UPLO);
+        ysyr2k_beta_scale(0, n, n, beta, c, ldc, UPLO);
         return;
     }
 
     const ptrdiff_t nb = ysyr2k_nb();
-    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        ysyr2k_block(jc, jb, N, K, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
+    for (ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        ysyr2k_block(jc, jb, n, k, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR);
     }
 }
 

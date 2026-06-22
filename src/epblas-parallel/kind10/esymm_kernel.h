@@ -53,7 +53,7 @@ void esymm_pack_b_sym(const esymm_T *a, ptrdiff_t lda,
 /* Pure-serial by-value core (no OpenMP). Same math as esymm_. */
 void esymm_serial(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const esymm_T *alpha_,
     const esymm_T *a, ptrdiff_t lda,
     const esymm_T *b, ptrdiff_t ldb,

@@ -79,7 +79,7 @@ static ptrdiff_t esbmv_omp(bool upper, ptrdiff_t n, ptrdiff_t k,
 
 static void esbmv_core(
     char uplo,
-    ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *restrict a, ptrdiff_t lda,
     const T *restrict x, ptrdiff_t incx,
@@ -90,14 +90,14 @@ static void esbmv_core(
     const T zero = 0.0L, one = 1.0L;
     const char UPLO = blas_up(uplo);
 
-    if (N == 0 || (alpha == zero && beta == one)) return;
+    if (n == 0 || (alpha == zero && beta == one)) return;
 
     if (beta != one) {
-        ptrdiff_t iy = (incy < 0) ? -(N - 1) * incy : 0;
+        ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
         if (beta == zero) {
-            for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = zero; iy += incy; }
+            for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = zero; iy += incy; }
         } else {
-            for (ptrdiff_t i = 0; i < N; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+            for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += incy; }
         }
     }
     if (alpha == zero) return;
@@ -106,8 +106,8 @@ static void esbmv_core(
     /* Cheap inline gate first: at OMP=1 (or below threshold) this short-circuits
      * before the noinline call's argument marshalling, so the serial gather that
      * follows keeps its unperturbed register allocation (outlining tax). */
-    if (N >= ESBMV_OMP_MIN && blas_omp_max_threads() > 1
-        && esbmv_omp(UPLO == 'U', N, K, a, lda, x, incx, alpha, y, incy))
+    if (n >= ESBMV_OMP_MIN && blas_omp_max_threads() > 1
+        && esbmv_omp(UPLO == 'U', n, k, a, lda, x, incx, alpha, y, incy))
         return;
 #endif
 
@@ -118,51 +118,51 @@ static void esbmv_core(
     const ptrdiff_t s1 = lda - 1;
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T *base = &A_(0, i);
-                T s = base[K] * x[i];
-                const ptrdiff_t rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
-                for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[K + (ptrdiff_t)d * s1] * x[i + d];
-                const ptrdiff_t llen = (i < K) ? i : K;
-                for (ptrdiff_t d = 1; d <= llen; ++d) s += base[K - d] * x[i - d];
+                T s = base[k] * x[i];
+                const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
+                for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[k + (ptrdiff_t)d * s1] * x[i + d];
+                const ptrdiff_t llen = (i < k) ? i : k;
+                for (ptrdiff_t d = 1; d <= llen; ++d) s += base[k - d] * x[i - d];
                 y[i] += alpha * s;
             }
         } else {
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T *base = &A_(0, i);
                 T s = base[0] * x[i];
-                const ptrdiff_t llen = (i < K) ? i : K;
+                const ptrdiff_t llen = (i < k) ? i : k;
                 for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
-                const ptrdiff_t rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
+                const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
                 for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[d] * x[i + d];
                 y[i] += alpha * s;
             }
         }
     } else {
-        const ptrdiff_t ix0 = (incx < 0) ? -(ptrdiff_t)(N - 1) * incx : 0;
-        const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(N - 1) * incy : 0;
+        const ptrdiff_t ix0 = (incx < 0) ? -(ptrdiff_t)(n - 1) * incx : 0;
+        const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(n - 1) * incy : 0;
         if (UPLO == 'U') {
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T *base = &A_(0, i);
                 const ptrdiff_t xi = ix0 + (ptrdiff_t)i * incx;
-                T s = base[K] * x[xi];
-                const ptrdiff_t rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
+                T s = base[k] * x[xi];
+                const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
                 ptrdiff_t xx = xi + incx;
-                for (ptrdiff_t d = 1; d <= rlen; ++d) { s += base[K + (ptrdiff_t)d * s1] * x[xx]; xx += incx; }
-                const ptrdiff_t llen = (i < K) ? i : K;
+                for (ptrdiff_t d = 1; d <= rlen; ++d) { s += base[k + (ptrdiff_t)d * s1] * x[xx]; xx += incx; }
+                const ptrdiff_t llen = (i < k) ? i : k;
                 xx = xi - incx;
-                for (ptrdiff_t d = 1; d <= llen; ++d) { s += base[K - d] * x[xx]; xx -= incx; }
+                for (ptrdiff_t d = 1; d <= llen; ++d) { s += base[k - d] * x[xx]; xx -= incx; }
                 y[iy0 + (ptrdiff_t)i * incy] += alpha * s;
             }
         } else {
-            for (ptrdiff_t i = 0; i < N; ++i) {
+            for (ptrdiff_t i = 0; i < n; ++i) {
                 const T *base = &A_(0, i);
                 const ptrdiff_t xi = ix0 + (ptrdiff_t)i * incx;
                 T s = base[0] * x[xi];
-                const ptrdiff_t llen = (i < K) ? i : K;
+                const ptrdiff_t llen = (i < k) ? i : k;
                 ptrdiff_t xx = xi - incx;
                 for (ptrdiff_t d = 1; d <= llen; ++d) { s += base[-(ptrdiff_t)d * s1] * x[xx]; xx -= incx; }
-                const ptrdiff_t rlen = (N - 1 - i < K) ? (N - 1 - i) : K;
+                const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
                 xx = xi + incx;
                 for (ptrdiff_t d = 1; d <= rlen; ++d) { s += base[d] * x[xx]; xx += incx; }
                 y[iy0 + (ptrdiff_t)i * incy] += alpha * s;

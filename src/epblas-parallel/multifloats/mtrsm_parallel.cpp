@@ -37,14 +37,14 @@ namespace {
 
 static void mtrsm_core(
     char side, char uplo, char transa, char diag,
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     T *b, std::ptrdiff_t ldb)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        mtrsm_serial(side, uplo, transa, diag, M, N, alpha_, a, lda,
+        mtrsm_serial(side, uplo, transa, diag, m, n, alpha_, a, lda,
                      b, ldb);
         return;
     }
@@ -56,36 +56,36 @@ static void mtrsm_core(
     if (TR == 'C') TR = 'T';
     const bool nounit = (up(&diag) != 'U');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
-    if (eq0(alpha)) { mtrsm_zero_B(M, N, b, ldb); return; }
+    if (eq0(alpha)) { mtrsm_zero_B(m, n, b, ldb); return; }
 
     if (SIDE == 'L') {
         const std::ptrdiff_t nb = mtrsm_block_nb();
-        const std::ptrdiff_t use_blocked = (M >= 2 * nb);
+        const std::ptrdiff_t use_blocked = (m >= 2 * nb);
 #ifdef _OPENMP
-        const bool use_omp = (N >= MTRSM_OMP_N_MIN && blas_omp_available());
+        const bool use_omp = (n >= MTRSM_OMP_N_MIN && blas_omp_available());
         if (use_omp) {
             #pragma omp parallel
             {
                 std::ptrdiff_t tid = omp_get_thread_num();
                 std::ptrdiff_t nth  = omp_get_num_threads();
-                std::ptrdiff_t js  = blas_part_bound(N, tid, nth);
-                std::ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);
-                mtrsm_L_slice(UPLO, TR, use_blocked, js, je, M, nb, alpha,
+                std::ptrdiff_t js  = blas_part_bound(n, tid, nth);
+                std::ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);
+                mtrsm_L_slice(UPLO, TR, use_blocked, js, je, m, nb, alpha,
                               a, lda, b, ldb, nounit);
             }
             return;
         }
 #endif
-        mtrsm_L_slice(UPLO, TR, use_blocked, 0, N, M, nb, alpha,
+        mtrsm_L_slice(UPLO, TR, use_blocked, 0, n, m, nb, alpha,
                       a, lda, b, ldb, nounit);
     } else {
         /* SIDE='R': partition over rows of B. Round interior boundaries to
          * multiples of 4 so the SIMD 4-row chunks stay aligned; the last
          * thread absorbs the M&3 tail. */
 #ifdef _OPENMP
-        const bool use_omp = (M >= MTRSM_OMP_N_MIN && blas_omp_available());
+        const bool use_omp = (m >= MTRSM_OMP_N_MIN && blas_omp_available());
         #pragma omp parallel if(use_omp)
 #endif
         {
@@ -93,11 +93,11 @@ static void mtrsm_core(
 #ifdef _OPENMP
             if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
-            std::ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
-            std::ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
+            std::ptrdiff_t i_lo = blas_part_bound(m, tid, nth);
+            std::ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
             if (tid > 0)      i_lo &= ~3;
             if (tid < nth - 1) i_hi &= ~3;
-            mtrsm_R_slice(UPLO, TR, i_lo, i_hi, N, alpha, a, lda, b, ldb, nounit);
+            mtrsm_R_slice(UPLO, TR, i_lo, i_hi, n, alpha, a, lda, b, ldb, nounit);
         }
     }
 }

@@ -38,7 +38,7 @@ ptrdiff_t egemmtr_round_up(ptrdiff_t v, ptrdiff_t m);
 void egemmtr_block_sizes(ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
 
 /* C := beta*C over the UPLO triangle of columns [j_start, j_end). */
-void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, char UPLO,
+void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, char UPLO,
                         egemmtr_T beta, egemmtr_T *c, ptrdiff_t ldc);
 
 /* Packers (egemm-style, take separate A and B). */
@@ -63,7 +63,7 @@ void egemmtr_macro_kernel_tri(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_
                               ptrdiff_t row_base, ptrdiff_t col_base, char UPLO);
 
 /* O(N²·K) scalar fallback (alloc failure path). */
-void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, char ta, char tb,
+void egemmtr_scalar_fallback(ptrdiff_t n, ptrdiff_t k, char UPLO, char ta, char tb,
                              egemmtr_T alpha,
                              const egemmtr_T *a, ptrdiff_t lda,
                              const egemmtr_T *b, ptrdiff_t ldb,
@@ -71,7 +71,7 @@ void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, char ta, char 
 
 /* Pure single-thread entry (by-value core). No OpenMP. */
 void egemmtr_serial(char uplo, char transa, char transb,
-                    ptrdiff_t N, ptrdiff_t K,
+                    ptrdiff_t n, ptrdiff_t k,
                     const egemmtr_T *alpha_,
                     const egemmtr_T *restrict a, ptrdiff_t lda,
                     const egemmtr_T *restrict b, ptrdiff_t ldb,

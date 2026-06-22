@@ -39,7 +39,7 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 
 static void xgemm_core(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const xgemm_T *alpha_,
     const xgemm_T *a, ptrdiff_t lda,
     const xgemm_T *b, ptrdiff_t ldb,
@@ -50,7 +50,7 @@ static void xgemm_core(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own. */
     if (omp_in_parallel()) {
-        xgemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+        xgemm_serial(transa, transb, m, n, k, alpha_, a, lda,
                      b, ldb, beta_, c, ldc);
         return;
     }
@@ -61,17 +61,17 @@ static void xgemm_core(
     const char ta = xgemm_trans_code(transa);
     const char tb = xgemm_trans_code(transb);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
     const R *A = (const R *)a;
     const R *B = (const R *)b;
     R *C = (R *)c;
 
-    qblas_ygemm_beta(M, N, beta_r, beta_i, C, ldc);
-    if (K == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
+    qblas_ygemm_beta(m, n, beta_r, beta_i, C, ldc);
+    if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
     xgemm_plan_t p;
-    xgemm_make_plan(M, N, K, ta, tb, &p);
+    xgemm_make_plan(m, n, k, ta, tb, &p);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = blas_omp_max_threads();
@@ -81,7 +81,7 @@ static void xgemm_core(
 #endif
 
     /* Don't fan out for tiny problems — overhead exceeds work. */
-    long mnk = (long)M * (long)N * (long)K;
+    long mnk = (long)m * (long)n * (long)k;
     if (mnk < 64L * 64L * 64L) nthreads = 1;
 
     if (nthreads == 1) {
@@ -89,12 +89,12 @@ static void xgemm_core(
         if (!Ap) return;
         R *Bp = aligned_alloc(64, (p.bp_bytes + 63) & ~(size_t)63);
         if (!Bp) { free(Ap); return; }
-        for (ptrdiff_t js = 0; js < N; js += p.NC) {
-            ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
-            for (ptrdiff_t ls = 0; ls < K; ls += p.KC) {
-                ptrdiff_t pb = (K - ls < p.KC) ? (K - ls) : p.KC;
+        for (ptrdiff_t js = 0; js < n; js += p.NC) {
+            ptrdiff_t jb = (n - js < p.NC) ? (n - js) : p.NC;
+            for (ptrdiff_t ls = 0; ls < k; ls += p.KC) {
+                ptrdiff_t pb = (k - ls < p.KC) ? (k - ls) : p.KC;
                 xgemm_pack_B(&p, B, ldb, js, ls, pb, jb, Bp);
-                xgemm_level3_slab(0, M, &p, alphar, alphai,
+                xgemm_level3_slab(0, m, &p, alphar, alphai,
                                   A, lda, Ap, Bp, js, ls, pb, jb, C, ldc);
             }
         }
@@ -132,15 +132,15 @@ static void xgemm_core(
 #endif
         R *Ap = Ap_arr[tid];
 
-        ptrdiff_t m_chunk = round_up((M + nth - 1) / nth, MR);
+        ptrdiff_t m_chunk = round_up((m + nth - 1) / nth, MR);
         ptrdiff_t m_lo = (ptrdiff_t)tid * m_chunk;
         ptrdiff_t m_hi = m_lo + m_chunk;
-        if (m_hi > M) m_hi = M;
+        if (m_hi > m) m_hi = m;
 
-        for (ptrdiff_t js = 0; js < N; js += p.NC) {
-            ptrdiff_t jb = (N - js < p.NC) ? (N - js) : p.NC;
-            for (ptrdiff_t ls = 0; ls < K; ls += p.KC) {
-                ptrdiff_t pb = (K - ls < p.KC) ? (K - ls) : p.KC;
+        for (ptrdiff_t js = 0; js < n; js += p.NC) {
+            ptrdiff_t jb = (n - js < p.NC) ? (n - js) : p.NC;
+            for (ptrdiff_t ls = 0; ls < k; ls += p.KC) {
+                ptrdiff_t pb = (k - ls < p.KC) ? (k - ls) : p.KC;
 #ifdef _OPENMP
                 #pragma omp barrier
                 #pragma omp single

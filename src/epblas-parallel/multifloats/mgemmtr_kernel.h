@@ -38,14 +38,14 @@ std::ptrdiff_t mgemmtr_block_nb(void);
 
 /* Beta-only pass over columns [j0,j1): scales (or zeros) the UPLO triangle of
  * each column by beta. The body of the alpha==0 / K==0 early-exit loop. */
-void mgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, bool upper,
+void mgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, bool upper,
                        mgemmtr_T beta, mgemmtr_T *c, std::ptrdiff_t ldc);
 
 /* One jc-block of the full update: beta-scale the triangle slice for columns
  * [jc, jc+jb), add the scalar jb×jb diagonal triangle, then route the off-
  * diagonal rectangle through mgemm_serial (the SIMD kernel). Each jc-block is
  * column-disjoint → race-free. ta/tb are pre-normalized ('C'→'T'). */
-void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K,
+void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k,
                         mgemmtr_T alpha, mgemmtr_T beta,
                         const mgemmtr_T *a, std::ptrdiff_t lda,
                         const mgemmtr_T *b, std::ptrdiff_t ldb,
@@ -55,7 +55,7 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, 
 /* Pure-serial by-value core. No OpenMP on this path; internal (no Fortran ABI). */
 extern "C" void mgemmtr_serial(
     char uplo, char transa, char transb,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const mgemmtr_T *alpha_,
     const mgemmtr_T *a, std::ptrdiff_t lda,
     const mgemmtr_T *b, std::ptrdiff_t ldb,

@@ -50,8 +50,8 @@ mf_kernels::wdotu_unit(std::ptrdiff_t n, const multifloats::complex64x2 *x,
 #ifdef MBLAS_SIMD_DD
     __m256d rA0 = _mm256_setzero_pd(), rA1 = _mm256_setzero_pd(), rA2 = _mm256_setzero_pd();
     __m256d iA0 = _mm256_setzero_pd(), iA1 = _mm256_setzero_pd(), iA2 = _mm256_setzero_pd();
-    constexpr std::ptrdiff_t K = 64;
-    std::ptrdiff_t counter = K;
+    constexpr std::ptrdiff_t k = 64;
+    std::ptrdiff_t counter = k;
     const std::ptrdiff_t n4 = n & ~3;
     for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xrh, xrl, xih, xil, yrh, yrl, yih, yil;
@@ -74,7 +74,7 @@ mf_kernels::wdotu_unit(std::ptrdiff_t n, const multifloats::complex64x2 *x,
         if (--counter == 0) {
             renorm3(rA0, rA1, rA2);
             renorm3(iA0, iA1, iA2);
-            counter = K;
+            counter = k;
         }
     }
     __m256d rt = _mm256_add_pd(rA1, rA2);

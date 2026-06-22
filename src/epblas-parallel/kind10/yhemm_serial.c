@@ -23,7 +23,7 @@ ptrdiff_t yhemm_nb(void) { return 32; }
 
 extern void ygemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -131,16 +131,16 @@ static void hemm_diag_add_R(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t ic, ptrdiff_t 
     }
 }
 
-void yhemm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, T beta, T *c, ptrdiff_t ldc)
+void yhemm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T beta, T *c, ptrdiff_t ldc)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         T *cj = c + (size_t)j * ldc;
-        if (beta == ZERO) for (ptrdiff_t i = 0; i < M; ++i) cj[i] = ZERO;
-        else              for (ptrdiff_t i = 0; i < M; ++i) cj[i] *= beta;
+        if (beta == ZERO) for (ptrdiff_t i = 0; i < m; ++i) cj[i] = ZERO;
+        else              for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
 }
 
-void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
+void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m,
                          T alpha, T beta,
                          const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                          T *c, ptrdiff_t ldc, char UPLO)
@@ -149,17 +149,17 @@ void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
         T *cj = c + (size_t)j * ldc;
         const T *bj = b + (size_t)j * ldb;
         if (UPLO == 'L') {
-            for (ptrdiff_t i = M - 1; i >= 0; --i) {
+            for (ptrdiff_t i = m - 1; i >= 0; --i) {
                 const T temp1 = alpha * bj[i];
                 const T *ai = &A_(0, i);
-                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, i + 1, M);
+                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, i + 1, m);
                 const T diag = temp1 * __real__ ai[i] + alpha * temp2;
                 if (beta == ZERO)     cj[i] = diag;
                 else if (beta == ONE) cj[i] += diag;
                 else                  cj[i] = beta * cj[i] + diag;
             }
         } else {
-            for (ptrdiff_t i = 0; i < M; ++i) {
+            for (ptrdiff_t i = 0; i < m; ++i) {
                 const T temp1 = alpha * bj[i];
                 const T *ai = &A_(0, i);
                 const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, 0, i);
@@ -172,18 +172,18 @@ void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M,
     }
 }
 
-void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, T alpha, T beta,
+void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, T alpha, T beta,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                    T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         T *cj = c + (size_t)j * ldc;
-        if (beta == ZERO)      for (ptrdiff_t i = 0; i < M; ++i) cj[i]  = ZERO;
-        else if (beta != ONE)  for (ptrdiff_t i = 0; i < M; ++i) cj[i] *= beta;
+        if (beta == ZERO)      for (ptrdiff_t i = 0; i < m; ++i) cj[i]  = ZERO;
+        else if (beta != ONE)  for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
 
-    for (ptrdiff_t ic = 0; ic < M; ic += nb) {
-        const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
+    for (ptrdiff_t ic = 0; ic < m; ic += nb) {
+        const ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 
         if (UPLO == 'L') {
             for (ptrdiff_t kc = 0; kc < ic; kc += nb) {
@@ -196,8 +196,8 @@ void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, T alpha, T beta,
                              &C_(ic, jc), ldc);
             }
         } else {
-            for (ptrdiff_t kc = ic + ib; kc < M; kc += nb) {
-                const ptrdiff_t kb = (M - kc < nb) ? (M - kc) : nb;
+            for (ptrdiff_t kc = ic + ib; kc < m; kc += nb) {
+                const ptrdiff_t kb = (m - kc < nb) ? (m - kc) : nb;
                 ygemm_serial('C', 'N', kb, jb, ib, &alpha,
                              &A_(ic, kc), lda, &B_(ic, jc), ldb, &ONE,
                              &C_(kc, jc), ldc);
@@ -211,22 +211,22 @@ void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, T alpha, T beta,
     }
 }
 
-void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, T alpha, T beta,
+void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, T alpha, T beta,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                    T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
 {
-    for (ptrdiff_t j = 0; j < N; ++j) {
+    for (ptrdiff_t j = 0; j < n; ++j) {
         T *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i]  = ZERO;
         else if (beta != ONE)  for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] *= beta;
     }
 
-    for (ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
+    for (ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 
         if (UPLO == 'L') {
-            for (ptrdiff_t kc = jc + jb; kc < N; kc += nb) {
-                const ptrdiff_t kb = (N - kc < nb) ? (N - kc) : nb;
+            for (ptrdiff_t kc = jc + jb; kc < n; kc += nb) {
+                const ptrdiff_t kb = (n - kc < nb) ? (n - kc) : nb;
                 ygemm_serial('N', 'N', ib, jb, kb, &alpha,
                              &B_(ic, kc), ldb, &A_(kc, jc), lda, &ONE,
                              &C_(ic, jc), ldc);
@@ -252,7 +252,7 @@ void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, T alpha, T beta,
 
 void yhemm_serial(
     char side, char uplo,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -263,30 +263,30 @@ void yhemm_serial(
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     if (alpha == ZERO) {
         if (beta == ONE) return;
-        yhemm_beta_only(0, N, M, beta, c, ldc);
+        yhemm_beta_only(0, n, m, beta, c, ldc);
         return;
     }
 
     const ptrdiff_t nb = yhemm_nb();
 
-    if (SIDE == 'L' && M <= nb) {
-        yhemm_L_singleblock(0, N, M, alpha, beta, a, lda, b, ldb, c, ldc, UPLO);
+    if (SIDE == 'L' && m <= nb) {
+        yhemm_L_singleblock(0, n, m, alpha, beta, a, lda, b, ldb, c, ldc, UPLO);
         return;
     }
 
     if (SIDE == 'L') {
-        for (ptrdiff_t jc = 0; jc < N; jc += nb) {
-            const ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-            yhemm_L_panel(jc, jb, M, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
+        for (ptrdiff_t jc = 0; jc < n; jc += nb) {
+            const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+            yhemm_L_panel(jc, jb, m, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
         }
     } else {
-        for (ptrdiff_t ic = 0; ic < M; ic += nb) {
-            const ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
-            yhemm_R_panel(ic, ib, N, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
+        for (ptrdiff_t ic = 0; ic < m; ic += nb) {
+            const ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
+            yhemm_R_panel(ic, ib, n, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, nb);
         }
     }
 }

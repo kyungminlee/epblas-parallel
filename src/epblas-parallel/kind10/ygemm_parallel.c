@@ -47,21 +47,21 @@ static ptrdiff_t trans_code(char c) {
 enum ygemm_klass { Y_NN, Y_TN, Y_NT, Y_TT };
 
 static inline void ygemm_dispatch(enum ygemm_klass klass, ptrdiff_t js, ptrdiff_t je,
-                                  ptrdiff_t M, ptrdiff_t K, T alpha,
+                                  ptrdiff_t m, ptrdiff_t k, T alpha,
                                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                                   T *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
 {
     switch (klass) {
-    case Y_NN: ygemm_nn_core(js, je, M, K, alpha, a, lda, b, ldb, c, ldc); break;
-    case Y_TN: ygemm_tn_core(js, je, M, K, alpha, a, lda, b, ldb, c, ldc, conj_a); break;
-    case Y_NT: ygemm_nt_core(js, je, M, K, alpha, a, lda, b, ldb, c, ldc, conj_b); break;
-    case Y_TT: ygemm_tt_core(js, je, M, K, alpha, a, lda, b, ldb, c, ldc, conj_a, conj_b); break;
+    case Y_NN: ygemm_nn_core(js, je, m, k, alpha, a, lda, b, ldb, c, ldc); break;
+    case Y_TN: ygemm_tn_core(js, je, m, k, alpha, a, lda, b, ldb, c, ldc, conj_a); break;
+    case Y_NT: ygemm_nt_core(js, je, m, k, alpha, a, lda, b, ldb, c, ldc, conj_b); break;
+    case Y_TT: ygemm_tt_core(js, je, m, k, alpha, a, lda, b, ldb, c, ldc, conj_a, conj_b); break;
     }
 }
 
 static void ygemm_core(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     const T *b, ptrdiff_t ldb,
@@ -72,7 +72,7 @@ static void ygemm_core(
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        ygemm_serial(transa, transb, M, N, K, alpha_, a, lda,
+        ygemm_serial(transa, transb, m, n, k, alpha_, a, lda,
                      b, ldb, beta_, c, ldc);
         return;
     }
@@ -82,10 +82,10 @@ static void ygemm_core(
     const char ta = trans_code(transa);
     const char tb = trans_code(transb);
 
-    if (M <= 0 || N <= 0) return;
+    if (m <= 0 || n <= 0) return;
 
-    ygemm_beta_prepass(M, N, beta, c, ldc);
-    if (alpha == zero || K == 0) return;
+    ygemm_beta_prepass(m, n, beta, c, ldc);
+    if (alpha == zero || k == 0) return;
 
     const bool conj_a = (ta == 'C');
     const bool conj_b = (tb == 'C');
@@ -96,20 +96,20 @@ static void ygemm_core(
     else                                              klass = Y_TT;
 
 #ifdef _OPENMP
-    if (N >= YGEMM_OMP_N_MIN && blas_omp_max_threads() > 1) {
+    if (n >= YGEMM_OMP_N_MIN && blas_omp_max_threads() > 1) {
         #pragma omp parallel
         {
             ptrdiff_t tid = omp_get_thread_num();
             ptrdiff_t nth  = omp_get_num_threads();
-            ptrdiff_t js  = blas_part_bound(N, tid, nth);
-            ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);
-            ygemm_dispatch(klass, js, je, M, K, alpha, a, lda, b, ldb,
+            ptrdiff_t js  = blas_part_bound(n, tid, nth);
+            ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);
+            ygemm_dispatch(klass, js, je, m, k, alpha, a, lda, b, ldb,
                            c, ldc, conj_a, conj_b);
         }
         return;
     }
 #endif
-    ygemm_dispatch(klass, 0, N, M, K, alpha, a, lda, b, ldb,
+    ygemm_dispatch(klass, 0, n, m, k, alpha, a, lda, b, ldb,
                    c, ldc, conj_a, conj_b);
 }
 

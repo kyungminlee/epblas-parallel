@@ -35,26 +35,26 @@ typedef __complex128 xtrmm_T;
 char xtrmm_uplo(char c);
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
-void xtrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
+void xtrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_T alpha,
                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
+void xtrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_T alpha,
                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrmm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
+void xtrmm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_T alpha,
                      const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void xtrmm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, xtrmm_T alpha,
+void xtrmm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_T alpha,
                      const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
-void xtrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
+void xtrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T alpha,
                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
+void xtrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T alpha,
                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrmm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
+void xtrmm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T alpha,
                      const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void xtrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T alpha,
+void xtrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T alpha,
                      const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
@@ -63,7 +63,7 @@ void xtrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t N, xtrmm_T al
  * the ptrdiff_t core ABI of xtrmm_core. */
 void xtrmm_serial(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const xtrmm_T *alpha_,
     const xtrmm_T *a, ptrdiff_t lda,
     xtrmm_T *b, ptrdiff_t ldb);

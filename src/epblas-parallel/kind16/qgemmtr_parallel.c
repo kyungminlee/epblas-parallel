@@ -35,7 +35,7 @@
 typedef qgemmtr_T T;
 
 static void qgemmtr_core(char uplo_c, char transa, char transb,
-              ptrdiff_t N, ptrdiff_t K,
+              ptrdiff_t n, ptrdiff_t k,
               const T *alpha_,
               const T *a, ptrdiff_t lda,
               const T *b, ptrdiff_t ldb,
@@ -47,26 +47,26 @@ static void qgemmtr_core(char uplo_c, char transa, char transb,
     const char ta = qgemmtr_trans_code(&transa);
     const char tb = qgemmtr_trans_code(&transb);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
     const T zero = 0.0Q, one = 1.0Q;
 
-    if (alpha == zero || K == 0) {
+    if (alpha == zero || k == 0) {
         if (beta == one) return;
 #ifdef _OPENMP
-        const bool use_omp0 = (N >= QGEMMTR_OMP_MIN && blas_omp_should_thread());
+        const bool use_omp0 = (n >= QGEMMTR_OMP_MIN && blas_omp_should_thread());
         #pragma omp parallel for if(use_omp0) schedule(static, 1)
 #endif
-        for (ptrdiff_t j = 0; j < N; ++j)
-            qgemmtr_beta_core(j, j + 1, N, upper, beta, c, ldc);
+        for (ptrdiff_t j = 0; j < n; ++j)
+            qgemmtr_beta_core(j, j + 1, n, upper, beta, c, ldc);
         return;
     }
 
 #ifdef _OPENMP
-    const bool use_omp = (N >= QGEMMTR_OMP_MIN && blas_omp_should_thread());
+    const bool use_omp = (n >= QGEMMTR_OMP_MIN && blas_omp_should_thread());
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-    for (ptrdiff_t j = 0; j < N; ++j)
-        qgemmtr_compute_core(j, j + 1, N, upper, K, ta, tb,
+    for (ptrdiff_t j = 0; j < n; ++j)
+        qgemmtr_compute_core(j, j + 1, n, upper, k, ta, tb,
                              alpha, beta, a, lda, b, ldb, c, ldc);
 }
 

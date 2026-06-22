@@ -218,45 +218,45 @@ void egemmtr_macro_kernel_tri(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, T alpha,
     }
 }
 
-void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, char UPLO,
+void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, char UPLO,
                         T beta, T *c, ptrdiff_t ldc)
 {
     const T zero = 0.0L;
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         const ptrdiff_t is = (UPLO == 'L') ? j : 0;
-        const ptrdiff_t ie = (UPLO == 'L') ? N : j + 1;
+        const ptrdiff_t ie = (UPLO == 'L') ? n : j + 1;
         T *cj = &C_(0, j);
         if (beta == zero) for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
         else              for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
     }
 }
 
-void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, char ta, char tb,
+void egemmtr_scalar_fallback(ptrdiff_t n, ptrdiff_t k, char UPLO, char ta, char tb,
                              T alpha,
                              const T *a, ptrdiff_t lda,
                              const T *b, ptrdiff_t ldb,
                              T *c, ptrdiff_t ldc)
 {
     const T zero = 0.0L;
-    for (ptrdiff_t j = 0; j < N; ++j) {
+    for (ptrdiff_t j = 0; j < n; ++j) {
         const ptrdiff_t is = (UPLO == 'L') ? j : 0;
-        const ptrdiff_t ie = (UPLO == 'L') ? N : j + 1;
+        const ptrdiff_t ie = (UPLO == 'L') ? n : j + 1;
         T *cj = &C_(0, j);
         for (ptrdiff_t i = is; i < ie; ++i) {
             T s = zero;
             if (ta == 'N') {
                 if (tb == 'N')
-                    for (ptrdiff_t l = 0; l < K; ++l)
+                    for (ptrdiff_t l = 0; l < k; ++l)
                         s += a[(size_t)l * lda + i] * b[(size_t)j * ldb + l];
                 else
-                    for (ptrdiff_t l = 0; l < K; ++l)
+                    for (ptrdiff_t l = 0; l < k; ++l)
                         s += a[(size_t)l * lda + i] * b[(size_t)l * ldb + j];
             } else {
                 if (tb == 'N')
-                    for (ptrdiff_t l = 0; l < K; ++l)
+                    for (ptrdiff_t l = 0; l < k; ++l)
                         s += a[(size_t)i * lda + l] * b[(size_t)j * ldb + l];
                 else
-                    for (ptrdiff_t l = 0; l < K; ++l)
+                    for (ptrdiff_t l = 0; l < k; ++l)
                         s += a[(size_t)i * lda + l] * b[(size_t)l * ldb + j];
             }
             cj[i] += alpha * s;
@@ -267,7 +267,7 @@ void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, char ta, char 
 /* ─── Serial entry ─────────────────────────────────────────────── */
 
 void egemmtr_serial(char uplo, char transa, char transb,
-                    ptrdiff_t N, ptrdiff_t K,
+                    ptrdiff_t n, ptrdiff_t k,
                     const T *alpha_,
                     const T *restrict a, ptrdiff_t lda,
                     const T *restrict b, ptrdiff_t ldb,
@@ -279,21 +279,21 @@ void egemmtr_serial(char uplo, char transa, char transb,
     const char ta = egemmtr_trans_code(&transa);
     const char tb = egemmtr_trans_code(&transb);
 
-    if (N <= 0) return;
+    if (n <= 0) return;
     const T zero = 0.0L, one = 1.0L;
 
-    if (alpha == zero || K == 0) {
+    if (alpha == zero || k == 0) {
         if (beta == one) return;
-        egemmtr_beta_scale(0, N, N, UPLO, beta, c, ldc);
+        egemmtr_beta_scale(0, n, n, UPLO, beta, c, ldc);
         return;
     }
 
     if (beta != one)
-        egemmtr_beta_scale(0, N, N, UPLO, beta, c, ldc);
+        egemmtr_beta_scale(0, n, n, UPLO, beta, c, ldc);
 
     ptrdiff_t MC, KC, NC;
     egemmtr_block_sizes(&MC, &KC, &NC);
-    if (NC > N) NC = N;
+    if (NC > n) NC = n;
     if (NC < NR) NC = NR;
 
     const ptrdiff_t sa_rows = egemmtr_round_up(MC, MR);
@@ -305,17 +305,17 @@ void egemmtr_serial(char uplo, char transa, char transb,
     T *Ap = Bp ? (T *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63) : NULL;
     if (!Bp || !Ap) {
         free(Ap); free(Bp);
-        egemmtr_scalar_fallback(N, K, UPLO, ta, tb, alpha, a, lda, b, ldb, c, ldc);
+        egemmtr_scalar_fallback(n, k, UPLO, ta, tb, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
-    for (ptrdiff_t jc = 0; jc < N; jc += NC) {
-        const ptrdiff_t jb = imin(NC, N - jc);
-        for (ptrdiff_t pc = 0; pc < K; pc += KC) {
-            const ptrdiff_t pb = imin(KC, K - pc);
+    for (ptrdiff_t jc = 0; jc < n; jc += NC) {
+        const ptrdiff_t jb = imin(NC, n - jc);
+        for (ptrdiff_t pc = 0; pc < k; pc += KC) {
+            const ptrdiff_t pb = imin(KC, k - pc);
             egemmtr_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-            for (ptrdiff_t ic = 0; ic < N; ic += MC) {
-                const ptrdiff_t ib = imin(MC, N - ic);
+            for (ptrdiff_t ic = 0; ic < n; ic += MC) {
+                const ptrdiff_t ib = imin(MC, n - ic);
 
                 ptrdiff_t tile_class;
                 if (UPLO == 'L') {

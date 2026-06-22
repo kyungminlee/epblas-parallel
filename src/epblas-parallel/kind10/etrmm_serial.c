@@ -62,14 +62,13 @@ static inline void pack_trmm_a(bool side_l, bool uplo_upper, bool trans, bool un
  * over-N-slice partitioning, each thread has its own (Ap, Bp).
  */
 void etrmm_L_band(bool upper, bool trans, bool unit,
-                        ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
+                        ptrdiff_t m, ptrdiff_t js0, ptrdiff_t js1,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                         const T *a, ptrdiff_t lda,
                         T *b, ptrdiff_t ldb,
                         T *Ap, T *Bp)
 {
     const T dp1 = 1.0L;
-    ptrdiff_t m = M;
 
     /* Outer js-loop walks the thread's N-band in steps of NC = GEMM_R. */
     for (ptrdiff_t js = js0; js < js1; js += NC) {
@@ -319,7 +318,7 @@ void etrmm_L_band(bool upper, bool trans, bool unit,
  * opposite.
  */
 void etrmm_R_band(bool upper, bool trans, bool unit,
-                        ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
+                        ptrdiff_t n, ptrdiff_t m_lo, ptrdiff_t m_hi,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
                         const T *a, ptrdiff_t lda,
                         T *b, ptrdiff_t ldb,
@@ -342,8 +341,8 @@ void etrmm_R_band(bool upper, bool trans, bool unit,
         /* trmm_R.c lines 109-241. Uses TRMM_KERNEL_T = TRMM_KERNEL_RT
          * (kernel runs in (left=0, trans=1) mode). */
         const ptrdiff_t kt = 1;
-        for (ptrdiff_t js = 0; js < N; js += NC) {
-            ptrdiff_t min_j = N - js;
+        for (ptrdiff_t js = 0; js < n; js += NC) {
+            ptrdiff_t min_j = n - js;
             if (min_j > NC) min_j = NC;
 
             for (ptrdiff_t ls = js; ls < js + min_j; ls += KC) {
@@ -418,8 +417,8 @@ void etrmm_R_band(bool upper, bool trans, bool unit,
             }
 
             /* Pure-GEMM tail for ls > js+min_j. */
-            for (ptrdiff_t ls = js + min_j; ls < N; ls += KC) {
-                ptrdiff_t min_l = N - ls;
+            for (ptrdiff_t ls = js + min_j; ls < n; ls += KC) {
+                ptrdiff_t min_l = n - ls;
                 if (min_l > KC) min_l = KC;
                 ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
@@ -464,7 +463,7 @@ void etrmm_R_band(bool upper, bool trans, bool unit,
          * Uses TRMM_KERNEL_N = TRMM_KERNEL_RN (kernel runs in (left=0,
          * trans=0) mode). */
         const ptrdiff_t kt = 0;
-        for (ptrdiff_t js = N; js > 0; js -= NC) {
+        for (ptrdiff_t js = n; js > 0; js -= NC) {
             ptrdiff_t min_j = js;
             if (min_j > NC) min_j = NC;
 
@@ -590,7 +589,7 @@ void etrmm_R_band(bool upper, bool trans, bool unit,
  */
 void etrmm_serial(
     char side, char uplo, char transa, char diag,
-    ptrdiff_t M, ptrdiff_t N,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha_,
     const T *a, ptrdiff_t lda,
     T *b, ptrdiff_t ldb)
@@ -603,14 +602,14 @@ void etrmm_serial(
     const bool trans = (TR == 'T' || TR == 'C');   /* real: 'C' ≡ 'T' */
     const bool unit  = (blas_up(diag) == 'U');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
     /* α pre-scale of B in place, then the nest runs kernel-alpha = 1
      * (mirrors trmm_{L,R}.c GEMM_BETA pass; alpha == 0 → B := 0). */
-    if (alpha != 1.0L) egemm_beta_prepass(M, N, alpha, b, ldb);
+    if (alpha != 1.0L) egemm_beta_prepass(m, n, alpha, b, ldb);
     if (alpha == 0.0L) return;
 
-    const ptrdiff_t K_eff = lside ? M : N;
+    const ptrdiff_t K_eff = lside ? m : n;
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
@@ -619,9 +618,9 @@ void etrmm_serial(
     T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
-        if (lside) etrmm_L_band(upper, trans, unit, M, 0, N,
+        if (lside) etrmm_L_band(upper, trans, unit, m, 0, n,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
-        else       etrmm_R_band(upper, trans, unit, N, 0, M,
+        else       etrmm_R_band(upper, trans, unit, n, 0, m,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
     }
     free(Ap);

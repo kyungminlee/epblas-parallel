@@ -62,22 +62,22 @@ using simd_exact::load_dd4;
  * scatter over only its rows (matrix read contiguous in i; ascending j ->
  * bit-exact vs serial). SIMD build packs y to SoA and uses the AVX2 DD kernel;
  * the scalar fallback runs the reference inner loop. */
-static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T *a, std::size_t lda,
+static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T *a, std::size_t lda,
                            const T *x, T *y)
 {
     std::ptrdiff_t nthreads = 1;
 #ifdef _OPENMP
-    if (M >= MGEMV_OMP_MIN && blas_omp_should_thread()) {
+    if (m >= MGEMV_OMP_MIN && blas_omp_should_thread()) {
         nthreads = blas_omp_max_threads();
         if (nthreads > MGEMV_MAX_CPUS) nthreads = MGEMV_MAX_CPUS;
     }
 #endif
 #ifdef MBLAS_SIMD_DD
-    const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
+    const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
     double *y_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
     double *y_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    for (std::ptrdiff_t i = 0; i < M; ++i) { y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1]; }
-    for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) { y_hi[i] = 0.0; y_lo[i] = 0.0; }
+    for (std::ptrdiff_t i = 0; i < m; ++i) { y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1]; }
+    for (std::size_t i = static_cast<std::size_t>(m); i < M_pad; ++i) { y_hi[i] = 0.0; y_lo[i] = 0.0; }
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nthreads)
 #endif
@@ -86,9 +86,9 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const std::ptrdiff_t lo = blas_part_bound(M, tid, nthreads);
-        const std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nthreads);
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        const std::ptrdiff_t lo = blas_part_bound(m, tid, nthreads);
+        const std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nthreads);
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;
             const T t = alpha * xj;
@@ -115,7 +115,7 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
             }
         }
     }
-    for (std::ptrdiff_t i = 0; i < M; ++i) { y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i]; }
+    for (std::ptrdiff_t i = 0; i < m; ++i) { y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i]; }
     std::free(y_hi); std::free(y_lo);
 #else
 #ifdef _OPENMP
@@ -126,9 +126,9 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const std::ptrdiff_t lo = blas_part_bound(M, tid, nthreads);
-        const std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nthreads);
-        for (std::ptrdiff_t j = 0; j < N; ++j) {
+        const std::ptrdiff_t lo = blas_part_bound(m, tid, nthreads);
+        const std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nthreads);
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;
             const T t = alpha * xj;
@@ -143,27 +143,27 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
  * Columns are independent dots over the shared read-only x; thread over j
  * (disjoint y[j], per-j reduction order fixed). SIMD build runs a 4-lane SoA
  * DD accumulator + hi/lo horizontal reduce; scalar fallback a plain dot. */
-static void mgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T *a, std::size_t lda,
+static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T *a, std::size_t lda,
                            const T *x, T *y)
 {
 #ifdef _OPENMP
-    const bool use_omp = (N >= MGEMV_OMP_MIN && blas_omp_should_thread());
+    const bool use_omp = (n >= MGEMV_OMP_MIN && blas_omp_should_thread());
 #endif
 #ifdef MBLAS_SIMD_DD
-    const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
+    const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
     double *x_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
     double *x_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    for (std::ptrdiff_t i = 0; i < M; ++i) { x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1]; }
-    for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
+    for (std::ptrdiff_t i = 0; i < m; ++i) { x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1]; }
+    for (std::size_t i = static_cast<std::size_t>(m); i < M_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
     const __m256d zerov = _mm256_setzero_pd();
 #ifdef _OPENMP
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
         const double *aj = reinterpret_cast<const double *>(&A_(0, j));
         __m256d s_h = zerov, s_l = zerov;
         std::ptrdiff_t i = 0;
-        for (; i + 3 < M; i += 4) {
+        for (; i + 3 < m; i += 4) {
             __m256d a_h, a_l;
             load_dd4(aj + 2 * i, a_h, a_l);
             __m256d xh = _mm256_loadu_pd(x_hi + i);
@@ -188,7 +188,7 @@ static void mgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
         _mm256_storeu_pd(red_l, r_l);
         T s{red_h[0], red_l[0]};
         const T *ajs = &A_(0, j);
-        for (; i < M; ++i) s = s + ajs[i] * T{x_hi[i], x_lo[i]};
+        for (; i < m; ++i) s = s + ajs[i] * T{x_hi[i], x_lo[i]};
         y[j] = y[j] + alpha * s;
     }
     std::free(x_hi); std::free(x_lo);
@@ -196,10 +196,10 @@ static void mgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #ifdef _OPENMP
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (std::ptrdiff_t j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < n; ++j) {
         const T *aj = &A_(0, j);
         T s = zero_dd;
-        for (std::ptrdiff_t i = 0; i < M; ++i) s = s + aj[i] * x[i];
+        for (std::ptrdiff_t i = 0; i < m; ++i) s = s + aj[i] * x[i];
         y[j] = y[j] + alpha * s;
     }
 #endif
@@ -207,7 +207,7 @@ static void mgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 
 static void mgemv_core(
     char trans,
-    std::ptrdiff_t M, std::ptrdiff_t N,
+    std::ptrdiff_t m, std::ptrdiff_t n,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda_,
     const T *x, std::ptrdiff_t incx,
@@ -220,17 +220,17 @@ static void mgemv_core(
     if (TR == 'C') TR = 'T';
     const bool notrans = (TR == 'N');
 
-    if (M == 0 || N == 0) return;
+    if (m == 0 || n == 0) return;
 
-    const std::ptrdiff_t leny = notrans ? M : N;
-    const std::ptrdiff_t lenx = notrans ? N : M;
+    const std::ptrdiff_t leny = notrans ? m : n;
+    const std::ptrdiff_t lenx = notrans ? n : m;
 
     mf_kernels::scale_y(leny, beta, y, incy);
     if (eq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
-        if (notrans) mgemv_n_contig(M, N, alpha, a, lda, x, y);
-        else         mgemv_t_contig(M, N, alpha, a, lda, x, y);
+        if (notrans) mgemv_n_contig(m, n, alpha, a, lda, x, y);
+        else         mgemv_t_contig(m, n, alpha, a, lda, x, y);
         return;
     }
 
@@ -239,8 +239,8 @@ static void mgemv_core(
     std::vector<T> xs(static_cast<std::size_t>(lenx)), ys(static_cast<std::size_t>(leny));
     mf_kernels::gather_strided(lenx, x, incx, xs.data());
     mf_kernels::gather_strided(leny, y, incy, ys.data());
-    if (notrans) mgemv_n_contig(M, N, alpha, a, lda, xs.data(), ys.data());
-    else         mgemv_t_contig(M, N, alpha, a, lda, xs.data(), ys.data());
+    if (notrans) mgemv_n_contig(m, n, alpha, a, lda, xs.data(), ys.data());
+    else         mgemv_t_contig(m, n, alpha, a, lda, xs.data(), ys.data());
     mf_kernels::scatter_strided(leny, y, incy, ys.data());
 }
 

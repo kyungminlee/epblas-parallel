@@ -36,7 +36,7 @@ namespace {
 
 static void mgemmtr_core(
     char uplo, char transa, char transb,
-    std::ptrdiff_t N, std::ptrdiff_t K,
+    std::ptrdiff_t n, std::ptrdiff_t k,
     const T *alpha_,
     const T *a, std::ptrdiff_t lda,
     const T *b, std::ptrdiff_t ldb,
@@ -45,7 +45,7 @@ static void mgemmtr_core(
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
-        mgemmtr_serial(uplo, transa, transb, N, K, alpha_, a, lda,
+        mgemmtr_serial(uplo, transa, transb, n, k, alpha_, a, lda,
                        b, ldb, beta_, c, ldc);
         return;
     }
@@ -55,27 +55,27 @@ static void mgemmtr_core(
     char ta = up(&transa); if (ta == 'C') ta = 'T';
     char tb = up(&transb); if (tb == 'C') tb = 'T';
 
-    if (N <= 0) return;
+    if (n <= 0) return;
 
-    if (eq0(alpha) || K == 0) {
+    if (eq0(alpha) || k == 0) {
         if (eq1(beta)) return;
 #ifdef _OPENMP
-        const bool use_omp0 = (N >= MGEMMTR_OMP_MIN && blas_omp_available());
+        const bool use_omp0 = (n >= MGEMMTR_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp0) schedule(static)
 #endif
-        for (std::ptrdiff_t j = 0; j < N; ++j)
-            mgemmtr_beta_core(j, j + 1, N, upper, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < n; ++j)
+            mgemmtr_beta_core(j, j + 1, n, upper, beta, c, ldc);
         return;
     }
 
     const std::ptrdiff_t nb = mgemmtr_block_nb();
 #ifdef _OPENMP
-    const bool use_omp = (N >= MGEMMTR_OMP_MIN && blas_omp_available());
+    const bool use_omp = (n >= MGEMMTR_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
-        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
-        mgemmtr_block_core(jc, jb, N, K, alpha, beta,
+    for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
+        const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
+        mgemmtr_block_core(jc, jb, n, k, alpha, beta,
                            a, lda, b, ldb, c, ldc, upper, ta, tb);
     }
 }

@@ -49,10 +49,10 @@ ptrdiff_t qgemm_round_up(ptrdiff_t v, ptrdiff_t m);
 
 /* Cache-block sizes (env-overridable QBLAS_MC/KC/NC) with OpenBLAS-style
  * adaptive MC when K fits one panel. */
-void qgemm_choose_blocks(ptrdiff_t K, ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
+void qgemm_choose_blocks(ptrdiff_t k, ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
 
 /* C := beta*C pre-pass over the full M×N tile (handles K==0 / alpha==0). */
-void qgemm_beta_prepass(ptrdiff_t M, ptrdiff_t N, qgemm_T beta, qgemm_T *c, ptrdiff_t ldc);
+void qgemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, qgemm_T beta, qgemm_T *c, ptrdiff_t ldc);
 
 /* Packers (panel-packed, OpenBLAS-style). */
 void qgemm_pack_A(const qgemm_T *restrict A, ptrdiff_t lda,
@@ -72,7 +72,7 @@ void qgemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, qgemm_T alpha,
  * every K and size because packing buys nothing without SIMD and A^T already
  * streams both operands stride-1 along the contraction index. The C-column
  * loop is threaded over j2 in the qgemm_ parallel entry. */
-void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, qgemm_T alpha,
+void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, qgemm_T alpha,
                     const qgemm_T *a, ptrdiff_t lda, const qgemm_T *b, ptrdiff_t ldb,
                     qgemm_T *c, ptrdiff_t ldc);
 
@@ -82,7 +82,7 @@ void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t M, ptrdiff_t K, qgemm_T alpha,
  * region can swap the symbol name only. */
 void qgemm_serial(
     char transa, char transb,
-    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
+    ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const qgemm_T *alpha_,
     const qgemm_T *a, ptrdiff_t lda,
     const qgemm_T *b, ptrdiff_t ldb,
