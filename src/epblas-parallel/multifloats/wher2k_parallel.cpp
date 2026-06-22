@@ -5,8 +5,8 @@
  * per-column triangle scaler and the diagonal-imaginary zeroer), shared
  * through wher2k_kernel.h.
  *
- *   C := alpha · A · Bᴴ + conj(alpha) · B · Aᴴ + beta · C  (TR='N')
- *   C := alpha · Aᴴ · B + conj(alpha) · Bᴴ · A + beta · C  (TR='C')
+ *   C := alpha · A · Bᴴ + conj(alpha) · B · Aᴴ + beta · C  (TR_c='N')
+ *   C := alpha · Aᴴ · B + conj(alpha) · Bᴴ · A + beta · C  (TR_c='C')
  *   alpha complex, beta real, A/B/C complex, the diagonal of C stays real.
  *
  * One `omp parallel for` over the jc BLOCK loop (schedule(dynamic,1)). Each
@@ -28,8 +28,8 @@
 #endif
 
 namespace mf = multifloats;
-using R = mf::float64x2;
-using T = mf::complex64x2;
+using TR = mf::float64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -43,11 +43,11 @@ namespace {
 static void wher2k_core(
     char uplo, char trans,
     std::ptrdiff_t N, std::ptrdiff_t K,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const R *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TC *b, std::ptrdiff_t ldb,
+    const TR *beta_,
+    TC *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
@@ -56,8 +56,8 @@ static void wher2k_core(
         return;
     }
 #endif
-    const T alpha = *alpha_;
-    const R beta  = *beta_;
+    const TC alpha = *alpha_;
+    const TR beta  = *beta_;
     const char UPLO = up(&uplo);
     const char TR_c = up(&trans);
     (void)lda; (void)ldb;
@@ -90,5 +90,5 @@ static void wher2k_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SYR2K(wher2k, T, R, T)
+EPBLAS_FACADE_SYR2K(wher2k, TC, TR, TC)
 }

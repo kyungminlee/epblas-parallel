@@ -5,7 +5,7 @@
  * per-column triangle scaler and the diagonal-imaginary zeroer), shared
  * through wherk_kernel.h.
  *
- *   C := α·A·Aᴴ + β·C   (TR='N')      C := α·Aᴴ·A + β·C   (TR='C')
+ *   C := α·A·Aᴴ + β·C   (TR_c='N')      C := α·Aᴴ·A + β·C   (TR_c='C')
  *   alpha/beta REAL, A/C complex, the diagonal of C stays real.
  *
  * One `omp parallel for` over the jc BLOCK loop (schedule(dynamic,1)). Each
@@ -27,8 +27,8 @@
 #endif
 
 namespace mf = multifloats;
-using R = mf::float64x2;
-using T = mf::complex64x2;
+using TR = mf::float64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -42,10 +42,10 @@ namespace {
 static void wherk_core(
     char uplo, char trans,
     std::ptrdiff_t N, std::ptrdiff_t K,
-    const R *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const R *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TR *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TR *beta_,
+    TC *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
@@ -53,7 +53,7 @@ static void wherk_core(
         return;
     }
 #endif
-    const R alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
     const char TR_c = up(&trans);
 
@@ -85,5 +85,5 @@ static void wherk_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SYRK(wherk, R, T)
+EPBLAS_FACADE_SYRK(wherk, TR, TC)
 }

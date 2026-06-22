@@ -3,8 +3,8 @@
  * single-thread worker. Owns ALL the numerics; no OpenMP on this path.
  * alpha/beta REAL, A/C complex, the diagonal of C stays real. TRANS ∈ {N, C}.
  *
- * Blocked: AVX2 SIMD diagonal (real-alpha scaling, conjugated panel for TR='N',
- * conjugated Ai for TR='C', real-diag preservation on unpack) + scalar diagonal
+ * Blocked: AVX2 SIMD diagonal (real-alpha scaling, conjugated panel for TR_c='N',
+ * conjugated Ai for TR_c='C', real-diag preservation on unpack) + scalar diagonal
  * fallback + wgemm_serial trailing with conjugate transpose.
  *
  * The trailing rank-k update routes through wgemm_serial (no nested OpenMP) so
@@ -26,8 +26,8 @@
 #endif
 
 namespace mf = multifloats;
-using R = mf::float64x2;
-using T = mf::complex64x2;
+using TR = mf::float64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -39,8 +39,8 @@ using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
 
-const R rzero{0.0, 0.0};
-const T czero{ rzero, rzero };
+const TR rzero{0.0, 0.0};
+const TC czero{ rzero, rzero };
 
 
 using mf_kernels::cmul;
@@ -58,11 +58,11 @@ constexpr std::ptrdiff_t kMaxBlockM = 128;
 constexpr std::ptrdiff_t kMaxK      = 512;
 
 inline void pack_4col_cdd(std::ptrdiff_t count, std::ptrdiff_t row_start,
-                          const T *m, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
+                          const TC *m, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                           double *rh, double *rl, double *ih, double *il)
 {
     for (std::ptrdiff_t j = 0; j < j_count; ++j) {
-        const T *col = m + static_cast<std::size_t>(j_start + j) * ldm;
+        const TC *col = m + static_cast<std::size_t>(j_start + j) * ldm;
         for (std::ptrdiff_t i = 0; i < count; ++i) {
             rh[i * kSimdLane + j] = col[row_start + i].re.limbs[0];
             rl[i * kSimdLane + j] = col[row_start + i].re.limbs[1];
@@ -81,7 +81,7 @@ inline void pack_4col_cdd(std::ptrdiff_t count, std::ptrdiff_t row_start,
  * (i == j_abs) overwrite only the .re limbs, keeping .im of the
  * original C[i,i] (Netlib herk preserves c.im on diagonal). */
 inline void unpack_4col_herk_triangle(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
-                                      char UPLO, T *c, std::ptrdiff_t ldc,
+                                      char UPLO, TC *c, std::ptrdiff_t ldc,
                                       const double *rh, const double *rl,
                                       const double *ih, const double *il)
 {
@@ -90,7 +90,7 @@ inline void unpack_4col_herk_triangle(std::ptrdiff_t jc, std::ptrdiff_t jb, std:
         const std::ptrdiff_t j_abs = j_start + j;
         const std::ptrdiff_t i_lo = (UPLO == 'L') ? j_abs   : jc;
         const std::ptrdiff_t i_hi = (UPLO == 'L') ? jc + jb : j_abs + 1;
-        T *col = c + static_cast<std::size_t>(j_abs) * ldc;
+        TC *col = c + static_cast<std::size_t>(j_abs) * ldc;
         for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
             const std::ptrdiff_t ir = i - jc;
             col[i].re.limbs[0] = rh[ir * kSimdLane + j];
@@ -106,11 +106,11 @@ inline void unpack_4col_herk_triangle(std::ptrdiff_t jc, std::ptrdiff_t jb, std:
 
 using simd_exact::vbcast;
 
-/* TR='N' rank-1 with Hermitian-conjugated Aj panel and real alpha.
+/* TR_c='N' rank-1 with Hermitian-conjugated Aj panel and real alpha.
  * t = alpha · conj(A(j_panel..+4, l));
  * C[i, j_panel..+4] += t · A(i, l). */
-inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, R alpha,
-                             const T *a, std::ptrdiff_t lda,
+inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR alpha,
+                             const TC *a, std::ptrdiff_t lda,
                              std::ptrdiff_t j_panel, std::ptrdiff_t j_count,
                              double *crh, double *crl,
                              double *cih, double *cil)
@@ -121,7 +121,7 @@ inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_
     alignas(32) double aj_ih[kSimdLane], aj_il[kSimdLane];
     for (std::ptrdiff_t l = 0; l < K; ++l) {
         for (std::ptrdiff_t j = 0; j < j_count; ++j) {
-            const T v = A_(j_panel + j, l);
+            const TC v = A_(j_panel + j, l);
             aj_rh[j] = v.re.limbs[0]; aj_rl[j] = v.re.limbs[1];
             aj_ih[j] = -v.im.limbs[0]; aj_il[j] = -v.im.limbs[1];   /* conj */
         }
@@ -161,14 +161,14 @@ inline void simd_herk_diag_n(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_
     }
 }
 
-/* TR='C' dot product SIMD, KC-tiled: accumulate the conjugated complex DD dot
+/* TR_c='C' dot product SIMD, KC-tiled: accumulate the conjugated complex DD dot
  * Σ conj(Ai[l])·Aj over l ∈ [l0, l0+kc) into the per-row 4-wide accumulator acc.
  * ajrh/.../ajil hold this chunk's 4 packed Aj columns (un-conjugated) at
  * chunk-local rows 0..kc-1. acc is loaded/stored each call, so accumulation
  * continues across chunks in the same order as a single l=0..K-1 loop →
  * bit-identical to the untiled path. Alpha is applied once after all chunks. */
 inline void simd_herk_diag_c_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t kc,
-                                   const T *a, std::ptrdiff_t lda, std::ptrdiff_t l0,
+                                   const TC *a, std::ptrdiff_t lda, std::ptrdiff_t l0,
                                    const double *ajrh, const double *ajrl,
                                    const double *ajih, const double *ajil,
                                    double *acc_rh, double *acc_rl,
@@ -176,7 +176,7 @@ inline void simd_herk_diag_c_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
 {
     for (std::ptrdiff_t i = jc; i < jc + jb; ++i) {
         const std::ptrdiff_t ir = i - jc;
-        const T *Ai = a + static_cast<std::size_t>(i) * lda;
+        const TC *Ai = a + static_cast<std::size_t>(i) * lda;
         __m256d srh = _mm256_load_pd(&acc_rh[ir * kSimdLane]);
         __m256d srl = _mm256_load_pd(&acc_rl[ir * kSimdLane]);
         __m256d sih = _mm256_load_pd(&acc_ih[ir * kSimdLane]);
@@ -208,16 +208,16 @@ inline void simd_herk_diag_c_chunk(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
     }
 }
 
-inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, R alpha,
-                                  const T *a, std::ptrdiff_t lda,
-                                  T *c, std::ptrdiff_t ldc,
+inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR alpha,
+                                  const TC *a, std::ptrdiff_t lda,
+                                  TC *c, std::ptrdiff_t ldc,
                                   char UPLO, char TR_c)
 {
     alignas(32) double crh[kMaxBlockM * kSimdLane];
     alignas(32) double crl[kMaxBlockM * kSimdLane];
     alignas(32) double cih[kMaxBlockM * kSimdLane];
     alignas(32) double cil[kMaxBlockM * kSimdLane];
-    /* TR='C' scratch: one K-chunk of 4 packed Aj columns (bounded by kMaxK)
+    /* TR_c='C' scratch: one K-chunk of 4 packed Aj columns (bounded by kMaxK)
      * plus a per-row complex-DD accumulator carried across chunks. */
     alignas(32) static thread_local double ajrh[kMaxK * kSimdLane];
     alignas(32) static thread_local double ajrl[kMaxK * kSimdLane];
@@ -232,7 +232,7 @@ inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
         const std::ptrdiff_t jcount = (jc + jb - j < kSimdLane) ? (jc + jb - j) : kSimdLane;
         pack_4col_cdd(jb, jc, c, ldc, j, jcount, crh, crl, cih, cil);
         if (TR_c == 'N') {
-            /* TR='N' reads A directly per l — K-independent, no scratch cap. */
+            /* TR_c='N' reads A directly per l — K-independent, no scratch cap. */
             simd_herk_diag_n(jc, jb, K, alpha, a, lda, j, jcount,
                              crh, crl, cih, cil);
         } else {
@@ -247,7 +247,7 @@ inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
             for (std::ptrdiff_t l0 = 0; l0 < K; l0 += kMaxK) {
                 const std::ptrdiff_t kc = (K - l0 < kMaxK) ? (K - l0) : kMaxK;
                 for (std::ptrdiff_t jj = 0; jj < jcount; ++jj) {
-                    const T *col = a + static_cast<std::size_t>(j + jj) * lda;
+                    const TC *col = a + static_cast<std::size_t>(j + jj) * lda;
                     for (std::ptrdiff_t ll = 0; ll < kc; ++ll) {
                         ajrh[ll * kSimdLane + jj] = col[l0 + ll].re.limbs[0];
                         ajrl[ll * kSimdLane + jj] = col[l0 + ll].re.limbs[1];
@@ -297,22 +297,22 @@ inline void simd_herk_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptr
 
 #endif  /* MBLAS_SIMD_DD */
 
-void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, R alpha,
-                   const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc,
+void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR alpha,
+                   const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc,
                    char UPLO, char TR_c)
 {
     if (TR_c == 'N') {
         for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
             const std::ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const std::ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
+            TC *cj = c + static_cast<std::size_t>(j) * ldc;
             for (std::ptrdiff_t l = 0; l < K; ++l) {
-                const T ajl = A_(j, l);
+                const TC ajl = A_(j, l);
                 if (!ceq0(ajl)) {
-                    const T t = rcmul(alpha, cconj(ajl));
+                    const TC t = rcmul(alpha, cconj(ajl));
                     for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                        T prod = cmul(t, A_(i, l));
-                        if (i == j) cj[i] = T{ cj[i].re + prod.re, cj[i].im };
+                        TC prod = cmul(t, A_(i, l));
+                        if (i == j) cj[i] = TC{ cj[i].re + prod.re, cj[i].im };
                         else        cj[i] = cadd(cj[i], prod);
                     }
                 }
@@ -322,22 +322,22 @@ void herk_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, R alp
         for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
             const std::ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const std::ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
-            T *cj = c + static_cast<std::size_t>(j) * ldc;
-            const T *Aj = a + static_cast<std::size_t>(j) * lda;
+            TC *cj = c + static_cast<std::size_t>(j) * ldc;
+            const TC *Aj = a + static_cast<std::size_t>(j) * lda;
             for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                const T *Ai = a + static_cast<std::size_t>(i) * lda;
-                T s = czero;
+                const TC *Ai = a + static_cast<std::size_t>(i) * lda;
+                TC s = czero;
                 for (std::ptrdiff_t l = 0; l < K; ++l) s = cadd(s, cmul(cconj(Ai[l]), Aj[l]));
-                T as = rcmul(alpha, s);
-                if (i == j) cj[i] = T{ cj[i].re + as.re, cj[i].im };
+                TC as = rcmul(alpha, s);
+                if (i == j) cj[i] = TC{ cj[i].re + as.re, cj[i].im };
                 else        cj[i] = cadd(cj[i], as);
             }
         }
     }
 }
 
-inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, R alpha,
-                          const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc,
+inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, TR alpha,
+                          const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc,
                           char UPLO, char TR_c)
 {
 #ifdef MBLAS_SIMD_DD
@@ -357,37 +357,37 @@ std::ptrdiff_t wherk_block_nb(void) {
     return nb;
 }
 
-void wherk_zero_diag_im(std::ptrdiff_t j, T *c, std::ptrdiff_t ldc) {
+void wherk_zero_diag_im(std::ptrdiff_t j, TC *c, std::ptrdiff_t ldc) {
     c[static_cast<std::size_t>(j) * ldc + j].im = rzero;
 }
 
-void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, R beta, T *c, std::ptrdiff_t ldc) {
+void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, TR beta, TC *c, std::ptrdiff_t ldc) {
     const std::ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
     const std::ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
-    T *cj = c + static_cast<std::size_t>(j) * ldc;
+    TC *cj = c + static_cast<std::size_t>(j) * ldc;
     if (eq0(beta)) {
         for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
     } else {
         for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
-            if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
+            if (i == j) cj[i] = TC{ beta * cj[i].re, rzero };
             else        cj[i] = rcmul(beta, cj[i]);
         }
     }
 }
 
-void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR,
-                 R alpha, R beta, const T *a, std::ptrdiff_t lda, T *c, std::ptrdiff_t ldc)
+void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR_c,
+                 TR alpha, TR beta, const TC *a, std::ptrdiff_t lda, TC *c, std::ptrdiff_t ldc)
 {
     /* Beta-scale this block's own triangle columns (real-diag preservation). */
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
         const std::ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
-        T *cj = c + static_cast<std::size_t>(j) * ldc;
+        TC *cj = c + static_cast<std::size_t>(j) * ldc;
         if (eq0(beta)) {
             for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
         } else if (!eq1(beta)) {
             for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                if (i == j) cj[i] = T{ beta * cj[i].re, rzero };
+                if (i == j) cj[i] = TC{ beta * cj[i].re, rzero };
                 else        cj[i] = rcmul(beta, cj[i]);
             }
         } else {
@@ -395,10 +395,10 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
         }
     }
 
-    diag_dispatch(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR);
+    diag_dispatch(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
 
-    const T alpha_c = T{ alpha, rzero };
-    const T cone { R{1.0, 0.0}, rzero };
+    const TC alpha_c = TC{ alpha, rzero };
+    const TC cone { TR{1.0, 0.0}, rzero };
     const char NN[1] = {'N'};
     const char CN[1] = {'C'};
 
@@ -406,7 +406,7 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
         const std::ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t j0 = jc + jb;
-            if (TR == 'N') {
+            if (TR_c == 'N') {
                 wgemm_serial(NN[0], CN[0], trailing, jb, K, &alpha_c, &A_(j0, 0), lda, &A_(jc, 0), lda, &cone, &C_(j0, jc), ldc);
             } else {
                 wgemm_serial(CN[0], NN[0], trailing, jb, K, &alpha_c, &A_(0, j0), lda, &A_(0, jc), lda, &cone, &C_(j0, jc), ldc);
@@ -414,7 +414,7 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
         }
     } else {
         if (jc > 0) {
-            if (TR == 'N') {
+            if (TR_c == 'N') {
                 wgemm_serial(NN[0], CN[0], jc, jb, K, &alpha_c, &A_(0, 0), lda, &A_(jc, 0), lda, &cone, &C_(0, jc), ldc);
             } else {
                 wgemm_serial(CN[0], NN[0], jc, jb, K, &alpha_c, &A_(0, 0), lda, &A_(0, jc), lda, &cone, &C_(0, jc), ldc);
@@ -426,12 +426,12 @@ void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::pt
 extern "C" void wherk_serial(
     char uplo, char trans,
     std::ptrdiff_t N, std::ptrdiff_t K,
-    const R *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const R *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TR *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TR *beta_,
+    TC *c, std::ptrdiff_t ldc)
 {
-    const R alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
     const char TR_c = up(&trans);
 
