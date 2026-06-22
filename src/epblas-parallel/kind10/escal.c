@@ -45,8 +45,8 @@ static int escal_omp(ptrdiff_t n, T alpha, T *x)
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
-        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) escal_unit(hi - lo, alpha, x + lo);
     }
     return 1;

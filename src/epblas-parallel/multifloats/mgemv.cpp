@@ -86,8 +86,8 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const std::ptrdiff_t lo = (std::ptrdiff_t)((__int128)M * tid / nt);
-        const std::ptrdiff_t hi = (std::ptrdiff_t)((__int128)M * (tid + 1) / nt);
+        const std::ptrdiff_t lo = blas_part_bound(M, tid, nt);
+        const std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nt);
         for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;
@@ -126,8 +126,8 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const std::ptrdiff_t lo = (std::ptrdiff_t)((__int128)M * tid / nt);
-        const std::ptrdiff_t hi = (std::ptrdiff_t)((__int128)M * (tid + 1) / nt);
+        const std::ptrdiff_t lo = blas_part_bound(M, tid, nt);
+        const std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nt);
         for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;

@@ -39,16 +39,23 @@ static inline int blas_omp_available(void) { return blas_omp_max_threads() > 1; 
 
 #include <stddef.h>
 
-/* Overflow-safe balanced 1-D partition bound: the low index of chunk `idx` of
- * `nparts` over [0, total), i.e. floor(total*idx/nparts). The product
- * total*idx can exceed 2^63 for ILP64 counts (once total > ~2^63/nparts), so
- * it is formed in 128-bit before the divide — the int->ptrdiff_t widening made
- * `(long long)total * idx` a real overflow site that LP64 (total <= 2^31) never
- * reached. total >= 0, 0 <= idx <= nparts, nparts >= 1; result is in [0,total]
- * and fits ptrdiff_t. Computed once per thread per dispatch, never per element. */
+/* Balanced 1-D partition bound: the low index of chunk `idx` of `nparts` over
+ * [0, total). Front-loaded-remainder scheme — every chunk gets base = total/nparts
+ * elements and the first rem = total%nparts chunks get one extra, so chunk sizes
+ * differ by at most one and the heavier chunks are threads 0..rem-1:
+ *     lo(idx) = idx*base + min(idx, rem).
+ * Overflow-safe in pure 64-bit with no wide type or libgcc soft-division: idx*base
+ * <= nparts*base <= total always, so the product cannot exceed ptrdiff_t (the
+ * `(long long)total*idx` floor idiom this replaced WAS a real ILP64 overflow once
+ * total > ~2^63/nparts). total >= 0, 0 <= idx <= nparts, nparts >= 1; result is in
+ * [0,total]. Computed once per thread per dispatch, never per element. This is the
+ * single partition primitive — every unit-granularity range split routes here so
+ * the scheme (and its overflow guard) lives in one place. */
 static inline ptrdiff_t blas_part_bound(ptrdiff_t total, ptrdiff_t idx,
                                         ptrdiff_t nparts) {
-    return (ptrdiff_t)((__int128)total * idx / nparts);
+    const ptrdiff_t base = total / nparts;
+    const ptrdiff_t rem  = total % nparts;
+    return idx * base + (idx < rem ? idx : rem);
 }
 
 /* Outer panel width for a threaded L3 panel loop. The cache-tuned serial

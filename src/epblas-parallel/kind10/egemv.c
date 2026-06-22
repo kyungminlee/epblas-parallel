@@ -126,8 +126,8 @@ void egemv_core(
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     const ptrdiff_t nt  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = ((long long)M * tid) / nt;
-                    const ptrdiff_t i_hi = ((long long)M * (tid + 1)) / nt;
+                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
+                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
                     EGEMV_N_BODY(i_lo, i_hi);
                 }
 #endif
@@ -175,8 +175,8 @@ void egemv_core(
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     const ptrdiff_t nt  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = ((long long)M * tid) / nt;
-                    const ptrdiff_t i_hi = ((long long)M * (tid + 1)) / nt;
+                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
+                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
                     EGEMV_N_INCY1_BODY(i_lo, i_hi);
                 }
 #endif
@@ -233,8 +233,8 @@ void egemv_core(
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     const ptrdiff_t nt  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = ((long long)M * tid) / nt;
-                    const ptrdiff_t i_hi = ((long long)M * (tid + 1)) / nt;
+                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
+                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
                     EGEMV_N_STRIDED_BODY(i_lo, i_hi);
                 }
 #endif

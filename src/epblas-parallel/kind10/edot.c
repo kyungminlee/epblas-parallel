@@ -58,8 +58,8 @@ __attribute__((noinline)) static ptrdiff_t edot_omp(ptrdiff_t n, const T *x, con
     {
         ptrdiff_t tid = omp_get_thread_num();
         ptrdiff_t nth = omp_get_num_threads();
-        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
-        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) partial[tid] = edot_kernel(hi - lo, x + lo, 1, y + lo, 1);
     }
     T s = 0.0L;

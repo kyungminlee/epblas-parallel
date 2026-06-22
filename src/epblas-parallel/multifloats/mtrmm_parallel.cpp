@@ -96,8 +96,8 @@ static void mtrmm_core(
 #ifdef _OPENMP
             if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
 #endif
-            std::ptrdiff_t i_lo = (std::ptrdiff_t)((__int128)M * tid / nt);
-            std::ptrdiff_t i_hi = (std::ptrdiff_t)((__int128)M * (tid + 1) / nt);
+            std::ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
+            std::ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
             if (tid > 0)      i_lo &= ~3;
             if (tid < nt - 1) i_hi &= ~3;
             mtrmm_R_slice(UPLO, TR, use_blocked, i_lo, i_hi, N, nb, alpha,

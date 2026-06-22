@@ -99,8 +99,8 @@ static bool mgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t lo = (std::ptrdiff_t)((__int128)M * tid / nthreads);
-        std::ptrdiff_t hi = (std::ptrdiff_t)((__int128)M * (tid + 1) / nthreads);
+        std::ptrdiff_t lo = blas_part_bound(M, tid, nthreads);
+        std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nthreads);
         /* columns whose band [j-KU, j+KL] intersects owned rows [lo,hi) */
         std::ptrdiff_t jlo = (lo - KL > 0) ? (lo - KL) : 0;
         std::ptrdiff_t jhi = (hi - 1 + KU + 1 < N) ? (hi + KU) : N;
@@ -149,8 +149,8 @@ static bool mgbmv_t_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, s
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t lo = (std::ptrdiff_t)((__int128)N * tid / nthreads);
-        std::ptrdiff_t hi = (std::ptrdiff_t)((__int128)N * (tid + 1) / nthreads);
+        std::ptrdiff_t lo = blas_part_bound(N, tid, nthreads);
+        std::ptrdiff_t hi = blas_part_bound(N, tid + 1, nthreads);
         for (std::ptrdiff_t j = lo; j < hi; ++j) {
             std::ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
             std::ptrdiff_t i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;

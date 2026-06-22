@@ -31,8 +31,8 @@ static int yaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
-        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) yaxpy_unit(hi - lo, alpha, x + lo, y + lo);
     }
     return 1;

@@ -106,8 +106,8 @@ __attribute__((noinline)) static int eynrm2_omp(ptrdiff_t n, const T *x, R *out)
     {
         int tid = omp_get_thread_num();
         int nth = omp_get_num_threads();
-        ptrdiff_t lo = n * tid / nth;
-        ptrdiff_t hi = n * (tid + 1) / nth;
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) eynrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
     }
     R abig = 0.0L, amed = 0.0L, asml = 0.0L;

@@ -42,8 +42,8 @@ static int erotm_omp(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        ptrdiff_t lo = (ptrdiff_t)((long long)n * tid / nth);
-        ptrdiff_t hi = (ptrdiff_t)((long long)n * (tid + 1) / nth);
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) erotm_unit(hi - lo, flag, h11, h12, h21, h22, x + lo, y + lo);
     }
     return 1;

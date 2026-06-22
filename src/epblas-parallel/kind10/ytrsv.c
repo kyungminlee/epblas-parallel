@@ -364,8 +364,8 @@ void ytrsv_blocked_(
                 ptrdiff_t mt = N - j - jb;
                 if (mt > 0) {
                     ptrdiff_t j2 = j + jb;
-                    long long lo = (long long)mt * tid / nt;
-                    long long hi = (long long)mt * (tid + 1) / nt;
+                    long long lo = blas_part_bound(mt, tid, nt);
+                    long long hi = blas_part_bound(mt, tid + 1, nt);
                     ptrdiff_t m_slice = (ptrdiff_t)(hi - lo);
                     if (m_slice > 0) {
                         const ptrdiff_t i_off = j2 + (ptrdiff_t)lo;
@@ -392,8 +392,8 @@ void ytrsv_blocked_(
                 if (use_omp) { _Pragma("omp barrier"); }
 #endif
                 if (j > 0) {
-                    long long lo = (long long)j * tid / nt;
-                    long long hi = (long long)j * (tid + 1) / nt;
+                    long long lo = blas_part_bound(j, tid, nt);
+                    long long hi = blas_part_bound(j, tid + 1, nt);
                     ptrdiff_t m_slice = (ptrdiff_t)(hi - lo);
                     if (m_slice > 0) {
                         const ptrdiff_t i_off = (ptrdiff_t)lo;
@@ -421,8 +421,8 @@ void ytrsv_blocked_(
                 if (use_omp) { _Pragma("omp barrier"); }
 #endif
                 if (j > 0) {
-                    long long lo = (long long)j * tid / nt;
-                    long long hi = (long long)j * (tid + 1) / nt;
+                    long long lo = blas_part_bound(j, tid, nt);
+                    long long hi = blas_part_bound(j, tid + 1, nt);
                     ptrdiff_t n_slice = (ptrdiff_t)(hi - lo);
                     if (n_slice > 0) {
                         const ptrdiff_t n_off = (ptrdiff_t)lo;
@@ -452,8 +452,8 @@ void ytrsv_blocked_(
                 ptrdiff_t mt = N - j - jb;
                 if (mt > 0) {
                     ptrdiff_t j2 = j + jb;
-                    long long lo = (long long)mt * tid / nt;
-                    long long hi = (long long)mt * (tid + 1) / nt;
+                    long long lo = blas_part_bound(mt, tid, nt);
+                    long long hi = blas_part_bound(mt, tid + 1, nt);
                     ptrdiff_t n_slice = (ptrdiff_t)(hi - lo);
                     if (n_slice > 0) {
                         const ptrdiff_t n_off = j2 + (ptrdiff_t)lo;
