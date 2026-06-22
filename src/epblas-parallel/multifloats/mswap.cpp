@@ -48,11 +48,11 @@ extern "C" void mswap_(const int *n_,
 #ifdef _OPENMP
     /* Memory-bandwidth bound (2 reads + 2 writes); disjoint contiguous slices. */
     if (n > MSWAP_OMP_MIN && blas_omp_available() && !omp_in_parallel()) {
-        int nthreads = blas_omp_max_threads();
+        std::ptrdiff_t nthreads = blas_omp_max_threads();
         #pragma omp parallel num_threads(nthreads)
         {
-            int tid = omp_get_thread_num();
-            int nth = omp_get_num_threads();
+            std::ptrdiff_t tid = omp_get_thread_num();
+            std::ptrdiff_t nth = omp_get_num_threads();
             std::ptrdiff_t chunk = (n + nth - 1) / nth;
             std::ptrdiff_t start = (std::ptrdiff_t)tid * chunk;
             std::ptrdiff_t end   = start + chunk;

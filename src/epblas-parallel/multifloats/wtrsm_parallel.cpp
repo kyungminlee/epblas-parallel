@@ -54,30 +54,30 @@ extern "C" void wtrsm_(
     }
 #endif
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
+    const std::ptrdiff_t M = *m_, N = *n_;
+    const std::ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     const char SIDE = up(side);
     const char UPLO = up(uplo);
     const char TR = up(transa);
-    const int nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
     if (ceq0(alpha)) { wtrsm_zero_B(M, N, b, ldb); return; }
 
     if (SIDE == 'L') {
-        const int nb = wtrsm_block_nb();
-        const int use_blocked = (M >= 2 * nb);
+        const std::ptrdiff_t nb = wtrsm_block_nb();
+        const std::ptrdiff_t use_blocked = (M >= 2 * nb);
 #ifdef _OPENMP
-        const int use_omp = (N >= WTRSM_OMP_N_MIN && blas_omp_available());
+        const std::ptrdiff_t use_omp = (N >= WTRSM_OMP_N_MIN && blas_omp_available());
         if (use_omp) {
             #pragma omp parallel
             {
-                int tid = omp_get_thread_num();
-                int nt  = omp_get_num_threads();
-                int js  = static_cast<int>((long long)N * tid / nt);
-                int je  = static_cast<int>((long long)N * (tid + 1) / nt);
+                std::ptrdiff_t tid = omp_get_thread_num();
+                std::ptrdiff_t nt  = omp_get_num_threads();
+                std::ptrdiff_t js  = static_cast<std::ptrdiff_t>((long long)N * tid / nt);
+                std::ptrdiff_t je  = static_cast<std::ptrdiff_t>((long long)N * (tid + 1) / nt);
                 wtrsm_L_slice(UPLO, TR, use_blocked, js, je, M, nb, alpha,
                               a, lda, b, ldb, nounit);
             }
@@ -91,16 +91,16 @@ extern "C" void wtrsm_(
          * multiples of 4 so the SIMD 4-row chunks stay aligned; the last
          * thread absorbs the M&3 tail. */
 #ifdef _OPENMP
-        const int use_omp = (M >= WTRSM_OMP_N_MIN && blas_omp_available());
+        const std::ptrdiff_t use_omp = (M >= WTRSM_OMP_N_MIN && blas_omp_available());
         #pragma omp parallel if(use_omp)
 #endif
         {
-            int tid = 0, nt = 1;
+            std::ptrdiff_t tid = 0, nt = 1;
 #ifdef _OPENMP
             if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
 #endif
-            int i_lo = (int)((long long)M * tid / nt);
-            int i_hi = (int)((long long)M * (tid + 1) / nt);
+            std::ptrdiff_t i_lo = (std::ptrdiff_t)((long long)M * tid / nt);
+            std::ptrdiff_t i_hi = (std::ptrdiff_t)((long long)M * (tid + 1) / nt);
             if (tid > 0)      i_lo &= ~3;
             if (tid < nt - 1) i_hi &= ~3;
             wtrsm_R_slice(UPLO, TR, i_lo, i_hi, N, alpha, a, lda, b, ldb, nounit);

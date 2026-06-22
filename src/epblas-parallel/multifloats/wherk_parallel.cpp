@@ -55,8 +55,8 @@ extern "C" void wherk_(
     }
 #endif
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldc = *ldc_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, ldc = *ldc_;
     const R alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
     const char TR_c = up(trans);
@@ -65,25 +65,25 @@ extern "C" void wherk_(
 
     if (eq0(alpha) || K == 0) {
         if (eq1(beta)) {
-            for (int j = 0; j < N; ++j) wherk_zero_diag_im(j, c, ldc);
+            for (std::ptrdiff_t j = 0; j < N; ++j) wherk_zero_diag_im(j, c, ldc);
             return;
         }
 #ifdef _OPENMP
         const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j) wherk_scale_col(j, N, UPLO, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < N; ++j) wherk_scale_col(j, N, UPLO, beta, c, ldc);
         return;
     }
 
-    const int nb = wherk_block_nb();
+    const std::ptrdiff_t nb = wherk_block_nb();
 
 #ifdef _OPENMP
     const bool use_omp = (N >= WHERK_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (int jc = 0; jc < N; jc += nb) {
-        const int jb = (N - jc < nb) ? (N - jc) : nb;
+    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
+        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
         wherk_block(jc, jb, N, K, UPLO, TR_c, alpha, beta, a, lda, c, ldc);
     }
 }

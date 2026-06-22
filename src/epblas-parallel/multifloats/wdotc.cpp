@@ -41,7 +41,7 @@ using simd_fast::dd_prod;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
  * Carved out so the OpenMP partial-reduction (and packed/banded triangular
  * matvecs, via mf_kernels.h) can call it per sub-range. */
 multifloats::complex64x2
-mf_kernels::wdotc_unit(int n, const multifloats::complex64x2 *x,
+mf_kernels::wdotc_unit(std::ptrdiff_t n, const multifloats::complex64x2 *x,
                        const multifloats::complex64x2 *y)
 {
     /* spelled out: mf_kernels::T is the real (float64x2) alias and would shadow
@@ -50,10 +50,10 @@ mf_kernels::wdotc_unit(int n, const multifloats::complex64x2 *x,
 #ifdef MBLAS_SIMD_DD
     __m256d rA0 = _mm256_setzero_pd(), rA1 = _mm256_setzero_pd(), rA2 = _mm256_setzero_pd();
     __m256d iA0 = _mm256_setzero_pd(), iA1 = _mm256_setzero_pd(), iA2 = _mm256_setzero_pd();
-    constexpr int K = 64;
-    int counter = K;
-    const int n4 = n & ~3;
-    for (int i = 0; i < n4; i += 4) {
+    constexpr std::ptrdiff_t K = 64;
+    std::ptrdiff_t counter = K;
+    const std::ptrdiff_t n4 = n & ~3;
+    for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xrh, xrl, xih, xil, yrh, yrl, yih, yil;
         cload4(&x[i], xrh, xrl, xih, xil);
         cload4(&y[i], yrh, yrl, yih, yil);
@@ -80,10 +80,10 @@ mf_kernels::wdotc_unit(int n, const multifloats::complex64x2 *x,
     __m256d it = _mm256_add_pd(iA1, iA2);
     s.re = horizontal_dd(rA0, rt);
     s.im = horizontal_dd(iA0, it);
-    for (int i = n4; i < n; ++i) s = cadd(s, cmul(cconj(x[i]), y[i]));
+    for (std::ptrdiff_t i = n4; i < n; ++i) s = cadd(s, cmul(cconj(x[i]), y[i]));
     return s;
 #else
-    for (int i = 0; i < n; ++i) s = cadd(s, cmul(cconj(x[i]), y[i]));
+    for (std::ptrdiff_t i = 0; i < n; ++i) s = cadd(s, cmul(cconj(x[i]), y[i]));
     return s;
 #endif
 }
@@ -91,23 +91,23 @@ mf_kernels::wdotc_unit(int n, const multifloats::complex64x2 *x,
 #ifdef _OPENMP
 #define WDOTC_OMP_MIN 8192
 #define WDOTC_MAX_CPUS 64
-__attribute__((noinline)) static int wdotc_omp(int n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static std::ptrdiff_t wdotc_omp(std::ptrdiff_t n, const T *x, const T *y, T *out)
 {
     if (n <= WDOTC_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WDOTC_MAX_CPUS) nthreads = WDOTC_MAX_CPUS;
     T partial[WDOTC_MAX_CPUS];
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         partial[tid] = (lo < hi) ? mf_kernels::wdotc_unit(hi - lo, x + lo, y + lo)
                                  : T{R{0.0, 0.0}, R{0.0, 0.0}};
     }
     T s{R{0.0, 0.0}, R{0.0, 0.0}};
-    for (int i = 0; i < nthreads; ++i) s = cadd(s, partial[i]);
+    for (std::ptrdiff_t i = 0; i < nthreads; ++i) s = cadd(s, partial[i]);
     *out = s;
     return 1;
 }
@@ -117,7 +117,7 @@ extern "C" T wdotc_(const int *n_,
                     const T *x, const int *incx_,
                     const T *y, const int *incy_)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     T s{R{0.0, 0.0}, R{0.0, 0.0}};
     if (n <= 0) return s;
 
@@ -128,8 +128,8 @@ extern "C" T wdotc_(const int *n_,
         return mf_kernels::wdotc_unit(n, x, y);
     }
 
-    int ix = (incx < 0) ? (-n + 1) * incx : 0;
-    int iy = (incy < 0) ? (-n + 1) * incy : 0;
-    for (int i = 0; i < n; ++i) { s = cadd(s, cmul(cconj(x[ix]), y[iy])); ix += incx; iy += incy; }
+    std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+    std::ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
+    for (std::ptrdiff_t i = 0; i < n; ++i) { s = cadd(s, cmul(cconj(x[ix]), y[iy])); ix += incx; iy += incy; }
     return s;
 }

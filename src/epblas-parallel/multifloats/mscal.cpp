@@ -32,38 +32,38 @@ using simd_exact::store_dd4;
 }  // namespace
 
 /* X := α·X over a contiguous unit-stride range — serial kernel, unchanged. */
-static void mscal_unit(int n, T alpha, T *x)
+static void mscal_unit(std::ptrdiff_t n, T alpha, T *x)
 {
 #ifdef MBLAS_SIMD_DD
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
     const __m256d al = _mm256_set1_pd(alpha.limbs[1]);
-    const int n4 = n & ~3;
-    for (int i = 0; i < n4; i += 4) {
+    const std::ptrdiff_t n4 = n & ~3;
+    for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xh, xl;
         load_dd4(&x[i], xh, xl);
         __m256d nh, nl;
         simd_fast::mul(xh, xl, ah, al, nh, nl);
         store_dd4(&x[i], nh, nl);
     }
-    for (int i = n4; i < n; ++i) x[i] = x[i] * alpha;
+    for (std::ptrdiff_t i = n4; i < n; ++i) x[i] = x[i] * alpha;
 #else
-    for (int i = 0; i < n; ++i) x[i] = x[i] * alpha;
+    for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = x[i] * alpha;
 #endif
 }
 
 #ifdef _OPENMP
 /* Threaded scale: disjoint output slices, each running the SIMD kernel. */
 #define MSCAL_OMP_MIN 2048
-__attribute__((noinline)) static int mscal_omp(int n, T alpha, T *x)
+__attribute__((noinline)) static std::ptrdiff_t mscal_omp(std::ptrdiff_t n, T alpha, T *x)
 {
     if (n <= MSCAL_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) mscal_unit(hi - lo, alpha, x + lo);
     }
     return 1;
@@ -72,7 +72,7 @@ __attribute__((noinline)) static int mscal_omp(int n, T alpha, T *x)
 
 extern "C" void mscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
 {
-    const int n = *n_, incx = *incx_;
+    const std::ptrdiff_t n = *n_, incx = *incx_;
     const T alpha = *alpha_;
     if (n <= 0 || eq1(alpha)) return;
 
@@ -82,7 +82,7 @@ extern "C" void mscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
 #endif
         mscal_unit(n, alpha, x);
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        for (int i = 0; i < n; ++i) { x[ix] = x[ix] * alpha; ix += incx; }
+        std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        for (std::ptrdiff_t i = 0; i < n; ++i) { x[ix] = x[ix] * alpha; ix += incx; }
     }
 }

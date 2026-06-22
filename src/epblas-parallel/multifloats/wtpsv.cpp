@@ -43,14 +43,14 @@ const T czero{rzero, rzero};
 /* Column base offsets into the packed array (column-major triangle).
  *   Lower: column j starts at its diagonal (row j); element (i,j) i>=j at base+(i-j).
  *   Upper: column j starts at row 0;            element (i,j) i<=j at base+i.       */
-inline std::size_t cbL(int j, int N) {
+inline std::size_t cbL(std::ptrdiff_t j, std::ptrdiff_t N) {
     return static_cast<std::size_t>(j) * static_cast<std::size_t>(N)
          - static_cast<std::size_t>(j) * static_cast<std::size_t>(j - 1) / 2;
 }
-inline std::size_t cbU(int j) {
+inline std::size_t cbU(std::ptrdiff_t j) {
     return static_cast<std::size_t>(j) * static_cast<std::size_t>(j + 1) / 2;
 }
-inline T melem(const T &a, int noconj) { return noconj ? a : cconj(a); }
+inline T melem(const T &a, std::ptrdiff_t noconj) { return noconj ? a : cconj(a); }
 #endif
 }
 
@@ -58,13 +58,13 @@ inline T melem(const T &a, int noconj) { return noconj ? a : cconj(a); }
  * (caxpy_sub, bit-exact); Trans/ConjTrans is a packed-column complex dot
  * (cdot, reorders -> within fuzz tol). The cross-column recurrence (divide by
  * the diagonal, feed the result forward) stays scalar here. */
-static void wtpsv_serial_contig(char UPLO, char TR, int noconj, int nounit,
-                                int N, const T *ap, T *x)
+static void wtpsv_serial_contig(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit,
+                                std::ptrdiff_t N, const T *ap, T *x)
 {
     if (TR == 'N') {
         if (UPLO == 'U') {
-            int kk = (N * (N + 1)) / 2 - 1;
-            for (int j = N - 1; j >= 0; --j) {
+            std::ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+            for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                 if (!ceq0(x[j])) {
                     if (nounit) x[j] = cdiv(x[j], ap[kk]);
                     mf_kernels::caxpy_sub(j, &x[0], &ap[kk - j], x[j]);
@@ -72,8 +72,8 @@ static void wtpsv_serial_contig(char UPLO, char TR, int noconj, int nounit,
                 kk -= j + 1;
             }
         } else {
-            int kk = 0;
-            for (int j = 0; j < N; ++j) {
+            std::ptrdiff_t kk = 0;
+            for (std::ptrdiff_t j = 0; j < N; ++j) {
                 if (!ceq0(x[j])) {
                     if (nounit) x[j] = cdiv(x[j], ap[kk]);
                     mf_kernels::caxpy_sub(N - 1 - j, &x[j + 1], &ap[kk + 1], x[j]);
@@ -84,16 +84,16 @@ static void wtpsv_serial_contig(char UPLO, char TR, int noconj, int nounit,
     } else {
         const bool conj = (noconj == 0);
         if (UPLO == 'U') {
-            int kk = 0;
-            for (int j = 0; j < N; ++j) {
+            std::ptrdiff_t kk = 0;
+            for (std::ptrdiff_t j = 0; j < N; ++j) {
                 T tmp = csub(x[j], mf_kernels::cdot(j, &ap[kk], &x[0], conj));
                 if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk + j] : cconj(ap[kk + j])));
                 x[j] = tmp;
                 kk += j + 1;
             }
         } else {
-            int kk = (N * (N + 1)) / 2 - 1;
-            for (int j = N - 1; j >= 0; --j) {
+            std::ptrdiff_t kk = (N * (N + 1)) / 2 - 1;
+            for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                 T tmp = csub(x[j], mf_kernels::cdot(N - 1 - j, &ap[kk - (N - 2 - j)], &x[j + 1], conj));
                 if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk - (N - 1 - j)] : cconj(ap[kk - (N - 1 - j)])));
                 x[j] = tmp;
@@ -105,8 +105,8 @@ static void wtpsv_serial_contig(char UPLO, char TR, int noconj, int nounit,
 
 /* Serial entry / <threshold / strided fallback. Strided gathers x to a
  * contiguous scratch, runs the SIMD core, and scatters back. */
-static void wtpsv_serial(char UPLO, char TR, int noconj, int nounit,
-                         int N, const T *ap, T *x, int incx)
+static void wtpsv_serial(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit,
+                         std::ptrdiff_t N, const T *ap, T *x, std::ptrdiff_t incx)
 {
     if (incx == 1) {
         wtpsv_serial_contig(UPLO, TR, noconj, nounit, N, ap, x);
@@ -114,29 +114,29 @@ static void wtpsv_serial(char UPLO, char TR, int noconj, int nounit,
     }
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(N - 1) * incx : x;
     std::vector<T> xs(static_cast<std::size_t>(N));
-    for (int i = 0; i < N; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
+    for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
     wtpsv_serial_contig(UPLO, TR, noconj, nounit, N, ap, xs.data());
-    for (int i = 0; i < N; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
+    for (std::ptrdiff_t i = 0; i < N; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
 }
 
 #ifdef _OPENMP
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within DD fuzz tol. */
-static void wtpsv_block(char UPLO, char TR, int noconj, int nounit,
-                        int j0, int j1, int N, const T *ap, T *x)
+static void wtpsv_block(char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit,
+                        std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, const T *ap, T *x)
 {
     const bool lower = (UPLO == 'L');
     const bool conj = (noconj == 0);
     if (TR == 'N') {
         if (!lower) {                                   /* Upper: backward */
-            for (int j = j1 - 1; j >= j0; --j) {
+            for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 if (ceq0(x[j])) continue;
                 const std::size_t b = cbU(j);
                 if (nounit) x[j] = cdiv(x[j], ap[b + j]);
                 mf_kernels::caxpy_sub(j - j0, &x[j0], &ap[b + j0], x[j]);
             }
         } else {                                        /* Lower: forward */
-            for (int j = j0; j < j1; ++j) {
+            for (std::ptrdiff_t j = j0; j < j1; ++j) {
                 if (ceq0(x[j])) continue;
                 const std::size_t b = cbL(j, N);
                 if (nounit) x[j] = cdiv(x[j], ap[b]);
@@ -145,14 +145,14 @@ static void wtpsv_block(char UPLO, char TR, int noconj, int nounit,
         }
     } else {
         if (!lower) {                                   /* Upper^(T/C): forward, k<j */
-            for (int j = j0; j < j1; ++j) {
+            for (std::ptrdiff_t j = j0; j < j1; ++j) {
                 const std::size_t b = cbU(j);
                 T tmp = csub(x[j], mf_kernels::cdot(j - j0, &ap[b + j0], &x[j0], conj));
                 if (nounit) tmp = cdiv(tmp, melem(ap[b + j], noconj));
                 x[j] = tmp;
             }
         } else {                                        /* Lower^(T/C): backward, k>j */
-            for (int j = j1 - 1; j >= j0; --j) {
+            for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 const std::size_t b = cbL(j, N);
                 T tmp = csub(x[j], mf_kernels::cdot(j1 - (j + 1), &ap[b + 1], &x[j + 1], conj));
                 if (nounit) tmp = cdiv(tmp, melem(ap[b], noconj));
@@ -166,11 +166,11 @@ static void wtpsv_block(char UPLO, char TR, int noconj, int nounit,
  * to small WTPSV_BLK diagonal blocks; bulk O(N^2) off-diagonal coupling threaded
  * over disjoint output rows. Returns true if it handled the call. */
 __attribute__((noinline)) static bool wtpsv_omp(
-    char UPLO, char TR, int noconj, int nounit, int N, const T *ap, T *x)
+    char UPLO, char TR, std::ptrdiff_t noconj, std::ptrdiff_t nounit, std::ptrdiff_t N, const T *ap, T *x)
 {
     if (N < WTPSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WTPSV_MAX_CPUS) nthreads = WTPSV_MAX_CPUS;
     const bool lower = (UPLO == 'L');
     const bool trans = (TR != 'N');
@@ -178,16 +178,16 @@ __attribute__((noinline)) static bool wtpsv_omp(
 
     if (!trans) {
         if (lower) {
-            for (int j0 = 0; j0 < N; j0 += WTPSV_BLK) {
-                int j1 = j0 + WTPSV_BLK; if (j1 > N) j1 = N;
+            for (std::ptrdiff_t j0 = 0; j0 < N; j0 += WTPSV_BLK) {
+                std::ptrdiff_t j1 = j0 + WTPSV_BLK; if (j1 > N) j1 = N;
                 wtpsv_block(UPLO, TR, noconj, nounit, j0, j1, N, ap, x);
                 if (j1 >= N) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
-                    int tid = omp_get_thread_num();
-                    int rlo = j1 + (int)((long long)(N - j1) * tid / nthreads);
-                    int rhi = j1 + (int)((long long)(N - j1) * (tid + 1) / nthreads);
-                    for (int i = j0; i < j1; ++i) {
+                    std::ptrdiff_t tid = omp_get_thread_num();
+                    std::ptrdiff_t rlo = j1 + (std::ptrdiff_t)((long long)(N - j1) * tid / nthreads);
+                    std::ptrdiff_t rhi = j1 + (std::ptrdiff_t)((long long)(N - j1) * (tid + 1) / nthreads);
+                    for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const T xi = x[i];
                         if (ceq0(xi)) continue;
                         const T *col = &ap[cbL(i, N)];      /* col[k-i] = A(k,i) */
@@ -196,16 +196,16 @@ __attribute__((noinline)) static bool wtpsv_omp(
                 }
             }
         } else {
-            for (int j1 = N; j1 > 0; j1 -= WTPSV_BLK) {
-                int j0 = j1 - WTPSV_BLK; if (j0 < 0) j0 = 0;
+            for (std::ptrdiff_t j1 = N; j1 > 0; j1 -= WTPSV_BLK) {
+                std::ptrdiff_t j0 = j1 - WTPSV_BLK; if (j0 < 0) j0 = 0;
                 wtpsv_block(UPLO, TR, noconj, nounit, j0, j1, N, ap, x);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
-                    int tid = omp_get_thread_num();
-                    int rlo = (int)((long long)j0 * tid / nthreads);
-                    int rhi = (int)((long long)j0 * (tid + 1) / nthreads);
-                    for (int i = j0; i < j1; ++i) {
+                    std::ptrdiff_t tid = omp_get_thread_num();
+                    std::ptrdiff_t rlo = (std::ptrdiff_t)((long long)j0 * tid / nthreads);
+                    std::ptrdiff_t rhi = (std::ptrdiff_t)((long long)j0 * (tid + 1) / nthreads);
+                    for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const T xi = x[i];
                         if (ceq0(xi)) continue;
                         const T *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
@@ -216,15 +216,15 @@ __attribute__((noinline)) static bool wtpsv_omp(
         }
     } else {
         if (lower) {                                       /* backward, k > j */
-            for (int j1 = N; j1 > 0; j1 -= WTPSV_BLK) {
-                int j0 = j1 - WTPSV_BLK; if (j0 < 0) j0 = 0;
+            for (std::ptrdiff_t j1 = N; j1 > 0; j1 -= WTPSV_BLK) {
+                std::ptrdiff_t j0 = j1 - WTPSV_BLK; if (j0 < 0) j0 = 0;
                 if (j1 < N) {
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
-                        int ilo = j0 + (int)((long long)(j1 - j0) * tid / nthreads);
-                        int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
-                        for (int i = ilo; i < ihi; ++i) {
+                        std::ptrdiff_t tid = omp_get_thread_num();
+                        std::ptrdiff_t ilo = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * tid / nthreads);
+                        std::ptrdiff_t ihi = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbL(i, N)];
                             x[i] = csub(x[i], mf_kernels::cdot(N - j1, &col[j1 - i], &x[j1], conj));
                         }
@@ -233,15 +233,15 @@ __attribute__((noinline)) static bool wtpsv_omp(
                 wtpsv_block(UPLO, TR, noconj, nounit, j0, j1, N, ap, x);
             }
         } else {                                           /* forward, k < j */
-            for (int j0 = 0; j0 < N; j0 += WTPSV_BLK) {
-                int j1 = j0 + WTPSV_BLK; if (j1 > N) j1 = N;
+            for (std::ptrdiff_t j0 = 0; j0 < N; j0 += WTPSV_BLK) {
+                std::ptrdiff_t j1 = j0 + WTPSV_BLK; if (j1 > N) j1 = N;
                 if (j0 > 0) {
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
-                        int ilo = j0 + (int)((long long)(j1 - j0) * tid / nthreads);
-                        int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
-                        for (int i = ilo; i < ihi; ++i) {
+                        std::ptrdiff_t tid = omp_get_thread_num();
+                        std::ptrdiff_t ilo = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * tid / nthreads);
+                        std::ptrdiff_t ihi = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const T *col = &ap[cbU(i)];
                             x[i] = csub(x[i], mf_kernels::cdot(j0, &col[0], &x[0], conj));
                         }
@@ -263,12 +263,12 @@ extern "C" void wtpsv_(
     std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int incx = *incx_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_;
     const char UPLO = up(uplo);
     const char TR = up(trans);
-    const int noconj = (TR == 'T');
-    const int nounit = (up(diag) != 'U');
+    const std::ptrdiff_t noconj = (TR == 'T');
+    const std::ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 

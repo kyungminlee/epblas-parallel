@@ -40,14 +40,14 @@ using mf_kernels::cconj;
 
 /* Per-column rank-2 update; off-diagonal packed run is a SIMD rank-2 AXPY (two
  * rank-1 passes). The Hermitian diagonal is forced real. */
-inline void whpr2_col_upper(int j, T t1, T t2, const T *x, const T *y, T *ap) {
+inline void whpr2_col_upper(std::ptrdiff_t j, T t1, T t2, const T *x, const T *y, T *ap) {
     T *c = ap + static_cast<std::size_t>(j) * (j + 1) / 2;
     mf_kernels::caxpy2_add(j, c, x, t1, y, t2);
     const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
     c[j] = T{ c[j].re + prod.re, rzero };
 }
 
-inline void whpr2_col_lower(int j, int N, T t1, T t2, const T *x, const T *y, T *ap) {
+inline void whpr2_col_lower(std::ptrdiff_t j, std::ptrdiff_t N, T t1, T t2, const T *x, const T *y, T *ap) {
     T *c0 = ap + (static_cast<std::size_t>(j) * N - static_cast<std::size_t>(j) * (j - 1) / 2);
     mf_kernels::caxpy2_add(N - j - 1, c0 + 1, x + j + 1, t1, y + j + 1, t2);
     const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
@@ -65,8 +65,8 @@ extern "C" void whpr2_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
@@ -83,7 +83,7 @@ extern "C" void whpr2_(
         xg.resize(N); yg.resize(N);
         std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
         std::ptrdiff_t iy = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             xg[j] = x[ix]; ix += incx;
             yg[j] = y[iy]; iy += incy;
         }
@@ -91,13 +91,13 @@ extern "C" void whpr2_(
     }
 
 #ifdef _OPENMP
-    const int use_omp = (N >= WHPR2_OMP_MIN && blas_omp_available());
+    const std::ptrdiff_t use_omp = (N >= WHPR2_OMP_MIN && blas_omp_available());
 #endif
     if (UPLO == 'U') {
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             if (!ceq0(xp[j]) || !ceq0(yp[j]))
                 whpr2_col_upper(j, cmul(alpha, cconj(yp[j])),
                                 cconj(cmul(alpha, xp[j])), xp, yp, ap);
@@ -110,7 +110,7 @@ extern "C" void whpr2_(
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             if (!ceq0(xp[j]) || !ceq0(yp[j]))
                 whpr2_col_lower(j, N, cmul(alpha, cconj(yp[j])),
                                 cconj(cmul(alpha, xp[j])), xp, yp, ap);

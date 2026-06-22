@@ -28,15 +28,15 @@ using simd_exact::store_dd4;
 
 /* Givens rotation over a contiguous unit-stride range — serial kernel,
  * unchanged. X and Y slices are disjoint per thread → safe to partition. */
-static void mrot_unit(int n, const T c, const T s, T *x, T *y)
+static void mrot_unit(std::ptrdiff_t n, const T c, const T s, T *x, T *y)
 {
 #ifdef MBLAS_SIMD_DD
     const __m256d ch = _mm256_set1_pd(c.limbs[0]);
     const __m256d cl = _mm256_set1_pd(c.limbs[1]);
     const __m256d sh = _mm256_set1_pd(s.limbs[0]);
     const __m256d sl = _mm256_set1_pd(s.limbs[1]);
-    const int n4 = n & ~3;
-    for (int i = 0; i < n4; i += 4) {
+    const std::ptrdiff_t n4 = n & ~3;
+    for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xh, xl, yh, yl;
         load_dd4(&x[i], xh, xl);
         load_dd4(&y[i], yh, yl);
@@ -50,13 +50,13 @@ static void mrot_unit(int n, const T c, const T s, T *x, T *y)
         store_dd4(&x[i], nxh, nxl);
         store_dd4(&y[i], nyh, nyl);
     }
-    for (int i = n4; i < n; ++i) {
+    for (std::ptrdiff_t i = n4; i < n; ++i) {
         T tx = c * x[i] + s * y[i];
         y[i] = c * y[i] - s * x[i];
         x[i] = tx;
     }
 #else
-    for (int i = 0; i < n; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         T tx = c * x[i] + s * y[i];
         y[i] = c * y[i] - s * x[i];
         x[i] = tx;
@@ -66,16 +66,16 @@ static void mrot_unit(int n, const T c, const T s, T *x, T *y)
 
 #ifdef _OPENMP
 #define MROT_OMP_MIN 2048
-__attribute__((noinline)) static int mrot_omp(int n, T c, T s, T *x, T *y)
+__attribute__((noinline)) static std::ptrdiff_t mrot_omp(std::ptrdiff_t n, T c, T s, T *x, T *y)
 {
     if (n <= MROT_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) mrot_unit(hi - lo, c, s, x + lo, y + lo);
     }
     return 1;
@@ -87,7 +87,7 @@ extern "C" void mrot_(const int *n_,
                       T *y, const int *incy_,
                       const T *c_, const T *s_)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T c = *c_, s = *s_;
     if (n <= 0) return;
 
@@ -97,9 +97,9 @@ extern "C" void mrot_(const int *n_,
 #endif
         mrot_unit(n, c, s, x, y);
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (int i = 0; i < n; ++i) {
+        std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        std::ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
+        for (std::ptrdiff_t i = 0; i < n; ++i) {
             T tx = c * x[ix] + s * y[iy];
             y[iy] = c * y[iy] - s * x[ix];
             x[ix] = tx;

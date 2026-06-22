@@ -51,8 +51,8 @@ extern "C" void msyrk_(
     }
 #endif
     (void)uplo_len; (void)trans_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldc = *ldc_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
     char TR = up(trans);
@@ -66,24 +66,24 @@ extern "C" void msyrk_(
         const bool use_omp = (N >= MSYRK_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j) msyrk_scale_col(j, N, UPLO, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < N; ++j) msyrk_scale_col(j, N, UPLO, beta, c, ldc);
         return;
     }
 
-    const int nb = msyrk_block_nb();
+    const std::ptrdiff_t nb = msyrk_block_nb();
 
-    int pw = nb;
+    std::ptrdiff_t pw = nb;
 #ifdef _OPENMP
-    const int nt = blas_omp_max_threads();
+    const std::ptrdiff_t nt = blas_omp_max_threads();
     const bool use_omp = (N >= MSYRK_OMP_MIN && nt > 1);
     /* Shrink the block step so the team gets ~2·nt panels at small N
      * (N=64, nb=32 -> 2 blocks -> idle threads). Triangular C output makes the
      * per-block work uneven, so oversubscribe for dynamic balance -> ppt=2. */
-    if (use_omp) pw = (int)blas_omp_panel_width(N, nt, nb, 2);
+    if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(N, nt, nb, 2);
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (int jc = 0; jc < N; jc += pw) {
-        const int jb = (N - jc < pw) ? (N - jc) : pw;
+    for (std::ptrdiff_t jc = 0; jc < N; jc += pw) {
+        const std::ptrdiff_t jb = (N - jc < pw) ? (N - jc) : pw;
         msyrk_block(jc, jb, N, K, UPLO, TR, alpha, beta, a, lda, c, ldc);
     }
 }

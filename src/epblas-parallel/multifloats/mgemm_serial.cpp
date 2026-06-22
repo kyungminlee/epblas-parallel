@@ -28,7 +28,7 @@ using T = mf::float64x2;
 
 namespace {
 
-int g_mc = 0, g_kc = 0, g_nc = 0;
+std::ptrdiff_t g_mc = 0, g_kc = 0, g_nc = 0;
 void init_blocks() {
     if (g_mc) return;
     g_mc =  64;
@@ -41,65 +41,65 @@ const T one_dd {1.0, 0.0};
 
 }  // namespace
 
-int mgemm_trans_code(const char *p, std::size_t /*len*/) {
+std::ptrdiff_t mgemm_trans_code(const char *p, std::size_t /*len*/) {
     char c = static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
     return (c == 'C') ? 'T' : c;  /* real type: C == T */
 }
 
-void mgemm_choose_blocks(int *MC, int *KC, int *NC) {
+void mgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC) {
     init_blocks();
     *MC = g_mc; *KC = g_kc; *NC = g_nc;
 }
 
-void mgemm_pack_A(const T * __restrict__ A, int lda,
-                  int ic, int pc, int ib, int pb,
-                  int ta, T * __restrict__ Ap)
+void mgemm_pack_A(const T * __restrict__ A, std::ptrdiff_t lda,
+                  std::ptrdiff_t ic, std::ptrdiff_t pc, std::ptrdiff_t ib, std::ptrdiff_t pb,
+                  std::ptrdiff_t ta, T * __restrict__ Ap)
 {
     if (ta == 'N') {
-        for (int p = 0; p < pb; ++p) {
+        for (std::ptrdiff_t p = 0; p < pb; ++p) {
             const T *src = &A[static_cast<std::size_t>(pc + p) * lda + ic];
             T *dst = &Ap[static_cast<std::size_t>(p) * ib];
-            for (int i = 0; i < ib; ++i) dst[i] = src[i];
+            for (std::ptrdiff_t i = 0; i < ib; ++i) dst[i] = src[i];
         }
     } else {
-        for (int i = 0; i < ib; ++i) {
+        for (std::ptrdiff_t i = 0; i < ib; ++i) {
             const T *src = &A[static_cast<std::size_t>(ic + i) * lda + pc];
-            for (int p = 0; p < pb; ++p)
+            for (std::ptrdiff_t p = 0; p < pb; ++p)
                 Ap[static_cast<std::size_t>(p) * ib + i] = src[p];
         }
     }
 }
 
-void mgemm_pack_B(const T * __restrict__ B, int ldb,
-                  int pc, int jc, int pb, int jb,
-                  int tb, T * __restrict__ Bp)
+void mgemm_pack_B(const T * __restrict__ B, std::ptrdiff_t ldb,
+                  std::ptrdiff_t pc, std::ptrdiff_t jc, std::ptrdiff_t pb, std::ptrdiff_t jb,
+                  std::ptrdiff_t tb, T * __restrict__ Bp)
 {
     if (tb == 'N') {
-        for (int j = 0; j < jb; ++j) {
+        for (std::ptrdiff_t j = 0; j < jb; ++j) {
             const T *src = &B[static_cast<std::size_t>(jc + j) * ldb + pc];
             T *dst = &Bp[static_cast<std::size_t>(j) * pb];
-            for (int p = 0; p < pb; ++p) dst[p] = src[p];
+            for (std::ptrdiff_t p = 0; p < pb; ++p) dst[p] = src[p];
         }
     } else {
-        for (int p = 0; p < pb; ++p) {
+        for (std::ptrdiff_t p = 0; p < pb; ++p) {
             const T *src = &B[static_cast<std::size_t>(pc + p) * ldb + jc];
-            for (int j = 0; j < jb; ++j)
+            for (std::ptrdiff_t j = 0; j < jb; ++j)
                 Bp[static_cast<std::size_t>(j) * pb + p] = src[j];
         }
     }
 }
 
-void mgemm_inner_kernel(int ib, int jb, int pb, T alpha,
+void mgemm_inner_kernel(std::ptrdiff_t ib, std::ptrdiff_t jb, std::ptrdiff_t pb, T alpha,
                         const T * __restrict__ Ap, const T * __restrict__ Bp,
-                        T * __restrict__ C, int ldc)
+                        T * __restrict__ C, std::ptrdiff_t ldc)
 {
-    for (int j = 0; j < jb; ++j) {
+    for (std::ptrdiff_t j = 0; j < jb; ++j) {
         T *cj = &C[static_cast<std::size_t>(j) * ldc];
         const T *bj = &Bp[static_cast<std::size_t>(j) * pb];
-        for (int p = 0; p < pb; ++p) {
+        for (std::ptrdiff_t p = 0; p < pb; ++p) {
             const T t = alpha * bj[p];
             const T *ap = &Ap[static_cast<std::size_t>(p) * ib];
-            for (int i = 0; i < ib; ++i) cj[i] += t * ap[i];
+            for (std::ptrdiff_t i = 0; i < ib; ++i) cj[i] += t * ap[i];
         }
     }
 }
@@ -121,40 +121,40 @@ void mgemm_inner_kernel(int ib, int jb, int pb, T alpha,
  * lanes.
  */
 /* Panel width W = simd_fast::NR * MGEMM_SIMD_NR_PAN (4 / 8 / …) */
-constexpr int simd_pack_W() { return simd_fast::NR * MGEMM_SIMD_NR_PAN; }
+constexpr std::ptrdiff_t simd_pack_W() { return simd_fast::NR * MGEMM_SIMD_NR_PAN; }
 
-void mgemm_pack_B_soa(const T * __restrict__ B, int ldb,
-                      int pc, int jc, int pb, int jb, int tb,
+void mgemm_pack_B_soa(const T * __restrict__ B, std::ptrdiff_t ldb,
+                      std::ptrdiff_t pc, std::ptrdiff_t jc, std::ptrdiff_t pb, std::ptrdiff_t jb, std::ptrdiff_t tb,
                       double * __restrict__ Bp_hi, double * __restrict__ Bp_lo)
 {
-    const int W = simd_pack_W();
-    const int npanels = (jb + W - 1) / W;
-    for (int panel = 0; panel < npanels; ++panel) {
-        const int j0 = panel * W;
-        const int w_eff = (jb - j0 < W) ? (jb - j0) : W;
+    const std::ptrdiff_t W = simd_pack_W();
+    const std::ptrdiff_t npanels = (jb + W - 1) / W;
+    for (std::ptrdiff_t panel = 0; panel < npanels; ++panel) {
+        const std::ptrdiff_t j0 = panel * W;
+        const std::ptrdiff_t w_eff = (jb - j0 < W) ? (jb - j0) : W;
         double *dst_hi = &Bp_hi[static_cast<std::size_t>(panel) * pb * W];
         double *dst_lo = &Bp_lo[static_cast<std::size_t>(panel) * pb * W];
         if (tb == 'N') {
-            for (int c = 0; c < w_eff; ++c) {
+            for (std::ptrdiff_t c = 0; c < w_eff; ++c) {
                 const T *col = &B[static_cast<std::size_t>(jc + j0 + c) * ldb + pc];
-                for (int p = 0; p < pb; ++p) {
+                for (std::ptrdiff_t p = 0; p < pb; ++p) {
                     dst_hi[p * W + c] = col[p].limbs[0];
                     dst_lo[p * W + c] = col[p].limbs[1];
                 }
             }
-            for (int c = w_eff; c < W; ++c)
-                for (int p = 0; p < pb; ++p) {
+            for (std::ptrdiff_t c = w_eff; c < W; ++c)
+                for (std::ptrdiff_t p = 0; p < pb; ++p) {
                     dst_hi[p * W + c] = 0.0;
                     dst_lo[p * W + c] = 0.0;
                 }
         } else {
-            for (int p = 0; p < pb; ++p) {
+            for (std::ptrdiff_t p = 0; p < pb; ++p) {
                 const T *row = &B[static_cast<std::size_t>(pc + p) * ldb + (jc + j0)];
-                for (int c = 0; c < w_eff; ++c) {
+                for (std::ptrdiff_t c = 0; c < w_eff; ++c) {
                     dst_hi[p * W + c] = row[c].limbs[0];
                     dst_lo[p * W + c] = row[c].limbs[1];
                 }
-                for (int c = w_eff; c < W; ++c) {
+                for (std::ptrdiff_t c = w_eff; c < W; ++c) {
                     dst_hi[p * W + c] = 0.0;
                     dst_lo[p * W + c] = 0.0;
                 }
@@ -163,7 +163,7 @@ void mgemm_pack_B_soa(const T * __restrict__ B, int ldb,
     }
 }
 
-int mgemm_simd_pack_W(void) { return simd_pack_W(); }
+std::ptrdiff_t mgemm_simd_pack_W(void) { return simd_pack_W(); }
 
 /*
  * SIMD writeback helper: alpha-scale a DD accumulator (acc_h, acc_l)
@@ -172,15 +172,15 @@ int mgemm_simd_pack_W(void) { return simd_pack_W(); }
 static inline __attribute__((always_inline)) void
 simd_writeback(__m256d alpha_h, __m256d alpha_l,
                __m256d acc_h, __m256d acc_l,
-               T *C_row_i, int ldc, int j0, int nr_eff)
+               T *C_row_i, std::ptrdiff_t ldc, std::ptrdiff_t j0, std::ptrdiff_t nr_eff)
 {
-    constexpr int NR = simd_fast::NR;
+    constexpr std::ptrdiff_t NR = simd_fast::NR;
     __m256d ph, pl;
     simd_fast::mul(alpha_h, alpha_l, acc_h, acc_l, ph, pl);
     alignas(32) double ph_a[NR], pl_a[NR];
     _mm256_store_pd(ph_a, ph);
     _mm256_store_pd(pl_a, pl);
-    for (int j = 0; j < nr_eff; ++j) {
+    for (std::ptrdiff_t j = 0; j < nr_eff; ++j) {
         T r;
         r.limbs[0] = ph_a[j];
         r.limbs[1] = pl_a[j];
@@ -216,49 +216,49 @@ simd_writeback(__m256d alpha_h, __m256d alpha_l,
 #define MGEMM_SIMD_NR_PAN 1
 #endif
 
-template <int MR, int NR_PAN>
+template <std::ptrdiff_t MR, std::ptrdiff_t NR_PAN>
 static __attribute__((noinline)) void
-inner_kernel_simd_t(int ib, int jb, int pb, T alpha,
+inner_kernel_simd_t(std::ptrdiff_t ib, std::ptrdiff_t jb, std::ptrdiff_t pb, T alpha,
                     const T * __restrict__ Ap,
                     const double * __restrict__ Bp_hi,
                     const double * __restrict__ Bp_lo,
-                    T * __restrict__ C, int ldc)
+                    T * __restrict__ C, std::ptrdiff_t ldc)
 {
-    constexpr int NR_LANE = simd_fast::NR;   /* = 4 (one ymm) */
-    constexpr int W = NR_LANE * NR_PAN;    /* total cols per call */
-    const int j_panels = (jb + W - 1) / W;
+    constexpr std::ptrdiff_t NR_LANE = simd_fast::NR;   /* = 4 (one ymm) */
+    constexpr std::ptrdiff_t W = NR_LANE * NR_PAN;    /* total cols per call */
+    const std::ptrdiff_t j_panels = (jb + W - 1) / W;
     const __m256d alpha_h = _mm256_set1_pd(alpha.limbs[0]);
     const __m256d alpha_l = _mm256_set1_pd(alpha.limbs[1]);
-    for (int jp = 0; jp < j_panels; ++jp) {
-        const int j0 = jp * W;
-        const int w_eff = (jb - j0 < W) ? (jb - j0) : W;
+    for (std::ptrdiff_t jp = 0; jp < j_panels; ++jp) {
+        const std::ptrdiff_t j0 = jp * W;
+        const std::ptrdiff_t w_eff = (jb - j0 < W) ? (jb - j0) : W;
         const double *Bp_h_panel = &Bp_hi[static_cast<std::size_t>(jp) * pb * W];
         const double *Bp_l_panel = &Bp_lo[static_cast<std::size_t>(jp) * pb * W];
-        int i = 0;
+        std::ptrdiff_t i = 0;
         /* Main MR×NR_PAN tile loop */
         for (; i + MR <= ib; i += MR) {
             __m256d ach[MR][NR_PAN], acl[MR][NR_PAN];
             #pragma GCC unroll 8
-            for (int k = 0; k < MR; ++k)
+            for (std::ptrdiff_t k = 0; k < MR; ++k)
                 #pragma GCC unroll 8
-                for (int n = 0; n < NR_PAN; ++n) {
+                for (std::ptrdiff_t n = 0; n < NR_PAN; ++n) {
                     ach[k][n] = _mm256_setzero_pd();
                     acl[k][n] = _mm256_setzero_pd();
                 }
-            for (int p = 0; p < pb; ++p) {
+            for (std::ptrdiff_t p = 0; p < pb; ++p) {
                 __m256d bh[NR_PAN], bl[NR_PAN];
                 #pragma GCC unroll 8
-                for (int n = 0; n < NR_PAN; ++n) {
+                for (std::ptrdiff_t n = 0; n < NR_PAN; ++n) {
                     bh[n] = _mm256_loadu_pd(&Bp_h_panel[p * W + n * NR_LANE]);
                     bl[n] = _mm256_loadu_pd(&Bp_l_panel[p * W + n * NR_LANE]);
                 }
                 #pragma GCC unroll 8
-                for (int k = 0; k < MR; ++k) {
+                for (std::ptrdiff_t k = 0; k < MR; ++k) {
                     const T &aval = Ap[static_cast<std::size_t>(p) * ib + i + k];
                     __m256d ah = _mm256_set1_pd(aval.limbs[0]);
                     __m256d al = _mm256_set1_pd(aval.limbs[1]);
                     #pragma GCC unroll 8
-                    for (int n = 0; n < NR_PAN; ++n) {
+                    for (std::ptrdiff_t n = 0; n < NR_PAN; ++n) {
                         __m256d rh, rl;
                         simd_fast::mul(ah, al, bh[n], bl[n], rh, rl);
                         simd_fast::add(ach[k][n], acl[k][n], rh, rl,
@@ -268,11 +268,11 @@ inner_kernel_simd_t(int ib, int jb, int pb, T alpha,
             }
             /* Writeback: NR_PAN ymm-panels per row. */
             #pragma GCC unroll 8
-            for (int k = 0; k < MR; ++k) {
+            for (std::ptrdiff_t k = 0; k < MR; ++k) {
                 #pragma GCC unroll 8
-                for (int n = 0; n < NR_PAN; ++n) {
-                    const int panel_j0 = j0 + n * NR_LANE;
-                    const int panel_eff = (w_eff - n * NR_LANE < NR_LANE)
+                for (std::ptrdiff_t n = 0; n < NR_PAN; ++n) {
+                    const std::ptrdiff_t panel_j0 = j0 + n * NR_LANE;
+                    const std::ptrdiff_t panel_eff = (w_eff - n * NR_LANE < NR_LANE)
                         ? (w_eff - n * NR_LANE) : NR_LANE;
                     if (panel_eff > 0)
                         simd_writeback(alpha_h, alpha_l, ach[k][n], acl[k][n],
@@ -283,14 +283,14 @@ inner_kernel_simd_t(int ib, int jb, int pb, T alpha,
         /* MR=1, NR_PAN=1 tail (just iterate remaining rows over panel 0). */
         for (; i < ib; ++i) {
             #pragma GCC unroll 8
-            for (int n = 0; n < NR_PAN; ++n) {
-                const int panel_j0 = j0 + n * NR_LANE;
-                const int panel_eff = (w_eff - n * NR_LANE < NR_LANE)
+            for (std::ptrdiff_t n = 0; n < NR_PAN; ++n) {
+                const std::ptrdiff_t panel_j0 = j0 + n * NR_LANE;
+                const std::ptrdiff_t panel_eff = (w_eff - n * NR_LANE < NR_LANE)
                     ? (w_eff - n * NR_LANE) : NR_LANE;
                 if (panel_eff <= 0) continue;
                 __m256d acc_h = _mm256_setzero_pd();
                 __m256d acc_l = _mm256_setzero_pd();
-                for (int p = 0; p < pb; ++p) {
+                for (std::ptrdiff_t p = 0; p < pb; ++p) {
                     const T &aval = Ap[static_cast<std::size_t>(p) * ib + i];
                     __m256d ah = _mm256_set1_pd(aval.limbs[0]);
                     __m256d al = _mm256_set1_pd(aval.limbs[1]);
@@ -307,11 +307,11 @@ inner_kernel_simd_t(int ib, int jb, int pb, T alpha,
     }
 }
 
-void mgemm_inner_kernel_simd(int ib, int jb, int pb, T alpha,
+void mgemm_inner_kernel_simd(std::ptrdiff_t ib, std::ptrdiff_t jb, std::ptrdiff_t pb, T alpha,
                              const T * __restrict__ Ap,
                              const double * __restrict__ Bp_hi,
                              const double * __restrict__ Bp_lo,
-                             T * __restrict__ C, int ldc)
+                             T * __restrict__ C, std::ptrdiff_t ldc)
 {
     inner_kernel_simd_t<MGEMM_SIMD_MR, MGEMM_SIMD_NR_PAN>(
         ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo, C, ldc);
@@ -329,44 +329,44 @@ extern "C" void mgemm_serial(
     T *c, const int *ldc_,
     std::size_t transa_len, std::size_t transb_len)
 {
-    const int M = *m_, N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const std::ptrdiff_t M = *m_, N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = mgemm_trans_code(transa, transa_len);
-    const int tb = mgemm_trans_code(transb, transb_len);
+    const std::ptrdiff_t ta = mgemm_trans_code(transa, transa_len);
+    const std::ptrdiff_t tb = mgemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         T *cj = &c[static_cast<std::size_t>(j) * ldc];
         if (beta == zero_dd) {
-            for (int i = 0; i < M; ++i) cj[i] = zero_dd;
+            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = zero_dd;
         } else if (beta != one_dd) {
-            for (int i = 0; i < M; ++i) cj[i] = cj[i] * beta;
+            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cj[i] * beta;
         }
     }
     if (alpha == zero_dd || K == 0) return;
 
-    int MC, KC, NC;
+    std::ptrdiff_t MC, KC, NC;
     mgemm_choose_blocks(&MC, &KC, &NC);
 
     T *Ap = static_cast<T *>(std::aligned_alloc(
         64, static_cast<std::size_t>(MC) * KC * sizeof(T)));
 #ifdef MBLAS_SIMD_DD
-    const int W_simd = mgemm_simd_pack_W();
-    const int NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
+    const std::ptrdiff_t W_simd = mgemm_simd_pack_W();
+    const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
     double *Bp_hi = static_cast<double *>(std::aligned_alloc(
         64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
     double *Bp_lo = static_cast<double *>(std::aligned_alloc(
         64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
     if (Ap && Bp_hi && Bp_lo) {
-        for (int jc = 0; jc < N; jc += NC) {
-            const int jb = (N - jc < NC) ? (N - jc) : NC;
-            for (int pc = 0; pc < K; pc += KC) {
-                const int pb = (K - pc < KC) ? (K - pc) : KC;
+        for (std::ptrdiff_t jc = 0; jc < N; jc += NC) {
+            const std::ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+            for (std::ptrdiff_t pc = 0; pc < K; pc += KC) {
+                const std::ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
                 mgemm_pack_B_soa(b, ldb, pc, jc, pb, jb, tb, Bp_hi, Bp_lo);
-                for (int ic = 0; ic < M; ic += MC) {
-                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                for (std::ptrdiff_t ic = 0; ic < M; ic += MC) {
+                    const std::ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
                     mgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                     mgemm_inner_kernel_simd(ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo,
                                             &c[static_cast<std::size_t>(jc) * ldc + ic],
@@ -382,13 +382,13 @@ extern "C" void mgemm_serial(
     T *Bp = static_cast<T *>(std::aligned_alloc(
         64, static_cast<std::size_t>(KC) * NC * sizeof(T)));
     if (Ap && Bp) {
-        for (int jc = 0; jc < N; jc += NC) {
-            const int jb = (N - jc < NC) ? (N - jc) : NC;
-            for (int pc = 0; pc < K; pc += KC) {
-                const int pb = (K - pc < KC) ? (K - pc) : KC;
+        for (std::ptrdiff_t jc = 0; jc < N; jc += NC) {
+            const std::ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+            for (std::ptrdiff_t pc = 0; pc < K; pc += KC) {
+                const std::ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
                 mgemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                for (int ic = 0; ic < M; ic += MC) {
-                    const int ib = (M - ic < MC) ? (M - ic) : MC;
+                for (std::ptrdiff_t ic = 0; ic < M; ic += MC) {
+                    const std::ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
                     mgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                     mgemm_inner_kernel(ib, jb, pb, alpha, Ap, Bp,
                                        &c[static_cast<std::size_t>(jc) * ldc + ic],

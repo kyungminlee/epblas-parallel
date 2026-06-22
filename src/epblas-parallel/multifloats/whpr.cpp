@@ -38,17 +38,17 @@ using mf_kernels::rcmul;
 /* Contiguous (unit-stride x) core: packed Hermitian rank-1 A += alpha*x*x^H.
  * Off-diagonal packed-column run is a SIMD column-AXPY (caxpy_add, bit-exact;
  * cmul commutes so t=alpha*conj(x[j]) factors out); diagonal forced real. */
-static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
+static void whpr_contig(char UPLO, std::ptrdiff_t N, R alpha, T *ap, const T *x)
 {
     if (UPLO == 'U') {
 #ifdef _OPENMP
-        const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_available());
+        const std::ptrdiff_t use_omp = (N >= WHPR_OMP_MIN && blas_omp_available());
         /* static,1: cyclic interleave balances the triangular packed-column skew;
          * complex DD rank-1 work per element dominates any false sharing. */
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
-            const int kk = (j * (j + 1)) / 2;
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
+            const std::ptrdiff_t kk = (j * (j + 1)) / 2;
             if (!ceq0(x[j])) {
                 const T tmp = rcmul(alpha, cconj(x[j]));
                 mf_kernels::caxpy_add(j, &ap[kk], &x[0], tmp);
@@ -60,11 +60,11 @@ static void whpr_contig(char UPLO, int N, R alpha, T *ap, const T *x)
         }
     } else {
 #ifdef _OPENMP
-        const int use_omp = (N >= WHPR_OMP_MIN && blas_omp_available());
+        const std::ptrdiff_t use_omp = (N >= WHPR_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
-            const int kk = j * N - (j * (j - 1)) / 2;
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
+            const std::ptrdiff_t kk = j * N - (j * (j - 1)) / 2;
             if (!ceq0(x[j])) {
                 const T tmp = rcmul(alpha, cconj(x[j]));
                 const R new_re = ap[kk].re + cmul(tmp, x[j]).re;
@@ -86,8 +86,8 @@ extern "C" void whpr_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_;
     const R alpha = *alpha_;
     const char UPLO = up(uplo);
 
@@ -100,6 +100,6 @@ extern "C" void whpr_(
     /* Strided x: gather to unit-stride scratch, run the SIMD core. */
     const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(N - 1) * incx : x;
     std::vector<T> xs(static_cast<std::size_t>(N));
-    for (int i = 0; i < N; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
+    for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
     whpr_contig(UPLO, N, alpha, ap, xs.data());
 }

@@ -36,15 +36,15 @@ using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
 
 /* Pass-1 unit kernel: max(|re.hi|, |im.hi|) over a contiguous (incx==1) slice.
  * Max is exact → the combined global scale is BIT-EXACT regardless of split. */
-static double mwnrm2_maxabs_unit(int n, const T *x)
+static double mwnrm2_maxabs_unit(std::ptrdiff_t n, const T *x)
 {
     double scale_hi = 0.0;
 #ifdef MBLAS_SIMD_DD
     __m256d mx = _mm256_setzero_pd();
     const __m256d absmask = _mm256_castsi256_pd(
         _mm256_set1_epi64x(static_cast<long long>(0x7FFFFFFFFFFFFFFFULL)));
-    const int n4 = n & ~3;
-    for (int i = 0; i < n4; i += 4) {
+    const std::ptrdiff_t n4 = n & ~3;
+    for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d rh, rl, ih, il;
         cload4(&x[i], rh, rl, ih, il); (void)rl; (void)il;
         mx = _mm256_max_pd(mx, _mm256_and_pd(rh, absmask));
@@ -52,14 +52,14 @@ static double mwnrm2_maxabs_unit(int n, const T *x)
     }
     alignas(32) double mxa[4];
     _mm256_store_pd(mxa, mx);
-    for (int k = 0; k < 4; ++k) if (mxa[k] > scale_hi) scale_hi = mxa[k];
-    for (int i = n4; i < n; ++i) {
+    for (std::ptrdiff_t k = 0; k < 4; ++k) if (mxa[k] > scale_hi) scale_hi = mxa[k];
+    for (std::ptrdiff_t i = n4; i < n; ++i) {
         R ar = fabsdd(x[i].re), ai = fabsdd(x[i].im);
         if (ar.limbs[0] > scale_hi) scale_hi = ar.limbs[0];
         if (ai.limbs[0] > scale_hi) scale_hi = ai.limbs[0];
     }
 #else
-    for (int i = 0; i < n; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         R ar = fabsdd(x[i].re), ai = fabsdd(x[i].im);
         if (ar.limbs[0] > scale_hi) scale_hi = ar.limbs[0];
         if (ai.limbs[0] > scale_hi) scale_hi = ai.limbs[0];
@@ -69,7 +69,7 @@ static double mwnrm2_maxabs_unit(int n, const T *x)
 }
 
 /* Pass-2 unit kernel: Σ (re/scale)² + (im/scale)² over a contiguous slice. */
-static R mwnrm2_ssq_unit(int n, const T *x, R scale)
+static R mwnrm2_ssq_unit(std::ptrdiff_t n, const T *x, R scale)
 {
     R s{0.0, 0.0};
 #ifdef MBLAS_SIMD_DD
@@ -79,9 +79,9 @@ static R mwnrm2_ssq_unit(int n, const T *x, R scale)
     __m256d a0 = _mm256_setzero_pd();
     __m256d a1 = _mm256_setzero_pd();
     __m256d a2 = _mm256_setzero_pd();
-    constexpr int K = 64;
-    int counter = K;
-    const int n4 = n & ~3;
+    constexpr std::ptrdiff_t K = 64;
+    std::ptrdiff_t counter = K;
+    const std::ptrdiff_t n4 = n & ~3;
     auto sq_into = [&](__m256d xh, __m256d xl) {
         /* t = x · inv */
         __m256d th, tl;
@@ -95,7 +95,7 @@ static R mwnrm2_ssq_unit(int n, const T *x, R scale)
         pl = _mm256_add_pd(pl, _mm256_add_pd(cross, cross));
         absorb(ph, pl, a0, a1, a2);
     };
-    for (int i = 0; i < n4; i += 4) {
+    for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d rh, rl, ih, il;
         cload4(&x[i], rh, rl, ih, il);
         sq_into(rh, rl);
@@ -104,12 +104,12 @@ static R mwnrm2_ssq_unit(int n, const T *x, R scale)
     }
     __m256d t = _mm256_add_pd(a1, a2);
     s = horizontal_dd(a0, t);
-    for (int i = n4; i < n; ++i) {
+    for (std::ptrdiff_t i = n4; i < n; ++i) {
         R r = x[i].re / scale, m = x[i].im / scale;
         s = s + r * r + m * m;
     }
 #else
-    for (int i = 0; i < n; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         R r = x[i].re / scale, m = x[i].im / scale;
         s = s + r * r + m * m;
     }
@@ -121,18 +121,18 @@ static R mwnrm2_ssq_unit(int n, const T *x, R scale)
 /* Threaded two-pass nrm2 (incx==1): parallel max (exact → global scale
  * BIT-EXACT) then partial-reduce Σ(re²+im²)/scale² in tid order (reorders, so
  * matches serial within fuzz tol). Returns false below threshold. */
-__attribute__((noinline)) static bool mwnrm2_omp(int n, const T *x, R *out)
+__attribute__((noinline)) static bool mwnrm2_omp(std::ptrdiff_t n, const T *x, R *out)
 {
     if (n <= MWNRM2_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MWNRM2_MAX_CPUS) nthreads = MWNRM2_MAX_CPUS;
 
     double scale_hi = 0.0;
     #pragma omp parallel num_threads(nthreads) reduction(max:scale_hi)
     {
-        int tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) {
             double local = mwnrm2_maxabs_unit(hi - lo, x + lo);
             if (local > scale_hi) scale_hi = local;
@@ -142,15 +142,15 @@ __attribute__((noinline)) static bool mwnrm2_omp(int n, const T *x, R *out)
     R scale{scale_hi, 0.0};
 
     R partial[MWNRM2_MAX_CPUS];
-    for (int t = 0; t < nthreads; ++t) partial[t] = R{0.0, 0.0};
+    for (std::ptrdiff_t t = 0; t < nthreads; ++t) partial[t] = R{0.0, 0.0};
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) partial[tid] = mwnrm2_ssq_unit(hi - lo, x + lo, scale);
     }
     R s{0.0, 0.0};
-    for (int t = 0; t < nthreads; ++t) s = s + partial[t];
+    for (std::ptrdiff_t t = 0; t < nthreads; ++t) s = s + partial[t];
     *out = scale * sqrtdd(s);
     return true;
 }
@@ -158,7 +158,7 @@ __attribute__((noinline)) static bool mwnrm2_omp(int n, const T *x, R *out)
 
 extern "C" R mwnrm2_(const int *n_, const T *x, const int *incx_)
 {
-    const int n = *n_, incx = *incx_;
+    const std::ptrdiff_t n = *n_, incx = *incx_;
     R zero{0.0, 0.0};
     if (n < 1 || incx < 1) return zero;
 
@@ -175,8 +175,8 @@ extern "C" R mwnrm2_(const int *n_, const T *x, const int *incx_)
 
     /* Strided fallback (scalar two-pass). */
     double scale_hi = 0.0;
-    int ix = 0;
-    for (int i = 0; i < n; ++i) {
+    std::ptrdiff_t ix = 0;
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         R ar = fabsdd(x[ix].re), ai = fabsdd(x[ix].im);
         if (ar.limbs[0] > scale_hi) scale_hi = ar.limbs[0];
         if (ai.limbs[0] > scale_hi) scale_hi = ai.limbs[0];
@@ -186,7 +186,7 @@ extern "C" R mwnrm2_(const int *n_, const T *x, const int *incx_)
     R scale{scale_hi, 0.0};
     R s = zero;
     ix = 0;
-    for (int i = 0; i < n; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         R r = x[ix].re / scale, m = x[ix].im / scale;
         s = s + r * r + m * m;
         ix += incx;

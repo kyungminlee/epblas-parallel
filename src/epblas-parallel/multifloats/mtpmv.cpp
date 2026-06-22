@@ -92,7 +92,7 @@ void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
  * DD addition reorders vs serial → within fuzz tol; serial stays bit-exact.
  * Returns true on success, false if a scratch alloc failed. */
 static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
-                             std::ptrdiff_t n, const T *ap, T *x, int nt)
+                             std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t nt)
 {
     if (trans) {
         T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
@@ -119,7 +119,7 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
         const T one_dd{1.0, 0.0};
         std::ptrdiff_t range[MTPMV_MAX_CPUS + 1];
         /* per-column work ~j (upper) / ~(n-j) (lower) -> heavy_high=upper. */
-        int ncpu = mf_omp::tri_area_bounds(n, nt, 3, 4, upper,
+        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nt, 3, 4, upper,
                                            MTPMV_MAX_CPUS, range);
         if (ncpu <= 1) return false;
         T *buf = static_cast<T *>(std::calloc((std::size_t)ncpu * n, sizeof(T)));
@@ -128,7 +128,7 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
          * reading the ORIGINAL x (x is overwritten only in the reduction). */
         #pragma omp parallel num_threads(ncpu)
         {
-            int t = omp_get_thread_num();
+            std::ptrdiff_t t = omp_get_thread_num();
             std::ptrdiff_t c_from = range[t], c_to = range[t + 1];
             T *slot = buf + (std::size_t)t * n;
             if (upper) {
@@ -151,7 +151,7 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
          * windows into the widest slot (last for upper / first for lower, which
          * spans all of [0,n)) and then overwrite x in one pass. */
         T *target = buf + (std::size_t)(upper ? ncpu - 1 : 0) * n;
-        for (int i = upper ? 0 : 1; i < (upper ? ncpu - 1 : ncpu); ++i) {
+        for (std::ptrdiff_t i = upper ? 0 : 1; i < (upper ? ncpu - 1 : ncpu); ++i) {
             const T *src = buf + (std::size_t)i * n;
             std::ptrdiff_t from, to;
             mf_omp::tri_row_window(i, upper, range, n, from, to);
@@ -166,12 +166,12 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
 /* Threaded in-place triangular packed matvec. incx==1 drives the contiguous
  * core directly; strided gathers/scatters around it. Returns true if handled. */
 __attribute__((noinline)) static bool mtpmv_omp(
-    bool upper, bool trans, bool nounit, int n,
-    const T *ap, T *x, int incx)
+    bool upper, bool trans, bool nounit, std::ptrdiff_t n,
+    const T *ap, T *x, std::ptrdiff_t incx)
 {
     if (n < MTPMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTPMV_MAX_CPUS) nthreads = MTPMV_MAX_CPUS;
 
     if (incx == 1)
@@ -180,10 +180,10 @@ __attribute__((noinline)) static bool mtpmv_omp(
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
     T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (!xbuf) return false;
-    for (int i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
+    for (std::ptrdiff_t i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
     bool ok = mtpmv_omp_contig(upper, trans, nounit, n, ap, xbuf, nthreads);
     if (ok)
-        for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xbuf[i];
+        for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xbuf[i];
     std::free(xbuf);
     return ok;
 }
@@ -197,12 +197,12 @@ extern "C" void mtpmv_(
     std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int incx = *incx_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
-    const int nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 

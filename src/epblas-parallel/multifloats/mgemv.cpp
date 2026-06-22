@@ -61,10 +61,10 @@ using simd_exact::load_dd4;
  * scatter over only its rows (matrix read contiguous in i; ascending j ->
  * bit-exact vs serial). SIMD build packs y to SoA and uses the AVX2 DD kernel;
  * the scalar fallback runs the reference inner loop. */
-static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
+static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T *a, std::size_t lda,
                            const T *x, T *y)
 {
-    int nt = 1;
+    std::ptrdiff_t nt = 1;
 #ifdef _OPENMP
     if (M >= MGEMV_OMP_MIN && blas_omp_available() && !omp_in_parallel()) {
         nt = blas_omp_max_threads();
@@ -75,19 +75,19 @@ static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
     const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
     double *y_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
     double *y_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    for (int i = 0; i < M; ++i) { y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1]; }
+    for (std::ptrdiff_t i = 0; i < M; ++i) { y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1]; }
     for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) { y_hi[i] = 0.0; y_lo[i] = 0.0; }
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nt)
 #endif
     {
-        int tid = 0;
+        std::ptrdiff_t tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const int lo = (int)((std::ptrdiff_t)M * tid / nt);
-        const int hi = (int)((std::ptrdiff_t)M * (tid + 1) / nt);
-        for (int j = 0; j < N; ++j) {
+        const std::ptrdiff_t lo = (std::ptrdiff_t)((std::ptrdiff_t)M * tid / nt);
+        const std::ptrdiff_t hi = (std::ptrdiff_t)((std::ptrdiff_t)M * (tid + 1) / nt);
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;
             const T t = alpha * xj;
@@ -95,7 +95,7 @@ static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
             const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
             const double *aj = reinterpret_cast<const double *>(&A_(0, j));
             const T *ajs = &A_(0, j);
-            int i = lo;
+            std::ptrdiff_t i = lo;
             for (; i + 3 < hi; i += 4) {
                 __m256d a_hi, a_lo;
                 load_dd4(aj + 2 * i, a_hi, a_lo);
@@ -114,25 +114,25 @@ static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
             }
         }
     }
-    for (int i = 0; i < M; ++i) { y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i]; }
+    for (std::ptrdiff_t i = 0; i < M; ++i) { y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i]; }
     std::free(y_hi); std::free(y_lo);
 #else
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nt)
 #endif
     {
-        int tid = 0;
+        std::ptrdiff_t tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const int lo = (int)((std::ptrdiff_t)M * tid / nt);
-        const int hi = (int)((std::ptrdiff_t)M * (tid + 1) / nt);
-        for (int j = 0; j < N; ++j) {
+        const std::ptrdiff_t lo = (std::ptrdiff_t)((std::ptrdiff_t)M * tid / nt);
+        const std::ptrdiff_t hi = (std::ptrdiff_t)((std::ptrdiff_t)M * (tid + 1) / nt);
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;
             const T t = alpha * xj;
             const T *aj = &A_(0, j);
-            for (int i = lo; i < hi; ++i) y[i] = y[i] + t * aj[i];
+            for (std::ptrdiff_t i = lo; i < hi; ++i) y[i] = y[i] + t * aj[i];
         }
     }
 #endif
@@ -142,27 +142,27 @@ static void mgemv_n_contig(int M, int N, T alpha, const T *a, std::size_t lda,
  * Columns are independent dots over the shared read-only x; thread over j
  * (disjoint y[j], per-j reduction order fixed). SIMD build runs a 4-lane SoA
  * DD accumulator + hi/lo horizontal reduce; scalar fallback a plain dot. */
-static void mgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
+static void mgemv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T *a, std::size_t lda,
                            const T *x, T *y)
 {
 #ifdef _OPENMP
-    const int use_omp = (N >= MGEMV_OMP_MIN && blas_omp_available()
+    const std::ptrdiff_t use_omp = (N >= MGEMV_OMP_MIN && blas_omp_available()
                          && !omp_in_parallel());
 #endif
 #ifdef MBLAS_SIMD_DD
     const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
     double *x_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
     double *x_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    for (int i = 0; i < M; ++i) { x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1]; }
+    for (std::ptrdiff_t i = 0; i < M; ++i) { x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1]; }
     for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
     const __m256d zerov = _mm256_setzero_pd();
 #ifdef _OPENMP
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         const double *aj = reinterpret_cast<const double *>(&A_(0, j));
         __m256d s_h = zerov, s_l = zerov;
-        int i = 0;
+        std::ptrdiff_t i = 0;
         for (; i + 3 < M; i += 4) {
             __m256d a_h, a_l;
             load_dd4(aj + 2 * i, a_h, a_l);
@@ -196,10 +196,10 @@ static void mgemv_t_contig(int M, int N, T alpha, const T *a, std::size_t lda,
 #ifdef _OPENMP
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         const T *aj = &A_(0, j);
         T s = zero_dd;
-        for (int i = 0; i < M; ++i) s = s + aj[i] * x[i];
+        for (std::ptrdiff_t i = 0; i < M; ++i) s = s + aj[i] * x[i];
         y[j] = y[j] + alpha * s;
     }
 #endif
@@ -216,9 +216,9 @@ extern "C" void mgemv_(
     std::size_t trans_len)
 {
     (void)trans_len;
-    const int M = *m_, N = *n_;
+    const std::ptrdiff_t M = *m_, N = *n_;
     const std::size_t lda = static_cast<std::size_t>(*lda_);
-    const int incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
@@ -226,8 +226,8 @@ extern "C" void mgemv_(
 
     if (M == 0 || N == 0) return;
 
-    const int leny = notrans ? M : N;
-    const int lenx = notrans ? N : M;
+    const std::ptrdiff_t leny = notrans ? M : N;
+    const std::ptrdiff_t lenx = notrans ? N : M;
 
     mf_kernels::scale_y(leny, beta, y, incy);
     if (eq0(alpha)) return;

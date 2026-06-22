@@ -34,7 +34,7 @@
 
 namespace simd_fast {
 
-constexpr int NR = 4;
+constexpr std::ptrdiff_t NR = 4;
 
 /* Error-free transforms ---------------------------------------------- */
 
@@ -150,7 +150,7 @@ horizontal_dd(__m256d h, __m256d l)
     alignas(32) double ha[4], la[4];
     _mm256_store_pd(ha, h); _mm256_store_pd(la, l);
     multifloats::float64x2 s{ha[0], la[0]};
-    for (int k = 1; k < 4; ++k) s = s + multifloats::float64x2{ha[k], la[k]};
+    for (std::ptrdiff_t k = 1; k < 4; ++k) s = s + multifloats::float64x2{ha[k], la[k]};
     return s;
 }
 

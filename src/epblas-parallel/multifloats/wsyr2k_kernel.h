@@ -38,21 +38,21 @@ using wsyr2k_T = multifloats::complex64x2;
 #define WSYR2K_OMP_MIN 32
 
 /* Block size over the diagonal axis (env WSYR2K_NB). */
-int wsyr2k_block_nb(void);
+std::ptrdiff_t wsyr2k_block_nb(void);
 
 /* Scale column j's UPLO triangle of C by beta (the alpha==0 / K==0 early
  * exit). Handles beta==0 (zero-fill) and beta!=1; the caller skips beta==1. */
-void wsyr2k_scale_col(int j, int N, char UPLO, wsyr2k_T beta,
-                      wsyr2k_T *c, int ldc);
+void wsyr2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, wsyr2k_T beta,
+                      wsyr2k_T *c, std::ptrdiff_t ldc);
 
 /* One diagonal block [jc, jc+jb) of the rank-2k update: beta-scale the block's
  * own triangle columns, accumulate the diagonal block (SIMD or scalar), then
  * the two trailing gemm calls (routed through wgemm_serial — no nested
  * OpenMP). Each block writes a disjoint column range of C → race-free. */
-void wsyr2k_block(int jc, int jb, int N, int K, char UPLO, char TR,
+void wsyr2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR,
                   wsyr2k_T alpha, wsyr2k_T beta,
-                  const wsyr2k_T *a, int lda, const wsyr2k_T *b, int ldb,
-                  wsyr2k_T *c, int ldc);
+                  const wsyr2k_T *a, std::ptrdiff_t lda, const wsyr2k_T *b, std::ptrdiff_t ldb,
+                  wsyr2k_T *c, std::ptrdiff_t ldc);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wsyr2k_. */
 extern "C" void wsyr2k_serial(

@@ -41,13 +41,13 @@ using simd_fast::hreduce;
  * msub:  x[k] -= xi * ai[k]  for k in [lo,hi)  (NoTrans axpy form).
  * dot :  returns sum_{k in [lo,hi)} ai[k] * x[k] (Trans dot form). */
 static inline void
-mtrsv_col_msub(T *x, const T *ai, T xi, int lo, int hi)
+mtrsv_col_msub(T *x, const T *ai, T xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
 {
     double *xp = reinterpret_cast<double *>(x);
     const double *aip = reinterpret_cast<const double *>(ai);
     const __m256d xh = _mm256_set1_pd(xi.limbs[0]);
     const __m256d xl = _mm256_set1_pd(xi.limbs[1]);
-    int k = lo;
+    std::ptrdiff_t k = lo;
     for (; k + 4 <= hi; k += 4) {
         __m256d ah, al, ch, cl;
         load_dd4(aip + 2 * k, ah, al);
@@ -62,12 +62,12 @@ mtrsv_col_msub(T *x, const T *ai, T xi, int lo, int hi)
     for (; k < hi; ++k) x[k] = x[k] - xi * ai[k];
 }
 static inline T
-mtrsv_dot_range(const T *ai, const T *x, int lo, int hi)
+mtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
 {
     const double *aip = reinterpret_cast<const double *>(ai);
     const double *xp  = reinterpret_cast<const double *>(x);
     __m256d sh = _mm256_setzero_pd(), sl = _mm256_setzero_pd();
-    int k = lo;
+    std::ptrdiff_t k = lo;
     for (; k + 4 <= hi; k += 4) {
         __m256d ah, al, xih, xil;
         load_dd4(aip + 2 * k, ah, al);
@@ -89,7 +89,7 @@ mtrsv_dot_range(const T *ai, const T *x, int lo, int hi)
  * diagonal-block solver by the threaded path below. TR is already normalized
  * ('C' folded to 'T' by the caller). */
 static void mtrsv_serial(char UPLO, char TR, bool nounit,
-                         int N, const T *a, int lda, T *x, int incx)
+                         std::ptrdiff_t N, const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
 {
     if (N == 0) return;
 
@@ -98,13 +98,13 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
         const std::size_t N_pad = (static_cast<std::size_t>(N) + 3) & ~static_cast<std::size_t>(3);
         double *x_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
         double *x_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-        for (int i = 0; i < N; ++i) { x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1]; }
+        for (std::ptrdiff_t i = 0; i < N; ++i) { x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1]; }
         for (std::size_t i = static_cast<std::size_t>(N); i < N_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
         const __m256d zerov = _mm256_setzero_pd();
 
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (int i = 0; i < N; ++i) {
+                for (std::ptrdiff_t i = 0; i < N; ++i) {
                     T xi{x_hi[i], x_lo[i]};
                     if (eq0(xi)) continue;
                     if (nounit) xi = xi / A_(i, i);
@@ -112,7 +112,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                     const __m256d xih = _mm256_set1_pd(xi.limbs[0]);
                     const __m256d xil = _mm256_set1_pd(xi.limbs[1]);
                     const double *aip = reinterpret_cast<const double *>(&A_(0, i));
-                    int k = i + 1;
+                    std::ptrdiff_t k = i + 1;
                     for (; k < N && (k & 3) != 0; ++k) {
                         T xk{x_hi[k], x_lo[k]};
                         T aki{aip[2*k], aip[2*k+1]};
@@ -140,7 +140,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                     }
                 }
             } else {
-                for (int i = N - 1; i >= 0; --i) {
+                for (std::ptrdiff_t i = N - 1; i >= 0; --i) {
                     T xi{x_hi[i], x_lo[i]};
                     if (eq0(xi)) continue;
                     if (nounit) xi = xi / A_(i, i);
@@ -148,7 +148,7 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                     const __m256d xih = _mm256_set1_pd(xi.limbs[0]);
                     const __m256d xil = _mm256_set1_pd(xi.limbs[1]);
                     const double *aip = reinterpret_cast<const double *>(&A_(0, i));
-                    int k = 0;
+                    std::ptrdiff_t k = 0;
                     for (; k + 3 < i; k += 4) {
                         __m256d a_h, a_l;
                         load_dd4(aip + 2 * k, a_h, a_l);
@@ -172,11 +172,11 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
             }
         } else {  /* TRANS = 'T' */
             if (UPLO == 'L') {
-                for (int i = N - 1; i >= 0; --i) {
+                for (std::ptrdiff_t i = N - 1; i >= 0; --i) {
                     const double *aip = reinterpret_cast<const double *>(&A_(0, i));
                     __m256d s_h = zerov, s_l = zerov;
                     T t{x_hi[i], x_lo[i]};
-                    int k = i + 1;
+                    std::ptrdiff_t k = i + 1;
                     for (; k < N && (k & 3) != 0; ++k) {
                         T xk{x_hi[k], x_lo[k]};
                         T aki{aip[2*k], aip[2*k+1]};
@@ -204,11 +204,11 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                     x_hi[i] = t.limbs[0]; x_lo[i] = t.limbs[1];
                 }
             } else {
-                for (int i = 0; i < N; ++i) {
+                for (std::ptrdiff_t i = 0; i < N; ++i) {
                     const double *aip = reinterpret_cast<const double *>(&A_(0, i));
                     __m256d s_h = zerov, s_l = zerov;
                     T t{x_hi[i], x_lo[i]};
-                    int k = 0;
+                    std::ptrdiff_t k = 0;
                     for (; k + 3 < i; k += 4) {
                         __m256d a_h, a_l;
                         load_dd4(aip + 2 * k, a_h, a_l);
@@ -232,43 +232,43 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
                 }
             }
         }
-        for (int i = 0; i < N; ++i) { x[i].limbs[0] = x_hi[i]; x[i].limbs[1] = x_lo[i]; }
+        for (std::ptrdiff_t i = 0; i < N; ++i) { x[i].limbs[0] = x_hi[i]; x[i].limbs[1] = x_lo[i]; }
         std::free(x_hi); std::free(x_lo);
 #else
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (int i = 0; i < N; ++i) {
+                for (std::ptrdiff_t i = 0; i < N; ++i) {
                     if (!eq0(x[i])) {
                         if (nounit) x[i] = x[i] / A_(i, i);
                         const T xi = x[i];
                         const T *ai = &A_(0, i);
-                        for (int k = i + 1; k < N; ++k) x[k] = x[k] - xi * ai[k];
+                        for (std::ptrdiff_t k = i + 1; k < N; ++k) x[k] = x[k] - xi * ai[k];
                     }
                 }
             } else {
-                for (int i = N - 1; i >= 0; --i) {
+                for (std::ptrdiff_t i = N - 1; i >= 0; --i) {
                     if (!eq0(x[i])) {
                         if (nounit) x[i] = x[i] / A_(i, i);
                         const T xi = x[i];
                         const T *ai = &A_(0, i);
-                        for (int k = 0; k < i; ++k) x[k] = x[k] - xi * ai[k];
+                        for (std::ptrdiff_t k = 0; k < i; ++k) x[k] = x[k] - xi * ai[k];
                     }
                 }
             }
         } else {
             if (UPLO == 'L') {
-                for (int i = N - 1; i >= 0; --i) {
+                for (std::ptrdiff_t i = N - 1; i >= 0; --i) {
                     T t = x[i];
                     const T *ai = &A_(0, i);
-                    for (int k = i + 1; k < N; ++k) t = t - ai[k] * x[k];
+                    for (std::ptrdiff_t k = i + 1; k < N; ++k) t = t - ai[k] * x[k];
                     if (nounit) t = t / ai[i];
                     x[i] = t;
                 }
             } else {
-                for (int i = 0; i < N; ++i) {
+                for (std::ptrdiff_t i = 0; i < N; ++i) {
                     T t = x[i];
                     const T *ai = &A_(0, i);
-                    for (int k = 0; k < i; ++k) t = t - ai[k] * x[k];
+                    for (std::ptrdiff_t k = 0; k < i; ++k) t = t - ai[k] * x[k];
                     if (nounit) t = t / ai[i];
                     x[i] = t;
                 }
@@ -355,11 +355,11 @@ static void mtrsv_serial(char UPLO, char TR, bool nounit,
  * (the off-diagonal contribution is regrouped / scalar rather than SIMD).
  * Returns true if it handled the call. */
 __attribute__((noinline)) static bool mtrsv_omp(
-    char UPLO, char TR, bool nounit, int N, const T *a, int lda, T *x)
+    char UPLO, char TR, bool nounit, std::ptrdiff_t N, const T *a, std::ptrdiff_t lda, T *x)
 {
     if (N < MTRSV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTRSV_MAX_CPUS) nthreads = MTRSV_MAX_CPUS;
     const bool lower = (UPLO == 'L');
     const bool trans = (TR != 'N');
@@ -368,45 +368,45 @@ __attribute__((noinline)) static bool mtrsv_omp(
         /* NoTrans: axpy form. Solve a diagonal block, then propagate its solved
          * columns into the not-yet-solved rows (trailing for L, leading for U). */
         if (lower) {
-            for (int j0 = 0; j0 < N; j0 += MTRSV_BLK) {
-                int j1 = j0 + MTRSV_BLK; if (j1 > N) j1 = N;
+            for (std::ptrdiff_t j0 = 0; j0 < N; j0 += MTRSV_BLK) {
+                std::ptrdiff_t j1 = j0 + MTRSV_BLK; if (j1 > N) j1 = N;
                 mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
                 if (j1 >= N) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
-                    int tid = omp_get_thread_num();
-                    int rlo = j1 + (int)((long long)(N - j1) * tid / nthreads);
-                    int rhi = j1 + (int)((long long)(N - j1) * (tid + 1) / nthreads);
-                    for (int i = j0; i < j1; ++i) {
+                    std::ptrdiff_t tid = omp_get_thread_num();
+                    std::ptrdiff_t rlo = j1 + (std::ptrdiff_t)((long long)(N - j1) * tid / nthreads);
+                    std::ptrdiff_t rhi = j1 + (std::ptrdiff_t)((long long)(N - j1) * (tid + 1) / nthreads);
+                    for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const T xi = x[i];
                         if (eq0(xi)) continue;
                         const T *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         mtrsv_col_msub(x, ai, xi, rlo, rhi);
 #else
-                        for (int k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
+                        for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
 #endif
                     }
                 }
             }
         } else {
-            for (int j1 = N; j1 > 0; j1 -= MTRSV_BLK) {
-                int j0 = j1 - MTRSV_BLK; if (j0 < 0) j0 = 0;
+            for (std::ptrdiff_t j1 = N; j1 > 0; j1 -= MTRSV_BLK) {
+                std::ptrdiff_t j0 = j1 - MTRSV_BLK; if (j0 < 0) j0 = 0;
                 mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
                 if (j0 <= 0) break;
                 #pragma omp parallel num_threads(nthreads)
                 {
-                    int tid = omp_get_thread_num();
-                    int rlo = (int)((long long)j0 * tid / nthreads);
-                    int rhi = (int)((long long)j0 * (tid + 1) / nthreads);
-                    for (int i = j0; i < j1; ++i) {
+                    std::ptrdiff_t tid = omp_get_thread_num();
+                    std::ptrdiff_t rlo = (std::ptrdiff_t)((long long)j0 * tid / nthreads);
+                    std::ptrdiff_t rhi = (std::ptrdiff_t)((long long)j0 * (tid + 1) / nthreads);
+                    for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const T xi = x[i];
                         if (eq0(xi)) continue;
                         const T *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         mtrsv_col_msub(x, ai, xi, rlo, rhi);
 #else
-                        for (int k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
+                        for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
 #endif
                     }
                 }
@@ -417,21 +417,21 @@ __attribute__((noinline)) static bool mtrsv_omp(
          * the block rows (threaded, disjoint rows), then solve the diagonal
          * block serially (it adds the within-block coupling + divides). */
         if (lower) {                                  /* backward, k > i */
-            for (int j1 = N; j1 > 0; j1 -= MTRSV_BLK) {
-                int j0 = j1 - MTRSV_BLK; if (j0 < 0) j0 = 0;
+            for (std::ptrdiff_t j1 = N; j1 > 0; j1 -= MTRSV_BLK) {
+                std::ptrdiff_t j0 = j1 - MTRSV_BLK; if (j0 < 0) j0 = 0;
                 if (j1 < N) {
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
-                        int ilo = j0 + (int)((long long)(j1 - j0) * tid / nthreads);
-                        int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
-                        for (int i = ilo; i < ihi; ++i) {
+                        std::ptrdiff_t tid = omp_get_thread_num();
+                        std::ptrdiff_t ilo = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * tid / nthreads);
+                        std::ptrdiff_t ihi = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const T *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                             T s = mtrsv_dot_range(ai, x, j1, N);
 #else
                             T s = zero_dd;
-                            for (int k = j1; k < N; ++k) s = s + ai[k] * x[k];
+                            for (std::ptrdiff_t k = j1; k < N; ++k) s = s + ai[k] * x[k];
 #endif
                             x[i] = x[i] - s;
                         }
@@ -440,21 +440,21 @@ __attribute__((noinline)) static bool mtrsv_omp(
                 mtrsv_serial(UPLO, TR, nounit, j1 - j0, &A_(j0, j0), lda, x + j0, 1);
             }
         } else {                                      /* forward, k < i */
-            for (int j0 = 0; j0 < N; j0 += MTRSV_BLK) {
-                int j1 = j0 + MTRSV_BLK; if (j1 > N) j1 = N;
+            for (std::ptrdiff_t j0 = 0; j0 < N; j0 += MTRSV_BLK) {
+                std::ptrdiff_t j1 = j0 + MTRSV_BLK; if (j1 > N) j1 = N;
                 if (j0 > 0) {
                     #pragma omp parallel num_threads(nthreads)
                     {
-                        int tid = omp_get_thread_num();
-                        int ilo = j0 + (int)((long long)(j1 - j0) * tid / nthreads);
-                        int ihi = j0 + (int)((long long)(j1 - j0) * (tid + 1) / nthreads);
-                        for (int i = ilo; i < ihi; ++i) {
+                        std::ptrdiff_t tid = omp_get_thread_num();
+                        std::ptrdiff_t ilo = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * tid / nthreads);
+                        std::ptrdiff_t ihi = j0 + (std::ptrdiff_t)((long long)(j1 - j0) * (tid + 1) / nthreads);
+                        for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const T *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                             T s = mtrsv_dot_range(ai, x, 0, j0);
 #else
                             T s = zero_dd;
-                            for (int k = 0; k < j0; ++k) s = s + ai[k] * x[k];
+                            for (std::ptrdiff_t k = 0; k < j0; ++k) s = s + ai[k] * x[k];
 #endif
                             x[i] = x[i] - s;
                         }
@@ -476,8 +476,8 @@ extern "C" void mtrsv_(
     std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';

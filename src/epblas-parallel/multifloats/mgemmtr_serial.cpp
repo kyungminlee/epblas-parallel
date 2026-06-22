@@ -46,44 +46,44 @@ const T one_dd {1.0, 0.0};
 
 /* Scalar update of the jb×jb diagonal triangle at (jc, jc).
  * Assumes beta-scaling on C[is..ie, j] already done. */
-inline void diag_add(int jc, int jb, int K, T alpha,
-                     const T *a, int lda,
-                     const T *b, int ldb,
-                     T *c, int ldc,
+inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alpha,
+                     const T *a, std::ptrdiff_t lda,
+                     const T *b, std::ptrdiff_t ldb,
+                     T *c, std::ptrdiff_t ldc,
                      bool upper, char ta, char tb)
 {
-    for (int j = jc; j < jc + jb; ++j) {
-        const int is = upper ? jc        : j;
-        const int ie = upper ? (j + 1)   : (jc + jb);
+    for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
+        const std::ptrdiff_t is = upper ? jc        : j;
+        const std::ptrdiff_t ie = upper ? (j + 1)   : (jc + jb);
         T *cj = c + (std::size_t)j * ldc;
 
         if (ta == 'N') {
             if (tb == 'N') {
-                for (int l = 0; l < K; ++l) {
+                for (std::ptrdiff_t l = 0; l < K; ++l) {
                     const T t = alpha * B_(l, j);
                     if (eq0(t)) continue;
                     const T *al = &A_(0, l);
-                    for (int i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
+                    for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
                 }
             } else {
-                for (int l = 0; l < K; ++l) {
+                for (std::ptrdiff_t l = 0; l < K; ++l) {
                     const T t = alpha * B_(j, l);
                     if (eq0(t)) continue;
                     const T *al = &A_(0, l);
-                    for (int i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
+                    for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
                 }
             }
         } else {
             if (tb == 'N') {
-                for (int i = is; i < ie; ++i) {
+                for (std::ptrdiff_t i = is; i < ie; ++i) {
                     T s = zero_dd;
-                    for (int l = 0; l < K; ++l) s = s + A_(l, i) * B_(l, j);
+                    for (std::ptrdiff_t l = 0; l < K; ++l) s = s + A_(l, i) * B_(l, j);
                     cj[i] = cj[i] + alpha * s;
                 }
             } else {
-                for (int i = is; i < ie; ++i) {
+                for (std::ptrdiff_t i = is; i < ie; ++i) {
                     T s = zero_dd;
-                    for (int l = 0; l < K; ++l) s = s + A_(l, i) * B_(j, l);
+                    for (std::ptrdiff_t l = 0; l < K; ++l) s = s + A_(l, i) * B_(j, l);
                     cj[i] = cj[i] + alpha * s;
                 }
             }
@@ -102,32 +102,32 @@ inline void diag_add(int jc, int jb, int K, T alpha,
  * N∈[64,512] for every (uplo,transa,transb). (Larger nb — e.g. the 64 a
  * dense GEMM would use — is pessimal here precisely because the diagonal is
  * scalar, not SIMD.) Env-overridable via MGEMMTR_NB for tuning. */
-int mgemmtr_block_nb(void) {
-    static const int nb = [] {
+std::ptrdiff_t mgemmtr_block_nb(void) {
+    static const std::ptrdiff_t nb = [] {
         const char *e = std::getenv("MGEMMTR_NB");
-        int v = e ? std::atoi(e) : 0;
+        std::ptrdiff_t v = e ? std::atoi(e) : 0;
         return (v > 0) ? v : 8;
     }();
     return nb;
 }
 
-void mgemmtr_beta_core(int j0, int j1, int N, bool upper,
-                       T beta, T *c, int ldc)
+void mgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, bool upper,
+                       T beta, T *c, std::ptrdiff_t ldc)
 {
-    for (int j = j0; j < j1; ++j) {
-        const int is = upper ? 0 : j;
-        const int ie = upper ? (j + 1) : N;
+    for (std::ptrdiff_t j = j0; j < j1; ++j) {
+        const std::ptrdiff_t is = upper ? 0 : j;
+        const std::ptrdiff_t ie = upper ? (j + 1) : N;
         T *cj = &C_(0, j);
-        if (eq0(beta)) for (int i = is; i < ie; ++i) cj[i] = zero_dd;
-        else                 for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
+        if (eq0(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_dd;
+        else                 for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] * beta;
     }
 }
 
-void mgemmtr_block_core(int jc, int jb, int N, int K,
+void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K,
                         T alpha, T beta,
-                        const T *a, int lda,
-                        const T *b, int ldb,
-                        T *c, int ldc,
+                        const T *a, std::ptrdiff_t lda,
+                        const T *b, std::ptrdiff_t ldb,
+                        T *c, std::ptrdiff_t ldc,
                         bool upper, char ta, char tb)
 {
     const char NN[1] = {'N'};
@@ -136,12 +136,12 @@ void mgemmtr_block_core(int jc, int jb, int N, int K,
     const char *tb_s = (tb == 'N') ? NN : TN;
 
     /* Beta-scale the triangle slice for cols [jc, jc+jb). */
-    for (int j = jc; j < jc + jb; ++j) {
-        const int is = upper ? 0 : j;
-        const int ie = upper ? (j + 1) : N;
+    for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
+        const std::ptrdiff_t is = upper ? 0 : j;
+        const std::ptrdiff_t ie = upper ? (j + 1) : N;
         T *cj = &C_(0, j);
-        if (eq0(beta))      for (int i = is; i < ie; ++i) cj[i] = zero_dd;
-        else if (!eq1(beta)) for (int i = is; i < ie; ++i) cj[i] = cj[i] * beta;
+        if (eq0(beta))      for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_dd;
+        else if (!eq1(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] * beta;
     }
 
     /* Diagonal jb×jb triangle: scalar. */
@@ -150,20 +150,20 @@ void mgemmtr_block_core(int jc, int jb, int N, int K,
     /* Off-diagonal rectangle: routed through mgemm_serial (SIMD). */
     if (upper) {
         if (jc > 0) {
-            const int m = jc;
+            const std::ptrdiff_t m = jc;
             const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            mgemm_serial(ta_s, tb_s, &m, &jb, &K, &alpha,
+            mgemm_serial_pd(ta_s, tb_s, &m, &jb, &K, &alpha,
                          ablk, &lda, bblk, &ldb,
                          &one_dd, &C_(0, jc), &ldc, 1, 1);
         }
     } else {
-        const int trailing = N - jc - jb;
+        const std::ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
-            const int r0 = jc + jb;
+            const std::ptrdiff_t r0 = jc + jb;
             const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            mgemm_serial(ta_s, tb_s, &trailing, &jb, &K, &alpha,
+            mgemm_serial_pd(ta_s, tb_s, &trailing, &jb, &K, &alpha,
                          ablk, &lda, bblk, &ldb,
                          &one_dd, &C_(r0, jc), &ldc, 1, 1);
         }
@@ -181,8 +181,8 @@ extern "C" void mgemmtr_serial(
     std::size_t uplo_len, std::size_t ta_len, std::size_t tb_len)
 {
     (void)uplo_len; (void)ta_len; (void)tb_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const bool upper = (up(uplo) == 'U');
     char ta = up(transa); if (ta == 'C') ta = 'T';
@@ -196,9 +196,9 @@ extern "C" void mgemmtr_serial(
         return;
     }
 
-    const int nb = mgemmtr_block_nb();
-    for (int jc = 0; jc < N; jc += nb) {
-        const int jb = (N - jc < nb) ? (N - jc) : nb;
+    const std::ptrdiff_t nb = mgemmtr_block_nb();
+    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
+        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
         mgemmtr_block_core(jc, jb, N, K, alpha, beta,
                            a, lda, b, ldb, c, ldc, upper, ta, tb);
     }

@@ -59,17 +59,17 @@ inline CT rcmul(const T &r, const CT &z) { return CT{ r * z.re, r * z.im }; }
  * come from mf_pred. DD (and complex-DD) multiply is commutative bit-for-bit, so
  * the operand order is cosmetic — call sites that wrote beta*y and y*beta both
  * map here unchanged. */
-static inline void scale_y(int n, const T &beta, T *y, int inc) {
+static inline void scale_y(std::ptrdiff_t n, const T &beta, T *y, std::ptrdiff_t inc) {
     if (mf_pred::eq1(beta)) return;
-    int iy = (inc < 0) ? -(n - 1) * inc : 0;
-    if (mf_pred::eq0(beta)) for (int i = 0; i < n; ++i) { y[iy] = T{}; iy += inc; }
-    else                    for (int i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += inc; }
+    std::ptrdiff_t iy = (inc < 0) ? -(n - 1) * inc : 0;
+    if (mf_pred::eq0(beta)) for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = T{}; iy += inc; }
+    else                    for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += inc; }
 }
-static inline void cscale_y(int n, const CT &beta, CT *y, int inc) {
+static inline void cscale_y(std::ptrdiff_t n, const CT &beta, CT *y, std::ptrdiff_t inc) {
     if (mf_pred::ceq1(beta)) return;
-    int iy = (inc < 0) ? -(n - 1) * inc : 0;
-    if (mf_pred::ceq0(beta)) for (int i = 0; i < n; ++i) { y[iy] = CT{}; iy += inc; }
-    else                     for (int i = 0; i < n; ++i) { y[iy] = cmul(beta, y[iy]); iy += inc; }
+    std::ptrdiff_t iy = (inc < 0) ? -(n - 1) * inc : 0;
+    if (mf_pred::ceq0(beta)) for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = CT{}; iy += inc; }
+    else                     for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = cmul(beta, y[iy]); iy += inc; }
 }
 
 /* Gather the length-n strided vector x (stride inc) into the contiguous scratch
@@ -81,14 +81,14 @@ static inline void cscale_y(int n, const CT &beta, CT *y, int inc) {
  * straight copies, zero arithmetic -> no rounding-order change, bit-identical to
  * the hand-written gather/scatter loops they replace. Same class as scale_y. */
 template <class V>
-static inline void gather_strided(int n, const V *x, int inc, V *dst) {
+static inline void gather_strided(std::ptrdiff_t n, const V *x, std::ptrdiff_t inc, V *dst) {
     const V *base = (inc < 0) ? x - (std::ptrdiff_t)(n - 1) * inc : x;
-    for (int i = 0; i < n; ++i) dst[i] = base[(std::ptrdiff_t)i * inc];
+    for (std::ptrdiff_t i = 0; i < n; ++i) dst[i] = base[(std::ptrdiff_t)i * inc];
 }
 template <class V>
-static inline void scatter_strided(int n, V *x, int inc, const V *src) {
+static inline void scatter_strided(std::ptrdiff_t n, V *x, std::ptrdiff_t inc, const V *src) {
     V *base = (inc < 0) ? x - (std::ptrdiff_t)(n - 1) * inc : x;
-    for (int i = 0; i < n; ++i) base[(std::ptrdiff_t)i * inc] = src[i];
+    for (std::ptrdiff_t i = 0; i < n; ++i) base[(std::ptrdiff_t)i * inc] = src[i];
 }
 
 #ifdef MBLAS_SIMD_DD
@@ -208,12 +208,12 @@ static inline CT cdot(std::ptrdiff_t len, const CT *cp, const CT *xp, bool conj)
  * (mspr/mspr2/msyr/msyr2 + complex twins); x pre-split into SoA limb arrays by
  * the caller (doubles as the strided-x gather, so the kernel is unit-stride). */
 static inline void
-dd_axpy(int n, const double *xh, const double *xl,
+dd_axpy(std::ptrdiff_t n, const double *xh, const double *xl,
         double th, double tl, multifloats::float64x2 *ap)
 {
     const __m256d thb = _mm256_set1_pd(th);
     const __m256d tlb = _mm256_set1_pd(tl);
-    int i = 0;
+    std::ptrdiff_t i = 0;
     /* 8-wide head: two INDEPENDENT 4-lane DD chains. The mul->add EFT chain
      * is long-latency with no native SIMD; a single chain leaves that latency
      * exposed even when the column streams from cache (matrix ~16 MB at N=1024 is
@@ -255,13 +255,13 @@ dd_axpy(int n, const double *xh, const double *xl,
  * the left-associative order of the reference `ap + x*t1 + y*t2`. One ap
  * read/write (vs two dd_axpy passes). */
 static inline void
-dd_axpy2(int n, const double *xh, const double *xl, double th, double tl,
+dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double tl,
          const double *yh, const double *yl, double sh, double sl,
          multifloats::float64x2 *ap)
 {
     const __m256d thb = _mm256_set1_pd(th), tlb = _mm256_set1_pd(tl);
     const __m256d shb = _mm256_set1_pd(sh), slb = _mm256_set1_pd(sl);
-    int i = 0;
+    std::ptrdiff_t i = 0;
     /* 8-wide head: two INDEPENDENT 4-lane chains. The fused rank-2 element chain
      * (load -> +x*t1 -> +y*t2 -> store) is twice as long as the rank-1 one and
      * stays compute/latency-bound even at N=1024 omp4 (the bandwidth wall that
@@ -331,23 +331,23 @@ static inline CT cdot(std::ptrdiff_t len, const CT *cp, const CT *xp, bool conj)
 }
 
 static inline void
-dd_axpy(int n, const double *xh, const double *xl,
+dd_axpy(std::ptrdiff_t n, const double *xh, const double *xl,
         double th, double tl, multifloats::float64x2 *ap)
 {
     const multifloats::float64x2 tv{th, tl};
-    for (int i = 0; i < n; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         const multifloats::float64x2 xv{xh[i], xl[i]};
         ap[i] = ap[i] + xv * tv;
     }
 }
 
 static inline void
-dd_axpy2(int n, const double *xh, const double *xl, double th, double tl,
+dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double tl,
          const double *yh, const double *yl, double sh, double sl,
          multifloats::float64x2 *ap)
 {
     const multifloats::float64x2 tv{th, tl}, sv{sh, sl};
-    for (int i = 0; i < n; ++i) {
+    for (std::ptrdiff_t i = 0; i < n; ++i) {
         const multifloats::float64x2 xv{xh[i], xl[i]}, yv{yh[i], yl[i]};
         ap[i] = ap[i] + xv * tv + yv * sv;
     }
@@ -373,7 +373,7 @@ static inline void caxpy2_add(std::ptrdiff_t len, CT *xp,
  * 3-limb accumulator kernels, defined out-of-line in wdotu.cpp/wdotc.cpp and
  * shared by the OpenMP partial-reduction and the packed/banded complex Trans
  * matvecs (wtpmv). */
-CT wdotu_unit(int n, const CT *x, const CT *y);
-CT wdotc_unit(int n, const CT *x, const CT *y);
+CT wdotu_unit(std::ptrdiff_t n, const CT *x, const CT *y);
+CT wdotc_unit(std::ptrdiff_t n, const CT *x, const CT *y);
 
 }  // namespace mf_kernels

@@ -45,10 +45,10 @@ using mf_kernels::cconj;
 
 /* Scalar update of the jb×jb diagonal triangle at (jc, jc).
  * Assumes beta-scaling on C[is..ie, j] already done. */
-inline void diag_add(int jc, int jb, int K, T alpha,
-                     const T *a, int lda,
-                     const T *b, int ldb,
-                     T *c, int ldc,
+inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t K, T alpha,
+                     const T *a, std::ptrdiff_t lda,
+                     const T *b, std::ptrdiff_t ldb,
+                     T *c, std::ptrdiff_t ldc,
                      bool upper, char ta, char tb)
 {
     const bool trans_a = (ta != 'N');
@@ -56,13 +56,13 @@ inline void diag_add(int jc, int jb, int K, T alpha,
     const bool conj_a  = (ta == 'C');
     const bool conj_b  = (tb == 'C');
 
-    for (int j = jc; j < jc + jb; ++j) {
-        const int is = upper ? jc        : j;
-        const int ie = upper ? (j + 1)   : (jc + jb);
+    for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
+        const std::ptrdiff_t is = upper ? jc        : j;
+        const std::ptrdiff_t ie = upper ? (j + 1)   : (jc + jb);
         T *cj = c + (std::size_t)j * ldc;
 
         if (!trans_a) {
-            for (int l = 0; l < K; ++l) {
+            for (std::ptrdiff_t l = 0; l < K; ++l) {
                 T bl;
                 if (!trans_b)      bl = B_(l, j);
                 else if (!conj_b)  bl = B_(j, l);
@@ -70,20 +70,20 @@ inline void diag_add(int jc, int jb, int K, T alpha,
                 const T t = cmul(alpha, bl);
                 if (ceq0(t)) continue;
                 const T *al = &A_(0, l);
-                for (int i = is; i < ie; ++i) cj[i] = cadd(cj[i], cmul(t, al[i]));
+                for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cadd(cj[i], cmul(t, al[i]));
             }
         } else {
-            for (int i = is; i < ie; ++i) {
+            for (std::ptrdiff_t i = is; i < ie; ++i) {
                 T s = zero_cdd;
                 if (!trans_b) {
-                    if (!conj_a) for (int l = 0; l < K; ++l) s = cadd(s, cmul(A_(l, i),        B_(l, j)));
-                    else         for (int l = 0; l < K; ++l) s = cadd(s, cmul(cconj(A_(l, i)), B_(l, j)));
+                    if (!conj_a) for (std::ptrdiff_t l = 0; l < K; ++l) s = cadd(s, cmul(A_(l, i),        B_(l, j)));
+                    else         for (std::ptrdiff_t l = 0; l < K; ++l) s = cadd(s, cmul(cconj(A_(l, i)), B_(l, j)));
                 } else if (!conj_b) {
-                    if (!conj_a) for (int l = 0; l < K; ++l) s = cadd(s, cmul(A_(l, i),        B_(j, l)));
-                    else         for (int l = 0; l < K; ++l) s = cadd(s, cmul(cconj(A_(l, i)), B_(j, l)));
+                    if (!conj_a) for (std::ptrdiff_t l = 0; l < K; ++l) s = cadd(s, cmul(A_(l, i),        B_(j, l)));
+                    else         for (std::ptrdiff_t l = 0; l < K; ++l) s = cadd(s, cmul(cconj(A_(l, i)), B_(j, l)));
                 } else {
-                    if (!conj_a) for (int l = 0; l < K; ++l) s = cadd(s, cmul(A_(l, i),        cconj(B_(j, l))));
-                    else         for (int l = 0; l < K; ++l) s = cadd(s, cmul(cconj(A_(l, i)), cconj(B_(j, l))));
+                    if (!conj_a) for (std::ptrdiff_t l = 0; l < K; ++l) s = cadd(s, cmul(A_(l, i),        cconj(B_(j, l))));
+                    else         for (std::ptrdiff_t l = 0; l < K; ++l) s = cadd(s, cmul(cconj(A_(l, i)), cconj(B_(j, l))));
                 }
                 cj[i] = cadd(cj[i], cmul(alpha, s));
             }
@@ -101,44 +101,44 @@ inline void diag_add(int jc, int jb, int K, T alpha,
  * SIMD off-diagonal at all. 8 is the knee: smallest multiple of the kernel's
  * NR=4 that still fills two SIMD column-tiles per block. Env-overridable via
  * WGEMMTR_NB for tuning. */
-int wgemmtr_block_nb(void) {
-    static const int nb = [] {
+std::ptrdiff_t wgemmtr_block_nb(void) {
+    static const std::ptrdiff_t nb = [] {
         const char *e = std::getenv("WGEMMTR_NB");
-        int v = e ? std::atoi(e) : 0;
+        std::ptrdiff_t v = e ? std::atoi(e) : 0;
         return (v > 0) ? v : 8;
     }();
     return nb;
 }
 
-void wgemmtr_beta_core(int j0, int j1, int N, bool upper,
-                       T beta, T *c, int ldc)
+void wgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, bool upper,
+                       T beta, T *c, std::ptrdiff_t ldc)
 {
-    for (int j = j0; j < j1; ++j) {
-        const int is = upper ? 0 : j;
-        const int ie = upper ? (j + 1) : N;
+    for (std::ptrdiff_t j = j0; j < j1; ++j) {
+        const std::ptrdiff_t is = upper ? 0 : j;
+        const std::ptrdiff_t ie = upper ? (j + 1) : N;
         T *cj = &C_(0, j);
-        if (ceq0(beta)) for (int i = is; i < ie; ++i) cj[i] = zero_cdd;
-        else                  for (int i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
+        if (ceq0(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_cdd;
+        else                  for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
     }
 }
 
-void wgemmtr_block_core(int jc, int jb, int N, int K,
+void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K,
                         T alpha, T beta,
-                        const T *a, int lda,
-                        const T *b, int ldb,
-                        T *c, int ldc,
+                        const T *a, std::ptrdiff_t lda,
+                        const T *b, std::ptrdiff_t ldb,
+                        T *c, std::ptrdiff_t ldc,
                         bool upper, char ta, char tb)
 {
     const char ta_s[1] = { ta };
     const char tb_s[1] = { tb };
 
     /* Beta-scale the triangle slice for cols [jc, jc+jb). */
-    for (int j = jc; j < jc + jb; ++j) {
-        const int is = upper ? 0 : j;
-        const int ie = upper ? (j + 1) : N;
+    for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
+        const std::ptrdiff_t is = upper ? 0 : j;
+        const std::ptrdiff_t ie = upper ? (j + 1) : N;
         T *cj = &C_(0, j);
-        if (ceq0(beta))      for (int i = is; i < ie; ++i) cj[i] = zero_cdd;
-        else if (!ceq1(beta)) for (int i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
+        if (ceq0(beta))      for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_cdd;
+        else if (!ceq1(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
     }
 
     /* Diagonal jb×jb triangle: scalar. */
@@ -147,20 +147,20 @@ void wgemmtr_block_core(int jc, int jb, int N, int K,
     /* Off-diagonal rectangle: routed through wgemm_serial (SIMD). */
     if (upper) {
         if (jc > 0) {
-            const int m = jc;
+            const std::ptrdiff_t m = jc;
             const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            wgemm_serial(ta_s, tb_s, &m, &jb, &K, &alpha,
+            wgemm_serial_pd(ta_s, tb_s, &m, &jb, &K, &alpha,
                          ablk, &lda, bblk, &ldb,
                          &one_cdd, &C_(0, jc), &ldc, 1, 1);
         }
     } else {
-        const int trailing = N - jc - jb;
+        const std::ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
-            const int r0 = jc + jb;
+            const std::ptrdiff_t r0 = jc + jb;
             const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
             const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
-            wgemm_serial(ta_s, tb_s, &trailing, &jb, &K, &alpha,
+            wgemm_serial_pd(ta_s, tb_s, &trailing, &jb, &K, &alpha,
                          ablk, &lda, bblk, &ldb,
                          &one_cdd, &C_(r0, jc), &ldc, 1, 1);
         }
@@ -178,8 +178,8 @@ extern "C" void wgemmtr_serial(
     std::size_t uplo_len, std::size_t ta_len, std::size_t tb_len)
 {
     (void)uplo_len; (void)ta_len; (void)tb_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const bool upper = (up(uplo) == 'U');
     const char ta = up(transa);
@@ -193,9 +193,9 @@ extern "C" void wgemmtr_serial(
         return;
     }
 
-    const int nb = wgemmtr_block_nb();
-    for (int jc = 0; jc < N; jc += nb) {
-        const int jb = (N - jc < nb) ? (N - jc) : nb;
+    const std::ptrdiff_t nb = wgemmtr_block_nb();
+    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
+        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
         wgemmtr_block_core(jc, jb, N, K, alpha, beta,
                            a, lda, b, ldb, c, ldc, upper, ta, tb);
     }

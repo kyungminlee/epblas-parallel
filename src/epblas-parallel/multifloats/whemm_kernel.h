@@ -41,29 +41,29 @@ using whemm_T = multifloats::complex64x2;
 #define WHEMM_OMP_MIN 32
 
 /* Block size over the threaded axis (env WHEMM_NB). */
-int whemm_block_nb(void);
+std::ptrdiff_t whemm_block_nb(void);
 
 /* Scale column j of C (rows 0..M) by beta — the alpha==0 early exit. Handles
  * beta==0 (zero-fill). The caller skips this entirely for beta==1. */
-void whemm_scale_col(int j, int M, whemm_T beta, whemm_T *c, int ldc);
+void whemm_scale_col(std::ptrdiff_t j, std::ptrdiff_t M, whemm_T beta, whemm_T *c, std::ptrdiff_t ldc);
 
 /* SIDE='L' row block [ic, ic+ib): beta-scale the block's rows across all N
  * columns, then the leading gemm wing, the Hermitian diagonal block, and the
  * trailing gemm wing (both wings routed through wgemm_serial — no nested
  * OpenMP). Writes only rows [ic, ic+ib) of C → row-disjoint across blocks. */
-void whemm_block_L(int ic, int ib, int M, int N, char UPLO,
+void whemm_block_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t M, std::ptrdiff_t N, char UPLO,
                    whemm_T alpha, whemm_T beta,
-                   const whemm_T *a, int lda, const whemm_T *b, int ldb,
-                   whemm_T *c, int ldc);
+                   const whemm_T *a, std::ptrdiff_t lda, const whemm_T *b, std::ptrdiff_t ldb,
+                   whemm_T *c, std::ptrdiff_t ldc);
 
 /* SIDE='R' column block [jc, jc+jb): beta-scale the block's columns over all M
  * rows, then the leading gemm wing, the Hermitian diagonal block, and the
  * trailing gemm wing. Writes only columns [jc, jc+jb) of C → column-disjoint
  * across blocks. */
-void whemm_block_R(int jc, int jb, int M, int N, char UPLO,
+void whemm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::ptrdiff_t N, char UPLO,
                    whemm_T alpha, whemm_T beta,
-                   const whemm_T *a, int lda, const whemm_T *b, int ldb,
-                   whemm_T *c, int ldc);
+                   const whemm_T *a, std::ptrdiff_t lda, const whemm_T *b, std::ptrdiff_t ldb,
+                   whemm_T *c, std::ptrdiff_t ldc);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as whemm_. */
 extern "C" void whemm_serial(

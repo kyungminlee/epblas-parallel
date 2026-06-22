@@ -34,15 +34,15 @@ using simd_exact::cstore4;
 }  // namespace
 
 /* Y := α·X + Y over a contiguous unit-stride range — serial kernel, unchanged. */
-static void waxpy_unit(int n, T alpha, const T *x, T *y)
+static void waxpy_unit(std::ptrdiff_t n, T alpha, const T *x, T *y)
 {
 #ifdef MBLAS_SIMD_DD
     const __m256d arh = _mm256_set1_pd(alpha.re.limbs[0]);
     const __m256d arl = _mm256_set1_pd(alpha.re.limbs[1]);
     const __m256d aih = _mm256_set1_pd(alpha.im.limbs[0]);
     const __m256d ail = _mm256_set1_pd(alpha.im.limbs[1]);
-    const int n4 = n & ~3;
-    for (int i = 0; i < n4; i += 4) {
+    const std::ptrdiff_t n4 = n & ~3;
+    for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xrh, xrl, xih, xil, yrh, yrl, yih, yil;
         cload4(&x[i], xrh, xrl, xih, xil);
         cload4(&y[i], yrh, yrl, yih, yil);
@@ -54,24 +54,24 @@ static void waxpy_unit(int n, T alpha, const T *x, T *y)
                          nrh, nrl, nih, nil_);
         cstore4(&y[i], nrh, nrl, nih, nil_);
     }
-    for (int i = n4; i < n; ++i) y[i] = cadd(y[i], cmul(alpha, x[i]));
+    for (std::ptrdiff_t i = n4; i < n; ++i) y[i] = cadd(y[i], cmul(alpha, x[i]));
 #else
-    for (int i = 0; i < n; ++i) y[i] = cadd(y[i], cmul(alpha, x[i]));
+    for (std::ptrdiff_t i = 0; i < n; ++i) y[i] = cadd(y[i], cmul(alpha, x[i]));
 #endif
 }
 
 #ifdef _OPENMP
 #define WAXPY_OMP_MIN 2048
-__attribute__((noinline)) static int waxpy_omp(int n, T alpha, const T *x, T *y)
+__attribute__((noinline)) static std::ptrdiff_t waxpy_omp(std::ptrdiff_t n, T alpha, const T *x, T *y)
 {
     if (n <= WAXPY_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) waxpy_unit(hi - lo, alpha, x + lo, y + lo);
     }
     return 1;
@@ -82,7 +82,7 @@ extern "C" void waxpy_(const int *n_, const T *alpha_,
                        const T *x, const int *incx_,
                        T *y, const int *incy_)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
     if (n <= 0 || ceq0(alpha)) return;
 
@@ -92,8 +92,8 @@ extern "C" void waxpy_(const int *n_, const T *alpha_,
 #endif
         waxpy_unit(n, alpha, x, y);
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (int i = 0; i < n; ++i) { y[iy] = cadd(y[iy], cmul(alpha, x[ix])); ix += incx; iy += incy; }
+        std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        std::ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
+        for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = cadd(y[iy], cmul(alpha, x[ix])); ix += incx; iy += incy; }
     }
 }

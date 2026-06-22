@@ -40,12 +40,12 @@ namespace {
  * to SoA once) and the y read differ between the contiguous and strided drivers,
  * so this one SIMD core serves both. */
 static inline __attribute__((always_inline)) void
-mger_col(int M, const double *x_hi, const double *x_lo, T t, T *ajT)
+mger_col(std::ptrdiff_t M, const double *x_hi, const double *x_lo, T t, T *ajT)
 {
     const __m256d thi = _mm256_set1_pd(t.limbs[0]);
     const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
     double *aj = reinterpret_cast<double *>(ajT);
-    int i = 0;
+    std::ptrdiff_t i = 0;
     /* 8-wide head: two INDEPENDENT 4-lane DD chains hide the long mul->add
      * EFT latency (no native SIMD for one scalar DD) that a single chain leaves
      * exposed while the column streams from cache. ~7% at N=1024, ~11% cache-
@@ -86,16 +86,16 @@ extern "C" void mger_(
     const T *y, const int *incy_,
     T *a, const int *lda_)
 {
-    const int M = *m_, N = *n_;
-    const int incx = *incx_, incy = *incy_, lda = *lda_;
+    const std::ptrdiff_t M = *m_, N = *n_;
+    const std::ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
 
     if (M == 0 || N == 0 || eq0(alpha)) return;
 
-    const int jy0 = (incy < 0) ? -(N - 1) * incy : 0;
-    const int ix0 = (incx < 0) ? -(M - 1) * incx : 0;
+    const std::ptrdiff_t jy0 = (incy < 0) ? -(N - 1) * incy : 0;
+    const std::ptrdiff_t ix0 = (incx < 0) ? -(M - 1) * incx : 0;
 #ifdef _OPENMP
-    const int use_omp = (N >= MGER_OMP_MIN && blas_omp_available());
+    const std::ptrdiff_t use_omp = (N >= MGER_OMP_MIN && blas_omp_available());
 #endif
 
 #ifdef MBLAS_SIMD_DD
@@ -105,12 +105,12 @@ extern "C" void mger_(
     const std::size_t M_pad = (static_cast<std::size_t>(M) + 3) & ~static_cast<std::size_t>(3);
     double *x_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
     double *x_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    { int ix = ix0; for (int i = 0; i < M; ++i) { x_hi[i] = x[ix].limbs[0]; x_lo[i] = x[ix].limbs[1]; ix += incx; } }
+    { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < M; ++i) { x_hi[i] = x[ix].limbs[0]; x_lo[i] = x[ix].limbs[1]; ix += incx; } }
     for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
 #ifdef _OPENMP
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         const T yj = y[jy0 + j * incy];
         if (eq0(yj)) continue;
         mger_col(M, x_hi, x_lo, alpha * yj, &A_(0, j));
@@ -123,19 +123,19 @@ extern "C" void mger_(
     T *x_buf = NULL;
     if (incx != 1) {
         x_buf = static_cast<T *>(std::malloc(static_cast<size_t>(M) * sizeof(T)));
-        if (x_buf) { int ix = ix0; for (int i = 0; i < M; ++i) { x_buf[i] = x[ix]; ix += incx; } xp = x_buf; }
+        if (x_buf) { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < M; ++i) { x_buf[i] = x[ix]; ix += incx; } xp = x_buf; }
     }
-    const int x_unit = (incx == 1) || (x_buf != NULL);
+    const std::ptrdiff_t x_unit = (incx == 1) || (x_buf != NULL);
 #ifdef _OPENMP
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         const T yj = y[jy0 + j * incy];
         if (!eq0(yj)) {
             const T t = alpha * yj;
             T *aj = &A_(0, j);
-            if (x_unit) { for (int i = 0; i < M; ++i) aj[i] = aj[i] + t * xp[i]; }
-            else { int ix = ix0; for (int i = 0; i < M; ++i) { aj[i] = aj[i] + t * x[ix]; ix += incx; } }
+            if (x_unit) { for (std::ptrdiff_t i = 0; i < M; ++i) aj[i] = aj[i] + t * xp[i]; }
+            else { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < M; ++i) { aj[i] = aj[i] + t * x[ix]; ix += incx; } }
         }
     }
     std::free(x_buf);

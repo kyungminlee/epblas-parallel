@@ -41,29 +41,29 @@ using mf_kernels::cconj;
  * while preserving the plain loop's accumulation order for each output element
  * (diagonal first, then strictly descending column index) so the result is
  * byte-identical to the untiled path. */
-static void wtrmv_serial_N_lower(bool nounit, int n,
+static void wtrmv_serial_N_lower(bool nounit, std::ptrdiff_t n,
                                  const T *a, std::size_t lda, T *x) {
-    const int RB = 32;
+    const std::ptrdiff_t RB = 32;
     std::vector<T> ybuf(static_cast<std::size_t>(n));
     T *y = ybuf.data();
-    for (int ib = 0; ib < n; ib += RB) {
-        const int ie = ib + RB < n ? ib + RB : n;
-        for (int i = ib; i < ie; ++i)
+    for (std::ptrdiff_t ib = 0; ib < n; ib += RB) {
+        const std::ptrdiff_t ie = ib + RB < n ? ib + RB : n;
+        for (std::ptrdiff_t i = ib; i < ie; ++i)
             y[i] = nounit ? cmul(x[i], A_(i, i)) : x[i];
-        for (int j = ie - 1; j >= ib; --j) {            /* within-tile, descending j */
+        for (std::ptrdiff_t j = ie - 1; j >= ib; --j) {            /* within-tile, descending j */
             const T xj = x[j];
             if (ceq0(xj)) continue;
             const T *col = &A_(0, j);
             mf_kernels::caxpy_add(ie - (j + 1), &y[j + 1], &col[j + 1], xj);
         }
-        for (int j = ib - 1; j >= 0; --j) {             /* below-tile columns, descending j */
+        for (std::ptrdiff_t j = ib - 1; j >= 0; --j) {             /* below-tile columns, descending j */
             const T xj = x[j];
             if (ceq0(xj)) continue;
             const T *col = &A_(0, j);
             mf_kernels::caxpy_add(ie - ib, &y[ib], &col[ib], xj);
         }
     }
-    for (int i = 0; i < n; ++i) x[i] = y[i];
+    for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = y[i];
 }
 
 #ifdef _OPENMP
@@ -120,7 +120,7 @@ static void wtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
  * Returns true on success, false if a scratch alloc failed. */
 static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
                              std::ptrdiff_t n, const T *a, std::size_t lda,
-                             T *x, int nt)
+                             T *x, std::ptrdiff_t nt)
 {
     if (trans) {
         T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
@@ -153,14 +153,14 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
          * column work grows with the index ⇒ heavy_high=upper. The forward
          * ascending slices are read REVERSED for upper so the thin top slice
          * carries the heavy top rows. mask 7/min 16 are this routine's tuning. */
-        int ncpu = mf_omp::tri_area_bounds(n, nt, 7, 16, upper,
+        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nt, 7, 16, upper,
                                            WTRMV_MAX_CPUS, range);
         T *buf_all = static_cast<T *>(
             std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(T)));
         if (!buf_all) { std::free(range); return false; }
         #pragma omp parallel num_threads(ncpu)
         {
-            const int tid = omp_get_thread_num();
+            const std::ptrdiff_t tid = omp_get_thread_num();
             T *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
             std::ptrdiff_t m_from, m_to;
             if (upper) { m_from = range[ncpu - tid - 1]; m_to = range[ncpu - tid]; }
@@ -170,14 +170,14 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
         }
         /* Bounded reduction: merge each thread's spill rows into slot 0. */
         if (upper) {
-            for (int t = 1; t < ncpu; ++t) {
+            for (std::ptrdiff_t t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_to_t = range[ncpu - t];
                 const T *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = 0; i < m_to_t; ++i)
                     buf_all[i] = cadd(buf_all[i], slot[i]);
             }
         } else {
-            for (int t = 1; t < ncpu; ++t) {
+            for (std::ptrdiff_t t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_from_t = range[t];
                 const T *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = m_from_t; i < n; ++i)
@@ -193,12 +193,12 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
 /* Threaded in-place complex dense triangular matvec. incx==1 drives the
  * contiguous core directly; strided gathers/scatters around it. */
 __attribute__((noinline)) static bool wtrmv_omp(
-    bool upper, bool trans, bool conj, bool nounit, int n,
-    const T *a, std::size_t lda, T *x, int incx)
+    bool upper, bool trans, bool conj, bool nounit, std::ptrdiff_t n,
+    const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
 {
     if (n < WTRMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WTRMV_MAX_CPUS) nthreads = WTRMV_MAX_CPUS;
 
     if (incx == 1)
@@ -207,10 +207,10 @@ __attribute__((noinline)) static bool wtrmv_omp(
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
     T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (!xbuf) return false;
-    for (int i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
+    for (std::ptrdiff_t i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
     bool ok = wtrmv_omp_contig(upper, trans, conj, nounit, n, a, lda, xbuf, nthreads);
     if (ok)
-        for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xbuf[i];
+        for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xbuf[i];
     std::free(xbuf);
     return ok;
 }
@@ -220,19 +220,19 @@ __attribute__((noinline)) static bool wtrmv_omp(
  * AXPY (mf_kernels::caxpy_add, bit-exact); Trans/ConjTrans is a column dot (mf_kernels::cdot,
  * within DD fuzz tol). The strided entry gathers x to scratch and reuses this. */
 static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
-                                int n, const T *a, std::size_t lda, T *x)
+                                std::ptrdiff_t n, const T *a, std::size_t lda, T *x)
 {
     if (!trans) {
         if (!upper) {
             if (n >= 128) { wtrmv_serial_N_lower(nounit, n, a, lda, x); return; }
-            for (int j = n - 1; j >= 0; --j) {
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 const T temp = x[j];
                 if (!ceq0(temp))
                     mf_kernels::caxpy_add(n - 1 - j, &x[j + 1], &A_(j + 1, j), temp);
                 if (nounit) x[j] = cmul(x[j], A_(j, j));
             }
         } else {
-            for (int j = 0; j < n; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 const T temp = x[j];
                 if (!ceq0(temp))
                     mf_kernels::caxpy_add(j, &x[0], &A_(0, j), temp);
@@ -241,14 +241,14 @@ static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
         }
     } else {
         if (!upper) {
-            for (int j = 0; j < n; ++j) {
+            for (std::ptrdiff_t j = 0; j < n; ++j) {
                 T temp = x[j];
                 if (nounit) temp = cmul(temp, conj ? cconj(A_(j, j)) : A_(j, j));
                 temp = cadd(temp, mf_kernels::cdot(n - 1 - j, &A_(j + 1, j), &x[j + 1], conj));
                 x[j] = temp;
             }
         } else {
-            for (int j = n - 1; j >= 0; --j) {
+            for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 T temp = x[j];
                 if (nounit) temp = cmul(temp, conj ? cconj(A_(j, j)) : A_(j, j));
                 temp = cadd(temp, mf_kernels::cdot(j, &A_(0, j), &x[0], conj));
@@ -266,8 +266,8 @@ extern "C" void wtrmv_(
     std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     const char TR   = up(trans);
     const char DIAG = up(diag);
@@ -292,49 +292,49 @@ extern "C" void wtrmv_(
         const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
         T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
         if (xs) {
-            for (int i = 0; i < N; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
+            for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
             wtrmv_serial_contig(UPLO == 'U', TR != 'N', TR == 'C', nounit, N, a, lda, xs);
-            for (int i = 0; i < N; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
+            for (std::ptrdiff_t i = 0; i < N; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
             std::free(xs);
             return;
         }
     }
 
     {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'L') {
-                for (int j = N - 1; j >= 0; --j) {
+                for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                     const T temp = x[kx + j * incx];
                     if (!ceq0(temp))
-                        for (int i = j + 1; i < N; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
+                        for (std::ptrdiff_t i = j + 1; i < N; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
                     if (nounit) x[kx + j * incx] = cmul(x[kx + j * incx], A_(j, j));
                 }
             } else {
-                for (int j = 0; j < N; ++j) {
+                for (std::ptrdiff_t j = 0; j < N; ++j) {
                     const T temp = x[kx + j * incx];
                     if (!ceq0(temp))
-                        for (int i = 0; i < j; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
+                        for (std::ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
                     if (nounit) x[kx + j * incx] = cmul(x[kx + j * incx], A_(j, j));
                 }
             }
         } else {
             const bool conj_a = (TR == 'C');
             if (UPLO == 'L') {
-                for (int j = 0; j < N; ++j) {
+                for (std::ptrdiff_t j = 0; j < N; ++j) {
                     T temp = x[kx + j * incx];
                     if (nounit) temp = cmul(temp, conj_a ? cconj(A_(j, j)) : A_(j, j));
-                    for (int i = j + 1; i < N; ++i) {
+                    for (std::ptrdiff_t i = j + 1; i < N; ++i) {
                         const T aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
                         temp = cadd(temp, cmul(aij, x[kx + i * incx]));
                     }
                     x[kx + j * incx] = temp;
                 }
             } else {
-                for (int j = N - 1; j >= 0; --j) {
+                for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                     T temp = x[kx + j * incx];
                     if (nounit) temp = cmul(temp, conj_a ? cconj(A_(j, j)) : A_(j, j));
-                    for (int i = 0; i < j; ++i) {
+                    for (std::ptrdiff_t i = 0; i < j; ++i) {
                         const T aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
                         temp = cadd(temp, cmul(aij, x[kx + i * incx]));
                     }

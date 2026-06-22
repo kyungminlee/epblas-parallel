@@ -108,7 +108,7 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
     _mm256_store_si256(reinterpret_cast<__m256i *>(li), vidx);
     ptrdiff_t best = (ptrdiff_t)li[0];
     R bv{mh[0], ml[0]};
-    for (int k = 1; k < 4; ++k) {
+    for (std::ptrdiff_t k = 1; k < 4; ++k) {
         R cv{mh[k], ml[k]};
         if (gt(cv, bv) || (cv.limbs[0] == bv.limbs[0] &&
                               cv.limbs[1] == bv.limbs[1] && li[k] < best)) {
@@ -145,32 +145,32 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
  * wins any tie, bit-identical to the serial left-to-right scan. */
 #define IWAMAX_OMP_MIN 8192
 #define IWAMAX_MAX_CPUS 64
-__attribute__((noinline)) static int iwamax_omp(int n, const T *x, int *out)
+__attribute__((noinline)) static std::ptrdiff_t iwamax_omp(std::ptrdiff_t n, const T *x, std::ptrdiff_t *out)
 {
     if (n <= IWAMAX_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > IWAMAX_MAX_CPUS) nthreads = IWAMAX_MAX_CPUS;
-    int   idx[IWAMAX_MAX_CPUS];
+    std::ptrdiff_t   idx[IWAMAX_MAX_CPUS];
     R     val[IWAMAX_MAX_CPUS];
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        int b = 0;
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t b = 0;
         R bv{0.0, 0.0};
         if (lo < hi) {
             R sv;
             ptrdiff_t li = iwamax_scan(hi - lo, x + lo, &sv);
-            b = lo + (int)li + 1;   /* 1-based global index */
+            b = lo + (std::ptrdiff_t)li + 1;   /* 1-based global index */
             bv = sv;
         }
         idx[tid] = b; val[tid] = bv;
     }
-    int best = 0;
+    std::ptrdiff_t best = 0;
     R bestv{0.0, 0.0};
-    for (int t = 0; t < nthreads; ++t) {
+    for (std::ptrdiff_t t = 0; t < nthreads; ++t) {
         if (idx[t] == 0) continue;
         if (best == 0 || gt(val[t], bestv)) { best = idx[t]; bestv = val[t]; }
     }
@@ -181,23 +181,23 @@ __attribute__((noinline)) static int iwamax_omp(int n, const T *x, int *out)
 
 extern "C" int iwamax_(const int *n_, const T *x, const int *incx_)
 {
-    const int n = *n_, incx = *incx_;
+    const std::ptrdiff_t n = *n_, incx = *incx_;
     if (n < 1 || incx <= 0) return 0;
     if (n == 1) return 1;
 #ifdef _OPENMP
     if (incx == 1) {
-        int r;
+        std::ptrdiff_t r;
         if (iwamax_omp(n, x, &r)) return r;
     }
 #endif
     if (incx == 1) {
         R bv;
-        return (int)iwamax_scan(n, x, &bv) + 1;
+        return (std::ptrdiff_t)iwamax_scan(n, x, &bv) + 1;
     }
-    int best = 1;
+    std::ptrdiff_t best = 1;
     R bestv = cabs1(x[0]);
-    int ix = incx;
-    for (int i = 2; i <= n; ++i) {
+    std::ptrdiff_t ix = incx;
+    for (std::ptrdiff_t i = 2; i <= n; ++i) {
         R av = cabs1(x[ix]);
         if (gt(av, bestv)) { bestv = av; best = i; }
         ix += incx;

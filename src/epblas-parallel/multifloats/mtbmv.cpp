@@ -183,23 +183,23 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
  * gather is repaid by the SoA core quartering the O(N*K) band work (gather alone,
  * feeding a scalar core, never closes the strided gap on a thin band; feeding the
  * SoA core it does).  Returns true if it ran; false (alloc) -> scalar core. */
-static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
-                              const T *a, std::ptrdiff_t lda, T *x, int incx)
+static bool mtbmv_notrans_soa(bool upper, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                              const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
 {
     const std::size_t np = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     double *xl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     if (!xh || !xl) { std::free(xh); std::free(xl); return false; }
-    for (int i = 0; i < n; ++i) { const T v = x[(std::ptrdiff_t)i * incx]; xh[i] = v.limbs[0]; xl[i] = v.limbs[1]; }
+    for (std::ptrdiff_t i = 0; i < n; ++i) { const T v = x[(std::ptrdiff_t)i * incx]; xh[i] = v.limbs[0]; xl[i] = v.limbs[1]; }
     for (std::size_t i = n; i < np; ++i) { xh[i] = 0.0; xl[i] = 0.0; }
 
     if (upper) {
-        for (int j = 0; j < n; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (xh[j] == 0.0 && xl[j] == 0.0) continue;
             const __m256d bh = _mm256_set1_pd(xh[j]), bl = _mm256_set1_pd(xl[j]);
             const T *col = &A_(0, j);
             const std::ptrdiff_t off = k - j;
-            int i = (j > k) ? j - k : 0;
+            std::ptrdiff_t i = (j > k) ? j - k : 0;
             for (; i + 4 <= j; i += 4) {
                 __m256d mh, ml; simd_exact::load_dd4(&col[off + i], mh, ml);
                 __m256d ph, pl; simd_exact::mul(mh, ml, bh, bl, ph, pl);
@@ -212,13 +212,13 @@ static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
             if (nounit) { T d{xh[j], xl[j]}; d = d * col[k]; xh[j] = d.limbs[0]; xl[j] = d.limbs[1]; }
         }
     } else {
-        for (int j = n - 1; j >= 0; --j) {
+        for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
             if (xh[j] == 0.0 && xl[j] == 0.0) continue;
             const __m256d bh = _mm256_set1_pd(xh[j]), bl = _mm256_set1_pd(xl[j]);
             const T *col = &A_(0, j);
             const std::ptrdiff_t off = -j;
-            const int i_hi = (j + k < n - 1) ? j + k : n - 1;   /* inclusive top row */
-            int i = j + 1;
+            const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;   /* inclusive top row */
+            std::ptrdiff_t i = j + 1;
             for (; i + 4 <= i_hi + 1; i += 4) {
                 __m256d mh, ml; simd_exact::load_dd4(&col[off + i], mh, ml);
                 __m256d ph, pl; simd_exact::mul(mh, ml, bh, bl, ph, pl);
@@ -232,7 +232,7 @@ static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
         }
     }
 
-    for (int i = 0; i < n; ++i) x[(std::ptrdiff_t)i * incx] = T{xh[i], xl[i]};
+    for (std::ptrdiff_t i = 0; i < n; ++i) x[(std::ptrdiff_t)i * incx] = T{xh[i], xl[i]};
     std::free(xh); std::free(xl);
     return true;
 }
@@ -245,12 +245,12 @@ static bool mtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
  * (read across [0,n) — a row reaches outside [lo,hi)); y is written SoA in
  * [lo,hi). Only interior rows with a full k-wide band group; boundary/tail
  * rows (and any group straddling [lo,hi)) fall to the scalar per-row path. */
-static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
-                                  int lo, int hi, const T *a, std::ptrdiff_t lda,
+static void mtbmv_rowgather_t_soa(bool upper, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                                  std::ptrdiff_t lo, std::ptrdiff_t hi, const T *a, std::ptrdiff_t lda,
                                   const double *xh, const double *xl,
                                   double *yh, double *yl)
 {
-    int r = lo;
+    std::ptrdiff_t r = lo;
     if (upper) {
         while (r < hi) {
             if (r >= k && r + 4 <= hi) {                 /* full band: llen == k */
@@ -259,7 +259,7 @@ static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
                     __m256d dh, dl; simd_exact::gather_dd4(&A_(k, r), lda, dh, dl);
                     simd_exact::mul(dh, dl, _mm256_loadu_pd(xh + r), _mm256_loadu_pd(xl + r), sh, sl);
                 } else { sh = _mm256_loadu_pd(xh + r); sl = _mm256_loadu_pd(xl + r); }
-                for (int d = 1; d <= k; ++d) {
+                for (std::ptrdiff_t d = 1; d <= k; ++d) {
                     __m256d mh, ml; simd_exact::gather_dd4(&A_(k - d, r), lda, mh, ml);
                     __m256d ph, pl;
                     simd_exact::mul(mh, ml, _mm256_loadu_pd(xh + (r - d)), _mm256_loadu_pd(xl + (r - d)), ph, pl);
@@ -269,9 +269,9 @@ static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
                 r += 4;
             } else {                                     /* scalar boundary/tail row */
                 const T *base = &A_(0, r);
-                const int llen = (r < k) ? r : k;
+                const std::ptrdiff_t llen = (r < k) ? r : k;
                 T s = nounit ? base[k] * T{xh[r], xl[r]} : T{xh[r], xl[r]};
-                for (int d = 1; d <= llen; ++d) { const T xv{xh[r - d], xl[r - d]}; s = s + base[k - d] * xv; }
+                for (std::ptrdiff_t d = 1; d <= llen; ++d) { const T xv{xh[r - d], xl[r - d]}; s = s + base[k - d] * xv; }
                 yh[r] = s.limbs[0]; yl[r] = s.limbs[1];
                 ++r;
             }
@@ -284,7 +284,7 @@ static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
                     __m256d dh, dl; simd_exact::gather_dd4(&A_(0, r), lda, dh, dl);
                     simd_exact::mul(dh, dl, _mm256_loadu_pd(xh + r), _mm256_loadu_pd(xl + r), sh, sl);
                 } else { sh = _mm256_loadu_pd(xh + r); sl = _mm256_loadu_pd(xl + r); }
-                for (int d = 1; d <= k; ++d) {
+                for (std::ptrdiff_t d = 1; d <= k; ++d) {
                     __m256d mh, ml; simd_exact::gather_dd4(&A_(d, r), lda, mh, ml);
                     __m256d ph, pl;
                     simd_exact::mul(mh, ml, _mm256_loadu_pd(xh + (r + d)), _mm256_loadu_pd(xl + (r + d)), ph, pl);
@@ -294,9 +294,9 @@ static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
                 r += 4;
             } else {
                 const T *base = &A_(0, r);
-                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+                const std::ptrdiff_t rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
                 T s = nounit ? base[0] * T{xh[r], xl[r]} : T{xh[r], xl[r]};
-                for (int d = 1; d <= rlen; ++d) { const T xv{xh[r + d], xl[r + d]}; s = s + base[d] * xv; }
+                for (std::ptrdiff_t d = 1; d <= rlen; ++d) { const T xv{xh[r + d], xl[r + d]}; s = s + base[d] * xv; }
                 yh[r] = s.limbs[0]; yl[r] = s.limbs[1];
                 ++r;
             }
@@ -311,8 +311,8 @@ static void mtbmv_rowgather_t_soa(bool upper, bool nounit, int n, int k,
  * scalar core would not close the strided gap on a thin band; feeding the SoA
  * core it does). Bit-identical to the scalar Trans cores (same per-row
  * d-order). false on alloc failure. */
-static bool mtbmv_trans_soa(bool upper, bool nounit, int n, int k,
-                            const T *a, std::ptrdiff_t lda, T *x, int incx)
+static bool mtbmv_trans_soa(bool upper, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                            const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
 {
     const std::size_t np = ((std::size_t)n + 3) & ~(std::size_t)3;
     double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
@@ -320,10 +320,10 @@ static bool mtbmv_trans_soa(bool upper, bool nounit, int n, int k,
     double *yh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     double *yl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     if (!xh || !xl || !yh || !yl) { std::free(xh); std::free(xl); std::free(yh); std::free(yl); return false; }
-    for (int i = 0; i < n; ++i) { const T v = x[(std::ptrdiff_t)i * incx]; xh[i] = v.limbs[0]; xl[i] = v.limbs[1]; }
+    for (std::ptrdiff_t i = 0; i < n; ++i) { const T v = x[(std::ptrdiff_t)i * incx]; xh[i] = v.limbs[0]; xl[i] = v.limbs[1]; }
     for (std::size_t i = n; i < np; ++i) { xh[i] = 0.0; xl[i] = 0.0; }
     mtbmv_rowgather_t_soa(upper, nounit, n, k, 0, n, a, lda, xh, xl, yh, yl);
-    for (int i = 0; i < n; ++i) x[(std::ptrdiff_t)i * incx] = T{yh[i], yl[i]};
+    for (std::ptrdiff_t i = 0; i < n; ++i) x[(std::ptrdiff_t)i * incx] = T{yh[i], yl[i]};
     std::free(xh); std::free(xl); std::free(yh); std::free(yl);
     return true;
 }
@@ -337,20 +337,20 @@ static bool mtbmv_trans_soa(bool upper, bool nounit, int n, int k,
  * anti-diagonal, uses the column-scatter below instead. Diagonal scales x[r]
  * when non-unit. Mirrors the serial accumulation order (bit-exact). */
 static void mtbmv_rowgather_t(bool upper, bool nounit,
-                              int n, int k, int lo, int hi,
+                              std::ptrdiff_t n, std::ptrdiff_t k, std::ptrdiff_t lo, std::ptrdiff_t hi,
                               const T *a, std::size_t lda,
                               const T *xin, T *y)
 {
-    for (int r = lo; r < hi; ++r) {
+    for (std::ptrdiff_t r = lo; r < hi; ++r) {
         const T *base = &A_(0, r);
         const T diagc = upper ? base[k] : base[0];
         T s = nounit ? diagc * xin[r] : xin[r];
         if (upper) {
-            const int llen = (r < k) ? r : k;
-            for (int d = 1; d <= llen; ++d) s = s + base[k - d] * xin[r - d];
+            const std::ptrdiff_t llen = (r < k) ? r : k;
+            for (std::ptrdiff_t d = 1; d <= llen; ++d) s = s + base[k - d] * xin[r - d];
         } else {
-            const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
-            for (int d = 1; d <= rlen; ++d) s = s + base[d] * xin[r + d];
+            const std::ptrdiff_t rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+            for (std::ptrdiff_t d = 1; d <= rlen; ++d) s = s + base[d] * xin[r + d];
         }
         y[r] = s;
     }
@@ -365,30 +365,30 @@ static void mtbmv_rowgather_t(bool upper, bool nounit,
  * first, then accumulates off-diagonals in column order -> identical per-row
  * association as the serial scatter (bit-exact). y[lo,hi) need not be pre-zeroed:
  * every owned row is assigned at its diagonal column before any += reaches it. */
-static void mtbmv_colscatter(bool upper, bool nounit, int n, int k,
-                             int lo, int hi, const T *a, std::size_t lda,
+static void mtbmv_colscatter(bool upper, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                             std::ptrdiff_t lo, std::ptrdiff_t hi, const T *a, std::size_t lda,
                              const T *xin, T *y)
 {
     if (upper) {
-        const int jmax = (hi + k < n) ? (hi + k) : n;
-        for (int j = lo; j < jmax; ++j) {
+        const std::ptrdiff_t jmax = (hi + k < n) ? (hi + k) : n;
+        for (std::ptrdiff_t j = lo; j < jmax; ++j) {
             const T tmp = xin[j];
-            const int L = k - j;                         /* A(i,j) = A_(L+i, j) */
-            const int i_lo = (j - k > lo) ? (j - k) : lo;
-            const int i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
+            const std::ptrdiff_t L = k - j;                         /* A(i,j) = A_(L+i, j) */
+            const std::ptrdiff_t i_lo = (j - k > lo) ? (j - k) : lo;
+            const std::ptrdiff_t i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
             const T *col = &A_(L + i_lo, j);             /* contiguous in i */
-            for (int i = i_lo; i < i_hi; ++i) y[i] = y[i] + tmp * (*col++);
+            for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) y[i] = y[i] + tmp * (*col++);
             if (j >= lo && j < hi)                       /* diagonal seed */
                 y[j] = nounit ? tmp * A_(k, j) : tmp;
         }
     } else {
-        const int jmin = (lo - k > 0) ? (lo - k) : 0;
-        for (int j = hi - 1; j >= jmin; --j) {
+        const std::ptrdiff_t jmin = (lo - k > 0) ? (lo - k) : 0;
+        for (std::ptrdiff_t j = hi - 1; j >= jmin; --j) {
             const T tmp = xin[j];
-            const int i_lo = (j + 1 > lo) ? (j + 1) : lo;
-            const int i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
+            const std::ptrdiff_t i_lo = (j + 1 > lo) ? (j + 1) : lo;
+            const std::ptrdiff_t i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
             const T *col = &A_(i_lo - j, j);             /* A(i,j)=A_(i-j,j), contiguous */
-            for (int i = i_lo; i < i_hi; ++i) y[i] = y[i] + tmp * (*col++);
+            for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) y[i] = y[i] + tmp * (*col++);
             if (j >= lo && j < hi)                       /* diagonal seed */
                 y[j] = nounit ? tmp * A_(0, j) : tmp;
         }
@@ -401,20 +401,20 @@ static void mtbmv_colscatter(bool upper, bool nounit, int n, int k,
  * the inner axpy runs packed. The matrix column is deinterleaved inline; y rows
  * are plain (loadu) since y is SoA. y[lo,hi) is seeded at each row's diagonal
  * column before any += reaches it (no pre-zero needed). */
-static void mtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
-                                 int lo, int hi, const T *a, std::ptrdiff_t lda,
+static void mtbmv_colscatter_soa(bool upper, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                                 std::ptrdiff_t lo, std::ptrdiff_t hi, const T *a, std::ptrdiff_t lda,
                                  const double *xh, const double *xl,
                                  double *yh, double *yl)
 {
     if (upper) {
-        const int jmax = (hi + k < n) ? (hi + k) : n;
-        for (int j = lo; j < jmax; ++j) {
+        const std::ptrdiff_t jmax = (hi + k < n) ? (hi + k) : n;
+        for (std::ptrdiff_t j = lo; j < jmax; ++j) {
             const __m256d bh = _mm256_set1_pd(xh[j]), bl = _mm256_set1_pd(xl[j]);
             const T *col = &A_(0, j);
             const std::ptrdiff_t off = k - j;            /* A(i,j) = col[off+i] */
-            const int i_lo = (j - k > lo) ? (j - k) : lo;
-            const int i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
-            int i = i_lo;
+            const std::ptrdiff_t i_lo = (j - k > lo) ? (j - k) : lo;
+            const std::ptrdiff_t i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
+            std::ptrdiff_t i = i_lo;
             for (; i + 4 <= i_hi; i += 4) {
                 __m256d mh, ml; simd_exact::load_dd4(&col[off + i], mh, ml);
                 __m256d ph, pl; simd_exact::mul(mh, ml, bh, bl, ph, pl);
@@ -430,14 +430,14 @@ static void mtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
             }
         }
     } else {
-        const int jmin = (lo - k > 0) ? (lo - k) : 0;
-        for (int j = hi - 1; j >= jmin; --j) {
+        const std::ptrdiff_t jmin = (lo - k > 0) ? (lo - k) : 0;
+        for (std::ptrdiff_t j = hi - 1; j >= jmin; --j) {
             const __m256d bh = _mm256_set1_pd(xh[j]), bl = _mm256_set1_pd(xl[j]);
             const T *col = &A_(0, j);
             const std::ptrdiff_t off = -j;               /* A(i,j) = col[off+i] */
-            const int i_lo = (j + 1 > lo) ? (j + 1) : lo;
-            const int i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
-            int i = i_lo;
+            const std::ptrdiff_t i_lo = (j + 1 > lo) ? (j + 1) : lo;
+            const std::ptrdiff_t i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
+            std::ptrdiff_t i = i_lo;
             for (; i + 4 <= i_hi; i += 4) {
                 __m256d mh, ml; simd_exact::load_dd4(&col[off + i], mh, ml);
                 __m256d ph, pl; simd_exact::mul(mh, ml, bh, bl, ph, pl);
@@ -464,12 +464,12 @@ static void mtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
  * (the old full x->xbuf memcpy was an O(n) Amdahl tax); only a strided x is
  * gathered to contiguous up front. Returns true if handled. */
 __attribute__((noinline)) static bool mtbmv_omp(
-    bool upper, bool trans, bool nounit, int n, int k,
-    const T *a, std::size_t lda, T *x, int incx)
+    bool upper, bool trans, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+    const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
 {
     if (n < MTBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTBMV_MAX_CPUS) nthreads = MTBMV_MAX_CPUS;
 
     if (incx < 0) x -= (std::ptrdiff_t)(n - 1) * incx;   /* x at logical 0 */
@@ -486,19 +486,19 @@ __attribute__((noinline)) static bool mtbmv_omp(
         double *yh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
         double *yl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
         if (xh && xl && yh && yl) {
-            for (int i = 0; i < n; ++i) {
+            for (std::ptrdiff_t i = 0; i < n; ++i) {
                 const T v = x[(std::ptrdiff_t)i * incx];
                 xh[i] = v.limbs[0]; xl[i] = v.limbs[1];
             }
             for (std::size_t i = n; i < np; ++i) { xh[i] = 0.0; xl[i] = 0.0; }
             #pragma omp parallel num_threads(nthreads)
             {
-                int tid = omp_get_thread_num();
-                int lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
+                std::ptrdiff_t tid = omp_get_thread_num();
+                std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
                 if (!trans) mtbmv_colscatter_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
                 else        mtbmv_rowgather_t_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
                 #pragma omp barrier          /* all reads of x done before write-back */
-                for (int i = lo; i < hi; ++i)
+                for (std::ptrdiff_t i = lo; i < hi; ++i)
                     x[(std::ptrdiff_t)i * incx] = T{yh[i], yl[i]};
             }
             std::free(xh); std::free(xl); std::free(yh); std::free(yl);
@@ -514,7 +514,7 @@ __attribute__((noinline)) static bool mtbmv_omp(
     if (incx != 1) {
         xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
         if (!xbuf) return false;
-        for (int i = 0; i < n; ++i) xbuf[i] = x[(std::ptrdiff_t)i * incx];
+        for (std::ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[(std::ptrdiff_t)i * incx];
         xptr = xbuf;
     }
     T *y = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
@@ -522,13 +522,13 @@ __attribute__((noinline)) static bool mtbmv_omp(
 
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
         if (!trans) mtbmv_colscatter(upper, nounit, n, k, lo, hi, a, lda, xptr, y);
         else        mtbmv_rowgather_t(upper, nounit, n, k, lo, hi, a, lda, xptr, y);
         #pragma omp barrier              /* all reads of x done before any write-back */
-        if (incx == 1) for (int i = lo; i < hi; ++i) x[i] = y[i];
-        else           for (int i = lo; i < hi; ++i) x[(std::ptrdiff_t)i * incx] = y[i];
+        if (incx == 1) for (std::ptrdiff_t i = lo; i < hi; ++i) x[i] = y[i];
+        else           for (std::ptrdiff_t i = lo; i < hi; ++i) x[(std::ptrdiff_t)i * incx] = y[i];
     }
     std::free(y); std::free(xbuf);
     return true;
@@ -543,12 +543,12 @@ extern "C" void mtbmv_(
     std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, incx = *incx_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
-    const int nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 

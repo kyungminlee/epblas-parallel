@@ -46,17 +46,17 @@ using mf_kernels::cconj;
  * a single acc, so its rounding depends on order: cdot_fwd walks ascending
  * (lower), cdot_rev walks descending from the base (upper), each matching the
  * original loop direction exactly. */
-__attribute__((noinline)) static void caxpy_run(T *x, const T *a, T tmp, int len) {
-    for (int t = 0; t < len; ++t) x[t] = cadd(x[t], cmul(tmp, a[t]));
+__attribute__((noinline)) static void caxpy_run(T *x, const T *a, T tmp, std::ptrdiff_t len) {
+    for (std::ptrdiff_t t = 0; t < len; ++t) x[t] = cadd(x[t], cmul(tmp, a[t]));
 }
-__attribute__((noinline)) static T cdot_fwd(const T *a, const T *x, int len, bool conj, T acc) {
-    if (!conj) for (int t = 0; t < len; ++t) acc = cadd(acc, cmul(a[t], x[t]));
-    else       for (int t = 0; t < len; ++t) acc = cadd(acc, cmul(cconj(a[t]), x[t]));
+__attribute__((noinline)) static T cdot_fwd(const T *a, const T *x, std::ptrdiff_t len, bool conj, T acc) {
+    if (!conj) for (std::ptrdiff_t t = 0; t < len; ++t) acc = cadd(acc, cmul(a[t], x[t]));
+    else       for (std::ptrdiff_t t = 0; t < len; ++t) acc = cadd(acc, cmul(cconj(a[t]), x[t]));
     return acc;
 }
-__attribute__((noinline)) static T cdot_rev(const T *a, const T *x, int len, bool conj, T acc) {
-    if (!conj) for (int t = 0; t < len; ++t) acc = cadd(acc, cmul(a[-t], x[-t]));
-    else       for (int t = 0; t < len; ++t) acc = cadd(acc, cmul(cconj(a[-t]), x[-t]));
+__attribute__((noinline)) static T cdot_rev(const T *a, const T *x, std::ptrdiff_t len, bool conj, T acc) {
+    if (!conj) for (std::ptrdiff_t t = 0; t < len; ++t) acc = cadd(acc, cmul(a[-t], x[-t]));
+    else       for (std::ptrdiff_t t = 0; t < len; ++t) acc = cadd(acc, cmul(cconj(a[-t]), x[-t]));
     return acc;
 }
 }
@@ -84,11 +84,11 @@ using simd_exact::cload4;       using simd_exact::cgather4;
  * conj negates each gathered matrix element's imag before the multiply, matching
  * the reference cmul(cconj(a),x).  Interior full-band groups vectorize; boundary
  * and straddling rows fall to the scalar per-row path. */
-static void wtbmv_rowgather_t_soa(bool upper, bool conj, bool nounit, int n, int k,
-                                  int lo, int hi, const T *a, std::ptrdiff_t lda,
+static void wtbmv_rowgather_t_soa(bool upper, bool conj, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                                  std::ptrdiff_t lo, std::ptrdiff_t hi, const T *a, std::ptrdiff_t lda,
                                   const cvec &x, const cvec &y)
 {
-    int r = lo;
+    std::ptrdiff_t r = lo;
     if (upper) {
         while (r < hi) {
             if (r >= k && r + 4 <= hi) {                 /* full band: llen == k */
@@ -97,7 +97,7 @@ static void wtbmv_rowgather_t_soa(bool upper, bool conj, bool nounit, int n, int
                     cx4 d = cgather4(&A_(k, r), lda); if (conj) d = cconj_soa(d);
                     s = cmul_soa(d, vload(x, r));
                 } else { s = vload(x, r); }
-                for (int d = 1; d <= k; ++d) {
+                for (std::ptrdiff_t d = 1; d <= k; ++d) {
                     cx4 m = cgather4(&A_(k - d, r), lda); if (conj) m = cconj_soa(m);
                     s = cadd_soa(s, cmul_soa(m, vload(x, r - d)));
                 }
@@ -105,10 +105,10 @@ static void wtbmv_rowgather_t_soa(bool upper, bool conj, bool nounit, int n, int
                 r += 4;
             } else {                                     /* scalar boundary/tail row */
                 const T *base = &A_(0, r);
-                const int llen = (r < k) ? r : k;
+                const std::ptrdiff_t llen = (r < k) ? r : k;
                 T diagc = base[k]; if (conj) diagc = cconj(diagc);
                 T s = nounit ? cmul(diagc, vload1(x, r)) : vload1(x, r);
-                for (int d = 1; d <= llen; ++d) { T e = base[k - d]; if (conj) e = cconj(e); s = cadd(s, cmul(e, vload1(x, r - d))); }
+                for (std::ptrdiff_t d = 1; d <= llen; ++d) { T e = base[k - d]; if (conj) e = cconj(e); s = cadd(s, cmul(e, vload1(x, r - d))); }
                 vstore1(y, r, s);
                 ++r;
             }
@@ -121,7 +121,7 @@ static void wtbmv_rowgather_t_soa(bool upper, bool conj, bool nounit, int n, int
                     cx4 d = cgather4(&A_(0, r), lda); if (conj) d = cconj_soa(d);
                     s = cmul_soa(d, vload(x, r));
                 } else { s = vload(x, r); }
-                for (int d = 1; d <= k; ++d) {
+                for (std::ptrdiff_t d = 1; d <= k; ++d) {
                     cx4 m = cgather4(&A_(d, r), lda); if (conj) m = cconj_soa(m);
                     s = cadd_soa(s, cmul_soa(m, vload(x, r + d)));
                 }
@@ -129,10 +129,10 @@ static void wtbmv_rowgather_t_soa(bool upper, bool conj, bool nounit, int n, int
                 r += 4;
             } else {
                 const T *base = &A_(0, r);
-                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+                const std::ptrdiff_t rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
                 T diagc = base[0]; if (conj) diagc = cconj(diagc);
                 T s = nounit ? cmul(diagc, vload1(x, r)) : vload1(x, r);
-                for (int d = 1; d <= rlen; ++d) { T e = base[d]; if (conj) e = cconj(e); s = cadd(s, cmul(e, vload1(x, r + d))); }
+                for (std::ptrdiff_t d = 1; d <= rlen; ++d) { T e = base[d]; if (conj) e = cconj(e); s = cadd(s, cmul(e, vload1(x, r + d))); }
                 vstore1(y, r, s);
                 ++r;
             }
@@ -150,8 +150,8 @@ static void wtbmv_rowgather_t_soa(bool upper, bool conj, bool nounit, int n, int
  * by the SoA core quartering the O(N*K) band work (the gather-only-helps-with-a
  * -fast-core caveat — gather alone never closed the scalar strided gap). false
  * on alloc fail. */
-static bool wtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
-                              const T *a, std::ptrdiff_t lda, T *x, int incx)
+static bool wtbmv_notrans_soa(bool upper, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                              const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
 {
     T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
     const std::size_t np = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
@@ -161,16 +161,16 @@ static bool wtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
     double *iml = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
     if (!reh || !rel || !imh || !iml) { std::free(reh); std::free(rel); std::free(imh); std::free(iml); return false; }
     const cvec v{reh, rel, imh, iml};
-    for (int i = 0; i < n; ++i) vstore1(v, i, xbase[(std::ptrdiff_t)i * incx]);
+    for (std::ptrdiff_t i = 0; i < n; ++i) vstore1(v, i, xbase[(std::ptrdiff_t)i * incx]);
     for (std::size_t i = n; i < np; ++i) { reh[i] = rel[i] = imh[i] = iml[i] = 0.0; }
 
     if (upper) {
-        for (int j = 0; j < n; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (reh[j] == 0.0 && rel[j] == 0.0 && imh[j] == 0.0 && iml[j] == 0.0) continue;
             const cx4 bj = vbcast(v, j);
             const T *col = &A_(0, j);
             const std::ptrdiff_t off = k - j;
-            int i = (j > k) ? j - k : 0;
+            std::ptrdiff_t i = (j > k) ? j - k : 0;
             for (; i + 4 <= j; i += 4) {
                 cx4 p = cmul_soa(bj, cload4(&col[off + i]));
                 vstore(v, i, cadd_soa(vload(v, i), p));
@@ -180,13 +180,13 @@ static bool wtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
             if (nounit) vstore1(v, j, cmul(xj, col[k]));
         }
     } else {
-        for (int j = n - 1; j >= 0; --j) {
+        for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
             if (reh[j] == 0.0 && rel[j] == 0.0 && imh[j] == 0.0 && iml[j] == 0.0) continue;
             const cx4 bj = vbcast(v, j);
             const T *col = &A_(0, j);
             const std::ptrdiff_t off = -j;
-            const int i_hi = (j + k < n - 1) ? j + k : n - 1;   /* inclusive top row */
-            int i = j + 1;
+            const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;   /* inclusive top row */
+            std::ptrdiff_t i = j + 1;
             for (; i + 4 <= i_hi + 1; i += 4) {
                 cx4 p = cmul_soa(bj, cload4(&col[off + i]));
                 vstore(v, i, cadd_soa(vload(v, i), p));
@@ -197,7 +197,7 @@ static bool wtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
         }
     }
 
-    for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = vload1(v, i);
+    for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = vload1(v, i);
     std::free(reh); std::free(rel); std::free(imh); std::free(iml);
     return true;
 }
@@ -205,8 +205,8 @@ static bool wtbmv_notrans_soa(bool upper, bool nounit, int n, int k,
 /* Serial Trans/ConjTrans: split x to SoA, run the row-gather over [0,n), merge
  * back.  Bit-identical to the scalar Trans cores.  A strided x is gathered into
  * the SoA arrays and scattered back (see wtbmv_notrans_soa). false on alloc. */
-static bool wtbmv_trans_soa(bool upper, bool conj, bool nounit, int n, int k,
-                            const T *a, std::ptrdiff_t lda, T *x, int incx)
+static bool wtbmv_trans_soa(bool upper, bool conj, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                            const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
 {
     T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
     const std::size_t np = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
@@ -215,10 +215,10 @@ static bool wtbmv_trans_soa(bool upper, bool conj, bool nounit, int n, int k,
     if (!xb || !yb) { std::free(xb); std::free(yb); return false; }
     const cvec xv{xb, xb + np, xb + 2*np, xb + 3*np};
     const cvec yv{yb, yb + np, yb + 2*np, yb + 3*np};
-    for (int i = 0; i < n; ++i) vstore1(xv, i, xbase[(std::ptrdiff_t)i * incx]);
+    for (std::ptrdiff_t i = 0; i < n; ++i) vstore1(xv, i, xbase[(std::ptrdiff_t)i * incx]);
     for (std::size_t i = n; i < np; ++i) { xv.reh[i] = xv.rel[i] = xv.imh[i] = xv.iml[i] = 0.0; }
     wtbmv_rowgather_t_soa(upper, conj, nounit, n, k, 0, n, a, lda, xv, yv);
-    for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = vload1(yv, i);
+    for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = vload1(yv, i);
     std::free(xb); std::free(yb);
     return true;
 }
@@ -233,36 +233,36 @@ static bool wtbmv_trans_soa(bool upper, bool conj, bool nounit, int n, int k,
  * destination. Mirrors the serial accumulation order → within DD fuzz tol; the
  * serial path stays bit-exact. */
 static void wtbmv_rowgather(bool upper, bool trans, bool conj, bool nounit,
-                            int n, int k, int lo, int hi,
+                            std::ptrdiff_t n, std::ptrdiff_t k, std::ptrdiff_t lo, std::ptrdiff_t hi,
                             const T *a, std::size_t lda,
-                            const T *xin, T *xout, int incx)
+                            const T *xin, T *xout, std::ptrdiff_t incx)
 {
     const std::ptrdiff_t s1 = static_cast<std::ptrdiff_t>(lda) - 1;
-    for (int r = lo; r < hi; ++r) {
+    for (std::ptrdiff_t r = lo; r < hi; ++r) {
         const T *base = &A_(0, r);
         T diagc = upper ? base[k] : base[0];
         if (conj) diagc = cconj(diagc);
         T s = nounit ? cmul(diagc, xin[r]) : xin[r];
         if (!trans) {
             if (upper) {
-                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
-                for (int d = 1; d <= rlen; ++d)
+                const std::ptrdiff_t rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+                for (std::ptrdiff_t d = 1; d <= rlen; ++d)
                     s = cadd(s, cmul(base[k + (std::ptrdiff_t)d * s1], xin[r + d]));
             } else {
-                const int llen = (r < k) ? r : k;
-                for (int d = 1; d <= llen; ++d)
+                const std::ptrdiff_t llen = (r < k) ? r : k;
+                for (std::ptrdiff_t d = 1; d <= llen; ++d)
                     s = cadd(s, cmul(base[-(std::ptrdiff_t)d * s1], xin[r - d]));
             }
         } else {
             if (upper) {
-                const int llen = (r < k) ? r : k;
-                for (int d = 1; d <= llen; ++d) {
+                const std::ptrdiff_t llen = (r < k) ? r : k;
+                for (std::ptrdiff_t d = 1; d <= llen; ++d) {
                     T e = base[k - d]; if (conj) e = cconj(e);
                     s = cadd(s, cmul(e, xin[r - d]));
                 }
             } else {
-                const int rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
-                for (int d = 1; d <= rlen; ++d) {
+                const std::ptrdiff_t rlen = (n - 1 - r < k) ? (n - 1 - r) : k;
+                for (std::ptrdiff_t d = 1; d <= rlen; ++d) {
                     T e = base[d]; if (conj) e = cconj(e);
                     s = cadd(s, cmul(e, xin[r + d]));
                 }
@@ -281,19 +281,19 @@ static void wtbmv_rowgather(bool upper, bool trans, bool conj, bool nounit,
  * descending (lower) seeds each owned row at its diagonal column first, then
  * accumulates off-diagonals in column order -> identical per-row association as
  * the serial scatter (bit-exact). y[lo,hi) needs no pre-zero. */
-static void wtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
-                                 int lo, int hi, const T *a, std::ptrdiff_t lda,
+static void wtbmv_colscatter_soa(bool upper, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+                                 std::ptrdiff_t lo, std::ptrdiff_t hi, const T *a, std::ptrdiff_t lda,
                                  const cvec &x, const cvec &y)
 {
     if (upper) {
-        const int jmax = (hi + k < n) ? (hi + k) : n;
-        for (int j = lo; j < jmax; ++j) {
+        const std::ptrdiff_t jmax = (hi + k < n) ? (hi + k) : n;
+        for (std::ptrdiff_t j = lo; j < jmax; ++j) {
             const cx4 bj = vbcast(x, j);
             const T *col = &A_(0, j);
             const std::ptrdiff_t off = k - j;            /* A(i,j) = col[off+i] */
-            const int i_lo = (j - k > lo) ? (j - k) : lo;
-            const int i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
-            int i = i_lo;
+            const std::ptrdiff_t i_lo = (j - k > lo) ? (j - k) : lo;
+            const std::ptrdiff_t i_hi = (j < hi) ? j : hi;          /* off-diagonal rows < j */
+            std::ptrdiff_t i = i_lo;
             for (; i + 4 <= i_hi; i += 4) {
                 cx4 p = cmul_soa(bj, cload4(&col[off + i]));
                 vstore(y, i, cadd_soa(vload(y, i), p));
@@ -304,14 +304,14 @@ static void wtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
                 vstore1(y, j, nounit ? cmul(tmp, col[k]) : tmp);
         }
     } else {
-        const int jmin = (lo - k > 0) ? (lo - k) : 0;
-        for (int j = hi - 1; j >= jmin; --j) {
+        const std::ptrdiff_t jmin = (lo - k > 0) ? (lo - k) : 0;
+        for (std::ptrdiff_t j = hi - 1; j >= jmin; --j) {
             const cx4 bj = vbcast(x, j);
             const T *col = &A_(0, j);
             const std::ptrdiff_t off = -j;               /* A(i,j) = col[off+i] */
-            const int i_lo = (j + 1 > lo) ? (j + 1) : lo;
-            const int i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
-            int i = i_lo;
+            const std::ptrdiff_t i_lo = (j + 1 > lo) ? (j + 1) : lo;
+            const std::ptrdiff_t i_hi = (j + k + 1 < hi) ? (j + k + 1) : hi;  /* rows > j */
+            std::ptrdiff_t i = i_lo;
             for (; i + 4 <= i_hi; i += 4) {
                 cx4 p = cmul_soa(bj, cload4(&col[off + i]));
                 vstore(y, i, cadd_soa(vload(y, i), p));
@@ -329,12 +329,12 @@ static void wtbmv_colscatter_soa(bool upper, bool nounit, int n, int k,
  * across threads, each filling its disjoint range, barrier, write back. Returns
  * true if handled. */
 __attribute__((noinline)) static bool wtbmv_omp(
-    bool upper, bool trans, bool conj, bool nounit, int n, int k,
-    const T *a, std::size_t lda, T *x, int incx)
+    bool upper, bool trans, bool conj, bool nounit, std::ptrdiff_t n, std::ptrdiff_t k,
+    const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
 {
     if (n < WTBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WTBMV_MAX_CPUS) nthreads = WTBMV_MAX_CPUS;
 
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
@@ -351,16 +351,16 @@ __attribute__((noinline)) static bool wtbmv_omp(
         if (xb && yb) {
             const cvec xv{xb, xb + np, xb + 2*np, xb + 3*np};
             const cvec yv{yb, yb + np, yb + 2*np, yb + 3*np};
-            for (int i = 0; i < n; ++i) vstore1(xv, i, xbase[(std::ptrdiff_t)i * incx]);
+            for (std::ptrdiff_t i = 0; i < n; ++i) vstore1(xv, i, xbase[(std::ptrdiff_t)i * incx]);
             for (std::size_t i = n; i < np; ++i) { xv.reh[i] = xv.rel[i] = xv.imh[i] = xv.iml[i] = 0.0; }
             #pragma omp parallel num_threads(nthreads)
             {
-                int tid = omp_get_thread_num();
-                int lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
+                std::ptrdiff_t tid = omp_get_thread_num();
+                std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
                 if (!trans) wtbmv_colscatter_soa(upper, nounit, n, k, lo, hi, a, lda, xv, yv);
                 else        wtbmv_rowgather_t_soa(upper, conj, nounit, n, k, lo, hi, a, lda, xv, yv);
                 #pragma omp barrier          /* all reads of x done before write-back */
-                for (int i = lo; i < hi; ++i)
+                for (std::ptrdiff_t i = lo; i < hi; ++i)
                     xbase[(std::ptrdiff_t)i * incx] = vload1(yv, i);
             }
             std::free(xb); std::free(yb);
@@ -373,12 +373,12 @@ __attribute__((noinline)) static bool wtbmv_omp(
 
     T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (!xbuf) return false;
-    for (int i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
+    for (std::ptrdiff_t i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
 
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
         wtbmv_rowgather(upper, trans, conj, nounit, n, k, lo, hi, a, lda, xbuf, xbase, incx);
     }
     std::free(xbuf);
@@ -394,12 +394,12 @@ extern "C" void wtbmv_(
     std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, incx = *incx_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     const char TR = up(trans);
-    const int noconj = (TR == 'T');
-    const int nounit = (up(diag) != 'U');
+    const std::ptrdiff_t noconj = (TR == 'T');
+    const std::ptrdiff_t nounit = (up(diag) != 'U');
 
     if (N == 0) return;
 
@@ -425,20 +425,20 @@ extern "C" void wtbmv_(
     if (incx == 1) {
         if (TR == 'N') {
             if (UPLO == 'U') {
-                for (int j = 0; j < N; ++j) {
+                for (std::ptrdiff_t j = 0; j < N; ++j) {
                     if (!ceq0(x[j])) {
                         const T tmp = x[j];
-                        const int L = K - j;
-                        const int i_lo = (j - K > 0) ? (j - K) : 0;
+                        const std::ptrdiff_t L = K - j;
+                        const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
                         if (j > i_lo) caxpy_run(&x[i_lo], &A_(L + i_lo, j), tmp, j - i_lo);
                         if (nounit) x[j] = cmul(x[j], A_(K, j));
                     }
                 }
             } else {
-                for (int j = N - 1; j >= 0; --j) {
+                for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (!ceq0(x[j])) {
                         const T tmp = x[j];
-                        const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                        const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
                         if (i_hi - 1 > j) caxpy_run(&x[j + 1], &A_(1, j), tmp, i_hi - j - 1);
                         if (nounit) x[j] = cmul(x[j], A_(0, j));
                     }
@@ -446,36 +446,36 @@ extern "C" void wtbmv_(
             }
         } else {
             if (UPLO == 'U') {
-                for (int j = N - 1; j >= 0; --j) {
+                for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[j];
-                    const int L = K - j;
+                    const std::ptrdiff_t L = K - j;
                     if (nounit) tmp = cmul(tmp, (noconj ? A_(K, j) : cconj(A_(K, j))));
-                    const int i_lo = (j - K > 0) ? (j - K) : 0;
+                    const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
                     if (j > i_lo) tmp = cdot_rev(&A_(L + j - 1, j), &x[j - 1], j - i_lo, !noconj, tmp);
                     x[j] = tmp;
                 }
             } else {
-                for (int j = 0; j < N; ++j) {
+                for (std::ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[j];
                     if (nounit) tmp = cmul(tmp, (noconj ? A_(0, j) : cconj(A_(0, j))));
-                    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
                     if (i_hi > j + 1) tmp = cdot_fwd(&A_(1, j), &x[j + 1], i_hi - j - 1, !noconj, tmp);
                     x[j] = tmp;
                 }
             }
         }
     } else {
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
+        std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
         if (TR == 'N') {
             if (UPLO == 'U') {
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = 0; j < N; ++j) {
                     if (!ceq0(x[jx])) {
                         const T tmp = x[jx];
-                        int ix = kx;
-                        const int L = K - j;
-                        const int i_lo = (j - K > 0) ? (j - K) : 0;
-                        for (int i = i_lo; i < j; ++i) {
+                        std::ptrdiff_t ix = kx;
+                        const std::ptrdiff_t L = K - j;
+                        const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                        for (std::ptrdiff_t i = i_lo; i < j; ++i) {
                             x[ix] = cadd(x[ix], cmul(tmp, A_(L + i, j)));
                             ix += incx;
                         }
@@ -486,13 +486,13 @@ extern "C" void wtbmv_(
                 }
             } else {
                 kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                     if (!ceq0(x[jx])) {
                         const T tmp = x[jx];
-                        int ix = kx;
-                        const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                        for (int i = i_hi - 1; i > j; --i) {
+                        std::ptrdiff_t ix = kx;
+                        const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                        for (std::ptrdiff_t i = i_hi - 1; i > j; --i) {
                             x[ix] = cadd(x[ix], cmul(tmp, A_(i - j, j)));
                             ix -= incx;
                         }
@@ -505,15 +505,15 @@ extern "C" void wtbmv_(
         } else {
             if (UPLO == 'U') {
                 kx += (N - 1) * incx;
-                int jx = kx;
-                for (int j = N - 1; j >= 0; --j) {
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                     T tmp = x[jx];
                     kx -= incx;
-                    int ix = kx;
-                    const int L = K - j;
+                    std::ptrdiff_t ix = kx;
+                    const std::ptrdiff_t L = K - j;
                     if (nounit) tmp = cmul(tmp, (noconj ? A_(K, j) : cconj(A_(K, j))));
-                    const int i_lo = (j - K > 0) ? (j - K) : 0;
-                    for (int i = j - 1; i >= i_lo; --i) {
+                    const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+                    for (std::ptrdiff_t i = j - 1; i >= i_lo; --i) {
                         const T aij = noconj ? A_(L + i, j) : cconj(A_(L + i, j));
                         tmp = cadd(tmp, cmul(aij, x[ix]));
                         ix -= incx;
@@ -522,14 +522,14 @@ extern "C" void wtbmv_(
                     jx -= incx;
                 }
             } else {
-                int jx = kx;
-                for (int j = 0; j < N; ++j) {
+                std::ptrdiff_t jx = kx;
+                for (std::ptrdiff_t j = 0; j < N; ++j) {
                     T tmp = x[jx];
                     kx += incx;
-                    int ix = kx;
+                    std::ptrdiff_t ix = kx;
                     if (nounit) tmp = cmul(tmp, (noconj ? A_(0, j) : cconj(A_(0, j))));
-                    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                    for (int i = j + 1; i < i_hi; ++i) {
+                    const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+                    for (std::ptrdiff_t i = j + 1; i < i_hi; ++i) {
                         const T aij = noconj ? A_(i - j, j) : cconj(A_(i - j, j));
                         tmp = cadd(tmp, cmul(aij, x[ix]));
                         ix += incx;

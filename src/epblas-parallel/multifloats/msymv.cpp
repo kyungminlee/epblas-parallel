@@ -59,7 +59,7 @@ namespace {
  * the prior inline body) and the threaded path (yacc = a private zero buffer,
  * a disjoint column subset; partials reduced afterwards → within DD fuzz tol). */
 static inline __attribute__((always_inline)) void
-msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
+msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_t lda,
           const T *x, const double *x_hi, const double *x_lo,
           double *yacc_hi, double *yacc_lo, T alpha)
 {
@@ -75,7 +75,7 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
         T yi{yacc_hi[i], yacc_lo[i]};
         yi = yi + temp1 * ai[i];
         yacc_hi[i] = yi.limbs[0]; yacc_lo[i] = yi.limbs[1];
-        int k = i + 1;
+        std::ptrdiff_t k = i + 1;
         /* Align to 4-element boundary at start. */
         for (; k < N && (k & 3) != 0; ++k) {
             T yk{yacc_hi[k], yacc_lo[k]};
@@ -122,7 +122,7 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
         yi2 = yi2 + alpha * temp2;
         yacc_hi[i] = yi2.limbs[0]; yacc_lo[i] = yi2.limbs[1];
     } else {  /* UPLO == 'U', inner k = 0..i-1 (already 4-aligned at k=0) */
-        int k = 0;
+        std::ptrdiff_t k = 0;
         for (; k + 3 < i; k += 4) {
             __m256d a_h, a_l;
             load_dd4(aip + 2 * k, a_h, a_l);
@@ -169,16 +169,16 @@ msymv_col(bool lower, int i, int N, const T *a, std::size_t lda,
  * fold. Reorders the per-row sum vs serial -> within DD fuzz tol. Returns true
  * if handled. */
 __attribute__((noinline)) static bool msymv_omp(
-    bool lower, int N, const T *a, std::size_t lda, const T *x,
+    bool lower, std::ptrdiff_t N, const T *a, std::size_t lda, const T *x,
     const double *x_hi, const double *x_lo,
     double *y_hi, double *y_lo, T alpha)
 {
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads <= 1 || omp_in_parallel()) return false;
     if (nthreads > MSYMV_MAX_CPUS) nthreads = MSYMV_MAX_CPUS;
 
     std::ptrdiff_t range[MSYMV_MAX_CPUS + 1];
-    int ncpu = mf_omp::tri_area_bounds(N, nthreads, 3, 4, !lower,
+    std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(N, nthreads, 3, 4, !lower,
                                        MSYMV_MAX_CPUS, range);
     if (ncpu <= 1) return false;
 
@@ -191,15 +191,15 @@ __attribute__((noinline)) static bool msymv_omp(
 
     #pragma omp parallel num_threads(ncpu)
     {
-        int tid = omp_get_thread_num();
+        std::ptrdiff_t tid = omp_get_thread_num();
         double *yp_hi = pool + static_cast<std::size_t>(tid) * per;
         double *yp_lo = yp_hi + N_pad;
-        for (int i = (int)range[tid]; i < (int)range[tid + 1]; ++i)
+        for (std::ptrdiff_t i = (std::ptrdiff_t)range[tid]; i < (std::ptrdiff_t)range[tid + 1]; ++i)
             msymv_col(lower, i, N, a, lda, x, x_hi, x_lo, yp_hi, yp_lo, alpha);
     }
 
     /* Bounded reduction: fold each thread's populated row window onto y. */
-    for (int t = 0; t < ncpu; ++t) {
+    for (std::ptrdiff_t t = 0; t < ncpu; ++t) {
         const double *yp_hi = pool + static_cast<std::size_t>(t) * per;
         const double *yp_lo = yp_hi + N_pad;
         std::ptrdiff_t k_from, k_to;
@@ -219,7 +219,7 @@ __attribute__((noinline)) static bool msymv_omp(
  * SIMD build packs x/y to SoA and runs the threaded/serial msymv_col; the scalar
  * fallback build runs the reference column loops. Strided callers gather x/y to
  * contiguous scratch and scatter y back, so this single core serves every case. */
-static void msymv_contig(bool lower, int N, const T *a, std::size_t lda,
+static void msymv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t lda,
                          const T *x, T *y, T alpha)
 {
 #ifdef MBLAS_SIMD_DD
@@ -228,7 +228,7 @@ static void msymv_contig(bool lower, int N, const T *a, std::size_t lda,
     double *x_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *y_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *y_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-    for (int i = 0; i < N; ++i) {
+    for (std::ptrdiff_t i = 0; i < N; ++i) {
         x_hi[i] = x[i].limbs[0]; x_lo[i] = x[i].limbs[1];
         y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1];
     }
@@ -241,31 +241,31 @@ static void msymv_contig(bool lower, int N, const T *a, std::size_t lda,
         done_omp = msymv_omp(lower, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
 #endif
     if (!done_omp)
-        for (int i = 0; i < N; ++i)
+        for (std::ptrdiff_t i = 0; i < N; ++i)
             msymv_col(lower, i, N, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
-    for (int i = 0; i < N; ++i) {
+    for (std::ptrdiff_t i = 0; i < N; ++i) {
         y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i];
     }
     std::free(x_hi); std::free(x_lo); std::free(y_hi); std::free(y_lo);
 #else
     if (lower) {
-        for (int i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < N; ++i) {
             const T temp1 = alpha * x[i];
             T temp2 = zero_dd;
             const T *ai = &A_(0, i);
             y[i] = y[i] + temp1 * ai[i];
-            for (int k = i + 1; k < N; ++k) {
+            for (std::ptrdiff_t k = i + 1; k < N; ++k) {
                 y[k]  = y[k] + temp1 * ai[k];
                 temp2 = temp2 + ai[k] * x[k];
             }
             y[i] = y[i] + alpha * temp2;
         }
     } else {
-        for (int i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < N; ++i) {
             const T temp1 = alpha * x[i];
             T temp2 = zero_dd;
             const T *ai = &A_(0, i);
-            for (int k = 0; k < i; ++k) {
+            for (std::ptrdiff_t k = 0; k < i; ++k) {
                 y[k]  = y[k] + temp1 * ai[k];
                 temp2 = temp2 + ai[k] * x[k];
             }
@@ -286,9 +286,9 @@ extern "C" void msymv_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
+    const std::ptrdiff_t N = *n_;
     const std::size_t lda = static_cast<std::size_t>(*lda_);
-    const int incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const bool lower = (up(uplo) == 'L');
 

@@ -42,8 +42,8 @@ using mf_pred::eq0;
 using mf_pred::eq1;
 namespace {
 
-int g_nb_trmm = 0;
-int trmm_nb(void) {
+std::ptrdiff_t g_nb_trmm = 0;
+std::ptrdiff_t trmm_nb(void) {
     if (g_nb_trmm == 0) g_nb_trmm = 64;
     return g_nb_trmm;
 }
@@ -59,32 +59,32 @@ const T one_dd {1.0, 0.0};
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_fast::NR;
-constexpr int kMaxBlockM = 256;
+constexpr std::ptrdiff_t kSimdLane = simd_fast::NR;
+constexpr std::ptrdiff_t kMaxBlockM = 256;
 
-inline void pack_B_4col(int M, const T *b, int ldb, int j_start, int j_count,
+inline void pack_B_4col(std::ptrdiff_t M, const T *b, std::ptrdiff_t ldb, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                         double *bh, double *bl)
 {
-    for (int j = 0; j < j_count; ++j) {
+    for (std::ptrdiff_t j = 0; j < j_count; ++j) {
         const T *col = &b[static_cast<std::size_t>(j_start + j) * ldb];
-        for (int i = 0; i < M; ++i) {
+        for (std::ptrdiff_t i = 0; i < M; ++i) {
             bh[i * kSimdLane + j] = col[i].limbs[0];
             bl[i * kSimdLane + j] = col[i].limbs[1];
         }
     }
-    for (int j = j_count; j < kSimdLane; ++j)
-        for (int i = 0; i < M; ++i) {
+    for (std::ptrdiff_t j = j_count; j < kSimdLane; ++j)
+        for (std::ptrdiff_t i = 0; i < M; ++i) {
             bh[i * kSimdLane + j] = 0.0;
             bl[i * kSimdLane + j] = 0.0;
         }
 }
 
-inline void unpack_B_4col(int M, T *b, int ldb, int j_start, int j_count,
+inline void unpack_B_4col(std::ptrdiff_t M, T *b, std::ptrdiff_t ldb, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                           const double *bh, const double *bl)
 {
-    for (int j = 0; j < j_count; ++j) {
+    for (std::ptrdiff_t j = 0; j < j_count; ++j) {
         T *col = &b[static_cast<std::size_t>(j_start + j) * ldb];
-        for (int i = 0; i < M; ++i) {
+        for (std::ptrdiff_t i = 0; i < M; ++i) {
             col[i].limbs[0] = bh[i * kSimdLane + j];
             col[i].limbs[1] = bl[i * kSimdLane + j];
         }
@@ -93,17 +93,17 @@ inline void unpack_B_4col(int M, T *b, int ldb, int j_start, int j_count,
 
 /* SIMD LLN: for k = M-1..0: temp = α·B(k); for i>k: B(i) += temp·A(i,k);
  * if nounit: temp *= A(k,k); B(k) = temp. */
-inline void simd_trmm_lln(int M, const T *a, int lda, T alpha, int nounit,
+inline void simd_trmm_lln(std::ptrdiff_t M, const T *a, std::ptrdiff_t lda, T alpha, std::ptrdiff_t nounit,
                           double *bh, double *bl)
 {
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
     const __m256d al = _mm256_set1_pd(alpha.limbs[1]);
-    for (int k = M - 1; k >= 0; --k) {
+    for (std::ptrdiff_t k = M - 1; k >= 0; --k) {
         __m256d bkh = _mm256_load_pd(&bh[k * kSimdLane]);
         __m256d bkl = _mm256_load_pd(&bl[k * kSimdLane]);
         __m256d th, tl;
         simd_fast::mul(ah, al, bkh, bkl, th, tl);
-        for (int i = M - 1; i > k; --i) {
+        for (std::ptrdiff_t i = M - 1; i > k; --i) {
             const T aik = A_(i, k);
             __m256d aih = _mm256_set1_pd(aik.limbs[0]);
             __m256d ail = _mm256_set1_pd(aik.limbs[1]);
@@ -131,17 +131,17 @@ inline void simd_trmm_lln(int M, const T *a, int lda, T alpha, int nounit,
 
 /* SIMD LUN: for k = 0..M: temp = α·B(k); for i<k: B(i) += temp·A(i,k);
  * if nounit: temp *= A(k,k); B(k) = temp. */
-inline void simd_trmm_lun(int M, const T *a, int lda, T alpha, int nounit,
+inline void simd_trmm_lun(std::ptrdiff_t M, const T *a, std::ptrdiff_t lda, T alpha, std::ptrdiff_t nounit,
                           double *bh, double *bl)
 {
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
     const __m256d al = _mm256_set1_pd(alpha.limbs[1]);
-    for (int k = 0; k < M; ++k) {
+    for (std::ptrdiff_t k = 0; k < M; ++k) {
         __m256d bkh = _mm256_load_pd(&bh[k * kSimdLane]);
         __m256d bkl = _mm256_load_pd(&bl[k * kSimdLane]);
         __m256d th, tl;
         simd_fast::mul(ah, al, bkh, bkl, th, tl);
-        for (int i = 0; i < k; ++i) {
+        for (std::ptrdiff_t i = 0; i < k; ++i) {
             const T aik = A_(i, k);
             __m256d aih = _mm256_set1_pd(aik.limbs[0]);
             __m256d ail = _mm256_set1_pd(aik.limbs[1]);
@@ -169,12 +169,12 @@ inline void simd_trmm_lun(int M, const T *a, int lda, T alpha, int nounit,
 
 /* SIMD LLT: for i = 0..M: t = B(i); if nounit: t *= A(i,i);
  * for k>i: t += A(k,i)·B(k); B(i) = alpha·t. */
-inline void simd_trmm_llt(int M, const T *a, int lda, T alpha, int nounit,
+inline void simd_trmm_llt(std::ptrdiff_t M, const T *a, std::ptrdiff_t lda, T alpha, std::ptrdiff_t nounit,
                           double *bh, double *bl)
 {
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
     const __m256d al = _mm256_set1_pd(alpha.limbs[1]);
-    for (int i = 0; i < M; ++i) {
+    for (std::ptrdiff_t i = 0; i < M; ++i) {
         __m256d th = _mm256_load_pd(&bh[i * kSimdLane]);
         __m256d tl = _mm256_load_pd(&bl[i * kSimdLane]);
         if (nounit) {
@@ -185,7 +185,7 @@ inline void simd_trmm_llt(int M, const T *a, int lda, T alpha, int nounit,
             simd_fast::mul(th, tl, aih, ail, nh, nl);
             th = nh; tl = nl;
         }
-        for (int k = i + 1; k < M; ++k) {
+        for (std::ptrdiff_t k = i + 1; k < M; ++k) {
             const T aki = A_(k, i);
             __m256d akh = _mm256_set1_pd(aki.limbs[0]);
             __m256d akl = _mm256_set1_pd(aki.limbs[1]);
@@ -206,12 +206,12 @@ inline void simd_trmm_llt(int M, const T *a, int lda, T alpha, int nounit,
 
 /* SIMD LUT: for i = M-1..0: t = B(i); if nounit: t *= A(i,i);
  * for k<i: t += A(k,i)·B(k); B(i) = alpha·t. */
-inline void simd_trmm_lut(int M, const T *a, int lda, T alpha, int nounit,
+inline void simd_trmm_lut(std::ptrdiff_t M, const T *a, std::ptrdiff_t lda, T alpha, std::ptrdiff_t nounit,
                           double *bh, double *bl)
 {
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
     const __m256d al = _mm256_set1_pd(alpha.limbs[1]);
-    for (int i = M - 1; i >= 0; --i) {
+    for (std::ptrdiff_t i = M - 1; i >= 0; --i) {
         __m256d th = _mm256_load_pd(&bh[i * kSimdLane]);
         __m256d tl = _mm256_load_pd(&bl[i * kSimdLane]);
         if (nounit) {
@@ -222,7 +222,7 @@ inline void simd_trmm_lut(int M, const T *a, int lda, T alpha, int nounit,
             simd_fast::mul(th, tl, aih, ail, nh, nl);
             th = nh; tl = nl;
         }
-        for (int k = 0; k < i; ++k) {
+        for (std::ptrdiff_t k = 0; k < i; ++k) {
             const T aki = A_(k, i);
             __m256d akh = _mm256_set1_pd(aki.limbs[0]);
             __m256d akl = _mm256_set1_pd(aki.limbs[1]);
@@ -243,14 +243,14 @@ inline void simd_trmm_lut(int M, const T *a, int lda, T alpha, int nounit,
 
 enum trmm_simd_op { SLLN, SLUN, SLLT, SLUT };
 
-inline void mtrmm_simd_diag(trmm_simd_op op, int j_start, int j_end,
-                            int M, T alpha,
-                            const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_simd_diag(trmm_simd_op op, std::ptrdiff_t j_start, std::ptrdiff_t j_end,
+                            std::ptrdiff_t M, T alpha,
+                            const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
     alignas(32) double bh[kMaxBlockM * kSimdLane];
     alignas(32) double bl[kMaxBlockM * kSimdLane];
-    for (int j = j_start; j < j_end; j += kSimdLane) {
-        const int jc = (j_end - j < kSimdLane) ? (j_end - j) : kSimdLane;
+    for (std::ptrdiff_t j = j_start; j < j_end; j += kSimdLane) {
+        const std::ptrdiff_t jc = (j_end - j < kSimdLane) ? (j_end - j) : kSimdLane;
         pack_B_4col(M, b, ldb, j, jc, bh, bl);
         switch (op) {
         case SLLN: simd_trmm_lln(M, a, lda, alpha, nounit, bh, bl); break;
@@ -264,14 +264,14 @@ inline void mtrmm_simd_diag(trmm_simd_op op, int j_start, int j_end,
 
 #endif  /* MBLAS_SIMD_DD */
 
-inline void mtrmm_lln_core(int j_start, int j_end, int M, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_lln_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, T alpha,
+                           const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int k = M - 1; k >= 0; --k) {
+    for (std::ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (std::ptrdiff_t k = M - 1; k >= 0; --k) {
             if (!eq0(B_(k, j))) {
                 T temp = alpha * B_(k, j);
-                for (int i = M - 1; i > k; --i)
+                for (std::ptrdiff_t i = M - 1; i > k; --i)
                     B_(i, j) = B_(i, j) + temp * A_(i, k);
                 if (nounit) temp = temp * A_(k, k);
                 B_(k, j) = temp;
@@ -280,14 +280,14 @@ inline void mtrmm_lln_core(int j_start, int j_end, int M, T alpha,
     }
 }
 
-inline void mtrmm_lun_core(int j_start, int j_end, int M, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_lun_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, T alpha,
+                           const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int k = 0; k < M; ++k) {
+    for (std::ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (std::ptrdiff_t k = 0; k < M; ++k) {
             if (!eq0(B_(k, j))) {
                 T temp = alpha * B_(k, j);
-                for (int i = 0; i < k; ++i)
+                for (std::ptrdiff_t i = 0; i < k; ++i)
                     B_(i, j) = B_(i, j) + temp * A_(i, k);
                 if (nounit) temp = temp * A_(k, k);
                 B_(k, j) = temp;
@@ -296,27 +296,27 @@ inline void mtrmm_lun_core(int j_start, int j_end, int M, T alpha,
     }
 }
 
-inline void mtrmm_llt_core(int j_start, int j_end, int M, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_llt_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, T alpha,
+                           const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = 0; i < M; ++i) {
+    for (std::ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (std::ptrdiff_t i = 0; i < M; ++i) {
             T t = B_(i, j);
             if (nounit) t = t * A_(i, i);
-            for (int k = i + 1; k < M; ++k) t = t + A_(k, i) * B_(k, j);
+            for (std::ptrdiff_t k = i + 1; k < M; ++k) t = t + A_(k, i) * B_(k, j);
             B_(i, j) = alpha * t;
         }
     }
 }
 
-inline void mtrmm_lut_core(int j_start, int j_end, int M, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_lut_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, T alpha,
+                           const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int j = j_start; j < j_end; ++j) {
-        for (int i = M - 1; i >= 0; --i) {
+    for (std::ptrdiff_t j = j_start; j < j_end; ++j) {
+        for (std::ptrdiff_t i = M - 1; i >= 0; --i) {
             T t = B_(i, j);
             if (nounit) t = t * A_(i, i);
-            for (int k = 0; k < i; ++k) t = t + A_(k, i) * B_(k, j);
+            for (std::ptrdiff_t k = 0; k < i; ++k) t = t + A_(k, i) * B_(k, j);
             B_(i, j) = alpha * t;
         }
     }
@@ -327,10 +327,10 @@ inline void mtrmm_lut_core(int j_start, int j_end, int M, T alpha,
 #ifdef MBLAS_SIMD_DD
 
 /* Forward decls for scalar tails (defined below). */
-inline void mtrmm_rln_core(int, int, int, T, const T*, int, T*, int, int);
-inline void mtrmm_run_core(int, int, int, T, const T*, int, T*, int, int);
-inline void mtrmm_rlt_core(int, int, int, T, const T*, int, T*, int, int);
-inline void mtrmm_rut_core(int, int, int, T, const T*, int, T*, int, int);
+inline void mtrmm_rln_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, std::ptrdiff_t);
+inline void mtrmm_run_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, std::ptrdiff_t);
+inline void mtrmm_rlt_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, std::ptrdiff_t);
+inline void mtrmm_rut_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, std::ptrdiff_t);
 
 /* AoS→SoA 4-cell transpose load: canonical simd_exact::load_dd4 (col + ofs). */
 using simd_exact::load_dd4;
@@ -338,10 +338,10 @@ using simd_exact::store_dd4;
 
 /* R-side trmm SIMD: 4-row chunks of B[i_start:i_end, 0..N).
  * For each 4-row chunk, run the trmm column-by-column with broadcast A. */
-inline void simd_trmm_r4_rln(int ib, int N, T alpha, const T *a, int lda,
-                             T *b, int ldb, int nounit)
+inline void simd_trmm_r4_rln(std::ptrdiff_t ib, std::ptrdiff_t N, T alpha, const T *a, std::ptrdiff_t lda,
+                             T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         T *bj = b + static_cast<std::size_t>(j) * ldb;
         T t = alpha;
         if (nounit) t = t * A_(j, j);
@@ -354,7 +354,7 @@ inline void simd_trmm_r4_rln(int ib, int N, T alpha, const T *a, int lda,
             simd_fast::mul(bjh, bjl, th, tl, nh, nl);
             bjh = nh; bjl = nl;
         }
-        for (int k = j + 1; k < N; ++k) {
+        for (std::ptrdiff_t k = j + 1; k < N; ++k) {
             const T akj_v = A_(k, j);
             if (eq0(akj_v)) continue;
             const T akj = alpha * akj_v;
@@ -373,10 +373,10 @@ inline void simd_trmm_r4_rln(int ib, int N, T alpha, const T *a, int lda,
     }
 }
 
-inline void simd_trmm_r4_run(int ib, int N, T alpha, const T *a, int lda,
-                             T *b, int ldb, int nounit)
+inline void simd_trmm_r4_run(std::ptrdiff_t ib, std::ptrdiff_t N, T alpha, const T *a, std::ptrdiff_t lda,
+                             T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int j = N - 1; j >= 0; --j) {
+    for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
         T *bj = b + static_cast<std::size_t>(j) * ldb;
         T t = alpha;
         if (nounit) t = t * A_(j, j);
@@ -389,7 +389,7 @@ inline void simd_trmm_r4_run(int ib, int N, T alpha, const T *a, int lda,
             simd_fast::mul(bjh, bjl, th, tl, nh, nl);
             bjh = nh; bjl = nl;
         }
-        for (int k = 0; k < j; ++k) {
+        for (std::ptrdiff_t k = 0; k < j; ++k) {
             const T akj_v = A_(k, j);
             if (eq0(akj_v)) continue;
             const T akj = alpha * akj_v;
@@ -411,14 +411,14 @@ inline void simd_trmm_r4_run(int ib, int N, T alpha, const T *a, int lda,
 /* For RLT/RUT, the column-update order goes k=N-1..0 (RLT) or 0..N-1 (RUT);
  * for each k we update columns j != k by adding α·A(j,k)·B(:,k), then scale B(:,k)
  * by α (×A(k,k) if nounit). Need to read B(:,k) before scaling. */
-inline void simd_trmm_r4_rlt(int ib, int N, T alpha, const T *a, int lda,
-                             T *b, int ldb, int nounit)
+inline void simd_trmm_r4_rlt(std::ptrdiff_t ib, std::ptrdiff_t N, T alpha, const T *a, std::ptrdiff_t lda,
+                             T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int k = N - 1; k >= 0; --k) {
+    for (std::ptrdiff_t k = N - 1; k >= 0; --k) {
         const T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkh, bkl;
         load_dd4(bk + ib, bkh, bkl);  /* original B(:,k) before scaling */
-        for (int j = k + 1; j < N; ++j) {
+        for (std::ptrdiff_t j = k + 1; j < N; ++j) {
             const T ajk_v = A_(j, k);
             if (eq0(ajk_v)) continue;
             const T ajk = alpha * ajk_v;
@@ -445,14 +445,14 @@ inline void simd_trmm_r4_rlt(int ib, int N, T alpha, const T *a, int lda,
     }
 }
 
-inline void simd_trmm_r4_rut(int ib, int N, T alpha, const T *a, int lda,
-                             T *b, int ldb, int nounit)
+inline void simd_trmm_r4_rut(std::ptrdiff_t ib, std::ptrdiff_t N, T alpha, const T *a, std::ptrdiff_t lda,
+                             T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int k = 0; k < N; ++k) {
+    for (std::ptrdiff_t k = 0; k < N; ++k) {
         const T *bk = b + static_cast<std::size_t>(k) * ldb;
         __m256d bkh, bkl;
         load_dd4(bk + ib, bkh, bkl);
-        for (int j = 0; j < k; ++j) {
+        for (std::ptrdiff_t j = 0; j < k; ++j) {
             const T ajk_v = A_(j, k);
             if (eq0(ajk_v)) continue;
             const T ajk = alpha * ajk_v;
@@ -481,11 +481,11 @@ inline void simd_trmm_r4_rut(int ib, int N, T alpha, const T *a, int lda,
 
 enum trmm_r_op { RLN_OP, RUN_OP, RLT_OP, RUT_OP };
 
-inline void mtrmm_simd_diag_R(trmm_r_op op, int i_start, int i_end, int N, T alpha,
-                              const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_simd_diag_R(trmm_r_op op, std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t N, T alpha,
+                              const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    const int i4_end = i_start + ((i_end - i_start) & ~3);
-    for (int ib = i_start; ib < i4_end; ib += 4) {
+    const std::ptrdiff_t i4_end = i_start + ((i_end - i_start) & ~3);
+    for (std::ptrdiff_t ib = i_start; ib < i4_end; ib += 4) {
         switch (op) {
         case RLN_OP: simd_trmm_r4_rln(ib, N, alpha, a, lda, b, ldb, nounit); break;
         case RUN_OP: simd_trmm_r4_run(ib, N, alpha, a, lda, b, ldb, nounit); break;
@@ -506,75 +506,75 @@ inline void mtrmm_simd_diag_R(trmm_r_op op, int i_start, int i_end, int N, T alp
 
 #endif  /* MBLAS_SIMD_DD */
 
-inline void mtrmm_rln_core(int i_start, int i_end, int N, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_rln_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t N, T alpha,
+                           const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         T t = alpha;
         if (nounit) t = t * A_(j, j);
         if (!eq1(t))
-            for (int i = i_start; i < i_end; ++i) B_(i, j) = B_(i, j) * t;
-        for (int k = j + 1; k < N; ++k) {
+            for (std::ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) = B_(i, j) * t;
+        for (std::ptrdiff_t k = j + 1; k < N; ++k) {
             if (!eq0(A_(k, j))) {
                 const T akj = alpha * A_(k, j);
-                for (int i = i_start; i < i_end; ++i)
+                for (std::ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) = B_(i, j) + akj * B_(i, k);
             }
         }
     }
 }
 
-inline void mtrmm_run_core(int i_start, int i_end, int N, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_run_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t N, T alpha,
+                           const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int j = N - 1; j >= 0; --j) {
+    for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
         T t = alpha;
         if (nounit) t = t * A_(j, j);
         if (!eq1(t))
-            for (int i = i_start; i < i_end; ++i) B_(i, j) = B_(i, j) * t;
-        for (int k = 0; k < j; ++k) {
+            for (std::ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) = B_(i, j) * t;
+        for (std::ptrdiff_t k = 0; k < j; ++k) {
             if (!eq0(A_(k, j))) {
                 const T akj = alpha * A_(k, j);
-                for (int i = i_start; i < i_end; ++i)
+                for (std::ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) = B_(i, j) + akj * B_(i, k);
             }
         }
     }
 }
 
-inline void mtrmm_rlt_core(int i_start, int i_end, int N, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_rlt_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t N, T alpha,
+                           const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int k = N - 1; k >= 0; --k) {
-        for (int j = k + 1; j < N; ++j) {
+    for (std::ptrdiff_t k = N - 1; k >= 0; --k) {
+        for (std::ptrdiff_t j = k + 1; j < N; ++j) {
             if (!eq0(A_(j, k))) {
                 const T ajk = alpha * A_(j, k);
-                for (int i = i_start; i < i_end; ++i)
+                for (std::ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) = B_(i, j) + ajk * B_(i, k);
             }
         }
         T t = alpha;
         if (nounit) t = t * A_(k, k);
         if (!eq1(t))
-            for (int i = i_start; i < i_end; ++i) B_(i, k) = B_(i, k) * t;
+            for (std::ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) = B_(i, k) * t;
     }
 }
 
-inline void mtrmm_rut_core(int i_start, int i_end, int N, T alpha,
-                           const T *a, int lda, T *b, int ldb, int nounit)
+inline void mtrmm_rut_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t N, T alpha,
+                           const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    for (int k = 0; k < N; ++k) {
-        for (int j = 0; j < k; ++j) {
+    for (std::ptrdiff_t k = 0; k < N; ++k) {
+        for (std::ptrdiff_t j = 0; j < k; ++j) {
             if (!eq0(A_(j, k))) {
                 const T ajk = alpha * A_(j, k);
-                for (int i = i_start; i < i_end; ++i)
+                for (std::ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) = B_(i, j) + ajk * B_(i, k);
             }
         }
         T t = alpha;
         if (nounit) t = t * A_(k, k);
         if (!eq1(t))
-            for (int i = i_start; i < i_end; ++i) B_(i, k) = B_(i, k) * t;
+            for (std::ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) = B_(i, k) * t;
     }
 }
 
@@ -583,11 +583,11 @@ inline void mtrmm_rut_core(int i_start, int i_end, int N, T alpha,
 
 enum trmm_variant_L { LLN, LUN, LLT, LUT };
 
-void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
-                     int M, int nb, T alpha,
-                     const T *a, int lda, T *b, int ldb, int nounit)
+void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_end,
+                     std::ptrdiff_t M, std::ptrdiff_t nb, T alpha,
+                     const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
-    const int my_N = j_end - j_start;
+    const std::ptrdiff_t my_N = j_end - j_start;
     if (my_N <= 0) return;
 
     const char NN[1] = {'N'};
@@ -595,9 +595,9 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
     T *B_chunk = &B_(0, j_start);
 
     if (V == LLN) {
-        int ic = ((M - 1) / nb) * nb;
+        std::ptrdiff_t ic = ((M - 1) / nb) * nb;
         while (ic >= 0) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+            const std::ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
 #ifdef MBLAS_SIMD_DD
             if (ib <= kMaxBlockM) {
                 mtrmm_simd_diag(SLLN, j_start, j_end, ib, alpha,
@@ -607,7 +607,7 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
             mtrmm_lln_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
-                mgemm_serial(NN, NN, &ib, &my_N, &ic, &alpha,
+                mgemm_serial_pd(NN, NN, &ib, &my_N, &ic, &alpha,
                              &A_(ic, 0), &lda,
                              B_chunk, &ldb, &one_dd,
                              &B_chunk[ic], &ldb, 1, 1);
@@ -615,8 +615,8 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
             ic -= nb;
         }
     } else if (V == LUN) {
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+        for (std::ptrdiff_t ic = 0; ic < M; ic += nb) {
+            const std::ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
 #ifdef MBLAS_SIMD_DD
             if (ib <= kMaxBlockM) {
                 mtrmm_simd_diag(SLUN, j_start, j_end, ib, alpha,
@@ -625,18 +625,18 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
 #endif
             mtrmm_lun_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            const int trailing = M - (ic + ib);
+            const std::ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
-                const int j0 = ic + ib;
-                mgemm_serial(NN, NN, &ib, &my_N, &trailing, &alpha,
+                const std::ptrdiff_t j0 = ic + ib;
+                mgemm_serial_pd(NN, NN, &ib, &my_N, &trailing, &alpha,
                              &A_(ic, j0), &lda,
                              &B_chunk[j0], &ldb, &one_dd,
                              &B_chunk[ic], &ldb, 1, 1);
             }
         }
     } else if (V == LLT) {
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+        for (std::ptrdiff_t ic = 0; ic < M; ic += nb) {
+            const std::ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
 #ifdef MBLAS_SIMD_DD
             if (ib <= kMaxBlockM) {
                 mtrmm_simd_diag(SLLT, j_start, j_end, ib, alpha,
@@ -645,19 +645,19 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
 #endif
             mtrmm_llt_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
-            const int trailing = M - (ic + ib);
+            const std::ptrdiff_t trailing = M - (ic + ib);
             if (trailing > 0) {
-                const int i0 = ic + ib;
-                mgemm_serial(TN, NN, &ib, &my_N, &trailing, &alpha,
+                const std::ptrdiff_t i0 = ic + ib;
+                mgemm_serial_pd(TN, NN, &ib, &my_N, &trailing, &alpha,
                              &A_(i0, ic), &lda,
                              &B_chunk[i0], &ldb, &one_dd,
                              &B_chunk[ic], &ldb, 1, 1);
             }
         }
     } else { /* LUT */
-        int ic = ((M - 1) / nb) * nb;
+        std::ptrdiff_t ic = ((M - 1) / nb) * nb;
         while (ic >= 0) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+            const std::ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
 #ifdef MBLAS_SIMD_DD
             if (ib <= kMaxBlockM) {
                 mtrmm_simd_diag(SLUT, j_start, j_end, ib, alpha,
@@ -667,7 +667,7 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
             mtrmm_lut_core(j_start, j_end, ib, alpha,
                            &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             if (ic > 0) {
-                mgemm_serial(TN, NN, &ib, &my_N, &ic, &alpha,
+                mgemm_serial_pd(TN, NN, &ib, &my_N, &ic, &alpha,
                              &A_(0, ic), &lda,
                              B_chunk, &ldb, &one_dd,
                              &B_chunk[ic], &ldb, 1, 1);
@@ -682,19 +682,19 @@ void blocked_chunk_L(trmm_variant_L V, int j_start, int j_end,
 
 enum trmm_variant_R { RLN, RUN, RLT, RUT };
 
-void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
-                     int N, int nb, T alpha,
-                     const T *a, int lda, T *b, int ldb, int nounit)
+void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_end,
+                     std::ptrdiff_t N, std::ptrdiff_t nb, T alpha,
+                     const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
     const char NN[1] = {'N'};
     const char TN[1] = {'T'};
-    const int my_M = i_end - i_start;
+    const std::ptrdiff_t my_M = i_end - i_start;
     if (my_M <= 0) return;
     T *B_chunk = &B_(i_start, 0);
 
     if (V == RLN) {
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+        for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
+            const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
 #ifdef MBLAS_SIMD_DD
             mtrmm_simd_diag_R(RLN_OP, i_start, i_end, jb, alpha,
                               &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
@@ -702,19 +702,19 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
             mtrmm_rln_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
-            const int trailing = N - (jc + jb);
+            const std::ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
-                const int k0 = jc + jb;
-                mgemm_serial(NN, NN, &my_M, &jb, &trailing, &alpha,
+                const std::ptrdiff_t k0 = jc + jb;
+                mgemm_serial_pd(NN, NN, &my_M, &jb, &trailing, &alpha,
                              &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
                              &A_(k0, jc), &lda, &one_dd,
                              &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
             }
         }
     } else if (V == RUN) {
-        int jc = ((N - 1) / nb) * nb;
+        std::ptrdiff_t jc = ((N - 1) / nb) * nb;
         while (jc >= 0) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+            const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
 #ifdef MBLAS_SIMD_DD
             mtrmm_simd_diag_R(RUN_OP, i_start, i_end, jb, alpha,
                               &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
@@ -723,7 +723,7 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
             if (jc > 0) {
-                mgemm_serial(NN, NN, &my_M, &jb, &jc, &alpha,
+                mgemm_serial_pd(NN, NN, &my_M, &jb, &jc, &alpha,
                              B_chunk, &ldb,
                              &A_(0, jc), &lda, &one_dd,
                              &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
@@ -731,9 +731,9 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
             jc -= nb;
         }
     } else if (V == RLT) {
-        int jc = ((N - 1) / nb) * nb;
+        std::ptrdiff_t jc = ((N - 1) / nb) * nb;
         while (jc >= 0) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+            const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
 #ifdef MBLAS_SIMD_DD
             mtrmm_simd_diag_R(RLT_OP, i_start, i_end, jb, alpha,
                               &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
@@ -742,7 +742,7 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
             if (jc > 0) {
-                mgemm_serial(NN, TN, &my_M, &jb, &jc, &alpha,
+                mgemm_serial_pd(NN, TN, &my_M, &jb, &jc, &alpha,
                              B_chunk, &ldb,
                              &A_(jc, 0), &lda, &one_dd,
                              &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
@@ -750,8 +750,8 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
             jc -= nb;
         }
     } else { /* RUT */
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+        for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
+            const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
 #ifdef MBLAS_SIMD_DD
             mtrmm_simd_diag_R(RUT_OP, i_start, i_end, jb, alpha,
                               &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
@@ -759,10 +759,10 @@ void blocked_chunk_R(trmm_variant_R V, int i_start, int i_end,
             mtrmm_rut_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #endif
-            const int trailing = N - (jc + jb);
+            const std::ptrdiff_t trailing = N - (jc + jb);
             if (trailing > 0) {
-                const int k0 = jc + jb;
-                mgemm_serial(NN, TN, &my_M, &jb, &trailing, &alpha,
+                const std::ptrdiff_t k0 = jc + jb;
+                mgemm_serial_pd(NN, TN, &my_M, &jb, &trailing, &alpha,
                              &B_chunk[static_cast<std::size_t>(k0) * ldb], &ldb,
                              &A_(jc, k0), &lda, &one_dd,
                              &B_chunk[static_cast<std::size_t>(jc) * ldb], &ldb, 1, 1);
@@ -785,17 +785,17 @@ inline trmm_variant_R r_variant(char UPLO, char TR) {
 
 /* ── Exposed surface (mtrmm_kernel.h). ─────────────────────────────────── */
 
-int mtrmm_block_nb(void) { return trmm_nb(); }
+std::ptrdiff_t mtrmm_block_nb(void) { return trmm_nb(); }
 
-void mtrmm_zero_B(int M, int N, T *b, int ldb)
+void mtrmm_zero_B(std::ptrdiff_t M, std::ptrdiff_t N, T *b, std::ptrdiff_t ldb)
 {
-    for (int j = 0; j < N; ++j)
-        for (int i = 0; i < M; ++i) B_(i, j) = zero_dd;
+    for (std::ptrdiff_t j = 0; j < N; ++j)
+        for (std::ptrdiff_t i = 0; i < M; ++i) B_(i, j) = zero_dd;
 }
 
-void mtrmm_L_slice(char UPLO, char TR, int use_blocked,
-                   int j_start, int j_end, int M, int nb, T alpha,
-                   const T *a, int lda, T *b, int ldb, int nounit)
+void mtrmm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+                   std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, std::ptrdiff_t nb, T alpha,
+                   const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
     if (j_start >= j_end) return;
     const trmm_variant_L V = l_variant(UPLO, TR);
@@ -822,9 +822,9 @@ void mtrmm_L_slice(char UPLO, char TR, int use_blocked,
     }
 }
 
-void mtrmm_R_slice(char UPLO, char TR, int use_blocked,
-                   int row_lo, int row_hi, int N, int nb, T alpha,
-                   const T *a, int lda, T *b, int ldb, int nounit)
+void mtrmm_R_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+                   std::ptrdiff_t row_lo, std::ptrdiff_t row_hi, std::ptrdiff_t N, std::ptrdiff_t nb, T alpha,
+                   const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit)
 {
     if (row_lo >= row_hi) return;
     const trmm_variant_R V = r_variant(UPLO, TR);
@@ -857,28 +857,28 @@ extern "C" void mtrmm_serial(
     std::size_t transa_len, std::size_t diag_len)
 {
     (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_;
+    const std::ptrdiff_t M = *m_, N = *n_;
+    const std::ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
     using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
     const char SIDE = up(side);
     const char UPLO = up(uplo);
     char TR = up(transa);
     if (TR == 'C') TR = 'T';   /* real DD: conj-trans ≡ trans */
-    const int nounit = (up(diag) != 'U');
+    const std::ptrdiff_t nounit = (up(diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
     if (eq0(alpha)) { mtrmm_zero_B(M, N, b, ldb); return; }
 
-    const int nb = trmm_nb();
+    const std::ptrdiff_t nb = trmm_nb();
 
     if (SIDE == 'L') {
-        const int use_blocked = (M >= 2 * nb);
+        const std::ptrdiff_t use_blocked = (M >= 2 * nb);
         mtrmm_L_slice(UPLO, TR, use_blocked, 0, N, M, nb, alpha,
                       a, lda, b, ldb, nounit);
     } else {
-        const int use_blocked = (N >= 2 * nb);
+        const std::ptrdiff_t use_blocked = (N >= 2 * nb);
         mtrmm_R_slice(UPLO, TR, use_blocked, 0, M, N, nb, alpha,
                       a, lda, b, ldb, nounit);
     }

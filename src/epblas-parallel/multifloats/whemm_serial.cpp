@@ -58,26 +58,26 @@ using mf_kernels::cconj;
 
 #ifdef MBLAS_SIMD_DD
 
-constexpr int kSimdLane = simd_fast::NR;   /* 4 */
-constexpr int kMaxBlockM = 128;          /* 4 cdd scratch × 128 × 4 = 16KB */
+constexpr std::ptrdiff_t kSimdLane = simd_fast::NR;   /* 4 */
+constexpr std::ptrdiff_t kMaxBlockM = 128;          /* 4 cdd scratch × 128 × 4 = 16KB */
 
 /* Pack `count` cells from cm[ic..ic+count, j_start..j_start+j_count) into
  * 4 SoA arrays {re_h, re_l, im_h, im_l}, indexed [0..count-1, 0..3]. */
-inline void pack_4col_cdd(int count, int row_start,
-                          const T *m, int ldm, int j_start, int j_count,
+inline void pack_4col_cdd(std::ptrdiff_t count, std::ptrdiff_t row_start,
+                          const T *m, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                           double *rh, double *rl, double *ih, double *il)
 {
-    for (int j = 0; j < j_count; ++j) {
+    for (std::ptrdiff_t j = 0; j < j_count; ++j) {
         const T *col = m + static_cast<std::size_t>(j_start + j) * ldm;
-        for (int i = 0; i < count; ++i) {
+        for (std::ptrdiff_t i = 0; i < count; ++i) {
             rh[i * kSimdLane + j] = col[row_start + i].re.limbs[0];
             rl[i * kSimdLane + j] = col[row_start + i].re.limbs[1];
             ih[i * kSimdLane + j] = col[row_start + i].im.limbs[0];
             il[i * kSimdLane + j] = col[row_start + i].im.limbs[1];
         }
     }
-    for (int j = j_count; j < kSimdLane; ++j)
-        for (int i = 0; i < count; ++i) {
+    for (std::ptrdiff_t j = j_count; j < kSimdLane; ++j)
+        for (std::ptrdiff_t i = 0; i < count; ++i) {
             rh[i * kSimdLane + j] = 0.0;
             rl[i * kSimdLane + j] = 0.0;
             ih[i * kSimdLane + j] = 0.0;
@@ -85,14 +85,14 @@ inline void pack_4col_cdd(int count, int row_start,
         }
 }
 
-inline void unpack_4col_cdd(int count, int row_start,
-                            T *m, int ldm, int j_start, int j_count,
+inline void unpack_4col_cdd(std::ptrdiff_t count, std::ptrdiff_t row_start,
+                            T *m, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                             const double *rh, const double *rl,
                             const double *ih, const double *il)
 {
-    for (int j = 0; j < j_count; ++j) {
+    for (std::ptrdiff_t j = 0; j < j_count; ++j) {
         T *col = m + static_cast<std::size_t>(j_start + j) * ldm;
-        for (int i = 0; i < count; ++i) {
+        for (std::ptrdiff_t i = 0; i < count; ++i) {
             col[row_start + i].re.limbs[0] = rh[i * kSimdLane + j];
             col[row_start + i].re.limbs[1] = rl[i * kSimdLane + j];
             col[row_start + i].im.limbs[0] = ih[i * kSimdLane + j];
@@ -110,8 +110,8 @@ using simd_exact::vbcast;
  *  - cj[k] += temp1 · conj(A(i,k))   — A's im negated for this product
  *  - diagonal A(i,i) is real (im=0)  — only A.re used
  */
-inline void simd_hemm_diag_L(int ic, int ib, T alpha,
-                             const T *a, int lda,
+inline void simd_hemm_diag_L(std::ptrdiff_t ic, std::ptrdiff_t ib, T alpha,
+                             const T *a, std::ptrdiff_t lda,
                              const double *brh, const double *brl,
                              const double *bih, const double *bil,
                              double *crh, double *crl,
@@ -122,8 +122,8 @@ inline void simd_hemm_diag_L(int ic, int ib, T alpha,
     vbcast(alpha, a_rh, a_rl, a_ih, a_il);
     const __m256d zero_v = _mm256_setzero_pd();
 
-    auto body = [&](int i) {
-        const int ir = i - ic;
+    auto body = [&](std::ptrdiff_t i) {
+        const std::ptrdiff_t ir = i - ic;
         __m256d bi_rh = _mm256_load_pd(&brh[ir * kSimdLane]);
         __m256d bi_rl = _mm256_load_pd(&brl[ir * kSimdLane]);
         __m256d bi_ih = _mm256_load_pd(&bih[ir * kSimdLane]);
@@ -137,10 +137,10 @@ inline void simd_hemm_diag_L(int ic, int ib, T alpha,
         __m256d t2ih = _mm256_setzero_pd();
         __m256d t2il = _mm256_setzero_pd();
 
-        const int k_lo = (UPLO == 'L') ? ic       : i + 1;
-        const int k_hi = (UPLO == 'L') ? i        : ic + ib;
-        for (int k = k_lo; k < k_hi; ++k) {
-            const int kr = k - ic;
+        const std::ptrdiff_t k_lo = (UPLO == 'L') ? ic       : i + 1;
+        const std::ptrdiff_t k_hi = (UPLO == 'L') ? i        : ic + ib;
+        for (std::ptrdiff_t k = k_lo; k < k_hi; ++k) {
+            const std::ptrdiff_t kr = k - ic;
             __m256d ak_rh, ak_rl, ak_ih, ak_il;
             vbcast(A_(i, k), ak_rh, ak_rl, ak_ih, ak_il);
             /* Conjugated copy of A(i,k) for cj[k] update */
@@ -211,14 +211,14 @@ inline void simd_hemm_diag_L(int ic, int ib, T alpha,
         _mm256_store_pd(&cil[ir * kSimdLane], nciil);
     };
 
-    if (UPLO == 'L') for (int i = ic;          i < ic + ib;  ++i) body(i);
-    else             for (int i = ic + ib - 1; i >= ic;      --i) body(i);
+    if (UPLO == 'L') for (std::ptrdiff_t i = ic;          i < ic + ib;  ++i) body(i);
+    else             for (std::ptrdiff_t i = ic + ib - 1; i >= ic;      --i) body(i);
 }
 
-inline void simd_hemm_diag_L_panels(int ic, int ib, int N, T alpha,
-                                    const T *a, int lda,
-                                    const T *b, int ldb,
-                                    T *c, int ldc, char UPLO)
+inline void simd_hemm_diag_L_panels(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t N, T alpha,
+                                    const T *a, std::ptrdiff_t lda,
+                                    const T *b, std::ptrdiff_t ldb,
+                                    T *c, std::ptrdiff_t ldc, char UPLO)
 {
     alignas(32) double brh[kMaxBlockM * kSimdLane];
     alignas(32) double brl[kMaxBlockM * kSimdLane];
@@ -228,8 +228,8 @@ inline void simd_hemm_diag_L_panels(int ic, int ib, int N, T alpha,
     alignas(32) double crl[kMaxBlockM * kSimdLane];
     alignas(32) double cih[kMaxBlockM * kSimdLane];
     alignas(32) double cil[kMaxBlockM * kSimdLane];
-    for (int j = 0; j < N; j += kSimdLane) {
-        const int jc = (N - j < kSimdLane) ? (N - j) : kSimdLane;
+    for (std::ptrdiff_t j = 0; j < N; j += kSimdLane) {
+        const std::ptrdiff_t jc = (N - j < kSimdLane) ? (N - j) : kSimdLane;
         pack_4col_cdd(ib, ic, b, ldb, j, jc, brh, brl, bih, bil);
         pack_4col_cdd(ib, ic, c, ldc, j, jc, crh, crl, cih, cil);
         simd_hemm_diag_L(ic, ib, alpha, a, lda,
@@ -241,18 +241,18 @@ inline void simd_hemm_diag_L_panels(int ic, int ib, int N, T alpha,
 
 #endif  /* MBLAS_SIMD_DD */
 
-void hemm_diag_add_L(int ic, int ib, int N, T alpha,
-                     const T *a, int lda, const T *b, int ldb,
-                     T *c, int ldc, char UPLO)
+void hemm_diag_add_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t N, T alpha,
+                     const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
+                     T *c, std::ptrdiff_t ldc, char UPLO)
 {
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         T *cj = c + static_cast<std::size_t>(j) * ldc;
         const T *bj = b + static_cast<std::size_t>(j) * ldb;
         if (UPLO == 'L') {
-            for (int i = ic; i < ic + ib; ++i) {
+            for (std::ptrdiff_t i = ic; i < ic + ib; ++i) {
                 const T temp1 = cmul(alpha, bj[i]);
                 T temp2 = zero_cdd;
-                for (int k = ic; k < i; ++k) {
+                for (std::ptrdiff_t k = ic; k < i; ++k) {
                     cj[k]  = cadd(cj[k], cmul(temp1, cconj(A_(i, k))));
                     temp2  = cadd(temp2, cmul(bj[k], A_(i, k)));
                 }
@@ -261,10 +261,10 @@ void hemm_diag_add_L(int ic, int ib, int N, T alpha,
                 cj[i] = cadd(cj[i], cadd(cmul(temp1, diag), cmul(alpha, temp2)));
             }
         } else {
-            for (int i = ic + ib - 1; i >= ic; --i) {
+            for (std::ptrdiff_t i = ic + ib - 1; i >= ic; --i) {
                 const T temp1 = cmul(alpha, bj[i]);
                 T temp2 = zero_cdd;
-                for (int k = i + 1; k < ic + ib; ++k) {
+                for (std::ptrdiff_t k = i + 1; k < ic + ib; ++k) {
                     cj[k]  = cadd(cj[k], cmul(temp1, cconj(A_(i, k))));
                     temp2  = cadd(temp2, cmul(bj[k], A_(i, k)));
                 }
@@ -283,19 +283,19 @@ using simd_exact::cstore4;
 /* SIDE='R' Hermitian diag, 4-row SIMD. Differences from wsymm-R:
  *  - A(j,j) is real (im=0)
  *  - Off-diag uses conj on the stored half (mirroring scalar code) */
-inline void simd_hemm_diag_R(int jc, int jb, int M, T alpha,
-                             const T *a, int lda, const T *b, int ldb,
-                             T *c, int ldc, char UPLO)
+inline void simd_hemm_diag_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, T alpha,
+                             const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
+                             T *c, std::ptrdiff_t ldc, char UPLO)
 {
-    const int M4 = M & ~3;
+    const std::ptrdiff_t M4 = M & ~3;
 
-    for (int ib = 0; ib < M4; ib += 4) {
-        for (int j = jc; j < jc + jb; ++j) {
+    for (std::ptrdiff_t ib = 0; ib < M4; ib += 4) {
+        for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
             T *cj = c + static_cast<std::size_t>(j) * ldc;
             __m256d crh, crl, cih, cil;
             cload4(cj + ib, crh, crl, cih, cil);
 
-            for (int k = jc; k < jc + jb; ++k) {
+            for (std::ptrdiff_t k = jc; k < jc + jb; ++k) {
                 T tval;
                 if (k == j) {
                     const T diag = T{ A_(j, j).re, rzero };  /* real */
@@ -334,30 +334,30 @@ inline void simd_hemm_diag_R(int jc, int jb, int M, T alpha,
 
     /* Scalar tail */
     if (M4 < M) {
-        for (int j = jc; j < jc + jb; ++j) {
+        for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
             T *cj = c + static_cast<std::size_t>(j) * ldc;
             {
                 const T diag = T{ A_(j, j).re, rzero };
                 const T t = cmul(alpha, diag);
-                for (int i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, j)));
+                for (std::ptrdiff_t i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, j)));
             }
             if (UPLO == 'L') {
-                for (int k = jc; k < j; ++k) {
+                for (std::ptrdiff_t k = jc; k < j; ++k) {
                     const T t = cmul(alpha, cconj(A_(j, k)));
-                    if (!ceq0(t)) for (int i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
+                    if (!ceq0(t)) for (std::ptrdiff_t i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
                 }
-                for (int k = j + 1; k < jc + jb; ++k) {
+                for (std::ptrdiff_t k = j + 1; k < jc + jb; ++k) {
                     const T t = cmul(alpha, A_(k, j));
-                    if (!ceq0(t)) for (int i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
+                    if (!ceq0(t)) for (std::ptrdiff_t i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
                 }
             } else {
-                for (int k = jc; k < j; ++k) {
+                for (std::ptrdiff_t k = jc; k < j; ++k) {
                     const T t = cmul(alpha, A_(k, j));
-                    if (!ceq0(t)) for (int i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
+                    if (!ceq0(t)) for (std::ptrdiff_t i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
                 }
-                for (int k = j + 1; k < jc + jb; ++k) {
+                for (std::ptrdiff_t k = j + 1; k < jc + jb; ++k) {
                     const T t = cmul(alpha, cconj(A_(j, k)));
-                    if (!ceq0(t)) for (int i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
+                    if (!ceq0(t)) for (std::ptrdiff_t i = M4; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
                 }
             }
         }
@@ -366,42 +366,42 @@ inline void simd_hemm_diag_R(int jc, int jb, int M, T alpha,
 
 #endif  /* MBLAS_SIMD_DD */
 
-void hemm_diag_add_R(int jc, int jb, int M, T alpha,
-                     const T *a, int lda, const T *b, int ldb,
-                     T *c, int ldc, char UPLO)
+void hemm_diag_add_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, T alpha,
+                     const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
+                     T *c, std::ptrdiff_t ldc, char UPLO)
 {
-    for (int j = jc; j < jc + jb; ++j) {
+    for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         T *cj = c + static_cast<std::size_t>(j) * ldc;
         {
             const T diag = T{ A_(j, j).re, rzero };
             const T t = cmul(alpha, diag);
-            for (int i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, j)));
+            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, j)));
         }
         if (UPLO == 'L') {
-            for (int k = jc; k < j; ++k) {
+            for (std::ptrdiff_t k = jc; k < j; ++k) {
                 const T t = cmul(alpha, cconj(A_(j, k)));
-                if (!ceq0(t)) for (int i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
+                if (!ceq0(t)) for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
             }
-            for (int k = j + 1; k < jc + jb; ++k) {
+            for (std::ptrdiff_t k = j + 1; k < jc + jb; ++k) {
                 const T t = cmul(alpha, A_(k, j));
-                if (!ceq0(t)) for (int i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
+                if (!ceq0(t)) for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
             }
         } else {
-            for (int k = jc; k < j; ++k) {
+            for (std::ptrdiff_t k = jc; k < j; ++k) {
                 const T t = cmul(alpha, A_(k, j));
-                if (!ceq0(t)) for (int i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
+                if (!ceq0(t)) for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
             }
-            for (int k = j + 1; k < jc + jb; ++k) {
+            for (std::ptrdiff_t k = j + 1; k < jc + jb; ++k) {
                 const T t = cmul(alpha, cconj(A_(j, k)));
-                if (!ceq0(t)) for (int i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
+                if (!ceq0(t)) for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cadd(cj[i], cmul(t, B_(i, k)));
             }
         }
     }
 }
 
-inline void diag_R_dispatch(int jc, int jb, int M, T alpha,
-                            const T *a, int lda, const T *b, int ldb,
-                            T *c, int ldc, char UPLO)
+inline void diag_R_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, T alpha,
+                            const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
+                            T *c, std::ptrdiff_t ldc, char UPLO)
 {
 #ifdef MBLAS_SIMD_DD
     simd_hemm_diag_R(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
@@ -411,9 +411,9 @@ inline void diag_R_dispatch(int jc, int jb, int M, T alpha,
 #endif
 }
 
-inline void diag_L_dispatch(int ic, int ib, int N, T alpha,
-                            const T *a, int lda, const T *b, int ldb,
-                            T *c, int ldc, char UPLO)
+inline void diag_L_dispatch(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t N, T alpha,
+                            const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
+                            T *c, std::ptrdiff_t ldc, char UPLO)
 {
 #ifdef MBLAS_SIMD_DD
     if (ib <= kMaxBlockM) {
@@ -426,96 +426,96 @@ inline void diag_L_dispatch(int ic, int ib, int N, T alpha,
 
 } /* anonymous namespace */
 
-int whemm_block_nb(void) {
-    static int nb = 0;
+std::ptrdiff_t whemm_block_nb(void) {
+    static std::ptrdiff_t nb = 0;
     if (nb == 0) nb = 64;
     return nb;
 }
 
-void whemm_scale_col(int j, int M, T beta, T *c, int ldc) {
+void whemm_scale_col(std::ptrdiff_t j, std::ptrdiff_t M, T beta, T *c, std::ptrdiff_t ldc) {
     T *cj = c + static_cast<std::size_t>(j) * ldc;
-    if (ceq0(beta)) for (int i = 0; i < M; ++i) cj[i] = zero_cdd;
-    else                  for (int i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
+    if (ceq0(beta)) for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = zero_cdd;
+    else                  for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
 }
 
-void whemm_block_L(int ic, int ib, int M, int N, char UPLO,
-                   T alpha, T beta, const T *a, int lda, const T *b, int ldb,
-                   T *c, int ldc)
+void whemm_block_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t M, std::ptrdiff_t N, char UPLO,
+                   T alpha, T beta, const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
+                   T *c, std::ptrdiff_t ldc)
 {
     const char NN[1] = {'N'};
     const char CN[1] = {'C'};
 
     /* beta-scale this block's rows across all columns */
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         T *cj = c + static_cast<std::size_t>(j) * ldc;
-        if (ceq0(beta))      for (int i = ic; i < ic + ib; ++i) cj[i] = zero_cdd;
-        else if (!ceq1(beta)) for (int i = ic; i < ic + ib; ++i) cj[i] = cmul(cj[i], beta);
+        if (ceq0(beta))      for (std::ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] = zero_cdd;
+        else if (!ceq1(beta)) for (std::ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] = cmul(cj[i], beta);
     }
     if (UPLO == 'L') {
         if (ic > 0) {
-            wgemm_serial(NN, NN, &ib, &N, &ic, &alpha,
+            wgemm_serial_pd(NN, NN, &ib, &N, &ic, &alpha,
                          &A_(ic, 0), &lda, &B_(0, 0), &ldb,
                          &one_cdd, &C_(ic, 0), &ldc, 1, 1);
         }
         diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
-        const int trailing = M - ic - ib;
+        const std::ptrdiff_t trailing = M - ic - ib;
         if (trailing > 0) {
-            wgemm_serial(CN, NN, &ib, &N, &trailing, &alpha,
+            wgemm_serial_pd(CN, NN, &ib, &N, &trailing, &alpha,
                          &A_(ic + ib, ic), &lda, &B_(ic + ib, 0), &ldb,
                          &one_cdd, &C_(ic, 0), &ldc, 1, 1);
         }
     } else {
         if (ic > 0) {
-            wgemm_serial(CN, NN, &ib, &N, &ic, &alpha,
+            wgemm_serial_pd(CN, NN, &ib, &N, &ic, &alpha,
                          &A_(0, ic), &lda, &B_(0, 0), &ldb,
                          &one_cdd, &C_(ic, 0), &ldc, 1, 1);
         }
         diag_L_dispatch(ic, ib, N, alpha, a, lda, b, ldb, c, ldc, UPLO);
-        const int trailing = M - ic - ib;
+        const std::ptrdiff_t trailing = M - ic - ib;
         if (trailing > 0) {
-            wgemm_serial(NN, NN, &ib, &N, &trailing, &alpha,
+            wgemm_serial_pd(NN, NN, &ib, &N, &trailing, &alpha,
                          &A_(ic, ic + ib), &lda, &B_(ic + ib, 0), &ldb,
                          &one_cdd, &C_(ic, 0), &ldc, 1, 1);
         }
     }
 }
 
-void whemm_block_R(int jc, int jb, int M, int N, char UPLO,
-                   T alpha, T beta, const T *a, int lda, const T *b, int ldb,
-                   T *c, int ldc)
+void whemm_block_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t M, std::ptrdiff_t N, char UPLO,
+                   T alpha, T beta, const T *a, std::ptrdiff_t lda, const T *b, std::ptrdiff_t ldb,
+                   T *c, std::ptrdiff_t ldc)
 {
     const char NN[1] = {'N'};
     const char CN[1] = {'C'};
 
     /* beta-scale this block's columns over all rows */
-    for (int j = jc; j < jc + jb; ++j) {
+    for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         T *cj = c + static_cast<std::size_t>(j) * ldc;
-        if (ceq0(beta))      for (int i = 0; i < M; ++i) cj[i] = zero_cdd;
-        else if (!ceq1(beta)) for (int i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
+        if (ceq0(beta))      for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = zero_cdd;
+        else if (!ceq1(beta)) for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
     }
     if (UPLO == 'L') {
         if (jc > 0) {
-            wgemm_serial(NN, CN, &M, &jb, &jc, &alpha,
+            wgemm_serial_pd(NN, CN, &M, &jb, &jc, &alpha,
                          &B_(0, 0), &ldb, &A_(jc, 0), &lda,
                          &one_cdd, &C_(0, jc), &ldc, 1, 1);
         }
         diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
-        const int trailing = N - jc - jb;
+        const std::ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
-            wgemm_serial(NN, NN, &M, &jb, &trailing, &alpha,
+            wgemm_serial_pd(NN, NN, &M, &jb, &trailing, &alpha,
                          &B_(0, jc + jb), &ldb, &A_(jc + jb, jc), &lda,
                          &one_cdd, &C_(0, jc), &ldc, 1, 1);
         }
     } else {
         if (jc > 0) {
-            wgemm_serial(NN, NN, &M, &jb, &jc, &alpha,
+            wgemm_serial_pd(NN, NN, &M, &jb, &jc, &alpha,
                          &B_(0, 0), &ldb, &A_(0, jc), &lda,
                          &one_cdd, &C_(0, jc), &ldc, 1, 1);
         }
         diag_R_dispatch(jc, jb, M, alpha, a, lda, b, ldb, c, ldc, UPLO);
-        const int trailing = N - jc - jb;
+        const std::ptrdiff_t trailing = N - jc - jb;
         if (trailing > 0) {
-            wgemm_serial(NN, CN, &M, &jb, &trailing, &alpha,
+            wgemm_serial_pd(NN, CN, &M, &jb, &trailing, &alpha,
                          &B_(0, jc + jb), &ldb, &A_(jc, jc + jb), &lda,
                          &one_cdd, &C_(0, jc), &ldc, 1, 1);
         }
@@ -533,8 +533,8 @@ extern "C" void whemm_serial(
     std::size_t side_len, std::size_t uplo_len)
 {
     (void)side_len; (void)uplo_len;
-    const int M = *m_, N = *n_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const std::ptrdiff_t M = *m_, N = *n_;
+    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const char SIDE = up(side);
     const char UPLO = up(uplo);
@@ -543,19 +543,19 @@ extern "C" void whemm_serial(
 
     if (ceq0(alpha)) {
         if (ceq1(beta)) return;
-        for (int j = 0; j < N; ++j) whemm_scale_col(j, M, beta, c, ldc);
+        for (std::ptrdiff_t j = 0; j < N; ++j) whemm_scale_col(j, M, beta, c, ldc);
         return;
     }
 
-    const int nb = whemm_block_nb();
+    const std::ptrdiff_t nb = whemm_block_nb();
     if (SIDE == 'L') {
-        for (int ic = 0; ic < M; ic += nb) {
-            const int ib = (M - ic < nb) ? (M - ic) : nb;
+        for (std::ptrdiff_t ic = 0; ic < M; ic += nb) {
+            const std::ptrdiff_t ib = (M - ic < nb) ? (M - ic) : nb;
             whemm_block_L(ic, ib, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     } else {
-        for (int jc = 0; jc < N; jc += nb) {
-            const int jb = (N - jc < nb) ? (N - jc) : nb;
+        for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
+            const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
             whemm_block_R(jc, jb, M, N, UPLO, alpha, beta, a, lda, b, ldb, c, ldc);
         }
     }

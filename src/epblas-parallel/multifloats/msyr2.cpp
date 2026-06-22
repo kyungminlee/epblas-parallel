@@ -43,8 +43,8 @@ extern "C" void msyr2_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, incy = *incy_, lda = *lda_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
@@ -56,7 +56,7 @@ extern "C" void msyr2_(
     {
         std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
         std::ptrdiff_t iy = (incy < 0) ? -(std::ptrdiff_t)(N - 1) * incy : 0;
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             xh[j] = x[ix].limbs[0]; xl[j] = x[ix].limbs[1]; ix += incx;
             yh[j] = y[iy].limbs[0]; yl[j] = y[iy].limbs[1]; iy += incy;
         }
@@ -65,7 +65,7 @@ extern "C" void msyr2_(
     const double *yhp = yh.data(), *ylp = yl.data();
 
 #ifdef _OPENMP
-    const int use_omp = (N >= MSYR2_OMP_MIN && blas_omp_available());
+    const std::ptrdiff_t use_omp = (N >= MSYR2_OMP_MIN && blas_omp_available());
     /* static,1 balances the triangular column skew; full storage → columns
      * lda apart, no false sharing. Hot loop is mf_kernels::dd_axpy2. */
 #endif
@@ -73,7 +73,7 @@ extern "C" void msyr2_(
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             if (eq0(xhp[j], xlp[j]) && eq0(yhp[j], ylp[j])) continue;
             const T tx = alpha * T{yhp[j], ylp[j]};   /* x-row scale = alpha*y[j] */
             const T ty = alpha * T{xhp[j], xlp[j]};   /* y-row scale = alpha*x[j] */
@@ -84,7 +84,7 @@ extern "C" void msyr2_(
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             if (eq0(xhp[j], xlp[j]) && eq0(yhp[j], ylp[j])) continue;
             const T tx = alpha * T{yhp[j], ylp[j]};
             const T ty = alpha * T{xhp[j], xlp[j]};

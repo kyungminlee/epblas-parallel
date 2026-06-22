@@ -47,26 +47,26 @@ using wherk_T = multifloats::complex64x2;
 #define WHERK_OMP_MIN 32
 
 /* Block size over the diagonal axis (env WHERK_NB). */
-int wherk_block_nb(void);
+std::ptrdiff_t wherk_block_nb(void);
 
 /* Zero the imaginary part of the diagonal cell C[j,j] (the beta==1 early
  * exit — Hermitian C has a real diagonal). */
-void wherk_zero_diag_im(int j, wherk_T *c, int ldc);
+void wherk_zero_diag_im(std::ptrdiff_t j, wherk_T *c, std::ptrdiff_t ldc);
 
 /* Scale column j's UPLO triangle of C by the real beta (the alpha==0 / K==0
  * early exit, beta!=1). Handles beta==0 (zero-fill); the diagonal cell becomes
  * real (beta·re, 0). The caller handles beta==1 via wherk_zero_diag_im. */
-void wherk_scale_col(int j, int N, char UPLO, wherk_R beta,
-                     wherk_T *c, int ldc);
+void wherk_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, wherk_R beta,
+                     wherk_T *c, std::ptrdiff_t ldc);
 
 /* One diagonal block [jc, jc+jb) of the rank-k update: beta-scale the block's
  * own triangle columns (real-diag preservation), accumulate the diagonal block
  * (SIMD or scalar), then the trailing conjugate-transpose gemm (routed through
  * wgemm_serial — no nested OpenMP). Each block writes a disjoint column range
  * of C → race-free across blocks. */
-void wherk_block(int jc, int jb, int N, int K, char UPLO, char TR,
+void wherk_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR,
                  wherk_R alpha, wherk_R beta,
-                 const wherk_T *a, int lda, wherk_T *c, int ldc);
+                 const wherk_T *a, std::ptrdiff_t lda, wherk_T *c, std::ptrdiff_t ldc);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wherk_. */
 extern "C" void wherk_serial(

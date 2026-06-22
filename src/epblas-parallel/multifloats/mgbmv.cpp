@@ -39,7 +39,7 @@ const T zero_dd{0.0, 0.0};
  * against x — the same stride-1 kernels used by the triangular twins. (The OMP paths
  * thread over ptrdiff_t rows and clamp the band to the owned range inline, so they
  * keep their own bounds.) */
-static inline void mgbmv_band(int j, int M, int KL, int KU, int &i_lo, int &i_hi) {
+static inline void mgbmv_band(std::ptrdiff_t j, std::ptrdiff_t M, std::ptrdiff_t KL, std::ptrdiff_t KU, std::ptrdiff_t &i_lo, std::ptrdiff_t &i_hi) {
     i_lo = (j - KU > 0) ? (j - KU) : 0;
     i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
 }
@@ -50,22 +50,22 @@ namespace {
  * (y[i] += tmp*col[i], distinct rows, ascending j -> bit-exact). Trans reduces it
  * against x via a vector dot (within DD fuzz tol). The strided entries gather
  * x/y to scratch and reuse these. */
-void mgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
+void mgbmv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                     const T *a, std::size_t lda, const T *x, T *y)
 {
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         const T tmp = alpha * x[j];
-        int i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
-        const int k = KU - j;
+        std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
+        const std::ptrdiff_t k = KU - j;
         if (i_hi > i_lo) mf_kernels::axpy_add(i_hi - i_lo, &y[i_lo], &A_(k + i_lo, j), tmp);
     }
 }
-void mgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
+void mgbmv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                     const T *a, std::size_t lda, const T *x, T *y)
 {
-    for (int j = 0; j < N; ++j) {
-        int i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
-        const int k = KU - j;
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
+        std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
+        const std::ptrdiff_t k = KU - j;
         const T s = (i_hi > i_lo) ? mf_kernels::dot(i_hi - i_lo, &A_(k + i_lo, j), &x[i_lo]) : zero_dd;
         y[j] = y[j] + alpha * s;
     }
@@ -83,21 +83,21 @@ void mgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
  * the serial/netlib scatter (bit-exact). alpha*x[j] is recomputed per column
  * (read-only x), which removes the shared ax buffer and its barrier. NoTrans
  * reads N of x, writes M of y. Returns true if handled. */
-static bool mgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
-                        const T *a, int lda,
-                        const T *x, int incx, T *y, int incy)
+static bool mgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
+                        const T *a, std::ptrdiff_t lda,
+                        const T *x, std::ptrdiff_t incx, T *y, std::ptrdiff_t incy)
 {
     if (M < MGBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
 
-    const int ix0 = (incx < 0) ? -(N - 1) * incx : 0;
+    const std::ptrdiff_t ix0 = (incx < 0) ? -(N - 1) * incx : 0;
     const std::ptrdiff_t iy0 = (incy < 0) ? -static_cast<std::ptrdiff_t>(M - 1) * incy : 0;
 
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
+        std::ptrdiff_t tid = omp_get_thread_num();
         std::ptrdiff_t lo = (static_cast<std::ptrdiff_t>(M) * tid) / nthreads;
         std::ptrdiff_t hi = (static_cast<std::ptrdiff_t>(M) * (tid + 1)) / nthreads;
         /* columns whose band [j-KU, j+KL] intersects owned rows [lo,hi) */
@@ -125,13 +125,13 @@ static bool mgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
  * Output columns partition across threads (each y[j]=alpha*Σ_i A(i,j)*x[i] disjoint).
  * Strided x gathered to contiguous so the inner dot reads x[i] directly. Trans reads
  * M of x, writes N of y. Bit-identical to the serial strided gather (ascending-i). */
-static bool mgbmv_t_omp(int M, int N, int KL, int KU, T alpha,
-                        const T *a, int lda,
-                        const T *x, int incx, T *y, int incy)
+static bool mgbmv_t_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
+                        const T *a, std::ptrdiff_t lda,
+                        const T *x, std::ptrdiff_t incx, T *y, std::ptrdiff_t incy)
 {
     if (N < MGBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MGBMV_MAX_CPUS) nthreads = MGBMV_MAX_CPUS;
 
     if (incy < 0) y -= static_cast<std::ptrdiff_t>(N - 1) * incy;
@@ -147,7 +147,7 @@ static bool mgbmv_t_omp(int M, int N, int KL, int KU, T alpha,
 
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
+        std::ptrdiff_t tid = omp_get_thread_num();
         std::ptrdiff_t lo = (static_cast<std::ptrdiff_t>(N) * tid) / nthreads;
         std::ptrdiff_t hi = (static_cast<std::ptrdiff_t>(N) * (tid + 1)) / nthreads;
         for (std::ptrdiff_t j = lo; j < hi; ++j) {
@@ -176,17 +176,17 @@ extern "C" void mgbmv_(
     std::size_t trans_len)
 {
     (void)trans_len;
-    const int M = *m_, N = *n_;
-    const int KL = *kl_, KU = *ku_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t M = *m_, N = *n_;
+    const std::ptrdiff_t KL = *kl_, KU = *ku_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
 
     if (M == 0 || N == 0 || (eq0(alpha) && eq1(beta))) return;
 
-    const int leny = (TR == 'N') ? M : N;
-    const int lenx = (TR == 'N') ? N : M;
+    const std::ptrdiff_t leny = (TR == 'N') ? M : N;
+    const std::ptrdiff_t lenx = (TR == 'N') ? N : M;
 
     mf_kernels::scale_y(leny, beta, y, incy);
     if (eq0(alpha)) return;
@@ -220,15 +220,15 @@ extern "C" void mgbmv_(
             std::free(xs); std::free(ys);
         }
         {
-            int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
-            int ky = (incy < 0) ? -(leny - 1) * incy : 0;
-            int jx = kx;
-            for (int j = 0; j < N; ++j) {
+            std::ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
+            std::ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
+            std::ptrdiff_t jx = kx;
+            for (std::ptrdiff_t j = 0; j < N; ++j) {
                 const T tmp = alpha * x[jx];
-                int iy = ky;
-                int i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
-                const int k = KU - j;
-                for (int i = i_lo; i < i_hi; ++i) {
+                std::ptrdiff_t iy = ky;
+                std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
+                const std::ptrdiff_t k = KU - j;
+                for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
                     y[iy] = y[iy] + tmp * A_(k + i, j);
                     iy += incy;
                 }
@@ -264,15 +264,15 @@ extern "C" void mgbmv_(
             std::free(xs); std::free(ys);
         }
         {
-            int kx = (incx < 0) ? -(lenx - 1) * incx : 0;
-            int ky = (incy < 0) ? -(leny - 1) * incy : 0;
-            int jy = ky;
-            for (int j = 0; j < N; ++j) {
+            std::ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
+            std::ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
+            std::ptrdiff_t jy = ky;
+            for (std::ptrdiff_t j = 0; j < N; ++j) {
                 T s = zero_dd;
-                int ix = kx;
-                int i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
-                const int k = KU - j;
-                for (int i = i_lo; i < i_hi; ++i) {
+                std::ptrdiff_t ix = kx;
+                std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, M, KL, KU, i_lo, i_hi);
+                const std::ptrdiff_t k = KU - j;
+                for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
                     s = s + A_(k + i, j) * x[ix];
                     ix += incx;
                 }

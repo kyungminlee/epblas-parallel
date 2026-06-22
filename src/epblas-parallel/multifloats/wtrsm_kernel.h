@@ -42,26 +42,26 @@ using wtrsm_T = multifloats::complex64x2;
 #define WTRSM_OMP_N_MIN 32
 
 /* Block size over the M axis for the blocked SIDE='L' path (env WTRSM_NB). */
-int wtrsm_block_nb(void);
+std::ptrdiff_t wtrsm_block_nb(void);
 
 /* B := 0 over the full M×N tile (the alpha==0 early-exit). */
-void wtrsm_zero_B(int M, int N, wtrsm_T *b, int ldb);
+void wtrsm_zero_B(std::ptrdiff_t M, std::ptrdiff_t N, wtrsm_T *b, std::ptrdiff_t ldb);
 
 /* One column slice [j_start, j_end) of a SIDE='L' solve. UPLO/TR select the
  * variant (TR ∈ {'N','T','C'}); use_blocked picks the blocked path
  * (wgemm_serial trailing update + SIMD diagonal) vs the scalar unblocked core.
  * Each slice owns a disjoint column range → race-free, bitwise-identical to
  * the serial sweep. */
-void wtrsm_L_slice(char UPLO, char TR, int use_blocked,
-                   int j_start, int j_end, int M, int nb, wtrsm_T alpha,
-                   const wtrsm_T *a, int lda, wtrsm_T *b, int ldb, int nounit);
+void wtrsm_L_slice(char UPLO, char TR, std::ptrdiff_t use_blocked,
+                   std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t M, std::ptrdiff_t nb, wtrsm_T alpha,
+                   const wtrsm_T *a, std::ptrdiff_t lda, wtrsm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
 
 /* One row slice [row_lo, row_hi) of a SIDE='R' solve (SIMD 4-row chunks +
  * scalar tail). TR ∈ {'N','T','C'}. Each slice owns a disjoint row range →
  * race-free. */
-void wtrsm_R_slice(char UPLO, char TR, int row_lo, int row_hi,
-                   int N, wtrsm_T alpha,
-                   const wtrsm_T *a, int lda, wtrsm_T *b, int ldb, int nounit);
+void wtrsm_R_slice(char UPLO, char TR, std::ptrdiff_t row_lo, std::ptrdiff_t row_hi,
+                   std::ptrdiff_t N, wtrsm_T alpha,
+                   const wtrsm_T *a, std::ptrdiff_t lda, wtrsm_T *b, std::ptrdiff_t ldb, std::ptrdiff_t nounit);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wtrsm_. */
 extern "C" void wtrsm_serial(

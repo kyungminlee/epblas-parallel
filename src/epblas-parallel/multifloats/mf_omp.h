@@ -38,11 +38,11 @@
 
 namespace mf_omp {
 
-static inline int tri_area_bounds(std::ptrdiff_t n, int nthreads,
-                                  int mask, int min_width, bool heavy_high,
-                                  int max_cpus, std::ptrdiff_t *range)
+static inline std::ptrdiff_t tri_area_bounds(std::ptrdiff_t n, std::ptrdiff_t nthreads,
+                                  std::ptrdiff_t mask, std::ptrdiff_t min_width, bool heavy_high,
+                                  std::ptrdiff_t max_cpus, std::ptrdiff_t *range)
 {
-    int num_cpu = 0;
+    std::ptrdiff_t num_cpu = 0;
     const double dnum = (double)n * (double)n / (double)nthreads;
     range[0] = 0;
     std::ptrdiff_t i = 0;
@@ -81,10 +81,10 @@ static inline int tri_area_bounds(std::ptrdiff_t n, int nthreads,
  * triangular sqrt split (tri_area_bounds) would skew it. Widths are rounded up to
  * (mask+1) and floored at min_width so per-thread slot writes stay off shared
  * cache lines. Fills range[0..return]; returns the slice count (<= max_cpus). */
-static inline int band_bounds(std::ptrdiff_t n, int nthreads, int mask,
-                              int min_width, int max_cpus, std::ptrdiff_t *range)
+static inline std::ptrdiff_t band_bounds(std::ptrdiff_t n, std::ptrdiff_t nthreads, std::ptrdiff_t mask,
+                              std::ptrdiff_t min_width, std::ptrdiff_t max_cpus, std::ptrdiff_t *range)
 {
-    int num_cpu = 0;
+    std::ptrdiff_t num_cpu = 0;
     const std::ptrdiff_t base = (n + nthreads - 1) / nthreads;
     range[0] = 0;
     std::ptrdiff_t i = 0;
@@ -111,7 +111,7 @@ static inline int band_bounds(std::ptrdiff_t n, int nthreads, int mask,
  * 0..j, so the slot is touched over [0,range[t+1]); for LOWER, rows j..n-1 ->
  * [range[t],n). The shared bounded-reduction fold walks exactly this window, so
  * the off-by-one logic lives here once instead of in every consumer. */
-static inline void tri_row_window(int t, bool upper, const std::ptrdiff_t *range,
+static inline void tri_row_window(std::ptrdiff_t t, bool upper, const std::ptrdiff_t *range,
                                   std::ptrdiff_t n,
                                   std::ptrdiff_t &from, std::ptrdiff_t &to)
 {
@@ -125,7 +125,7 @@ static inline void tri_row_window(int t, bool upper, const std::ptrdiff_t *range
  * [range[t]-k,range[t+1]); LOWER [range[t],range[t+1]+k), clamped to [0,n).
  * Adjacent windows overlap by k, but each column's contribution lives in exactly
  * one slot, so summing the overlapping windows is correct. */
-static inline void band_row_window(int t, bool upper, const std::ptrdiff_t *range,
+static inline void band_row_window(std::ptrdiff_t t, bool upper, const std::ptrdiff_t *range,
                                    std::ptrdiff_t n, std::ptrdiff_t k,
                                    std::ptrdiff_t &from, std::ptrdiff_t &to)
 {
@@ -135,14 +135,14 @@ static inline void band_row_window(int t, bool upper, const std::ptrdiff_t *rang
 
 /* even_slice(): the flat EQUAL-COUNT partition of [0,n) used by every threaded L1
  * / reduction sweep (copy/scal/axpy/rot/asum/dot/nrm2/argmax). Thread tid of nth
- * gets [lo,hi) = [n*tid/nth, n*(tid+1)/nth); the long-long product avoids int
+ * gets [lo,hi) = [n*tid/nth, n*(tid+1)/nth); the long-long product avoids std::ptrdiff_t
  * overflow before the divide. Byte-identical math previously re-derived in ~20
  * files — centralized here so the slice bounds (and their overflow guard) live
  * once. */
-static inline void even_slice(int n, int tid, int nth, int &lo, int &hi)
+static inline void even_slice(std::ptrdiff_t n, std::ptrdiff_t tid, std::ptrdiff_t nth, std::ptrdiff_t &lo, std::ptrdiff_t &hi)
 {
-    lo = (int)((long long)n * tid / nth);
-    hi = (int)((long long)n * (tid + 1) / nth);
+    lo = (std::ptrdiff_t)((long long)n * tid / nth);
+    hi = (std::ptrdiff_t)((long long)n * (tid + 1) / nth);
 }
 
 }  // namespace mf_omp

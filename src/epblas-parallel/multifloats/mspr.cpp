@@ -41,8 +41,8 @@ extern "C" void mspr_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_;
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
@@ -54,7 +54,7 @@ extern "C" void mspr_(
     std::vector<double> xh(N), xl(N);
     {
         std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             xh[j] = x[ix].limbs[0];
             xl[j] = x[ix].limbs[1];
             ix += incx;
@@ -64,7 +64,7 @@ extern "C" void mspr_(
     const double *xlp = xl.data();
 
 #ifdef _OPENMP
-    const int use_omp = (N >= MSPR_OMP_MIN && blas_omp_available());
+    const std::ptrdiff_t use_omp = (N >= MSPR_OMP_MIN && blas_omp_available());
     /* static,8: column j writes j+1 (U) / N-j (L) packed elems — a triangular
      * skew that plain static dumps onto one thread. Packed columns are
      * contiguous in ap, so cyclic static,1 would false-share cache lines on
@@ -75,20 +75,20 @@ extern "C" void mspr_(
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
             const T tmp = alpha * T{xhp[j], xlp[j]};
-            const int kk = (j * (j + 1)) / 2;
+            const std::ptrdiff_t kk = (j * (j + 1)) / 2;
             mf_kernels::dd_axpy(j + 1, xhp, xlp, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
     } else {
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
             const T tmp = alpha * T{xhp[j], xlp[j]};
-            const int kk = j * N - (j * (j - 1)) / 2;
+            const std::ptrdiff_t kk = j * N - (j * (j - 1)) / 2;
             mf_kernels::dd_axpy(N - j, xhp + j, xlp + j, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
     }

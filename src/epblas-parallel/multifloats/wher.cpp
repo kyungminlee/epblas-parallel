@@ -37,15 +37,15 @@ using mf_kernels::rcmul;
  * updating one triangle. The off-diagonal column run is a SIMD column-AXPY
  * (caxpy_add, bit-exact); the diagonal stays real. Columns disjoint -> OMP-over-j
  * race-free. Strided callers gather x to unit stride around this. */
-static void wher_contig(char UPLO, int N, R alpha, T *a, std::size_t lda, const T *x)
+static void wher_contig(char UPLO, std::ptrdiff_t N, R alpha, T *a, std::size_t lda, const T *x)
 {
 #ifdef _OPENMP
-    const int use_omp = (N >= WHER_OMP_MIN && blas_omp_available());
+    const std::ptrdiff_t use_omp = (N >= WHER_OMP_MIN && blas_omp_available());
     /* static,1: cyclic interleave balances the triangular column skew; mirrors
      * the yher twin. */
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         const T xj = x[j];
         if (!ceq0(xj)) {
             const T t = rcmul(alpha, cconj(xj));
@@ -71,8 +71,8 @@ extern "C" void wher_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, lda = *lda_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_, lda = *lda_;
     const R alpha = *alpha_;
     const char UPLO = up(uplo);
 
@@ -86,7 +86,7 @@ extern "C" void wher_(
      * column-major/lda regardless of x's stride). */
     const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(N - 1) * incx : x;
     std::vector<T> xs(static_cast<std::size_t>(N));
-    for (int i = 0; i < N; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
+    for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
     wher_contig(UPLO, N, alpha, a, lda, xs.data());
 }
 

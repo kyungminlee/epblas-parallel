@@ -53,8 +53,8 @@ extern "C" void wgemmtr_(
     }
 #endif
     (void)uplo_len; (void)ta_len; (void)tb_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
     const bool upper = (up(uplo) == 'U');
     const char ta = up(transa);
@@ -69,18 +69,18 @@ extern "C" void wgemmtr_(
         const bool use_omp0 = (N >= WGEMMTR_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp0) schedule(static)
 #endif
-        for (int j = 0; j < N; ++j)
+        for (std::ptrdiff_t j = 0; j < N; ++j)
             wgemmtr_beta_core(j, j + 1, N, upper, beta, c, ldc);
         return;
     }
 
-    const int nb = wgemmtr_block_nb();
+    const std::ptrdiff_t nb = wgemmtr_block_nb();
 #ifdef _OPENMP
     const bool use_omp = (N >= WGEMMTR_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
-    for (int jc = 0; jc < N; jc += nb) {
-        const int jb = (N - jc < nb) ? (N - jc) : nb;
+    for (std::ptrdiff_t jc = 0; jc < N; jc += nb) {
+        const std::ptrdiff_t jb = (N - jc < nb) ? (N - jc) : nb;
         wgemmtr_block_core(jc, jb, N, K, alpha, beta,
                            a, lda, b, ldb, c, ldc, upper, ta, tb);
     }

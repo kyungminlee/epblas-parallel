@@ -130,11 +130,11 @@ void rotm_contig(bool neg, bool zero, std::ptrdiff_t n, T *x, T *y,
                  T h11, T h12, T h21, T h22) {
 #ifdef _OPENMP
     if (n > MROTM_OMP_MIN && blas_omp_available() && !omp_in_parallel()) {
-        int nthreads = blas_omp_max_threads();
+        std::ptrdiff_t nthreads = blas_omp_max_threads();
         #pragma omp parallel num_threads(nthreads)
         {
-            int tid = omp_get_thread_num();
-            int nth = omp_get_num_threads();
+            std::ptrdiff_t tid = omp_get_thread_num();
+            std::ptrdiff_t nth = omp_get_num_threads();
             std::ptrdiff_t chunk = (n + nth - 1) / nth;
             std::ptrdiff_t s = (std::ptrdiff_t)tid * chunk;
             std::ptrdiff_t e = s + chunk;

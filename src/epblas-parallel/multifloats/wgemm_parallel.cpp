@@ -56,27 +56,27 @@ extern "C" void wgemm_(
     }
 #endif
 
-    const int M = *m_, N = *n_, K = *k_;
-    const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
+    const std::ptrdiff_t M = *m_, N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = wgemm_trans_code(transa, transa_len);
-    const int tb = wgemm_trans_code(transb, transb_len);
+    const std::ptrdiff_t ta = wgemm_trans_code(transa, transa_len);
+    const std::ptrdiff_t tb = wgemm_trans_code(transb, transb_len);
 
     if (M <= 0 || N <= 0) return;
 
     /* beta pre-pass runs serially in the calling thread (matches the
      * pre-split wgemm_). */
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         T *cj = &c[static_cast<std::size_t>(j) * ldc];
         if (ceq0(beta)) {
-            for (int i = 0; i < M; ++i) cj[i] = zero_cdd;
+            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = zero_cdd;
         } else if (!ceq1(beta)) {
-            for (int i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
+            for (std::ptrdiff_t i = 0; i < M; ++i) cj[i] = cmul(cj[i], beta);
         }
     }
     if (ceq0(alpha) || K == 0) return;
 
-    int MC, KC, NC;
+    std::ptrdiff_t MC, KC, NC;
     wgemm_choose_blocks(&MC, &KC, &NC);
 
 #ifdef _OPENMP
@@ -86,8 +86,8 @@ extern "C" void wgemm_(
         T *Ap = static_cast<T *>(std::aligned_alloc(
             64, static_cast<std::size_t>(MC) * KC * sizeof(T)));
 #ifdef WBLAS_SIMD_DD
-        const int W_simd = wgemm_simd_pack_W();
-        const int NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
+        const std::ptrdiff_t W_simd = wgemm_simd_pack_W();
+        const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
         double *Bp_rh = static_cast<double *>(std::aligned_alloc(
             64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
         double *Bp_rl = static_cast<double *>(std::aligned_alloc(
@@ -100,14 +100,14 @@ extern "C" void wgemm_(
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
+            for (std::ptrdiff_t jc = 0; jc < N; jc += NC) {
+                const std::ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+                for (std::ptrdiff_t pc = 0; pc < K; pc += KC) {
+                    const std::ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
                     wgemm_pack_B_soa_complex(b, ldb, pc, jc, pb, jb, tb,
                                              Bp_rh, Bp_rl, Bp_ih, Bp_il);
-                    for (int ic = 0; ic < M; ic += MC) {
-                        const int ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (std::ptrdiff_t ic = 0; ic < M; ic += MC) {
+                        const std::ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
                         wgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         wgemm_inner_kernel_simd_complex(ib, jb, pb, alpha, Ap,
                                                         Bp_rh, Bp_rl, Bp_ih, Bp_il,
@@ -129,13 +129,13 @@ extern "C" void wgemm_(
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
-            for (int jc = 0; jc < N; jc += NC) {
-                const int jb = (N - jc < NC) ? (N - jc) : NC;
-                for (int pc = 0; pc < K; pc += KC) {
-                    const int pb = (K - pc < KC) ? (K - pc) : KC;
+            for (std::ptrdiff_t jc = 0; jc < N; jc += NC) {
+                const std::ptrdiff_t jb = (N - jc < NC) ? (N - jc) : NC;
+                for (std::ptrdiff_t pc = 0; pc < K; pc += KC) {
+                    const std::ptrdiff_t pb = (K - pc < KC) ? (K - pc) : KC;
                     wgemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                    for (int ic = 0; ic < M; ic += MC) {
-                        const int ib = (M - ic < MC) ? (M - ic) : MC;
+                    for (std::ptrdiff_t ic = 0; ic < M; ic += MC) {
+                        const std::ptrdiff_t ib = (M - ic < MC) ? (M - ic) : MC;
                         wgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
                         wgemm_inner_kernel(ib, jb, pb, alpha, Ap, Bp,
                                            &c[static_cast<std::size_t>(jc) * ldc + ic],

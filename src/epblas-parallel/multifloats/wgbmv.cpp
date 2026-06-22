@@ -36,7 +36,7 @@ using mf_kernels::cadd;
 /* A band column stores its in-band rows [i_lo,i_hi) contiguously at &A_(KU-j+i_lo,j),
  * so per column NoTrans is a SIMD AXPY into y and Trans is a SIMD (conj-)dot of the
  * band run against x — the same stride-1 kernels used by the triangular twins. */
-static inline void wgbmv_band(int j, int M, int KL, int KU, int &i_lo, int &i_hi) {
+static inline void wgbmv_band(std::ptrdiff_t j, std::ptrdiff_t M, std::ptrdiff_t KL, std::ptrdiff_t KU, std::ptrdiff_t &i_lo, std::ptrdiff_t &i_hi) {
     i_lo = (j - KU > 0) ? (j - KU) : 0;
     i_hi = (j + KL + 1 < M) ? (j + KL + 1) : M;
 }
@@ -46,24 +46,24 @@ static inline void wgbmv_band(int j, int M, int KL, int KU, int &i_lo, int &i_hi
  * disjoint output-row range [r0,r1) and folds only the columns whose band touches
  * it, clipping each contiguous band run to [r0,r1). Disjoint y rows -> no race,
  * no reduction; each row still accumulates ascending-j -> BIT-EXACT vs serial. */
-static bool wgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
+static bool wgbmv_n_omp(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                         const T *a, std::size_t lda, const T *x, T *y)
 {
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads <= 1 || omp_in_parallel()) return false;
     if (nthreads > WGBMV_MAX_CPUS) nthreads = WGBMV_MAX_CPUS;
 
     #pragma omp parallel num_threads(nthreads)
     {
-        const int tid = omp_get_thread_num();
-        const int r0 = (int)((std::ptrdiff_t)M * tid / nthreads);
-        const int r1 = (int)((std::ptrdiff_t)M * (tid + 1) / nthreads);
-        const int j0 = (r0 - KL > 0) ? (r0 - KL) : 0;
-        const int j1 = (r1 + KU < N) ? (r1 + KU) : N;
-        for (int j = j0; j < j1; ++j) {
+        const std::ptrdiff_t tid = omp_get_thread_num();
+        const std::ptrdiff_t r0 = (std::ptrdiff_t)((std::ptrdiff_t)M * tid / nthreads);
+        const std::ptrdiff_t r1 = (std::ptrdiff_t)((std::ptrdiff_t)M * (tid + 1) / nthreads);
+        const std::ptrdiff_t j0 = (r0 - KL > 0) ? (r0 - KL) : 0;
+        const std::ptrdiff_t j1 = (r1 + KU < N) ? (r1 + KU) : N;
+        for (std::ptrdiff_t j = j0; j < j1; ++j) {
             const T tmp = cmul(alpha, x[j]);
             if (ceq0(tmp)) continue;
-            int i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
+            std::ptrdiff_t i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
             if (i_lo < r0) i_lo = r0;
             if (i_hi > r1) i_hi = r1;
             if (i_lo < i_hi)
@@ -76,7 +76,7 @@ static bool wgbmv_n_omp(int M, int N, int KL, int KU, T alpha,
 
 /* Contiguous NoTrans core (x len N, y len M, y pre-beta'd). Threaded row-disjoint
  * sweep when enabled, else a serial column AXPY (ascending-j -> bit-exact). */
-static void wgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
+static void wgbmv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                            const T *a, std::size_t lda, const T *x, T *y)
 {
 #ifdef _OPENMP
@@ -84,10 +84,10 @@ static void wgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
         && wgbmv_n_omp(M, N, KL, KU, alpha, a, lda, x, y))
         return;
 #endif
-    for (int j = 0; j < N; ++j) {
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
         const T tmp = cmul(alpha, x[j]);
         if (ceq0(tmp)) continue;
-        int i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
+        std::ptrdiff_t i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
         mf_kernels::caxpy_add(i_hi - i_lo, &y[i_lo], &A_(KU - j + i_lo, j), tmp);
     }
 }
@@ -95,16 +95,16 @@ static void wgbmv_n_contig(int M, int N, int KL, int KU, T alpha,
 /* Contiguous Trans/ConjTrans core (x len M, y len N, y pre-beta'd). Each y[j] is
  * an independent band conj-dot (disjoint writes -> simple parallel for, the cdot
  * reduction reorders -> within DD fuzz tol). conj selects ConjTrans. */
-static void wgbmv_t_contig(int M, int N, int KL, int KU, T alpha,
+static void wgbmv_t_contig(std::ptrdiff_t M, std::ptrdiff_t N, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
                            const T *a, std::size_t lda, const T *x, T *y, bool conj)
 {
 #ifdef _OPENMP
-    const int use_omp = (N >= WGBMV_OMP_MIN && blas_omp_available()
+    const std::ptrdiff_t use_omp = (N >= WGBMV_OMP_MIN && blas_omp_available()
                          && !omp_in_parallel());
     #pragma omp parallel for if(use_omp) schedule(static) num_threads(blas_omp_max_threads())
 #endif
-    for (int j = 0; j < N; ++j) {
-        int i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
+    for (std::ptrdiff_t j = 0; j < N; ++j) {
+        std::ptrdiff_t i_lo, i_hi; wgbmv_band(j, M, KL, KU, i_lo, i_hi);
         const T s = mf_kernels::cdot(i_hi - i_lo, &A_(KU - j + i_lo, j), &x[i_lo], conj);
         y[j] = cadd(y[j], cmul(alpha, s));
     }
@@ -122,10 +122,10 @@ extern "C" void wgbmv_(
     std::size_t trans_len)
 {
     (void)trans_len;
-    const int M = *m_, N = *n_;
-    const int KL = *kl_, KU = *ku_;
+    const std::ptrdiff_t M = *m_, N = *n_;
+    const std::ptrdiff_t KL = *kl_, KU = *ku_;
     const std::size_t lda = static_cast<std::size_t>(*lda_);
-    const int incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char TR = up(trans);
     const bool notrans = (TR == 'N');
@@ -133,8 +133,8 @@ extern "C" void wgbmv_(
 
     if (M == 0 || N == 0 || (ceq0(alpha) && ceq1(beta))) return;
 
-    const int leny = notrans ? M : N;
-    const int lenx = notrans ? N : M;
+    const std::ptrdiff_t leny = notrans ? M : N;
+    const std::ptrdiff_t lenx = notrans ? N : M;
 
     mf_kernels::cscale_y(leny, beta, y, incy);
     if (ceq0(alpha)) return;
@@ -150,11 +150,11 @@ extern "C" void wgbmv_(
     const T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(lenx - 1) * incx : x;
     T *ybase = (incy < 0) ? y - (std::ptrdiff_t)(leny - 1) * incy : y;
     std::vector<T> xs(static_cast<std::size_t>(lenx)), ys(static_cast<std::size_t>(leny));
-    for (int i = 0; i < lenx; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
-    for (int i = 0; i < leny; ++i) ys[i] = ybase[(std::ptrdiff_t)i * incy];
+    for (std::ptrdiff_t i = 0; i < lenx; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
+    for (std::ptrdiff_t i = 0; i < leny; ++i) ys[i] = ybase[(std::ptrdiff_t)i * incy];
     if (notrans) wgbmv_n_contig(M, N, KL, KU, alpha, a, lda, xs.data(), ys.data());
     else         wgbmv_t_contig(M, N, KL, KU, alpha, a, lda, xs.data(), ys.data(), conj);
-    for (int i = 0; i < leny; ++i) ybase[(std::ptrdiff_t)i * incy] = ys[i];
+    for (std::ptrdiff_t i = 0; i < leny; ++i) ybase[(std::ptrdiff_t)i * incy] = ys[i];
 }
 
 #undef A_

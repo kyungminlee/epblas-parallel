@@ -43,8 +43,8 @@ extern "C" void msyr_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, lda = *lda_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_, lda = *lda_;
     const T alpha = *alpha_;
     const char UPLO = up(uplo);
 
@@ -55,7 +55,7 @@ extern "C" void msyr_(
     std::vector<double> xh(N), xl(N);
     {
         std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             xh[j] = x[ix].limbs[0];
             xl[j] = x[ix].limbs[1];
             ix += incx;
@@ -65,7 +65,7 @@ extern "C" void msyr_(
     const double *xlp = xl.data();
 
 #ifdef _OPENMP
-    const int use_omp = (N >= MSYR_OMP_MIN && blas_omp_available());
+    const std::ptrdiff_t use_omp = (N >= MSYR_OMP_MIN && blas_omp_available());
     /* static,1 cyclic interleave balances the triangular column skew (column
      * j writes j+1 (U) / N-j (L) elems); full storage → columns lda apart, no
      * false sharing. The hot inner loop is mf_kernels::dd_axpy, so the per-
@@ -76,7 +76,7 @@ extern "C" void msyr_(
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
             const T t = alpha * T{xhp[j], xlp[j]};
             mf_kernels::dd_axpy(N - j, xhp + j, xlp + j, t.limbs[0], t.limbs[1], &A_(j, j));
@@ -85,7 +85,7 @@ extern "C" void msyr_(
 #ifdef _OPENMP
         #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
-        for (int j = 0; j < N; ++j) {
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
             const T t = alpha * T{xhp[j], xlp[j]};
             mf_kernels::dd_axpy(j + 1, xhp, xlp, t.limbs[0], t.limbs[1], &A_(0, j));

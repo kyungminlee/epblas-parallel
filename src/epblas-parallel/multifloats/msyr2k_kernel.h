@@ -42,21 +42,21 @@ using msyr2k_T = multifloats::float64x2;
 #define MSYR2K_OMP_MIN 32
 
 /* Block size over the diagonal axis (env MSYR2K_NB). */
-int msyr2k_block_nb(void);
+std::ptrdiff_t msyr2k_block_nb(void);
 
 /* Scale column j's UPLO triangle of C by beta (the alpha==0 / K==0 early
  * exit). Handles beta==0 (zero-fill) and beta!=1; the caller skips beta==1. */
-void msyr2k_scale_col(int j, int N, char UPLO, msyr2k_T beta,
-                      msyr2k_T *c, int ldc);
+void msyr2k_scale_col(std::ptrdiff_t j, std::ptrdiff_t N, char UPLO, msyr2k_T beta,
+                      msyr2k_T *c, std::ptrdiff_t ldc);
 
 /* One diagonal block [jc, jc+jb) of the rank-2k update: beta-scale the block's
  * own triangle columns, accumulate the diagonal block (SIMD or scalar), then
  * the two trailing gemm calls (routed through mgemm_serial — no nested
  * OpenMP). Each block writes a disjoint column range of C → race-free. */
-void msyr2k_block(int jc, int jb, int N, int K, char UPLO, char TR,
+void msyr2k_block(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K, char UPLO, char TR,
                   msyr2k_T alpha, msyr2k_T beta,
-                  const msyr2k_T *a, int lda, const msyr2k_T *b, int ldb,
-                  msyr2k_T *c, int ldc);
+                  const msyr2k_T *a, std::ptrdiff_t lda, const msyr2k_T *b, std::ptrdiff_t ldb,
+                  msyr2k_T *c, std::ptrdiff_t ldc);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as msyr2k_. */
 extern "C" void msyr2k_serial(

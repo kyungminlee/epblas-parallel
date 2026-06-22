@@ -46,23 +46,23 @@ using mf_kernels::rcmul;
  * bit-exact) and the threaded path (yacc = a private zero buffer, disjoint
  * cyclic columns -> within DD fuzz tol). The conj-dot reorders its reduction
  * either way. */
-static inline void whbmv_col_upper(int j, int K, const T *a, std::size_t lda,
+static inline void whbmv_col_upper(std::ptrdiff_t j, std::ptrdiff_t K, const T *a, std::size_t lda,
                                    const T *x, T alpha, T *yacc) {
     const T t1 = cmul(alpha, x[j]);
-    const int L = K - j;
-    const int i_lo = (j - K > 0) ? (j - K) : 0;
-    const int len = j - i_lo;
+    const std::ptrdiff_t L = K - j;
+    const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+    const std::ptrdiff_t len = j - i_lo;
     mf_kernels::caxpy_add(len, &yacc[i_lo], &A_(L + i_lo, j), t1);
     const T t2 = mf_kernels::cdot(len, &A_(L + i_lo, j), &x[i_lo], true);
     yacc[j] = cadd(yacc[j], cadd(rcmul(A_(K, j).re, t1), cmul(alpha, t2)));
 }
 
-static inline void whbmv_col_lower(int j, int N, int K, const T *a, std::size_t lda,
+static inline void whbmv_col_lower(std::ptrdiff_t j, std::ptrdiff_t N, std::ptrdiff_t K, const T *a, std::size_t lda,
                                    const T *x, T alpha, T *yacc) {
     const T t1 = cmul(alpha, x[j]);
     yacc[j] = cadd(yacc[j], rcmul(A_(0, j).re, t1));
-    const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-    const int len = i_hi - (j + 1);
+    const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+    const std::ptrdiff_t len = i_hi - (j + 1);
     mf_kernels::caxpy_add(len, &yacc[j + 1], &A_(1, j), t1);
     const T t2 = mf_kernels::cdot(len, &A_(1, j), &x[j + 1], true);
     yacc[j] = cadd(yacc[j], cmul(alpha, t2));
@@ -83,14 +83,14 @@ static inline void whbmv_col_lower(int j, int N, int K, const T *a, std::size_t 
  * O(nthreads*N) full fold. Reorders the per-row sum vs serial -> within DD fuzz
  * tol. Returns true if handled. */
 __attribute__((noinline)) static bool whbmv_omp(
-    bool upper, int N, int K, const T *a, std::size_t lda, const T *x, T alpha, T *y)
+    bool upper, std::ptrdiff_t N, std::ptrdiff_t K, const T *a, std::size_t lda, const T *x, T alpha, T *y)
 {
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads <= 1 || omp_in_parallel()) return false;
     if (nthreads > WHBMV_MAX_CPUS) nthreads = WHBMV_MAX_CPUS;
 
     std::ptrdiff_t range[WHBMV_MAX_CPUS + 1];
-    int num_cpu = mf_omp::band_bounds(N, nthreads, 3, 4, WHBMV_MAX_CPUS, range);
+    std::ptrdiff_t num_cpu = mf_omp::band_bounds(N, nthreads, 3, 4, WHBMV_MAX_CPUS, range);
     if (num_cpu <= 1) return false;
 
     T *buf = static_cast<T *>(std::calloc((std::size_t)num_cpu * N, sizeof(T)));
@@ -98,16 +98,16 @@ __attribute__((noinline)) static bool whbmv_omp(
 
     #pragma omp parallel num_threads(num_cpu)
     {
-        int t = omp_get_thread_num();
+        std::ptrdiff_t t = omp_get_thread_num();
         std::ptrdiff_t m_from = range[t];
         std::ptrdiff_t m_to   = range[t + 1];
         T *slot = buf + (std::size_t)t * N;
         if (upper) {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
                 const T temp1 = x[j];                          /* alpha deferred */
-                const int L = K - (int)j;
+                const std::ptrdiff_t L = K - (std::ptrdiff_t)j;
                 const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
-                const int len = (int)(j - i_lo);
+                const std::ptrdiff_t len = (std::ptrdiff_t)(j - i_lo);
                 const T *col = &A_(L + i_lo, j);               /* contiguous band run */
                 T temp2 = czero;
                 if (len > 0) {
@@ -121,7 +121,7 @@ __attribute__((noinline)) static bool whbmv_omp(
                 const T temp1 = x[j];
                 slot[j] = cadd(slot[j], rcmul(A_(0, j).re, temp1));
                 const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-                const int len = (int)(i_hi - (j + 1));
+                const std::ptrdiff_t len = (std::ptrdiff_t)(i_hi - (j + 1));
                 if (len > 0) {
                     mf_kernels::caxpy_add(len, &slot[j + 1], &A_(1, j), temp1);
                     slot[j] = cadd(slot[j],
@@ -133,7 +133,7 @@ __attribute__((noinline)) static bool whbmv_omp(
 
     /* Windowed bounded reduction: each slot is touched only over a band window
      * around its column range; sum just those windows, alpha-scaled, into y. */
-    for (int t = 0; t < num_cpu; ++t) {
+    for (std::ptrdiff_t t = 0; t < num_cpu; ++t) {
         const T *slot = buf + (std::size_t)t * N;
         std::ptrdiff_t lo, hi;
         mf_omp::band_row_window(t, upper, range, N, K, lo, hi);
@@ -147,7 +147,7 @@ __attribute__((noinline)) static bool whbmv_omp(
 /* Contiguous (unit-stride x,y) core: Hermitian band matvec y += alpha*A*x, with
  * y already beta-applied. Threaded private-accumulator sweep when enabled, else
  * a serial SIMD column sweep. Strided callers gather x,y around this. */
-static void whbmv_contig(bool upper, int N, int K, const T *a, std::size_t lda,
+static void whbmv_contig(bool upper, std::ptrdiff_t N, std::ptrdiff_t K, const T *a, std::size_t lda,
                          const T *x, T alpha, T *y)
 {
 #ifdef _OPENMP
@@ -155,8 +155,8 @@ static void whbmv_contig(bool upper, int N, int K, const T *a, std::size_t lda,
         && whbmv_omp(upper, N, K, a, lda, x, alpha, y))
         return;
 #endif
-    if (upper) for (int j = 0; j < N; ++j) whbmv_col_upper(j, K, a, lda, x, alpha, y);
-    else       for (int j = 0; j < N; ++j) whbmv_col_lower(j, N, K, a, lda, x, alpha, y);
+    if (upper) for (std::ptrdiff_t j = 0; j < N; ++j) whbmv_col_upper(j, K, a, lda, x, alpha, y);
+    else       for (std::ptrdiff_t j = 0; j < N; ++j) whbmv_col_lower(j, N, K, a, lda, x, alpha, y);
 }
 
 extern "C" void whbmv_(
@@ -170,8 +170,8 @@ extern "C" void whbmv_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 

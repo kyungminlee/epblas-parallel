@@ -60,7 +60,7 @@ namespace {
  * instructions serve the serial path (yacc = shared y, in column order) and the
  * threaded path (yacc = private zero buffer, disjoint columns). */
 static inline __attribute__((always_inline)) T
-whemv_inner(int i, int k_lo, int k_hi, const T *a, std::size_t lda, T alpha,
+whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const T *a, std::size_t lda, T alpha,
             const double *x_rh, const double *x_rl,
             const double *x_ih, const double *x_il,
             double *yacc_rh, double *yacc_rl,
@@ -74,7 +74,7 @@ whemv_inner(int i, int k_lo, int k_hi, const T *a, std::size_t lda, T alpha,
     const double *aip = reinterpret_cast<const double *>(&A_(0, i));
     const __m256d zerov = _mm256_setzero_pd();
     __m256d s_rh = zerov, s_rl = zerov, s_ih = zerov, s_il = zerov;
-    int k = k_lo;
+    std::ptrdiff_t k = k_lo;
     T temp2_sc = zero_cdd;
     /* Align to 4-boundary for unit-aligned SIMD. */
     for (; k < k_hi && (k & 3) != 0; ++k) {
@@ -138,7 +138,7 @@ whemv_inner(int i, int k_lo, int k_hi, const T *a, std::size_t lda, T alpha,
  * (column order, bit-identical to the prior inline body) and threaded
  * (private zero buffer, disjoint columns → within DD fuzz tol). */
 static inline __attribute__((always_inline)) void
-whemv_col(bool lower, int i, int N, const T *a, std::size_t lda, T alpha,
+whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t N, const T *a, std::size_t lda, T alpha,
           const double *x_rh, const double *x_rl,
           const double *x_ih, const double *x_il,
           double *y_rh, double *y_rl, double *y_ih, double *y_il)
@@ -181,16 +181,16 @@ whemv_col(bool lower, int i, int N, const T *a, std::size_t lda, T alpha,
  * fold. Reorders the per-row sum vs serial -> within DD fuzz tol. Returns true
  * if handled. */
 __attribute__((noinline)) static bool whemv_omp(
-    bool lower, int N, const T *a, std::size_t lda, T alpha,
+    bool lower, std::ptrdiff_t N, const T *a, std::size_t lda, T alpha,
     const double *x_rh, const double *x_rl, const double *x_ih, const double *x_il,
     double *y_rh, double *y_rl, double *y_ih, double *y_il)
 {
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads <= 1 || omp_in_parallel()) return false;
     if (nthreads > WHEMV_MAX_CPUS) nthreads = WHEMV_MAX_CPUS;
 
     std::ptrdiff_t range[WHEMV_MAX_CPUS + 1];
-    int ncpu = mf_omp::tri_area_bounds(N, nthreads, 3, 4, !lower,
+    std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(N, nthreads, 3, 4, !lower,
                                        WHEMV_MAX_CPUS, range);
     if (ncpu <= 1) return false;
 
@@ -203,16 +203,16 @@ __attribute__((noinline)) static bool whemv_omp(
 
     #pragma omp parallel num_threads(ncpu)
     {
-        int tid = omp_get_thread_num();
+        std::ptrdiff_t tid = omp_get_thread_num();
         double *p = pool + static_cast<std::size_t>(tid) * per;
         double *yp_rh = p, *yp_rl = p + N_pad, *yp_ih = p + 2 * N_pad, *yp_il = p + 3 * N_pad;
-        for (int i = (int)range[tid]; i < (int)range[tid + 1]; ++i)
+        for (std::ptrdiff_t i = (std::ptrdiff_t)range[tid]; i < (std::ptrdiff_t)range[tid + 1]; ++i)
             whemv_col(lower, i, N, a, lda, alpha,
                       x_rh, x_rl, x_ih, x_il, yp_rh, yp_rl, yp_ih, yp_il);
     }
 
     /* Bounded reduction: fold each thread's populated row window onto y. */
-    for (int t = 0; t < ncpu; ++t) {
+    for (std::ptrdiff_t t = 0; t < ncpu; ++t) {
         const double *p = pool + static_cast<std::size_t>(t) * per;
         const double *yp_rh = p, *yp_rl = p + N_pad, *yp_ih = p + 2 * N_pad, *yp_il = p + 3 * N_pad;
         std::ptrdiff_t k_from, k_to;
@@ -233,7 +233,7 @@ __attribute__((noinline)) static bool whemv_omp(
  * already beta-applied. SIMD SoA path (+ threaded private-accumulator) when
  * built with MBLAS_SIMD_DD; faithful scalar column sweep otherwise. Strided
  * callers gather x,y to unit stride around this. */
-static void whemv_contig(bool lower, int N, const T *a, std::size_t lda, T alpha,
+static void whemv_contig(bool lower, std::ptrdiff_t N, const T *a, std::size_t lda, T alpha,
                          const T *x, T *y)
 {
 #ifdef MBLAS_SIMD_DD
@@ -246,7 +246,7 @@ static void whemv_contig(bool lower, int N, const T *a, std::size_t lda, T alpha
     double *y_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *y_ih = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *y_il = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
-    for (int i = 0; i < N; ++i) {
+    for (std::ptrdiff_t i = 0; i < N; ++i) {
         x_rh[i] = x[i].re.limbs[0]; x_rl[i] = x[i].re.limbs[1];
         x_ih[i] = x[i].im.limbs[0]; x_il[i] = x[i].im.limbs[1];
         y_rh[i] = y[i].re.limbs[0]; y_rl[i] = y[i].re.limbs[1];
@@ -264,11 +264,11 @@ static void whemv_contig(bool lower, int N, const T *a, std::size_t lda, T alpha
                              x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
 #endif
     if (!done_omp)
-        for (int i = 0; i < N; ++i)
+        for (std::ptrdiff_t i = 0; i < N; ++i)
             whemv_col(lower, i, N, a, lda, alpha,
                       x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
 
-    for (int i = 0; i < N; ++i) {
+    for (std::ptrdiff_t i = 0; i < N; ++i) {
         y[i].re.limbs[0] = y_rh[i]; y[i].re.limbs[1] = y_rl[i];
         y[i].im.limbs[0] = y_ih[i]; y[i].im.limbs[1] = y_il[i];
     }
@@ -276,24 +276,24 @@ static void whemv_contig(bool lower, int N, const T *a, std::size_t lda, T alpha
     std::free(y_rh); std::free(y_rl); std::free(y_ih); std::free(y_il);
 #else
     if (lower) {
-        for (int i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < N; ++i) {
             const T temp1 = cmul(alpha, x[i]);
             T temp2 = zero_cdd;
             const T *ai = &A_(0, i);
             const T aii_re{ ai[i].re, rzero };
             y[i] = cadd(y[i], cmul(temp1, aii_re));
-            for (int k = i + 1; k < N; ++k) {
+            for (std::ptrdiff_t k = i + 1; k < N; ++k) {
                 y[k]  = cadd(y[k], cmul(temp1, ai[k]));
                 temp2 = cadd(temp2, cmul(cconj(ai[k]), x[k]));
             }
             y[i] = cadd(y[i], cmul(alpha, temp2));
         }
     } else {
-        for (int i = 0; i < N; ++i) {
+        for (std::ptrdiff_t i = 0; i < N; ++i) {
             const T temp1 = cmul(alpha, x[i]);
             T temp2 = zero_cdd;
             const T *ai = &A_(0, i);
-            for (int k = 0; k < i; ++k) {
+            for (std::ptrdiff_t k = 0; k < i; ++k) {
                 y[k]  = cadd(y[k], cmul(temp1, ai[k]));
                 temp2 = cadd(temp2, cmul(cconj(ai[k]), x[k]));
             }
@@ -315,8 +315,8 @@ extern "C" void whemv_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 

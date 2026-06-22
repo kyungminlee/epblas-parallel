@@ -33,13 +33,13 @@ using simd_exact::store_dd4;
 
 /* Y := α·X + Y over a contiguous unit-stride range — serial kernel, unchanged.
  * Carved out so the OpenMP path can run it per disjoint sub-range. */
-static void maxpy_unit(int n, T alpha, const T *x, T *y)
+static void maxpy_unit(std::ptrdiff_t n, T alpha, const T *x, T *y)
 {
 #ifdef MBLAS_SIMD_DD
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
     const __m256d al = _mm256_set1_pd(alpha.limbs[1]);
-    const int n4 = n & ~3;
-    for (int i = 0; i < n4; i += 4) {
+    const std::ptrdiff_t n4 = n & ~3;
+    for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xh, xl, yh, yl;
         load_dd4(&x[i], xh, xl);
         load_dd4(&y[i], yh, yl);
@@ -49,9 +49,9 @@ static void maxpy_unit(int n, T alpha, const T *x, T *y)
         simd_fast::add(yh, yl, ph, pl, nh, nl);
         store_dd4(&y[i], nh, nl);
     }
-    for (int i = n4; i < n; ++i) y[i] = y[i] + alpha * x[i];
+    for (std::ptrdiff_t i = n4; i < n; ++i) y[i] = y[i] + alpha * x[i];
 #else
-    for (int i = 0; i < n; ++i) y[i] = y[i] + alpha * x[i];
+    for (std::ptrdiff_t i = 0; i < n; ++i) y[i] = y[i] + alpha * x[i];
 #endif
 }
 
@@ -60,16 +60,16 @@ static void maxpy_unit(int n, T alpha, const T *x, T *y)
  * runs the SIMD kernel over its own [lo,hi) range — no reduction. DD math is
  * compute-bound, so this threads profitably above the crossover. */
 #define MAXPY_OMP_MIN 2048
-__attribute__((noinline)) static int maxpy_omp(int n, T alpha, const T *x, T *y)
+__attribute__((noinline)) static std::ptrdiff_t maxpy_omp(std::ptrdiff_t n, T alpha, const T *x, T *y)
 {
     if (n <= MAXPY_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) maxpy_unit(hi - lo, alpha, x + lo, y + lo);
     }
     return 1;
@@ -80,7 +80,7 @@ extern "C" void maxpy_(const int *n_, const T *alpha_,
                        const T *x, const int *incx_,
                        T *y, const int *incy_)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_;
     if (n <= 0 || eq0(alpha)) return;
 
@@ -90,8 +90,8 @@ extern "C" void maxpy_(const int *n_, const T *alpha_,
 #endif
         maxpy_unit(n, alpha, x, y);
     } else {
-        int ix = (incx < 0) ? (-n + 1) * incx : 0;
-        int iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (int i = 0; i < n; ++i) { y[iy] = y[iy] + alpha * x[ix]; ix += incx; iy += incy; }
+        std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+        std::ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
+        for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = y[iy] + alpha * x[ix]; ix += incx; iy += incy; }
     }
 }

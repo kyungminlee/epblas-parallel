@@ -219,17 +219,17 @@ static inline cx4 csub_soa(const cx4 &a, const cx4 &b)
 /* A complex vector held as four parallel SoA limb arrays. */
 struct cvec { double *reh, *rel, *imh, *iml; };
 
-static inline cx4 vload(const cvec &v, int i)
+static inline cx4 vload(const cvec &v, std::ptrdiff_t i)
 {
     return cx4{ _mm256_loadu_pd(v.reh + i), _mm256_loadu_pd(v.rel + i),
                 _mm256_loadu_pd(v.imh + i), _mm256_loadu_pd(v.iml + i) };
 }
-static inline void vstore(const cvec &v, int i, const cx4 &c)
+static inline void vstore(const cvec &v, std::ptrdiff_t i, const cx4 &c)
 {
     _mm256_storeu_pd(v.reh + i, c.reh); _mm256_storeu_pd(v.rel + i, c.rel);
     _mm256_storeu_pd(v.imh + i, c.imh); _mm256_storeu_pd(v.iml + i, c.iml);
 }
-static inline cx4 vbcast(const cvec &v, int j)
+static inline cx4 vbcast(const cvec &v, std::ptrdiff_t j)
 {
     return cx4{ _mm256_set1_pd(v.reh[j]), _mm256_set1_pd(v.rel[j]),
                 _mm256_set1_pd(v.imh[j]), _mm256_set1_pd(v.iml[j]) };
@@ -250,12 +250,12 @@ vbcast(const multifloats::complex64x2 &t,
     rh = _mm256_set1_pd(t.re.limbs[0]); rl = _mm256_set1_pd(t.re.limbs[1]);
     ih = _mm256_set1_pd(t.im.limbs[0]); il = _mm256_set1_pd(t.im.limbs[1]);
 }
-static inline multifloats::complex64x2 vload1(const cvec &v, int i)
+static inline multifloats::complex64x2 vload1(const cvec &v, std::ptrdiff_t i)
 {
     return multifloats::complex64x2{ multifloats::float64x2{v.reh[i], v.rel[i]},
                                      multifloats::float64x2{v.imh[i], v.iml[i]} };
 }
-static inline void vstore1(const cvec &v, int i, const multifloats::complex64x2 &c)
+static inline void vstore1(const cvec &v, std::ptrdiff_t i, const multifloats::complex64x2 &c)
 {
     v.reh[i] = c.re.limbs[0]; v.rel[i] = c.re.limbs[1];
     v.imh[i] = c.im.limbs[0]; v.iml[i] = c.im.limbs[1];

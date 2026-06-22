@@ -130,7 +130,7 @@ static void mtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
  * (caller falls back to serial). */
 static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
                              std::ptrdiff_t n, const T *a, std::size_t lda,
-                             T *x, int nt)
+                             T *x, std::ptrdiff_t nt)
 {
     if (trans) {
         T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
@@ -167,14 +167,14 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
         std::ptrdiff_t *range = static_cast<std::ptrdiff_t *>(
             std::malloc((std::size_t)(nt + 1) * sizeof(std::ptrdiff_t)));
         if (!range) return false;
-        int ncpu = mf_omp::tri_area_bounds(n, nt, 7, 16, upper,
+        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nt, 7, 16, upper,
                                            MTRMV_MAX_CPUS, range);
         T *buf_all = static_cast<T *>(
             std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(T)));
         if (!buf_all) { std::free(range); return false; }
         #pragma omp parallel num_threads(ncpu)
         {
-            const int tid = omp_get_thread_num();
+            const std::ptrdiff_t tid = omp_get_thread_num();
             T *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
             std::ptrdiff_t m_from, m_to;
             if (upper) { m_from = range[ncpu - tid - 1]; m_to = range[ncpu - tid]; }
@@ -184,14 +184,14 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
         }
         /* Bounded reduction: merge each thread's spill rows into slot 0. */
         if (upper) {
-            for (int t = 1; t < ncpu; ++t) {
+            for (std::ptrdiff_t t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_to_t = range[ncpu - t];
                 const T *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = 0; i < m_to_t; ++i)
                     buf_all[i] = buf_all[i] + slot[i];
             }
         } else {
-            for (int t = 1; t < ncpu; ++t) {
+            for (std::ptrdiff_t t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_from_t = range[t];
                 const T *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = m_from_t; i < n; ++i)
@@ -208,12 +208,12 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
  * directly; strided gathers into a contiguous buffer, drives the core, scatters
  * back. Returns true if handled. */
 __attribute__((noinline)) static bool mtrmv_omp(
-    bool upper, bool trans, bool nounit, int n,
-    const T *a, std::size_t lda, T *x, int incx)
+    bool upper, bool trans, bool nounit, std::ptrdiff_t n,
+    const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
 {
     if (n < MTRMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MTRMV_MAX_CPUS) nthreads = MTRMV_MAX_CPUS;
 
     if (incx == 1)
@@ -222,10 +222,10 @@ __attribute__((noinline)) static bool mtrmv_omp(
     T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
     T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
     if (!xbuf) return false;
-    for (int i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
+    for (std::ptrdiff_t i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
     bool ok = mtrmv_omp_contig(upper, trans, nounit, n, a, lda, xbuf, nthreads);
     if (ok)
-        for (int i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xbuf[i];
+        for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xbuf[i];
     std::free(xbuf);
     return ok;
 }
@@ -239,8 +239,8 @@ extern "C" void mtrmv_(
     std::size_t uplo_len, std::size_t trans_len, std::size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
-    const int N = *n_;
-    const int lda = *lda_, incx = *incx_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     char TR = up(trans);
     if (TR == 'C') TR = 'T';
@@ -266,43 +266,43 @@ extern "C" void mtrmv_(
     const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(N - 1) * incx : 0;
     T *xs = static_cast<T *>(std::malloc((std::size_t)N * sizeof(T)));
     if (xs) {
-        for (int i = 0; i < N; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
+        for (std::ptrdiff_t i = 0; i < N; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
         mtrmv_contig(UPLO == 'U', TR != 'N', nounit, N, a, (std::size_t)lda, xs);
-        for (int i = 0; i < N; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
+        for (std::ptrdiff_t i = 0; i < N; ++i) x[base + (std::ptrdiff_t)i * incx] = xs[i];
         std::free(xs);
         return;
     }
 
-    int kx = (incx < 0) ? -(N - 1) * incx : 0;
+    std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
     if (TR == 'N') {
         if (UPLO == 'L') {
-            for (int j = N - 1; j >= 0; --j) {
+            for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                 const T temp = x[kx + j * incx];
                 if (!eq0(temp))
-                    for (int i = j + 1; i < N; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
+                    for (std::ptrdiff_t i = j + 1; i < N; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
                 if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
             }
         } else {
-            for (int j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < N; ++j) {
                 const T temp = x[kx + j * incx];
                 if (!eq0(temp))
-                    for (int i = 0; i < j; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
+                    for (std::ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
                 if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
             }
         }
     } else {
         if (UPLO == 'L') {
-            for (int j = 0; j < N; ++j) {
+            for (std::ptrdiff_t j = 0; j < N; ++j) {
                 T temp = x[kx + j * incx];
                 if (nounit) temp = temp * A_(j, j);
-                for (int i = j + 1; i < N; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
+                for (std::ptrdiff_t i = j + 1; i < N; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
                 x[kx + j * incx] = temp;
             }
         } else {
-            for (int j = N - 1; j >= 0; --j) {
+            for (std::ptrdiff_t j = N - 1; j >= 0; --j) {
                 T temp = x[kx + j * incx];
                 if (nounit) temp = temp * A_(j, j);
-                for (int i = 0; i < j; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
+                for (std::ptrdiff_t i = 0; i < j; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
                 x[kx + j * incx] = temp;
             }
         }

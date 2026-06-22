@@ -43,11 +43,11 @@ namespace {
  * bit-exact) and the symmetric dot (t2 += col[i]*x[i], vector accumulate +
  * hreduce -> within tolerance); y and x are distinct (spmv forbids aliasing).
  * The strided entry gathers x/y to scratch and reuses this. */
-void mspmv_contig(bool upper, int n, const T *ap, const T *x, T alpha, T *y)
+void mspmv_contig(bool upper, std::ptrdiff_t n, const T *ap, const T *x, T alpha, T *y)
 {
     std::size_t kk = 0;
     if (upper) {
-        for (int j = 0; j < n; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T *aj = &AP_(kk);            /* column j: rows 0..j-1, diag at aj[j] */
             const T t1 = alpha * x[j];
             T t2 = zero_dd;
@@ -59,11 +59,11 @@ void mspmv_contig(bool upper, int n, const T *ap, const T *x, T alpha, T *y)
             kk += static_cast<std::size_t>(j) + 1;
         }
     } else {
-        for (int j = 0; j < n; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T *aj = &AP_(kk);            /* column j: diag at aj[0], rows j+1.. at aj[1.. ] */
             const T t1 = alpha * x[j];
             y[j] = y[j] + t1 * aj[0];
-            const int len = n - 1 - j;
+            const std::ptrdiff_t len = n - 1 - j;
             if (len > 0) {
                 mf_kernels::axpy_add(len, &y[j + 1], &aj[1], t1);
                 y[j] = y[j] + alpha * mf_kernels::dot(len, &aj[1], &x[j + 1]);
@@ -83,14 +83,14 @@ void mspmv_contig(bool upper, int n, const T *ap, const T *x, T alpha, T *y)
  * Contiguous column read (vs the row-gather's anti-diagonal col-jump that spans
  * the whole packed array) is what lets this scale ~3.3x. Reorders the per-row
  * sum vs serial -> within DD fuzz tol (strided path keeps the row-gather). */
-static bool mspmv_axpydot(bool upper, int n, const T *ap,
-                          const T *x, T alpha, T *y, int nthreads)
+static bool mspmv_axpydot(bool upper, std::ptrdiff_t n, const T *ap,
+                          const T *x, T alpha, T *y, std::ptrdiff_t nthreads)
 {
     std::ptrdiff_t range[MSPMV_MAX_CPUS + 1];
     /* Area-balanced column partition: per-column triangular work is ~j (upper) /
      * ~(n-j) (lower), so heavy_high=upper. mask 3/min 4 keep slot writes off
      * shared cache lines. */
-    int num_cpu = mf_omp::tri_area_bounds(n, nthreads, 3, 4, upper,
+    std::ptrdiff_t num_cpu = mf_omp::tri_area_bounds(n, nthreads, 3, 4, upper,
                                           MSPMV_MAX_CPUS, range);
     if (num_cpu <= 1) return false;
 
@@ -99,7 +99,7 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
 
     #pragma omp parallel num_threads(num_cpu)
     {
-        int t = omp_get_thread_num();
+        std::ptrdiff_t t = omp_get_thread_num();
         std::ptrdiff_t m_from = range[t];
         std::ptrdiff_t m_to   = range[t + 1];
         T *slot = buf + (std::size_t)t * n;
@@ -135,7 +135,7 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
 
     /* Bounded reduction: fold each thread's populated row window (alpha deferred
      * to here) straight onto y. */
-    for (int t = 0; t < num_cpu; ++t) {
+    for (std::ptrdiff_t t = 0; t < num_cpu; ++t) {
         const T *slot = buf + (std::size_t)t * n;
         std::ptrdiff_t from, to;
         mf_omp::tri_row_window(t, upper, range, n, from, to);
@@ -148,12 +148,12 @@ static bool mspmv_axpydot(bool upper, int n, const T *ap,
 /* Threaded symmetric packed matvec. Disjoint output-row ranges; x gathered to
  * contiguous when strided. Returns true if handled. Beta already applied. */
 __attribute__((noinline)) static bool mspmv_omp(
-    bool upper, int n, const T *ap,
-    const T *x, int incx, T alpha, T *y, int incy)
+    bool upper, std::ptrdiff_t n, const T *ap,
+    const T *x, std::ptrdiff_t incx, T alpha, T *y, std::ptrdiff_t incy)
 {
     if (n < MSPMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MSPMV_MAX_CPUS) nthreads = MSPMV_MAX_CPUS;
 
     /* Unit-stride: ob-style column-partition axpydot (contiguous column read,
@@ -191,8 +191,8 @@ extern "C" void mspmv_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_;
-    const int incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t N = *n_;
+    const std::ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 
@@ -230,16 +230,16 @@ extern "C" void mspmv_(
     }
 
     {
-        int kk = 0;
-        int kx = (incx < 0) ? -(N - 1) * incx : 0;
-        int ky = (incy < 0) ? -(N - 1) * incy : 0;
+        std::ptrdiff_t kk = 0;
+        std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+        std::ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
         if (UPLO == 'U') {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
+            std::ptrdiff_t jx = kx, jy = ky;
+            for (std::ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero_dd;
-                int ix = kx, iy = ky;
-                for (int k = kk; k < kk + j; ++k) {
+                std::ptrdiff_t ix = kx, iy = ky;
+                for (std::ptrdiff_t k = kk; k < kk + j; ++k) {
                     y[iy] = y[iy] + t1 * ap[k];
                     t2 = t2 + ap[k] * x[ix];
                     ix += incx; iy += incy;
@@ -249,13 +249,13 @@ extern "C" void mspmv_(
                 kk += j + 1;
             }
         } else {
-            int jx = kx, jy = ky;
-            for (int j = 0; j < N; ++j) {
+            std::ptrdiff_t jx = kx, jy = ky;
+            for (std::ptrdiff_t j = 0; j < N; ++j) {
                 const T t1 = alpha * x[jx];
                 T t2 = zero_dd;
                 y[jy] = y[jy] + t1 * ap[kk];
-                int ix = jx, iy = jy;
-                for (int k = kk + 1; k < kk + N - j; ++k) {
+                std::ptrdiff_t ix = jx, iy = jy;
+                for (std::ptrdiff_t k = kk + 1; k < kk + N - j; ++k) {
                     ix += incx; iy += incy;
                     y[iy] = y[iy] + t1 * ap[k];
                     t2 = t2 + ap[k] * x[ix];

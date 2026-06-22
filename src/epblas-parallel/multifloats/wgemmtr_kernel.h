@@ -27,25 +27,25 @@
 using wgemmtr_T = multifloats::complex64x2;
 
 /* Block size over the column axis (env-overridable WGEMMTR_NB). */
-int wgemmtr_block_nb(void);
+std::ptrdiff_t wgemmtr_block_nb(void);
 
 /* Threading threshold (N below this stays serial). */
 #define WGEMMTR_OMP_MIN 32
 
 /* Beta-only pass over columns [j0,j1): scales (or zeros) the UPLO triangle of
  * each column by beta. The body of the alpha==0 / K==0 early-exit loop. */
-void wgemmtr_beta_core(int j0, int j1, int N, bool upper,
-                       wgemmtr_T beta, wgemmtr_T *c, int ldc);
+void wgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t N, bool upper,
+                       wgemmtr_T beta, wgemmtr_T *c, std::ptrdiff_t ldc);
 
 /* One jc-block of the full update: beta-scale the triangle slice for columns
  * [jc, jc+jb), add the scalar jb×jb diagonal triangle, then route the off-
  * diagonal rectangle through wgemm_serial. Each jc-block is column-disjoint →
  * race-free. ta/tb are kept distinct (N/T/C) for the complex case. */
-void wgemmtr_block_core(int jc, int jb, int N, int K,
+void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t N, std::ptrdiff_t K,
                         wgemmtr_T alpha, wgemmtr_T beta,
-                        const wgemmtr_T *a, int lda,
-                        const wgemmtr_T *b, int ldb,
-                        wgemmtr_T *c, int ldc,
+                        const wgemmtr_T *a, std::ptrdiff_t lda,
+                        const wgemmtr_T *b, std::ptrdiff_t ldb,
+                        wgemmtr_T *c, std::ptrdiff_t ldc,
                         bool upper, char ta, char tb);
 
 /* Pure-serial Fortran entry. No OpenMP on this path; same ABI as wgemmtr_. */

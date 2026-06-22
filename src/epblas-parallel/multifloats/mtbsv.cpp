@@ -38,7 +38,7 @@ namespace {
  * cross-column recurrence stays scalar/exact in the caller below. */
 
 /* Contiguous (unit-stride) triangular band solve, x[0..n-1] in logical order. */
-void mtbsv_contig(int upper, int trans_, int nounit,
+void mtbsv_contig(std::ptrdiff_t upper, std::ptrdiff_t trans_, std::ptrdiff_t nounit,
                   std::ptrdiff_t n, std::ptrdiff_t k,
                   const T *a, std::ptrdiff_t lda, T *x)
 {
@@ -91,7 +91,7 @@ void mtbsv_contig(int upper, int trans_, int nounit,
 
 /* In-place strided solve — faithful OpenBLAS reference, used only when the
  * gather scratch cannot be allocated. */
-void mtbsv_strided(int upper, int trans_, int nounit,
+void mtbsv_strided(std::ptrdiff_t upper, std::ptrdiff_t trans_, std::ptrdiff_t nounit,
                    std::ptrdiff_t n, std::ptrdiff_t k,
                    const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
 {
@@ -192,10 +192,10 @@ extern "C" void mtbsv_(
 
     if (n == 0) return;
 
-    const int upper  = (up(uplo) == 'U');
+    const std::ptrdiff_t upper  = (up(uplo) == 'U');
     const char trc   = up(trans);
-    const int trans_ = (trc == 'T' || trc == 'C') ? 1 : 0;
-    const int nounit = (up(diag) == 'N');
+    const std::ptrdiff_t trans_ = (trc == 'T' || trc == 'C') ? 1 : 0;
+    const std::ptrdiff_t nounit = (up(diag) == 'N');
 
     if (incx == 1) {
         mtbsv_contig(upper, trans_, nounit, n, k, a, lda, x);

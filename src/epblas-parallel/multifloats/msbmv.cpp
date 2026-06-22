@@ -42,15 +42,15 @@ namespace {
  * the dot (t2 += col[i]*x[i], vector accumulate + hreduce -> within tolerance);
  * y and x are distinct (sbmv forbids aliasing) so the two passes are independent.
  * The strided entry gathers x/y to scratch and reuses this. */
-void msbmv_contig(bool upper, int n, int k, const T *a, std::size_t lda,
+void msbmv_contig(bool upper, std::ptrdiff_t n, std::ptrdiff_t k, const T *a, std::size_t lda,
                   const T *x, T alpha, T *y)
 {
     if (upper) {
-        for (int j = 0; j < n; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T *aj = &A_(0, j);
             const T t1 = alpha * x[j];
-            const int i_lo = (j - k > 0) ? (j - k) : 0;
-            const int len = j - i_lo;
+            const std::ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
+            const std::ptrdiff_t len = j - i_lo;
             const T *col = &aj[k - j + i_lo];   /* A_(K-j+i_lo, j), contiguous */
             T t2 = zero_dd;
             if (len > 0) {
@@ -60,12 +60,12 @@ void msbmv_contig(bool upper, int n, int k, const T *a, std::size_t lda,
             y[j] = y[j] + t1 * aj[k] + alpha * t2;
         }
     } else {
-        for (int j = 0; j < n; ++j) {
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
             const T *aj = &A_(0, j);
             const T t1 = alpha * x[j];
             y[j] = y[j] + t1 * aj[0];
-            const int i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
-            const int len = i_hi - (j + 1);
+            const std::ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
+            const std::ptrdiff_t len = i_hi - (j + 1);
             if (len > 0) {
                 mf_kernels::axpy_add(len, &y[j + 1], &aj[1], t1);
                 y[j] = y[j] + alpha * mf_kernels::dot(len, &aj[1], &x[j + 1]);
@@ -87,13 +87,13 @@ void msbmv_contig(bool upper, int n, int k, const T *a, std::size_t lda,
  * the fold); adjacent windows overlap by K and each column's contribution lives
  * in exactly one slot, so summing the overlaps is correct. Reorders the per-row
  * sum vs serial -> within DD fuzz tol; serial stays bit-exact. */
-static bool msbmv_axpydot(bool upper, int n, int k, const T *a, std::size_t lda,
-                          const T *x, T alpha, T *y, int nthreads)
+static bool msbmv_axpydot(bool upper, std::ptrdiff_t n, std::ptrdiff_t k, const T *a, std::size_t lda,
+                          const T *x, T alpha, T *y, std::ptrdiff_t nthreads)
 {
     std::ptrdiff_t range[MSBMV_MAX_CPUS + 1];
     /* equal-width column split: band work per column is uniform (mask3/min4 keep
      * slot writes cache-line aligned). */
-    int num_cpu = mf_omp::band_bounds(n, nthreads, 3, 4, MSBMV_MAX_CPUS, range);
+    std::ptrdiff_t num_cpu = mf_omp::band_bounds(n, nthreads, 3, 4, MSBMV_MAX_CPUS, range);
     if (num_cpu <= 1) return false;
 
     T *buf = static_cast<T *>(std::calloc((std::size_t)num_cpu * n, sizeof(T)));
@@ -101,7 +101,7 @@ static bool msbmv_axpydot(bool upper, int n, int k, const T *a, std::size_t lda,
 
     #pragma omp parallel num_threads(num_cpu)
     {
-        int t = omp_get_thread_num();
+        std::ptrdiff_t t = omp_get_thread_num();
         std::ptrdiff_t m_from = range[t];
         std::ptrdiff_t m_to   = range[t + 1];
         T *slot = buf + (std::size_t)t * n;
@@ -134,7 +134,7 @@ static bool msbmv_axpydot(bool upper, int n, int k, const T *a, std::size_t lda,
         }
     }
 
-    for (int t = 0; t < num_cpu; ++t) {
+    for (std::ptrdiff_t t = 0; t < num_cpu; ++t) {
         const T *slot = buf + (std::size_t)t * n;
         std::ptrdiff_t lo, hi;
         mf_omp::band_row_window(t, upper, range, n, k, lo, hi);
@@ -147,12 +147,12 @@ static bool msbmv_axpydot(bool upper, int n, int k, const T *a, std::size_t lda,
 /* Threaded symmetric band matvec. Returns true if handled. Beta-scaling already
  * applied by caller. */
 __attribute__((noinline)) static bool msbmv_omp(
-    bool upper, int n, int k, const T *a, std::size_t lda,
-    const T *x, int incx, T alpha, T *y, int incy)
+    bool upper, std::ptrdiff_t n, std::ptrdiff_t k, const T *a, std::size_t lda,
+    const T *x, std::ptrdiff_t incx, T alpha, T *y, std::ptrdiff_t incy)
 {
     if (n < MSBMV_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return false;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MSBMV_MAX_CPUS) nthreads = MSBMV_MAX_CPUS;
 
     if (incx == 1 && incy == 1)
@@ -186,8 +186,8 @@ extern "C" void msbmv_(
     std::size_t uplo_len)
 {
     (void)uplo_len;
-    const int N = *n_, K = *k_;
-    const int lda = *lda_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t N = *n_, K = *k_;
+    const std::ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char UPLO = up(uplo);
 
@@ -222,17 +222,17 @@ extern "C" void msbmv_(
     }
     std::free(xs); std::free(ys);
 
-    int kx = (incx < 0) ? -(N - 1) * incx : 0;
-    int ky = (incy < 0) ? -(N - 1) * incy : 0;
+    std::ptrdiff_t kx = (incx < 0) ? -(N - 1) * incx : 0;
+    std::ptrdiff_t ky = (incy < 0) ? -(N - 1) * incy : 0;
     if (UPLO == 'U') {
-        int jx = kx, jy = ky;
-        for (int j = 0; j < N; ++j) {
+        std::ptrdiff_t jx = kx, jy = ky;
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T t1 = alpha * x[jx];
             T t2 = zero_dd;
-            int ix = kx, iy = ky;
-            const int L = K - j;
-            const int i_lo = (j - K > 0) ? (j - K) : 0;
-            for (int i = i_lo; i < j; ++i) {
+            std::ptrdiff_t ix = kx, iy = ky;
+            const std::ptrdiff_t L = K - j;
+            const std::ptrdiff_t i_lo = (j - K > 0) ? (j - K) : 0;
+            for (std::ptrdiff_t i = i_lo; i < j; ++i) {
                 y[iy] = y[iy] + t1 * A_(L + i, j);
                 t2 = t2 + A_(L + i, j) * x[ix];
                 ix += incx; iy += incy;
@@ -242,14 +242,14 @@ extern "C" void msbmv_(
             if (j >= K) { kx += incx; ky += incy; }
         }
     } else {
-        int jx = kx, jy = ky;
-        for (int j = 0; j < N; ++j) {
+        std::ptrdiff_t jx = kx, jy = ky;
+        for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T t1 = alpha * x[jx];
             T t2 = zero_dd;
             y[jy] = y[jy] + t1 * A_(0, j);
-            int ix = jx, iy = jy;
-            const int i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
-            for (int i = j + 1; i < i_hi; ++i) {
+            std::ptrdiff_t ix = jx, iy = jy;
+            const std::ptrdiff_t i_hi = (j + K + 1 < N) ? (j + K + 1) : N;
+            for (std::ptrdiff_t i = j + 1; i < i_hi; ++i) {
                 ix += incx; iy += incy;
                 y[iy] = y[iy] + t1 * A_(i - j, j);
                 t2 = t2 + A_(i - j, j) * x[ix];

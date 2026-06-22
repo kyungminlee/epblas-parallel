@@ -40,16 +40,16 @@ using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (
 
 /* Σ X·Y over contiguous unit-stride ranges — the serial kernel, unchanged.
  * Carved out so the OpenMP partial-reduction can call it per sub-range. */
-static T mdot_unit(int n, const T *x, const T *y)
+static T mdot_unit(std::ptrdiff_t n, const T *x, const T *y)
 {
 #ifdef MBLAS_SIMD_DD
     __m256d a0 = _mm256_setzero_pd();
     __m256d a1 = _mm256_setzero_pd();
     __m256d a2 = _mm256_setzero_pd();
-    constexpr int K = 64;
-    int counter = K;
-    const int n4 = n & ~3;
-    for (int i = 0; i < n4; i += 4) {
+    constexpr std::ptrdiff_t K = 64;
+    std::ptrdiff_t counter = K;
+    const std::ptrdiff_t n4 = n & ~3;
+    for (std::ptrdiff_t i = 0; i < n4; i += 4) {
         __m256d xh, xl, yh, yl;
         load_dd4(&x[i], xh, xl);
         load_dd4(&y[i], yh, yl);
@@ -78,11 +78,11 @@ static T mdot_unit(int n, const T *x, const T *y)
     }
     __m256d t = _mm256_add_pd(a1, a2);
     T s = horizontal_dd(a0, t);
-    for (int i = n4; i < n; ++i) s = s + x[i] * y[i];
+    for (std::ptrdiff_t i = n4; i < n; ++i) s = s + x[i] * y[i];
     return s;
 #else
     T s0{0.0, 0.0}, s1{0.0, 0.0}, s{0.0, 0.0};
-    int i = 0;
+    std::ptrdiff_t i = 0;
     for (; i + 1 < n; i += 2) {
         s0 = s0 + x[i]     * y[i];
         s1 = s1 + x[i + 1] * y[i + 1];
@@ -99,22 +99,22 @@ static T mdot_unit(int n, const T *x, const T *y)
  * Reduction order differs from serial → within fuzz tolerance (kind10 edot). */
 #define MDOT_OMP_MIN 8192
 #define MDOT_MAX_CPUS 64
-__attribute__((noinline)) static int mdot_omp(int n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static std::ptrdiff_t mdot_omp(std::ptrdiff_t n, const T *x, const T *y, T *out)
 {
     if (n <= MDOT_OMP_MIN || !blas_omp_available() || omp_in_parallel())
         return 0;
-    int nthreads = blas_omp_max_threads();
+    std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MDOT_MAX_CPUS) nthreads = MDOT_MAX_CPUS;
     T partial[MDOT_MAX_CPUS];
     #pragma omp parallel num_threads(nthreads)
     {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
+        std::ptrdiff_t tid = omp_get_thread_num();
+        std::ptrdiff_t nth = omp_get_num_threads();
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         partial[tid] = (lo < hi) ? mdot_unit(hi - lo, x + lo, y + lo) : T{0.0, 0.0};
     }
     T s{0.0, 0.0};
-    for (int i = 0; i < nthreads; ++i) s = s + partial[i];
+    for (std::ptrdiff_t i = 0; i < nthreads; ++i) s = s + partial[i];
     *out = s;
     return 1;
 }
@@ -124,7 +124,7 @@ extern "C" T mdot_(const int *n_,
                    const T *x, const int *incx_,
                    const T *y, const int *incy_)
 {
-    const int n = *n_, incx = *incx_, incy = *incy_;
+    const std::ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     T s{0.0, 0.0};
     if (n <= 0) return s;
 
@@ -136,8 +136,8 @@ extern "C" T mdot_(const int *n_,
     }
 
     /* Strided fallback */
-    int ix = (incx < 0) ? (-n + 1) * incx : 0;
-    int iy = (incy < 0) ? (-n + 1) * incy : 0;
-    for (int i = 0; i < n; ++i) { s = s + x[ix] * y[iy]; ix += incx; iy += incy; }
+    std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
+    std::ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
+    for (std::ptrdiff_t i = 0; i < n; ++i) { s = s + x[ix] * y[iy]; ix += incx; iy += incy; }
     return s;
 }
