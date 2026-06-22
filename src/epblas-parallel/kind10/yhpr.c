@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -21,21 +22,17 @@ typedef _Complex long double T;
 typedef long double TR;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
-void yhpr_(
-    const char *uplo,
-    const int *n_,
+static void yhpr_core(
+    char uplo,
+    ptrdiff_t N,
     const TR *alpha_,
-    const T *restrict x, const int *incx_,
-    T *restrict ap,
-    size_t uplo_len)
+    const T *restrict x, ptrdiff_t incx,
+    T *restrict ap)
 {
-    (void)uplo_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t incx = *incx_;
     const TR alpha = *alpha_;
     const TR rzero = 0.0L;
     const T czero = 0.0L + 0.0Li;
@@ -125,3 +122,5 @@ void yhpr_(
         }
     }
 }
+
+EPBLAS_FACADE_SPR(yhpr, TR, T)

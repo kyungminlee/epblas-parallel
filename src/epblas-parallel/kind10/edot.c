@@ -4,6 +4,7 @@
 #include "../common/blas_omp.h"
 #include <stddef.h>
 #endif
+#include "../common/epblas_facade.h"
 typedef long double T;
 
 /* Σ x·y over a contiguous logical range. FOUR independent accumulators hide
@@ -68,10 +69,9 @@ __attribute__((noinline)) static ptrdiff_t edot_omp(ptrdiff_t n, const T *x, con
 }
 #endif
 
-T edot_(const int *n_, const T *x, const int *incx_,
-        const T *y, const int *incy_)
+static T edot_core(ptrdiff_t n, const T *x, ptrdiff_t incx,
+                   const T *y, ptrdiff_t incy)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return 0.0L;
 #ifdef _OPENMP
     if (incx == 1 && incy == 1) {
@@ -81,3 +81,5 @@ T edot_(const int *n_, const T *x, const int *incx_,
 #endif
     return edot_kernel(n, x, incx, y, incy);
 }
+
+EPBLAS_FACADE_DOT(edot, T, T)

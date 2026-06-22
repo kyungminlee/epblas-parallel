@@ -17,3 +17,6 @@ void erotg_(T *a, T *b, T *c, T *s)
     *a = r;
     *b = z;
 }
+
+/* No integer arguments -> LP64/ILP64 ABIs identical; _64_ twin tail-calls. */
+void erotg_64_(T *a, T *b, T *c, T *s) { erotg_(a, b, c, s); }

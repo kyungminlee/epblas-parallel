@@ -25,6 +25,7 @@
 #include "esyrk_kernel.h"
 #include "etri_kernel.h"
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_round_up */
+#include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -37,35 +38,29 @@ typedef esyrk_T T;
 #define MR ESYRK_MR
 #define NR ESYRK_NR
 
-void esyrk_(
-    const char *uplo_p, const char *trans_p,
-    const int *n_, const int *k_,
+static void esyrk_core(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
+    const T *a, ptrdiff_t lda,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldc_pt = *ldc_;
-        esyrk_serial(uplo_p, trans_p, &n_pt, &k_pt, alpha_, a, &lda_pt, beta_,
-                     c, &ldc_pt, uplo_len, trans_len);
+        esyrk_serial(uplo, trans, N, K, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
-    const ptrdiff_t uplo  = (char)toupper((unsigned char)*uplo_p);
-    const ptrdiff_t trans = (char)toupper((unsigned char)*trans_p);
+    const char UPLO  = (char)toupper((unsigned char)uplo);
+    const char TRANS = (char)toupper((unsigned char)trans);
 
     if (N <= 0) return;
 
     /* Triangular beta pre-pass on the UPLO triangle of C only. */
-    if (uplo == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    if (UPLO == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
     else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
     if (K == 0 || alpha == 0.0L) return;
@@ -120,8 +115,8 @@ void esyrk_(
                 const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
 
                 /* UPLO clip of this thread's [m_lo, m_hi] for this js-band. */
-                ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
-                ptrdiff_t m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                ptrdiff_t m_lo_eff = (UPLO == 'L' && m_lo < js) ? js : m_lo;
+                ptrdiff_t m_hi_eff = (UPLO == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
@@ -134,7 +129,7 @@ void esyrk_(
                     #pragma omp single
 #endif
                     {
-                        if (trans == 'N')
+                        if (TRANS == 'N')
                             etri_tcopy(pb, jb, &a[(size_t)ls * lda + js], lda, Bp);
                         else
                             etri_ncopy(pb, jb, &a[(size_t)js * lda + ls], lda, Bp);
@@ -144,12 +139,12 @@ void esyrk_(
                     for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
                         const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
-                        if (trans == 'N')
+                        if (TRANS == 'N')
                             etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap);
                         else
                             etri_ncopy(pb, min_i, &a[(size_t)is * lda + ls], lda, Ap);
 
-                        if (uplo == 'U')
+                        if (UPLO == 'U')
                             esyrk_kernel_u(min_i, jb, pb, alpha, Ap, Bp,
                                            &c[(size_t)js * ldc + is], ldc,
                                            (ptrdiff_t)(is - js));
@@ -167,3 +162,5 @@ void esyrk_(
     free(Ap_arr);
     free(Bp);
 }
+
+EPBLAS_FACADE_SYRK(esyrk, T, T)

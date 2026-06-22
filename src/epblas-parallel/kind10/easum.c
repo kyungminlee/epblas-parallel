@@ -5,6 +5,7 @@
 #include "../common/blas_omp.h"
 #include <stddef.h>
 #endif
+#include "../common/epblas_facade.h"
 typedef long double T;
 
 /* Σ|x| over a contiguous logical range. 6-accumulator unroll matches NETLIB
@@ -62,9 +63,8 @@ __attribute__((noinline)) static ptrdiff_t easum_omp(ptrdiff_t n, const T *x, T 
 }
 #endif
 
-T easum_(const int *n_, const T *x, const int *incx_)
+static T easum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
-    const ptrdiff_t n = *n_, incx = *incx_;
     if (n < 1 || incx < 1) return 0.0L;
 #ifdef _OPENMP
     if (incx == 1) {
@@ -74,3 +74,5 @@ T easum_(const int *n_, const T *x, const int *incx_)
 #endif
     return easum_kernel(n, x, incx);
 }
+
+EPBLAS_FACADE_ASUM(easum, T, T)

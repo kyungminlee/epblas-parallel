@@ -183,25 +183,21 @@ void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * (A and B in OCOPY shape) and two A-packs (ditto in ICOPY shape) per tile;
  * pass 1 = (Ap_A, Bp_B, flag=1), pass 2 = (Ap_B, Bp_A, flag=0). */
 void esyr2k_serial(
-    const char *uplo_p, const char *trans_p,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
-    const T *b, const ptrdiff_t *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const ptrdiff_t uplo  = (char)toupper((unsigned char)*uplo_p);
-    const ptrdiff_t trans = (char)toupper((unsigned char)*trans_p);
+    const char UPLO  = (char)toupper((unsigned char)uplo);
+    const char TRANS = (char)toupper((unsigned char)trans);
 
     if (N <= 0) return;
 
-    if (uplo == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    if (UPLO == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
     else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
     if (K == 0 || alpha == 0.0L) return;
@@ -222,15 +218,15 @@ void esyr2k_serial(
             /* UPLO clip of the [0, N] row range for this js-band:
              *   UPPER: only rows up to js+jb contribute.
              *   LOWER: only rows from js onwards. */
-            ptrdiff_t m_lo_eff = (uplo == 'L') ? js : 0;
-            ptrdiff_t m_hi_eff = (uplo == 'U' && N > js + jb) ? (js + jb) : N;
+            ptrdiff_t m_lo_eff = (UPLO == 'L') ? js : 0;
+            ptrdiff_t m_hi_eff = (UPLO == 'U' && N > js + jb) ? (js + jb) : N;
             if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
 
             for (ptrdiff_t ls = 0; ls < K; ls += KC) {
                 const ptrdiff_t pb = (K - ls < KC) ? (K - ls) : KC;
 
                 /* Pack both B-side panels (A and B in OCOPY shape). */
-                if (trans == 'N') {
+                if (TRANS == 'N') {
                     etri_tcopy(pb, jb, &a[(size_t)ls * lda + js], lda, Bp_A);
                     etri_tcopy(pb, jb, &b[(size_t)ls * ldb + js], ldb, Bp_B);
                 } else {
@@ -241,7 +237,7 @@ void esyr2k_serial(
                 for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
                     const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
-                    if (trans == 'N') {
+                    if (TRANS == 'N') {
                         etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap_A);
                         etri_tcopy(pb, min_i, &b[(size_t)ls * ldb + is], ldb, Ap_B);
                     } else {
@@ -253,13 +249,13 @@ void esyr2k_serial(
                     const ptrdiff_t off = (ptrdiff_t)(is - js);
 
                     /* Pass 1: alpha·A·B^T + symmetric diagonal merge. */
-                    if (uplo == 'U')
+                    if (UPLO == 'U')
                         esyr2k_kernel_u(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
                     else
                         esyr2k_kernel_l(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
 
                     /* Pass 2: alpha·B·A^T into the off-diagonal strips only. */
-                    if (uplo == 'U')
+                    if (UPLO == 'U')
                         esyr2k_kernel_u(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);
                     else
                         esyr2k_kernel_l(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);

@@ -21,14 +21,13 @@ typedef yhemm_T T;
 ptrdiff_t yhemm_nb(void) { return 32; }
 
 extern void ygemm_serial(
-    const char *transa, const char *transb,
-    const ptrdiff_t *m, const ptrdiff_t *n, const ptrdiff_t *k,
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const T *alpha,
-    const T *a, const ptrdiff_t *lda,
-    const T *b, const ptrdiff_t *ldb,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta,
-    T *c, const ptrdiff_t *ldc,
-    size_t transa_len, size_t transb_len);
+    T *c, ptrdiff_t ldc);
 
 static inline T cconj(T z) { return ~z; }
 
@@ -176,9 +175,6 @@ void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, T alpha, T beta,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                    T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
 {
-    const char NN[1] = {'N'};
-    const char CN[1] = {'C'};
-
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         T *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = 0; i < M; ++i) cj[i]  = ZERO;
@@ -191,22 +187,22 @@ void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t M, T alpha, T beta,
         if (UPLO == 'L') {
             for (ptrdiff_t kc = 0; kc < ic; kc += nb) {
                 const ptrdiff_t kb = (ic - kc < nb) ? (ic - kc) : nb;
-                ygemm_serial(CN, NN, &kb, &jb, &ib, &alpha,
-                             &A_(ic, kc), &lda, &B_(ic, jc), &ldb, &ONE,
-                             &C_(kc, jc), &ldc, 1, 1);
-                ygemm_serial(NN, NN, &ib, &jb, &kb, &alpha,
-                             &A_(ic, kc), &lda, &B_(kc, jc), &ldb, &ONE,
-                             &C_(ic, jc), &ldc, 1, 1);
+                ygemm_serial('C', 'N', kb, jb, ib, &alpha,
+                             &A_(ic, kc), lda, &B_(ic, jc), ldb, &ONE,
+                             &C_(kc, jc), ldc);
+                ygemm_serial('N', 'N', ib, jb, kb, &alpha,
+                             &A_(ic, kc), lda, &B_(kc, jc), ldb, &ONE,
+                             &C_(ic, jc), ldc);
             }
         } else {
             for (ptrdiff_t kc = ic + ib; kc < M; kc += nb) {
                 const ptrdiff_t kb = (M - kc < nb) ? (M - kc) : nb;
-                ygemm_serial(CN, NN, &kb, &jb, &ib, &alpha,
-                             &A_(ic, kc), &lda, &B_(ic, jc), &ldb, &ONE,
-                             &C_(kc, jc), &ldc, 1, 1);
-                ygemm_serial(NN, NN, &ib, &jb, &kb, &alpha,
-                             &A_(ic, kc), &lda, &B_(kc, jc), &ldb, &ONE,
-                             &C_(ic, jc), &ldc, 1, 1);
+                ygemm_serial('C', 'N', kb, jb, ib, &alpha,
+                             &A_(ic, kc), lda, &B_(ic, jc), ldb, &ONE,
+                             &C_(kc, jc), ldc);
+                ygemm_serial('N', 'N', ib, jb, kb, &alpha,
+                             &A_(ic, kc), lda, &B_(kc, jc), ldb, &ONE,
+                             &C_(ic, jc), ldc);
             }
         }
 
@@ -218,9 +214,6 @@ void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, T alpha, T beta,
                    const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
                    T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
 {
-    const char NN[1] = {'N'};
-    const char CN[1] = {'C'};
-
     for (ptrdiff_t j = 0; j < N; ++j) {
         T *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i]  = ZERO;
@@ -233,22 +226,22 @@ void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, T alpha, T beta,
         if (UPLO == 'L') {
             for (ptrdiff_t kc = jc + jb; kc < N; kc += nb) {
                 const ptrdiff_t kb = (N - kc < nb) ? (N - kc) : nb;
-                ygemm_serial(NN, NN, &ib, &jb, &kb, &alpha,
-                             &B_(ic, kc), &ldb, &A_(kc, jc), &lda, &ONE,
-                             &C_(ic, jc), &ldc, 1, 1);
-                ygemm_serial(NN, CN, &ib, &kb, &jb, &alpha,
-                             &B_(ic, jc), &ldb, &A_(kc, jc), &lda, &ONE,
-                             &C_(ic, kc), &ldc, 1, 1);
+                ygemm_serial('N', 'N', ib, jb, kb, &alpha,
+                             &B_(ic, kc), ldb, &A_(kc, jc), lda, &ONE,
+                             &C_(ic, jc), ldc);
+                ygemm_serial('N', 'C', ib, kb, jb, &alpha,
+                             &B_(ic, jc), ldb, &A_(kc, jc), lda, &ONE,
+                             &C_(ic, kc), ldc);
             }
         } else {
             for (ptrdiff_t kc = 0; kc < jc; kc += nb) {
                 const ptrdiff_t kb = (jc - kc < nb) ? (jc - kc) : nb;
-                ygemm_serial(NN, NN, &ib, &jb, &kb, &alpha,
-                             &B_(ic, kc), &ldb, &A_(kc, jc), &lda, &ONE,
-                             &C_(ic, jc), &ldc, 1, 1);
-                ygemm_serial(NN, CN, &ib, &kb, &jb, &alpha,
-                             &B_(ic, jc), &ldb, &A_(kc, jc), &lda, &ONE,
-                             &C_(ic, kc), &ldc, 1, 1);
+                ygemm_serial('N', 'N', ib, jb, kb, &alpha,
+                             &B_(ic, kc), ldb, &A_(kc, jc), lda, &ONE,
+                             &C_(ic, jc), ldc);
+                ygemm_serial('N', 'C', ib, kb, jb, &alpha,
+                             &B_(ic, jc), ldb, &A_(kc, jc), lda, &ONE,
+                             &C_(ic, kc), ldc);
             }
         }
 
@@ -257,21 +250,17 @@ void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, T alpha, T beta,
 }
 
 void yhemm_serial(
-    const char *side, const char *uplo,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
-    const T *b, const ptrdiff_t *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const ptrdiff_t *ldc_,
-    size_t side_len, size_t uplo_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)side_len; (void)uplo_len;
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char SIDE = (char)toupper((unsigned char)*side);
-    const char UPLO = (char)toupper((unsigned char)*uplo);
+    const char SIDE = (char)toupper((unsigned char)side);
+    const char UPLO = (char)toupper((unsigned char)uplo);
 
     if (M == 0 || N == 0) return;
 

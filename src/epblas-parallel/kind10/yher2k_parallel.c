@@ -22,39 +22,34 @@
 #endif
 
 #include "yher2k_kernel.h"
+#include "../common/epblas_facade.h"
 
 typedef yher2k_TC TC;
 typedef yher2k_TR TR;
 
 #define YHER2K_OMP_MIN 32
 
-void yher2k_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+static void yher2k_core(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const TC *alpha_,
-    const TC *restrict a, const int *lda_,
-    const TC *restrict b, const int *ldb_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict b, ptrdiff_t ldb,
     const TR *beta_,
-    TC *restrict c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    TC *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
-        yher2k_serial(uplo, trans, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt, beta_,
-                      c, &ldc_pt, uplo_len, trans_len);
+        yher2k_serial(uplo, trans, N, K, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const TC alpha = *alpha_;
     const TR beta  = *beta_;
-    const ptrdiff_t ldc = *ldc_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    const char TR_c = (char)toupper((unsigned char)*trans);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char TR_c = (char)toupper((unsigned char)trans);
 
     const TR rone = 1.0L;
     const TC czero = 0.0L + 0.0Li;
@@ -76,7 +71,6 @@ void yher2k_(
     }
 
     const ptrdiff_t nb = yher2k_nb();
-    const ptrdiff_t lda = *lda_, ldb = *ldb_;
 
     ptrdiff_t pw = nb;
 #ifdef _OPENMP
@@ -93,3 +87,5 @@ void yher2k_(
         yher2k_block(jc, jb, N, K, alpha, beta, a, lda, b, ldb, c, ldc, UPLO, TR_c);
     }
 }
+
+EPBLAS_FACADE_SYR2K(yher2k, TC, TR, TC)

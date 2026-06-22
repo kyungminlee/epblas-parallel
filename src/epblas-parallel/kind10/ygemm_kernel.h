@@ -60,15 +60,14 @@ void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
                    const ygemm_T *a, ptrdiff_t lda, const ygemm_T *b, ptrdiff_t ldb,
                    ygemm_T *c, ptrdiff_t ldc, ptrdiff_t conj_a, ptrdiff_t conj_b);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ygemm_. */
+/* Pure-serial by-value core (no OpenMP). Same math as ygemm_. */
 void ygemm_serial(
-    const char *transa, const char *transb,
-    const ptrdiff_t *m_, const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const ygemm_T *alpha_,
-    const ygemm_T *a, const ptrdiff_t *lda_,
-    const ygemm_T *b, const ptrdiff_t *ldb_,
+    const ygemm_T *a, ptrdiff_t lda,
+    const ygemm_T *b, ptrdiff_t ldb,
     const ygemm_T *beta_,
-    ygemm_T *c, const ptrdiff_t *ldc_,
-    size_t transa_len, size_t transb_len);
+    ygemm_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YGEMM_KERNEL_H */

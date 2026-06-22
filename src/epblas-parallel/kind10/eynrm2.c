@@ -12,6 +12,7 @@
 #define EYNRM2_OMP_MIN  10000   /* below this, run the serial path (n in elements) */
 #define EYNRM2_MAX_CPUS 64
 #endif
+#include "../common/epblas_facade.h"
 typedef _Complex long double T;
 typedef long double R;
 
@@ -116,9 +117,8 @@ __attribute__((noinline)) static int eynrm2_omp(ptrdiff_t n, const T *x, R *out)
 }
 #endif
 
-R eynrm2_(const int *n_, const T *x, const int *incx_)
+static R eynrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
-    const ptrdiff_t n = *n_, incx = *incx_;
     if (n <= 0) return 0.0L;
     if (!blue_inited) blue_init();
 
@@ -162,3 +162,5 @@ R eynrm2_(const int *n_, const T *x, const int *incx_)
 
     return eynrm2_finalize(abig, amed, asml);
 }
+
+EPBLAS_FACADE_ASUM(eynrm2, R, T)

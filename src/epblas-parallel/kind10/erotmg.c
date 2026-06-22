@@ -53,3 +53,7 @@ void erotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
     else                   { dparam[1]=h11; dparam[4]=h22; }
     *d1_ = d1; *d2_ = d2; *x1_ = x1;
 }
+
+/* No integer arguments -> LP64/ILP64 ABIs identical; _64_ twin tail-calls. */
+void erotmg_64_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
+{ erotmg_(d1_, d2_, x1_, y1_, dparam); }

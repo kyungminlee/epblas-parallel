@@ -49,13 +49,12 @@ void yher2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, yher2k_T
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as yher2k_. */
 void yher2k_serial(
-    const char *uplo, const char *trans,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const yher2k_TC *alpha_,
-    const yher2k_TC *a, const ptrdiff_t *lda_,
-    const yher2k_TC *b, const ptrdiff_t *ldb_,
+    const yher2k_TC *a, ptrdiff_t lda,
+    const yher2k_TC *b, ptrdiff_t ldb,
     const yher2k_TR *beta_,
-    yher2k_TC *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len);
+    yher2k_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YHER2K_KERNEL_H */

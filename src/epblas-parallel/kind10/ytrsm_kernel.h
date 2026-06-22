@@ -81,13 +81,12 @@ void ytrsm_R_blocked_chunk(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj,
                            const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
                            ptrdiff_t nounit);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ytrsm_. */
+/* Pure-serial by-value entry (no OpenMP). */
 void ytrsm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const ytrsm_T *alpha_,
-    const ytrsm_T *a, const ptrdiff_t *lda_,
-    ytrsm_T *b, const ptrdiff_t *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
+    const ytrsm_T *a, ptrdiff_t lda,
+    ytrsm_T *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YTRSM_KERNEL_H */

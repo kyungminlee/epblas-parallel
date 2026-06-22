@@ -5,6 +5,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 typedef _Complex long double T;
 
 #ifdef _OPENMP
@@ -35,9 +36,8 @@ static int ycopy_omp(ptrdiff_t n, const T *x, T *y)
 }
 #endif
 
-void ycopy_(const int *n_, const T *x, const int *incx_, T *y, const int *incy_)
+static void ycopy_core(ptrdiff_t n, const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
@@ -50,3 +50,5 @@ void ycopy_(const int *n_, const T *x, const int *incx_, T *y, const int *incy_)
         for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = x[ix]; ix += incx; iy += incy; }
     }
 }
+
+EPBLAS_FACADE_COPY(ycopy, T)

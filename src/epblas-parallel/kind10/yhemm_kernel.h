@@ -55,15 +55,14 @@ void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t N, yhemm_T alpha, yhemm
                    const yhemm_T *a, ptrdiff_t lda, const yhemm_T *b, ptrdiff_t ldb,
                    yhemm_T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as yhemm_. */
+/* Pure-serial by-value core (no OpenMP). */
 void yhemm_serial(
-    const char *side, const char *uplo,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo,
+    ptrdiff_t M, ptrdiff_t N,
     const yhemm_T *alpha_,
-    const yhemm_T *a, const ptrdiff_t *lda_,
-    const yhemm_T *b, const ptrdiff_t *ldb_,
+    const yhemm_T *a, ptrdiff_t lda,
+    const yhemm_T *b, ptrdiff_t ldb,
     const yhemm_T *beta_,
-    yhemm_T *c, const ptrdiff_t *ldc_,
-    size_t side_len, size_t uplo_len);
+    yhemm_T *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YHEMM_KERNEL_H */

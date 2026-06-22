@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <math.h>
 #include <omp.h>
@@ -30,8 +31,8 @@ typedef long double T;
 #define ESPMV_OMP_MIN 16384
 #define ESPMV_MAX_CPUS 256
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 /* Contiguous (stride-1) two-pass run shared by the serial and threaded
@@ -135,19 +136,15 @@ static ptrdiff_t espmv_partition(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t nthread
 }
 #endif
 
-void espmv_(
-    const char *uplo,
-    const int *n_,
+static void espmv_core(
+    char uplo,
+    ptrdiff_t N,
     const T *alpha_,
     const T *restrict ap,
-    const T *restrict x, const int *incx_,
+    const T *restrict x, ptrdiff_t incx,
     const T *beta_,
-    T *restrict y, const int *incy_,
-    size_t uplo_len)
+    T *restrict y, ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L, one = 1.0L;
     const char UPLO = up(uplo);
@@ -287,3 +284,5 @@ void espmv_(
         }
     }
 }
+
+EPBLAS_FACADE_SPMV(espmv, T)

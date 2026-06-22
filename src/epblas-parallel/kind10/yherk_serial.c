@@ -22,14 +22,13 @@ typedef yherk_TR TR;
 ptrdiff_t yherk_nb(void) { return 32; }
 
 extern void ygemm_serial(
-    const char *transa, const char *transb,
-    const ptrdiff_t *m, const ptrdiff_t *n, const ptrdiff_t *k,
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const TC *alpha,
-    const TC *a, const ptrdiff_t *lda,
-    const TC *b, const ptrdiff_t *ldb,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
     const TC *beta,
-    TC *c, const ptrdiff_t *ldc,
-    size_t transa_len, size_t transb_len);
+    TC *c, ptrdiff_t ldc);
 
 static inline TC cconj(TC z) { return ~z; }
 
@@ -115,9 +114,6 @@ void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TR alpha,
 {
     const TC cone    = 1.0L + 0.0Li;
     const TC alpha_c = alpha + 0.0Li;
-    const char NN[1] = {'N'};
-    const char CN[1] = {'C'};
-
     yherk_beta_scale(jc, jc + jb, N, beta, c, ldc, UPLO);
 
     herk_diag_add(jc, jb, K, alpha, a, lda, c, ldc, UPLO, TR_c);
@@ -127,45 +123,41 @@ void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, TR alpha,
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
             if (TR_c == 'N') {
-                ygemm_serial(NN, CN, &trailing, &jb, &K, &alpha_c,
-                             &A_(j0, 0), &lda, &A_(jc, 0), &lda,
-                             &cone, &C_(j0, jc), &ldc, 1, 1);
+                ygemm_serial('N', 'C', trailing, jb, K, &alpha_c,
+                             &A_(j0, 0), lda, &A_(jc, 0), lda,
+                             &cone, &C_(j0, jc), ldc);
             } else {
-                ygemm_serial(CN, NN, &trailing, &jb, &K, &alpha_c,
-                             &A_(0, j0), &lda, &A_(0, jc), &lda,
-                             &cone, &C_(j0, jc), &ldc, 1, 1);
+                ygemm_serial('C', 'N', trailing, jb, K, &alpha_c,
+                             &A_(0, j0), lda, &A_(0, jc), lda,
+                             &cone, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR_c == 'N') {
-                ygemm_serial(NN, CN, &jc, &jb, &K, &alpha_c,
-                             &A_(0, 0), &lda, &A_(jc, 0), &lda,
-                             &cone, &C_(0, jc), &ldc, 1, 1);
+                ygemm_serial('N', 'C', jc, jb, K, &alpha_c,
+                             &A_(0, 0), lda, &A_(jc, 0), lda,
+                             &cone, &C_(0, jc), ldc);
             } else {
-                ygemm_serial(CN, NN, &jc, &jb, &K, &alpha_c,
-                             &A_(0, 0), &lda, &A_(0, jc), &lda,
-                             &cone, &C_(0, jc), &ldc, 1, 1);
+                ygemm_serial('C', 'N', jc, jb, K, &alpha_c,
+                             &A_(0, 0), lda, &A_(0, jc), lda,
+                             &cone, &C_(0, jc), ldc);
             }
         }
     }
 }
 
 void yherk_serial(
-    const char *uplo, const char *trans,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const TR *alpha_,
-    const TC *a, const ptrdiff_t *lda_,
+    const TC *a, ptrdiff_t lda,
     const TR *beta_,
-    TC *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len)
+    TC *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
     const TR alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    const char TR_c = (char)toupper((unsigned char)*trans);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char TR_c = (char)toupper((unsigned char)trans);
 
     if (N == 0) return;
 

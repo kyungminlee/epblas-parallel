@@ -21,6 +21,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 /* RECALIBRATED 2026-06-07 (was 64): stale libgomp-era break-even; iomp5 hot-team
  * reuse lets this dense complex fp80 matvec thread from N=32 (matching its sibling
@@ -32,8 +33,8 @@
 
 typedef _Complex long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 static inline T cconj(T z) { return ~z; }
@@ -43,19 +44,17 @@ static const T ONE  = 1.0L + 0.0Li;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void ygemv_(
-    const char *trans,
-    const int *m_, const int *n_,
+/* External linkage: ytrsv calls ygemv_core directly (the §1.3 cross-call
+ * retarget) so the trailing GEMV bypasses the by-ref facade. */
+void ygemv_core(
+    char trans,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict x, const int *incx_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict x, ptrdiff_t incx,
     const T *beta_,
-    T *restrict y, const int *incy_,
-    size_t trans_len)
+    T *restrict y, ptrdiff_t incy)
 {
-    (void)trans_len;
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const char TR = up(trans);
 
@@ -287,5 +286,7 @@ void ygemv_(
         }
     }
 }
+
+EPBLAS_FACADE_GEMV(ygemv, T)
 
 #undef A_

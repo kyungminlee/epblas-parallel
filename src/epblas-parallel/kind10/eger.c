@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdlib.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -44,15 +45,13 @@ static void eger_col_unit(ptrdiff_t M, T t, const T *restrict x, T *restrict aj)
     }
 }
 
-void eger_(
-    const int *m_, const int *n_,
+static void eger_core(
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *restrict x, const int *incx_,
-    const T *restrict y, const int *incy_,
-    T *restrict a, const int *lda_)
+    const T *restrict x, ptrdiff_t incx,
+    const T *restrict y, ptrdiff_t incy,
+    T *restrict a, ptrdiff_t lda)
 {
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
     const T zero = 0.0L;
 
@@ -138,5 +137,7 @@ void eger_(
         free(x_buf);
     }
 }
+
+EPBLAS_FACADE_GER(eger, T)
 
 #undef A_

@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -22,15 +23,13 @@ static const T ZERO = 0.0L + 0.0Li;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void ygeru_(
-    const int *m_, const int *n_,
+static void ygeru_core(
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *restrict x, const int *incx_,
-    const T *restrict y, const int *incy_,
-    T *restrict a, const int *lda_)
+    const T *restrict x, ptrdiff_t incx,
+    const T *restrict y, ptrdiff_t incy,
+    T *restrict a, ptrdiff_t lda)
 {
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t incx = *incx_, incy = *incy_, lda = *lda_;
     const T alpha = *alpha_;
 
     if (M == 0 || N == 0 || alpha == ZERO) return;
@@ -96,5 +95,7 @@ void ygeru_(
 #undef YGERU_STRIDED_BODY
     }
 }
+
+EPBLAS_FACADE_GER(ygeru, T)
 
 #undef A_

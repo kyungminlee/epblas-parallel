@@ -3,6 +3,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 /* erot — kind10 real Givens rotation. */
 typedef long double T;
 
@@ -65,10 +66,9 @@ static int erot_omp(ptrdiff_t n, T c, T s, T *x, T *y)
 }
 #endif
 
-void erot_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
-           const T *c_, const T *s_)
+static void erot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
+                      const T *c_, const T *s_)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T c = *c_, s = *s_;
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
@@ -87,3 +87,5 @@ void erot_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
         }
     }
 }
+
+EPBLAS_FACADE_ROT(erot, T, T)

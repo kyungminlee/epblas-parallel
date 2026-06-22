@@ -27,6 +27,7 @@
 
 #include <stddef.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <stdlib.h>
 #include <omp.h>
@@ -36,8 +37,8 @@
 typedef _Complex long double T;
 static inline T cconj(T z) { return ~z; }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
@@ -69,16 +70,12 @@ static ptrdiff_t ytbmv_omp(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t conj, ptr
                      const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
 #endif
 
-void ytbmv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_, const int *k_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+static void ytbmv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N, ptrdiff_t K,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = up(uplo);
     const char TR = up(trans);
     const ptrdiff_t noconj = (TR == 'T');
@@ -312,5 +309,7 @@ __attribute__((noinline)) static ptrdiff_t ytbmv_omp(
     return 1;
 }
 #endif /* _OPENMP */
+
+EPBLAS_FACADE_TBMV(ytbmv, T)
 
 #undef A_

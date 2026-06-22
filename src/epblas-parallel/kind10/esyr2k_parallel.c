@@ -25,6 +25,7 @@
  */
 
 #include "esyr2k_kernel.h"
+#include "../common/epblas_facade.h"
 #include "esyrk_kernel.h"   /* esyrk_beta_{u,l} — shared triangular β pre-pass */
 #include "etri_kernel.h"
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_round_up */
@@ -40,36 +41,30 @@ typedef esyr2k_T T;
 #define MR ESYR2K_MR
 #define NR ESYR2K_NR
 
-void esyr2k_(
-    const char *uplo_p, const char *trans_p,
-    const int *n_, const int *k_,
+static void esyr2k_core(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const int *lda_,
-    const T *b, const int *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
-        esyr2k_serial(uplo_p, trans_p, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt,
-                      beta_, c, &ldc_pt, uplo_len, trans_len);
+        esyr2k_serial(uplo, trans, N, K, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
-    const ptrdiff_t uplo  = (char)toupper((unsigned char)*uplo_p);
-    const ptrdiff_t trans = (char)toupper((unsigned char)*trans_p);
+    const char UPLO  = (char)toupper((unsigned char)uplo);
+    const char TRANS = (char)toupper((unsigned char)trans);
 
     if (N <= 0) return;
 
     /* Triangular beta pre-pass on the UPLO triangle of C only. */
-    if (uplo == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+    if (UPLO == 'U') esyrk_beta_u((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
     else             esyrk_beta_l((ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
     if (K == 0 || alpha == 0.0L) return;
@@ -128,8 +123,8 @@ void esyr2k_(
                 const ptrdiff_t jb = (N - js < NC) ? (N - js) : NC;
 
                 /* UPLO clip of this thread's [m_lo, m_hi] for this js-band. */
-                ptrdiff_t m_lo_eff = (uplo == 'L' && m_lo < js) ? js : m_lo;
-                ptrdiff_t m_hi_eff = (uplo == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                ptrdiff_t m_lo_eff = (UPLO == 'L' && m_lo < js) ? js : m_lo;
+                ptrdiff_t m_hi_eff = (UPLO == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
                 if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
                 if (m_lo_eff < m_lo) m_lo_eff = m_lo;
 
@@ -142,7 +137,7 @@ void esyr2k_(
                     #pragma omp single
 #endif
                     {
-                        if (trans == 'N') {
+                        if (TRANS == 'N') {
                             etri_tcopy(pb, jb, &a[(size_t)ls * lda + js], lda, Bp_A);
                             etri_tcopy(pb, jb, &b[(size_t)ls * ldb + js], ldb, Bp_B);
                         } else {
@@ -155,7 +150,7 @@ void esyr2k_(
                     for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
                         const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
-                        if (trans == 'N') {
+                        if (TRANS == 'N') {
                             etri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap_A);
                             etri_tcopy(pb, min_i, &b[(size_t)ls * ldb + is], ldb, Ap_B);
                         } else {
@@ -167,13 +162,13 @@ void esyr2k_(
                         const ptrdiff_t off = (ptrdiff_t)(is - js);
 
                         /* Pass 1: alpha·A·B^T + symmetric diagonal merge. */
-                        if (uplo == 'U')
+                        if (UPLO == 'U')
                             esyr2k_kernel_u(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
                         else
                             esyr2k_kernel_l(min_i, jb, pb, alpha, Ap_A, Bp_B, cij, ldc, off, 1);
 
                         /* Pass 2: alpha·B·A^T into the off-diagonal strips. */
-                        if (uplo == 'U')
+                        if (UPLO == 'U')
                             esyr2k_kernel_u(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);
                         else
                             esyr2k_kernel_l(min_i, jb, pb, alpha, Ap_B, Bp_A, cij, ldc, off, 0);
@@ -190,3 +185,5 @@ void esyr2k_(
     free(Bp_A);
     free(Bp_B);
 }
+
+EPBLAS_FACADE_SYR2K(esyr2k, T, T, T)

@@ -26,6 +26,7 @@
 #endif
 
 #include "ytrmm_kernel.h"
+#include "../common/epblas_facade.h"
 
 typedef ytrmm_T T;
 
@@ -172,32 +173,26 @@ YTRMM_OMP_WRAP_R_TC(ytrmm_rut, ytrmm_ruTC_core, 0)
 YTRMM_OMP_WRAP_R_TC(ytrmm_rlc, ytrmm_rlTC_core, 1)
 YTRMM_OMP_WRAP_R_TC(ytrmm_ruc, ytrmm_ruTC_core, 1)
 
-void ytrmm_(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const int *m_, const int *n_,
+static void ytrmm_core(
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    const T *a, ptrdiff_t lda,
+    T *b, ptrdiff_t ldb)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        const ptrdiff_t m_pt = *m_, n_pt = *n_, lda_pt = *lda_, ldb_pt = *ldb_;
-        ytrmm_serial(side, uplo, transa, diag, &m_pt, &n_pt, alpha_, a, &lda_pt,
-                     b, &ldb_pt, side_len, uplo_len, transa_len, diag_len);
+        ytrmm_serial(side, uplo, transa, diag, M, N, alpha_, a, lda, b, ldb);
         return;
     }
 #endif
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
-    const char SIDE = up(side);
-    const char UPLO = up(uplo);
-    const char TR = up(transa);
-    const ptrdiff_t nounit = (up(diag) != 'U');
+    const char SIDE = up(&side);
+    const char UPLO = up(&uplo);
+    const char TR = up(&transa);
+    const ptrdiff_t nounit = (up(&diag) != 'U');
 
     if (M == 0 || N == 0) return;
 
@@ -265,5 +260,7 @@ void ytrmm_(
         }
     }
 }
+
+EPBLAS_FACADE_TRMM(ytrmm, T)
 
 #undef B_

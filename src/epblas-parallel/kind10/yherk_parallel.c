@@ -22,37 +22,32 @@
 #endif
 
 #include "yherk_kernel.h"
+#include "../common/epblas_facade.h"
 
 typedef yherk_TC TC;
 typedef yherk_TR TR;
 
 #define YHERK_OMP_MIN 32
 
-void yherk_(
-    const char *uplo, const char *trans,
-    const int *n_, const int *k_,
+static void yherk_core(
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const TR *alpha_,
-    const TC *restrict a, const int *lda_,
+    const TC *restrict a, ptrdiff_t lda,
     const TR *beta_,
-    TC *restrict c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    TC *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldc_pt = *ldc_;
-        yherk_serial(uplo, trans, &n_pt, &k_pt, alpha_, a, &lda_pt, beta_, c, &ldc_pt,
-                     uplo_len, trans_len);
+        yherk_serial(uplo, trans, N, K, alpha_, a, lda, beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
     const TR alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ldc = *ldc_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    const char TR_c = (char)toupper((unsigned char)*trans);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char TR_c = (char)toupper((unsigned char)trans);
 
     const TR rzero = 0.0L, rone = 1.0L;
 
@@ -73,7 +68,6 @@ void yherk_(
     }
 
     const ptrdiff_t nb = yherk_nb();
-    const ptrdiff_t lda = *lda_;
 
     ptrdiff_t pw = nb;
 #ifdef _OPENMP
@@ -90,3 +84,5 @@ void yherk_(
         yherk_block(jc, jb, N, K, alpha, beta, a, lda, c, ldc, UPLO, TR_c);
     }
 }
+
+EPBLAS_FACADE_SYRK(yherk, TR, TC)

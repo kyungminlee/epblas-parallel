@@ -38,6 +38,7 @@
 
 #include <stddef.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <stdlib.h>
 #include <omp.h>
@@ -46,8 +47,8 @@
 
 typedef long double T;
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
@@ -78,19 +79,15 @@ static ptrdiff_t esbmv_omp(ptrdiff_t upper, ptrdiff_t n, ptrdiff_t k,
                      T alpha, T *restrict y, ptrdiff_t incy);
 #endif
 
-void esbmv_(
-    const char *uplo,
-    const int *n_, const int *k_,
+static void esbmv_core(
+    char uplo,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *restrict a, const int *lda_,
-    const T *restrict x, const int *incx_,
+    const T *restrict a, ptrdiff_t lda,
+    const T *restrict x, ptrdiff_t incx,
     const T *beta_,
-    T *restrict y, const int *incy_,
-    size_t uplo_len)
+    T *restrict y, ptrdiff_t incy)
 {
-    (void)uplo_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, incx = *incx_, incy = *incy_;
     const T alpha = *alpha_, beta = *beta_;
     const T zero = 0.0L, one = 1.0L;
     const char UPLO = up(uplo);
@@ -257,5 +254,7 @@ __attribute__((noinline)) static ptrdiff_t esbmv_omp(
     return 1;
 }
 #endif /* _OPENMP */
+
+EPBLAS_FACADE_SBMV(esbmv, T)
 
 #undef A_

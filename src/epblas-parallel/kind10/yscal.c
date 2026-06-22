@@ -13,6 +13,7 @@
  * order, the inner loop is 15 insns per element with 2 fxch; this
  * form is 14 insns with 1 fxch — matches gfortran's ZSCAL codegen.
  */
+#include "../common/epblas_facade.h"
 typedef _Complex long double T;
 
 /* Unit-stride kernel over the (re,im)-pair view, shared by serial + OMP slices.
@@ -70,9 +71,8 @@ static int yscal_omp(ptrdiff_t n, long double ar, long double ai, long double *b
 }
 #endif
 
-void yscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
+static void yscal_core(ptrdiff_t n, const T *alpha_, T *x, ptrdiff_t incx)
 {
-    const ptrdiff_t n = *n_, incx = *incx_;
     if (n <= 0) return;
     const long double ar = __real__ *alpha_;
     const long double ai = __imag__ *alpha_;
@@ -93,3 +93,5 @@ void yscal_(const int *n_, const T *alpha_, T *x, const int *incx_)
         }
     }
 }
+
+EPBLAS_FACADE_SCAL(yscal, T, T)

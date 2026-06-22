@@ -21,37 +21,32 @@
 #endif
 
 #include "ygemmtr_kernel.h"
+#include "../common/epblas_facade.h"
 
 typedef ygemmtr_T T;
 
 #define YGEMMTR_OMP_MIN 32
 
-void ygemmtr_(const char *uplo, const char *transa, const char *transb,
-              const int *n_, const int *k_,
+static void ygemmtr_core(char uplo, char transa, char transb,
+              ptrdiff_t N, ptrdiff_t K,
               const T *alpha_,
-              const T *a, const int *lda_,
-              const T *b, const int *ldb_,
+              const T *a, ptrdiff_t lda,
+              const T *b, ptrdiff_t ldb,
               const T *beta_,
-              T *c, const int *ldc_,
-              size_t uplo_len, size_t ta_len, size_t tb_len)
+              T *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
      * serial, opening no team of our own (the libgomp wedge guard). */
     if (omp_in_parallel()) {
-        const ptrdiff_t n_pt = *n_, k_pt = *k_, lda_pt = *lda_, ldb_pt = *ldb_, ldc_pt = *ldc_;
-        ygemmtr_serial(uplo, transa, transb, &n_pt, &k_pt, alpha_, a, &lda_pt, b, &ldb_pt,
-                       beta_, c, &ldc_pt, uplo_len, ta_len, tb_len);
+        ygemmtr_serial(uplo, transa, transb, N, K, alpha_, a, lda, b, ldb, beta_, c, ldc);
         return;
     }
 #endif
-    (void)uplo_len; (void)ta_len; (void)tb_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t upper = ((char)toupper((unsigned char)*uplo) == 'U');
-    const ptrdiff_t ta = (char)toupper((unsigned char)*transa);
-    const ptrdiff_t tb = (char)toupper((unsigned char)*transb);
+    const ptrdiff_t upper = ((char)toupper((unsigned char)uplo) == 'U');
+    const ptrdiff_t ta = (char)toupper((unsigned char)transa);
+    const ptrdiff_t tb = (char)toupper((unsigned char)transb);
 
     if (N <= 0) return;
     const T zero = 0.0L + 0.0iL;
@@ -81,3 +76,5 @@ void ygemmtr_(const char *uplo, const char *transa, const char *transb,
         ygemmtr_col(j, N, K, upper, alpha, beta, a, lda, b, ldb, c, ldc,
                     trans_a, conj_a, trans_b, conj_b);
 }
+
+EPBLAS_FACADE_GEMMTR(ygemmtr, T)

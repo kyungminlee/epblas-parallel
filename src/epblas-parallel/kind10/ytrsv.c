@@ -33,6 +33,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "../common/epblas_facade.h"
 
 typedef _Complex long double T;
 static const T ZERO = 0.0L + 0.0Li;
@@ -64,16 +65,12 @@ void ytrsv_serial_(
     T *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
-void ytrsv_(
-    const char *uplo, const char *trans, const char *diag,
-    const int *n_,
-    const T *restrict a, const int *lda_,
-    T *restrict x, const int *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+void ytrsv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t N,
+    const T *restrict a, ptrdiff_t lda,
+    T *restrict x, ptrdiff_t incx)
 {
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t incx = *incx_;
-
     if (N == 0) return;
 
 #ifdef _OPENMP
@@ -81,17 +78,16 @@ void ytrsv_(
 #else
     const ptrdiff_t in_par = 0;
 #endif
+    const char uplo_c = uplo, trans_c = trans, diag_c = diag;
     if (incx == 1 && N >= 2 * ytrsv_blocked_nb() && !in_par
         && blas_omp_max_threads() > 1) {
-        const ptrdiff_t n_pt = *n_, lda_pt = *lda_, incx_pt = *incx_;
-        ytrsv_blocked_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt,
-                       uplo_len, trans_len, diag_len);
+        ytrsv_blocked_(&uplo_c, &trans_c, &diag_c, &N, a, &lda, x, &incx,
+                       1, 1, 1);
         return;
     }
 
-    const ptrdiff_t n_pt = *n_, lda_pt = *lda_, incx_pt = *incx_;
-    ytrsv_serial_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt,
-                  uplo_len, trans_len, diag_len);
+    ytrsv_serial_(&uplo_c, &trans_c, &diag_c, &N, a, &lda, x, &incx,
+                  1, 1, 1);
 }
 
 void ytrsv_serial_(
@@ -301,15 +297,14 @@ void ytrsv_serial_(
  * entire diagonal walk; two `#pragma omp barrier`s per step.
  */
 
-extern void ygemv_(
-    const char *trans,
-    const ptrdiff_t *m, const ptrdiff_t *n,
+extern void ygemv_core(
+    char trans,
+    ptrdiff_t m, ptrdiff_t n,
     const T *alpha,
-    const T *a, const ptrdiff_t *lda,
-    const T *x, const ptrdiff_t *incx,
+    const T *a, ptrdiff_t lda,
+    const T *x, ptrdiff_t incx,
     const T *beta,
-    T *y, const ptrdiff_t *incy,
-    size_t trans_len);
+    T *y, ptrdiff_t incy);
 
 void ytrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
@@ -374,10 +369,10 @@ void ytrsv_blocked_(
                     ptrdiff_t m_slice = (ptrdiff_t)(hi - lo);
                     if (m_slice > 0) {
                         const ptrdiff_t i_off = j2 + (ptrdiff_t)lo;
-                        ygemv_(NN, &m_slice, &jb, &neg_one,
-                               &A_(i_off, j), lda_,
-                               &x[j], &one_i, &one_v,
-                               &x[i_off], &one_i, 1);
+                        ygemv_core(NN[0], m_slice, jb, &neg_one,
+                                   &A_(i_off, j), *lda_,
+                                   &x[j], one_i, &one_v,
+                                   &x[i_off], one_i);
                     }
                 }
 #ifdef _OPENMP
@@ -402,10 +397,10 @@ void ytrsv_blocked_(
                     ptrdiff_t m_slice = (ptrdiff_t)(hi - lo);
                     if (m_slice > 0) {
                         const ptrdiff_t i_off = (ptrdiff_t)lo;
-                        ygemv_(NN, &m_slice, &jb, &neg_one,
-                               &A_(i_off, j), lda_,
-                               &x[j], &one_i, &one_v,
-                               &x[i_off], &one_i, 1);
+                        ygemv_core(NN[0], m_slice, jb, &neg_one,
+                                   &A_(i_off, j), *lda_,
+                                   &x[j], one_i, &one_v,
+                                   &x[i_off], one_i);
                     }
                 }
 #ifdef _OPENMP
@@ -431,10 +426,10 @@ void ytrsv_blocked_(
                     ptrdiff_t n_slice = (ptrdiff_t)(hi - lo);
                     if (n_slice > 0) {
                         const ptrdiff_t n_off = (ptrdiff_t)lo;
-                        ygemv_(gemv_tr, &jb, &n_slice, &neg_one,
-                               &A_(j, n_off), lda_,
-                               &x[j], &one_i, &one_v,
-                               &x[n_off], &one_i, 1);
+                        ygemv_core(gemv_tr[0], jb, n_slice, &neg_one,
+                                   &A_(j, n_off), *lda_,
+                                   &x[j], one_i, &one_v,
+                                   &x[n_off], one_i);
                     }
                 }
 #ifdef _OPENMP
@@ -462,10 +457,10 @@ void ytrsv_blocked_(
                     ptrdiff_t n_slice = (ptrdiff_t)(hi - lo);
                     if (n_slice > 0) {
                         const ptrdiff_t n_off = j2 + (ptrdiff_t)lo;
-                        ygemv_(gemv_tr, &jb, &n_slice, &neg_one,
-                               &A_(j, n_off), lda_,
-                               &x[j], &one_i, &one_v,
-                               &x[n_off], &one_i, 1);
+                        ygemv_core(gemv_tr[0], jb, n_slice, &neg_one,
+                                   &A_(j, n_off), *lda_,
+                                   &x[j], one_i, &one_v,
+                                   &x[n_off], one_i);
                     }
                 }
 #ifdef _OPENMP
@@ -475,5 +470,7 @@ void ytrsv_blocked_(
         }
     }
 }
+
+EPBLAS_FACADE_TRMV(ytrsv, T)
 
 #undef A_

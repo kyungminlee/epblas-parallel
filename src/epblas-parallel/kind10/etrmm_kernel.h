@@ -75,13 +75,12 @@ void etrmm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
                   const etrmm_T *a, ptrdiff_t lda, etrmm_T *b, ptrdiff_t ldb,
                   etrmm_T *Ap, etrmm_T *Bp);
 
-/* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as etrmm_. */
+/* Pure-serial by-value core (no OpenMP). Same shape as etrmm_core. */
 void etrmm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const etrmm_T *alpha_,
-    const etrmm_T *a, const ptrdiff_t *lda_,
-    etrmm_T *b, const ptrdiff_t *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len);
+    const etrmm_T *a, ptrdiff_t lda,
+    etrmm_T *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ETRMM_KERNEL_H */

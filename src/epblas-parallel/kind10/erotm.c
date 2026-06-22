@@ -10,6 +10,7 @@
  * a fxch — same pattern as yscal (Addendum 17). The flag-unswitched
  * paths each shrink from 14 insns + 2 fxch to 12 insns + 1 fxch in
  * the flag<0 branch. */
+#include "../common/epblas_facade.h"
 typedef long double T;
 
 static inline void step(const T flag, const T h11, const T h12, const T h21, const T h22,
@@ -49,10 +50,9 @@ static int erotm_omp(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y
 }
 #endif
 
-void erotm_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
-            const T *dparam)
+static void erotm_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
+                       const T *dparam)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     const T flag = dparam[0];
     if (n <= 0 || flag == -2.0L) return;
     const T h11 = dparam[1], h21 = dparam[2], h12 = dparam[3], h22 = dparam[4];
@@ -68,3 +68,5 @@ void erotm_(const int *n_, T *x, const int *incx_, T *y, const int *incy_,
                                        ix += incx; iy += incy; }
     }
 }
+
+EPBLAS_FACADE_ROTM(erotm, T)

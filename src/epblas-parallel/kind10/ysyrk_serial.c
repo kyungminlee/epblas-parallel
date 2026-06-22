@@ -20,14 +20,13 @@ typedef ysyrk_T T;
 ptrdiff_t ysyrk_nb(void) { return 32; }
 
 extern void ygemm_serial(
-    const char *transa, const char *transb,
-    const ptrdiff_t *m, const ptrdiff_t *n, const ptrdiff_t *k,
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const T *alpha,
-    const T *a, const ptrdiff_t *lda,
-    const T *b, const ptrdiff_t *ldb,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta,
-    T *c, const ptrdiff_t *ldc,
-    size_t transa_len, size_t transb_len);
+    T *c, ptrdiff_t ldc);
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
@@ -84,9 +83,6 @@ void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t N, T beta,
 void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha, T beta,
                  const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc, char UPLO, char TR)
 {
-    const char NN[1] = {'N'};
-    const char TN[1] = {'T'};
-
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
         const ptrdiff_t i_hi = (UPLO == 'L') ? N : j + 1;
@@ -102,45 +98,41 @@ void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t N, ptrdiff_t K, T alpha, 
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
             if (TR == 'N') {
-                ygemm_serial(NN, TN, &trailing, &jb, &K, &alpha,
-                             &A_(j0, 0), &lda, &A_(jc, 0), &lda,
-                             &ONE, &C_(j0, jc), &ldc, 1, 1);
+                ygemm_serial('N', 'T', trailing, jb, K, &alpha,
+                             &A_(j0, 0), lda, &A_(jc, 0), lda,
+                             &ONE, &C_(j0, jc), ldc);
             } else {
-                ygemm_serial(TN, NN, &trailing, &jb, &K, &alpha,
-                             &A_(0, j0), &lda, &A_(0, jc), &lda,
-                             &ONE, &C_(j0, jc), &ldc, 1, 1);
+                ygemm_serial('T', 'N', trailing, jb, K, &alpha,
+                             &A_(0, j0), lda, &A_(0, jc), lda,
+                             &ONE, &C_(j0, jc), ldc);
             }
         }
     } else {
         if (jc > 0) {
             if (TR == 'N') {
-                ygemm_serial(NN, TN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &A_(jc, 0), &lda,
-                             &ONE, &C_(0, jc), &ldc, 1, 1);
+                ygemm_serial('N', 'T', jc, jb, K, &alpha,
+                             &A_(0, 0), lda, &A_(jc, 0), lda,
+                             &ONE, &C_(0, jc), ldc);
             } else {
-                ygemm_serial(TN, NN, &jc, &jb, &K, &alpha,
-                             &A_(0, 0), &lda, &A_(0, jc), &lda,
-                             &ONE, &C_(0, jc), &ldc, 1, 1);
+                ygemm_serial('T', 'N', jc, jb, K, &alpha,
+                             &A_(0, 0), lda, &A_(0, jc), lda,
+                             &ONE, &C_(0, jc), ldc);
             }
         }
     }
 }
 
 void ysyrk_serial(
-    const char *uplo, const char *trans,
-    const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char uplo, char trans,
+    ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
+    const T *a, ptrdiff_t lda,
     const T *beta_,
-    T *c, const ptrdiff_t *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)trans_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    const char TR   = (char)toupper((unsigned char)*trans);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    const char TR   = (char)toupper((unsigned char)trans);
 
     if (N == 0) return;
 

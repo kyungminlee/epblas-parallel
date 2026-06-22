@@ -265,22 +265,18 @@ void egemmtr_scalar_fallback(ptrdiff_t N, ptrdiff_t K, char UPLO, ptrdiff_t ta, 
 
 /* ─── Serial entry ─────────────────────────────────────────────── */
 
-void egemmtr_serial(const char *uplo, const char *transa, const char *transb,
-                    const ptrdiff_t *n_, const ptrdiff_t *k_,
+void egemmtr_serial(char uplo, char transa, char transb,
+                    ptrdiff_t N, ptrdiff_t K,
                     const T *alpha_,
-                    const T *restrict a, const ptrdiff_t *lda_,
-                    const T *restrict b, const ptrdiff_t *ldb_,
+                    const T *restrict a, ptrdiff_t lda,
+                    const T *restrict b, ptrdiff_t ldb,
                     const T *beta_,
-                    T *restrict c, const ptrdiff_t *ldc_,
-                    size_t uplo_len, size_t ta_len, size_t tb_len)
+                    T *restrict c, ptrdiff_t ldc)
 {
-    (void)uplo_len; (void)ta_len; (void)tb_len;
-    const ptrdiff_t N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const char UPLO = (char)toupper((unsigned char)*uplo);
-    const ptrdiff_t ta = egemmtr_trans_code(transa);
-    const ptrdiff_t tb = egemmtr_trans_code(transb);
+    const char UPLO = (char)toupper((unsigned char)uplo);
+    const ptrdiff_t ta = egemmtr_trans_code(&transa);
+    const ptrdiff_t tb = egemmtr_trans_code(&transb);
 
     if (N <= 0) return;
     const T zero = 0.0L, one = 1.0L;

@@ -499,24 +499,19 @@ void etrsm_R_band(ptrdiff_t upper, ptrdiff_t trans, ptrdiff_t unit,
  * here when called from inside another routine's parallel region.
  */
 void etrsm_serial(
-    const char *side, const char *uplo, const char *transa, const char *diag,
-    const ptrdiff_t *m_, const ptrdiff_t *n_,
+    char side, char uplo, char transa, char diag,
+    ptrdiff_t M, ptrdiff_t N,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
-    T *b, const ptrdiff_t *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    const T *a, ptrdiff_t lda,
+    T *b, ptrdiff_t ldb)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
-
-    const ptrdiff_t M = *m_, N = *n_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_;
     const T alpha = *alpha_;
 
-    const ptrdiff_t lside = (toupper((unsigned char)*side)   == 'L');
-    const ptrdiff_t upper = (toupper((unsigned char)*uplo)   == 'U');
-    const char trc  = (char)toupper((unsigned char)*transa);
+    const ptrdiff_t lside = (toupper((unsigned char)side)   == 'L');
+    const ptrdiff_t upper = (toupper((unsigned char)uplo)   == 'U');
+    const char trc  = (char)toupper((unsigned char)transa);
     const ptrdiff_t trans = (trc == 'T' || trc == 'C');   /* real: 'C' ≡ 'T' */
-    const ptrdiff_t unit  = (toupper((unsigned char)*diag) == 'U');
+    const ptrdiff_t unit  = (toupper((unsigned char)diag) == 'U');
 
     if (M == 0 || N == 0) return;
 

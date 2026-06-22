@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <ctype.h>
+#include "../common/epblas_facade.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -23,23 +24,19 @@ typedef _Complex long double TC;
 typedef long double          TR;
 static inline TC cconj(TC z) { return ~z; }
 
-static inline char up(const char *p) {
-    return (char)toupper((unsigned char)*p);
+static inline char up(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
-void yher_(
-    const char *uplo,
-    const int *n_,
+static void yher_core(
+    char uplo,
+    ptrdiff_t N,
     const TR *alpha_,
-    const TC *restrict x, const int *incx_,
-    TC *restrict a, const int *lda_,
-    size_t uplo_len)
+    const TC *restrict x, ptrdiff_t incx,
+    TC *restrict a, ptrdiff_t lda)
 {
-    (void)uplo_len;
-    const ptrdiff_t N = *n_;
-    const ptrdiff_t incx = *incx_, lda = *lda_;
     const TR alpha = *alpha_;
     const TR rzero = 0.0L;
     const TC czero = 0.0L + 0.0Li;
@@ -107,5 +104,7 @@ void yher_(
         }
     }
 }
+
+EPBLAS_FACADE_SYR(yher, TR, TC)
 
 #undef A_

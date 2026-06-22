@@ -5,6 +5,7 @@
 #include "../common/blas_omp.h"
 #include <stddef.h>
 #endif
+#include "../common/epblas_facade.h"
 typedef _Complex long double T;
 typedef long double R;
 
@@ -55,9 +56,8 @@ __attribute__((noinline)) static ptrdiff_t eyasum_omp(ptrdiff_t n, const T *x, R
 }
 #endif
 
-R eyasum_(const int *n_, const T *x, const int *incx_)
+static R eyasum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
-    const ptrdiff_t n = *n_, incx = *incx_;
     if (n < 1 || incx < 1) return 0.0L;
 #ifdef _OPENMP
     if (incx == 1) {
@@ -67,3 +67,5 @@ R eyasum_(const int *n_, const T *x, const int *incx_)
 #endif
     return eyasum_kernel(n, x, incx);
 }
+
+EPBLAS_FACADE_ASUM(eyasum, R, T)

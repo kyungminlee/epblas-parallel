@@ -7,6 +7,7 @@
 #include "../common/blas_omp.h"
 #include <stddef.h>
 #endif
+#include "../common/epblas_facade.h"
 typedef _Complex long double T;
 
 static T ydotu_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdiff_t incy)
@@ -54,10 +55,9 @@ __attribute__((noinline)) static ptrdiff_t ydotu_omp(ptrdiff_t n, const T *x, co
 }
 #endif
 
-T ydotu_(const int *n_, const T *x, const int *incx_,
-         const T *y, const int *incy_)
+static T ydotu_core(ptrdiff_t n, const T *x, ptrdiff_t incx,
+                    const T *y, ptrdiff_t incy)
 {
-    const ptrdiff_t n = *n_, incx = *incx_, incy = *incy_;
     if (n <= 0) return (T)0.0L;
 #ifdef _OPENMP
     if (incx == 1 && incy == 1) {
@@ -67,3 +67,5 @@ T ydotu_(const int *n_, const T *x, const int *incx_,
 #endif
     return ydotu_kernel(n, x, incx, y, incy);
 }
+
+EPBLAS_FACADE_DOT(ydotu, T, T)

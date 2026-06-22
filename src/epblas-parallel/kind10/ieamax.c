@@ -5,6 +5,7 @@
 #include "../common/blas_omp.h"
 #include <stddef.h>
 #endif
+#include "../common/epblas_facade.h"
 typedef long double T;
 
 /* Scan a contiguous unit-stride range [0,n); return the 0-based index of the
@@ -60,9 +61,8 @@ __attribute__((noinline)) static ptrdiff_t ieamax_omp(ptrdiff_t n, const T *x, p
 }
 #endif
 
-int ieamax_(const int *n_, const T *x, const int *incx_)
+static ptrdiff_t ieamax_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
-    const ptrdiff_t n = *n_, incx = *incx_;
     if (n < 1 || incx <= 0) return 0;
     if (n == 1) return 1;
 #ifdef _OPENMP
@@ -75,3 +75,5 @@ int ieamax_(const int *n_, const T *x, const int *incx_)
     for (ptrdiff_t i = 2; i <= n; ++i) { T v = fabsl(x[ix]); if (v > bv) { bv = v; best = i; } ix += incx; }
     return best;
 }
+
+EPBLAS_FACADE_IAMAX(ieamax, T)

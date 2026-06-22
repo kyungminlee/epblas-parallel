@@ -33,9 +33,8 @@ typedef ygemm_T T;
 static const T zero = 0.0L + 0.0iL;
 static const T one  = 1.0L + 0.0iL;
 
-static ptrdiff_t trans_code(const char *p, size_t len) {
-    (void)len;
-    return (char)toupper((unsigned char)*p);
+static ptrdiff_t trans_code(char c) {
+    return (char)toupper((unsigned char)c);
 }
 
 /* ── beta pre-pass ────────────────────────────────────────────── */
@@ -182,20 +181,17 @@ void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t M, ptrdiff_t K,
 /* ── Single-thread entry ──────────────────────────────────────── */
 
 void ygemm_serial(
-    const char *transa, const char *transb,
-    const ptrdiff_t *m_, const ptrdiff_t *n_, const ptrdiff_t *k_,
+    char transa, char transb,
+    ptrdiff_t M, ptrdiff_t N, ptrdiff_t K,
     const T *alpha_,
-    const T *a, const ptrdiff_t *lda_,
-    const T *b, const ptrdiff_t *ldb_,
+    const T *a, ptrdiff_t lda,
+    const T *b, ptrdiff_t ldb,
     const T *beta_,
-    T *c, const ptrdiff_t *ldc_,
-    size_t transa_len, size_t transb_len)
+    T *c, ptrdiff_t ldc)
 {
-    const ptrdiff_t M = *m_, N = *n_, K = *k_;
-    const ptrdiff_t lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const ptrdiff_t ta = trans_code(transa, transa_len);
-    const ptrdiff_t tb = trans_code(transb, transb_len);
+    const ptrdiff_t ta = trans_code(transa);
+    const ptrdiff_t tb = trans_code(transb);
 
     if (M <= 0 || N <= 0) return;
 
