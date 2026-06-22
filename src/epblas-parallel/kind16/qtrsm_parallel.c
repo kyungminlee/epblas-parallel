@@ -103,9 +103,9 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
                               && !omp_in_parallel()) {                      \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                            \
-                ptrdiff_t nt  = omp_get_num_threads();                           \
-                ptrdiff_t js  = blas_part_bound(N, tid, nt);               \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);           \
+                ptrdiff_t nth  = omp_get_num_threads();                           \
+                ptrdiff_t js  = blas_part_bound(N, tid, nth);               \
+                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);           \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit);            \
             }                                                              \
         } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }           \
@@ -118,9 +118,9 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t M) {
                               && !omp_in_parallel()) {                      \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                            \
-                ptrdiff_t nt  = omp_get_num_threads();                           \
-                ptrdiff_t is  = blas_part_bound(M, tid, nt);               \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);           \
+                ptrdiff_t nth  = omp_get_num_threads();                           \
+                ptrdiff_t is  = blas_part_bound(M, tid, nth);               \
+                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);           \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit);            \
             }                                                              \
         } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }           \
@@ -272,12 +272,12 @@ static void qtrsm_blocked_core(
     #pragma omp parallel if(use_omp)
 #endif
     {
-        ptrdiff_t tid = 0, nt = 1;
+        ptrdiff_t tid = 0, nth = 1;
 #ifdef _OPENMP
-        if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
+        if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
-        const ptrdiff_t j_lo = blas_part_bound(N, tid, nt);
-        const ptrdiff_t j_hi = blas_part_bound(N, tid + 1, nt);
+        const ptrdiff_t j_lo = blas_part_bound(N, tid, nth);
+        const ptrdiff_t j_hi = blas_part_bound(N, tid + 1, nth);
         const ptrdiff_t n_slice = j_hi - j_lo;
 
         if (n_slice > 0) {

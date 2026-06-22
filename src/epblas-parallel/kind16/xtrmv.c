@@ -40,16 +40,16 @@ __attribute__((noinline))
 static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdiff_t N, ptrdiff_t lda,
                      const T *restrict a, T *restrict x)
 {
-    const ptrdiff_t nt = blas_omp_max_threads();
+    const ptrdiff_t nthreads = blas_omp_max_threads();
     if (N < XTRMV_OMP_MIN || !blas_omp_should_thread()) return 0;
     const T zero = 0.0Q + 0.0Qi;
     const T one  = 1.0Q + 0.0Qi;
 
     if (!trans_t) {
         /* TR='N': per-thread y_priv + reduction (cross-thread overlapping writes). */
-        T *y_priv_all = (T *)calloc((size_t)nt * (size_t)N, sizeof(T));
+        T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)N, sizeof(T));
         if (!y_priv_all) return 0;
-        #pragma omp parallel num_threads(nt)
+        #pragma omp parallel num_threads(nthreads)
         {
             const ptrdiff_t tid = omp_get_thread_num();
             T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
@@ -73,7 +73,7 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
             #pragma omp for schedule(static)
             for (ptrdiff_t i = 0; i < N; ++i) {
                 T s = zero;
-                for (ptrdiff_t t = 0; t < nt; ++t) s += y_priv_all[(size_t)t * N + i];
+                for (ptrdiff_t t = 0; t < nthreads; ++t) s += y_priv_all[(size_t)t * N + i];
                 x[i] = s;
             }
         }
@@ -83,7 +83,7 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
         /* TR='T'/'C': each j writes its own output slot. */
         T *y_buf = (T *)malloc((size_t)N * sizeof(T));
         if (!y_buf) return 0;
-        #pragma omp parallel num_threads(nt)
+        #pragma omp parallel num_threads(nthreads)
         {
             if (!upper) {
                 #pragma omp for schedule(static, 1)

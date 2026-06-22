@@ -131,14 +131,14 @@ static void wgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
     const bool use_omp = (M >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel if(use_omp)
     {
-        std::ptrdiff_t tid = 0, nt = 1;
-        if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
+        std::ptrdiff_t tid = 0, nth = 1;
+        if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
         /* Disjoint row slices, boundaries floored to a multiple of 4 so the
          * vector blocks stay within one thread; the last thread owns the tail. */
-        const std::ptrdiff_t i_lo = blas_part_bound(M, tid, nt) & ~static_cast<std::ptrdiff_t>(3);
-        const std::ptrdiff_t i_hi = (tid == nt - 1)
+        const std::ptrdiff_t i_lo = blas_part_bound(M, tid, nth) & ~static_cast<std::ptrdiff_t>(3);
+        const std::ptrdiff_t i_hi = (tid == nth - 1)
             ? M
-            : (blas_part_bound(M, tid + 1, nt) & ~static_cast<std::ptrdiff_t>(3));
+            : (blas_part_bound(M, tid + 1, nth) & ~static_cast<std::ptrdiff_t>(3));
         wgemv_n_simd_rows(i_lo, i_hi, N, alpha, a, lda, x,
                           y_rh, y_rl, y_ih, y_il);
     }
@@ -155,10 +155,10 @@ static void wgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
     const bool use_omp = (M >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel if(use_omp)
     {
-        std::ptrdiff_t tid = 0, nt = 1;
-        if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
-        const std::ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
-        const std::ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
+        std::ptrdiff_t tid = 0, nth = 1;
+        if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
+        const std::ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
+        const std::ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
         for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (!ceq0(xj)) {

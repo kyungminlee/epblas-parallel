@@ -70,12 +70,12 @@ static void msyrk_core(
 
     std::ptrdiff_t pw = nb;
 #ifdef _OPENMP
-    const std::ptrdiff_t nt = blas_omp_max_threads();
-    const bool use_omp = (N >= MSYRK_OMP_MIN && nt > 1);
-    /* Shrink the block step so the team gets ~2·nt panels at small N
+    const std::ptrdiff_t nthreads = blas_omp_max_threads();
+    const bool use_omp = (N >= MSYRK_OMP_MIN && nthreads > 1);
+    /* Shrink the block step so the team gets ~2·nthreads panels at small N
      * (N=64, nb=32 -> 2 blocks -> idle threads). Triangular C output makes the
      * per-block work uneven, so oversubscribe for dynamic balance -> ppt=2. */
-    if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(N, nt, nb, 2);
+    if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(N, nthreads, nb, 2);
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
     for (std::ptrdiff_t jc = 0; jc < N; jc += pw) {

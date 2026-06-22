@@ -40,12 +40,12 @@ static inline T cconj(T z) { return ~z; }
  * falls back to serial). */
 static bool ytrmv_omp_contig(char UPLO, char TR, bool nounit,
                             ptrdiff_t N, const T *restrict a, ptrdiff_t lda,
-                            T *restrict x, ptrdiff_t nt)
+                            T *restrict x, ptrdiff_t nthreads)
 {
     if (TR == 'N') {
-        T *y_priv_all = (T *)calloc((size_t)nt * (size_t)N, sizeof(T));
+        T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)N, sizeof(T));
         if (!y_priv_all) return 0;
-        #pragma omp parallel num_threads(nt)
+        #pragma omp parallel num_threads(nthreads)
         {
             const ptrdiff_t tid = omp_get_thread_num();
             T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
@@ -72,7 +72,7 @@ static bool ytrmv_omp_contig(char UPLO, char TR, bool nounit,
             #pragma omp for schedule(static)
             for (ptrdiff_t i = 0; i < N; ++i) {
                 T s = ZERO;
-                for (ptrdiff_t t = 0; t < nt; ++t)
+                for (ptrdiff_t t = 0; t < nthreads; ++t)
                     s += y_priv_all[(size_t)t * N + i];
                 x[i] = s;
             }
@@ -137,9 +137,9 @@ static void ytrmv_core(
 
     if (incx == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t nt = blas_omp_max_threads();
+        const ptrdiff_t nthreads = blas_omp_max_threads();
         if (N >= YTRMV_OMP_MIN && blas_omp_should_thread()
-            && ytrmv_omp_contig(UPLO, TR, nounit, N, a, lda, x, nt))
+            && ytrmv_omp_contig(UPLO, TR, nounit, N, a, lda, x, nthreads))
             return;
 #endif
         if (TR == 'N') {
@@ -201,12 +201,12 @@ static void ytrmv_core(
          * driving the shared OMP core, and scattering back — so the threading
          * lives in one place and the serial strided code below stays
          * byte-for-byte unchanged. */
-        const ptrdiff_t ntS = blas_omp_max_threads();
+        const ptrdiff_t nthreads = blas_omp_max_threads();
         if (N >= YTRMV_OMP_MIN && blas_omp_should_thread()) {
             T *xc = (T *)malloc((size_t)N * sizeof(T));
             if (xc) {
                 for (ptrdiff_t i = 0; i < N; ++i) xc[i] = x[kx + i * incx];
-                if (ytrmv_omp_contig(UPLO, TR, nounit, N, a, lda, xc, ntS)) {
+                if (ytrmv_omp_contig(UPLO, TR, nounit, N, a, lda, xc, nthreads)) {
                     for (ptrdiff_t i = 0; i < N; ++i) x[kx + i * incx] = xc[i];
                     free(xc);
                     return;

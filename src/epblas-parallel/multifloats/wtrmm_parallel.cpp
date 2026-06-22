@@ -73,9 +73,9 @@ static void wtrmm_core(
             #pragma omp parallel
             {
                 std::ptrdiff_t tid = omp_get_thread_num();
-                std::ptrdiff_t nt  = omp_get_num_threads();
-                std::ptrdiff_t js  = blas_part_bound(N, tid, nt);
-                std::ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);
+                std::ptrdiff_t nth  = omp_get_num_threads();
+                std::ptrdiff_t js  = blas_part_bound(N, tid, nth);
+                std::ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);
                 wtrmm_L_slice(UPLO, TR, use_blocked, js, je, M, nb, alpha,
                               a, lda, b, ldb, nounit);
             }
@@ -94,14 +94,14 @@ static void wtrmm_core(
         #pragma omp parallel if(use_omp)
 #endif
         {
-            std::ptrdiff_t tid = 0, nt = 1;
+            std::ptrdiff_t tid = 0, nth = 1;
 #ifdef _OPENMP
-            if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
+            if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
-            std::ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
-            std::ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
+            std::ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
+            std::ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
             if (tid > 0)      i_lo &= ~3;
-            if (tid < nt - 1) i_hi &= ~3;
+            if (tid < nth - 1) i_hi &= ~3;
             wtrmm_R_slice(UPLO, TR, use_blocked, i_lo, i_hi, N, nb, alpha,
                           a, lda, b, ldb, nounit);
         }

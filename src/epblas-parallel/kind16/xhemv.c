@@ -49,14 +49,14 @@ void xhemv_core(
 
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
-        const ptrdiff_t nt = blas_omp_max_threads();
+        const ptrdiff_t nthreads = blas_omp_max_threads();
         if (N >= XHEMV_OMP_MIN && blas_omp_should_thread()) {
             /* Parallel column-walk with per-thread private y, then reduce
              * (same pattern as qsymv; Hermitian conjugation stays inside the
              * column loop unchanged). Faithful port of kind10 yhemv. */
-            T *y_priv_all = (T *)calloc((size_t)nt * (size_t)N, sizeof(T));
+            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)N, sizeof(T));
             if (y_priv_all) {
-                #pragma omp parallel num_threads(nt)
+                #pragma omp parallel num_threads(nthreads)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
@@ -90,7 +90,7 @@ void xhemv_core(
                     #pragma omp for schedule(static)
                     for (ptrdiff_t i = 0; i < N; ++i) {
                         T s = zero;
-                        for (ptrdiff_t t = 0; t < nt; ++t)
+                        for (ptrdiff_t t = 0; t < nthreads; ++t)
                             s += y_priv_all[(size_t)t * N + i];
                         y[i] += s;
                     }

@@ -71,12 +71,12 @@ static void ysyr2k_core(
 
     ptrdiff_t pw = nb;
 #ifdef _OPENMP
-    const ptrdiff_t nt = blas_omp_max_threads();
-    const bool use_omp = (N >= YSYR2K_OMP_MIN && nt > 1);
+    const ptrdiff_t nthreads = blas_omp_max_threads();
+    const bool use_omp = (N >= YSYR2K_OMP_MIN && nthreads > 1);
     /* Thin the diagonal blocks so the team can balance the triangular
      * per-block load at small N (N=64, nb=32 -> 2 blocks -> at most 2x);
      * triangular + schedule(dynamic) -> ppt=2 for finer balance. */
-    if (use_omp) pw = blas_omp_panel_width(N, nt, nb, 2);
+    if (use_omp) pw = blas_omp_panel_width(N, nthreads, nb, 2);
     #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
     for (ptrdiff_t jc = 0; jc < N; jc += pw) {

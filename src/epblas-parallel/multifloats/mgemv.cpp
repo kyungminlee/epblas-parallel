@@ -65,11 +65,11 @@ using simd_exact::load_dd4;
 static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T *a, std::size_t lda,
                            const T *x, T *y)
 {
-    std::ptrdiff_t nt = 1;
+    std::ptrdiff_t nthreads = 1;
 #ifdef _OPENMP
     if (M >= MGEMV_OMP_MIN && blas_omp_should_thread()) {
-        nt = blas_omp_max_threads();
-        if (nt > MGEMV_MAX_CPUS) nt = MGEMV_MAX_CPUS;
+        nthreads = blas_omp_max_threads();
+        if (nthreads > MGEMV_MAX_CPUS) nthreads = MGEMV_MAX_CPUS;
     }
 #endif
 #ifdef MBLAS_SIMD_DD
@@ -79,15 +79,15 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
     for (std::ptrdiff_t i = 0; i < M; ++i) { y_hi[i] = y[i].limbs[0]; y_lo[i] = y[i].limbs[1]; }
     for (std::size_t i = static_cast<std::size_t>(M); i < M_pad; ++i) { y_hi[i] = 0.0; y_lo[i] = 0.0; }
 #ifdef _OPENMP
-    #pragma omp parallel num_threads(nt)
+    #pragma omp parallel num_threads(nthreads)
 #endif
     {
         std::ptrdiff_t tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const std::ptrdiff_t lo = blas_part_bound(M, tid, nt);
-        const std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nt);
+        const std::ptrdiff_t lo = blas_part_bound(M, tid, nthreads);
+        const std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nthreads);
         for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;
@@ -119,15 +119,15 @@ static void mgemv_n_contig(std::ptrdiff_t M, std::ptrdiff_t N, T alpha, const T 
     std::free(y_hi); std::free(y_lo);
 #else
 #ifdef _OPENMP
-    #pragma omp parallel num_threads(nt)
+    #pragma omp parallel num_threads(nthreads)
 #endif
     {
         std::ptrdiff_t tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
 #endif
-        const std::ptrdiff_t lo = blas_part_bound(M, tid, nt);
-        const std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nt);
+        const std::ptrdiff_t lo = blas_part_bound(M, tid, nthreads);
+        const std::ptrdiff_t hi = blas_part_bound(M, tid + 1, nthreads);
         for (std::ptrdiff_t j = 0; j < N; ++j) {
             const T xj = x[j];
             if (eq0(xj)) continue;

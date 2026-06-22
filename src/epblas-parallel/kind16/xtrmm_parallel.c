@@ -49,9 +49,9 @@ static const T ZERO = 0.0Q + 0.0Qi;
         if (N >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
-                ptrdiff_t nt  = omp_get_num_threads();                            \
-                ptrdiff_t js  = blas_part_bound(N, tid, nt);                   \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);             \
+                ptrdiff_t nth  = omp_get_num_threads();                            \
+                ptrdiff_t js  = blas_part_bound(N, tid, nth);                   \
+                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);             \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
         } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }            \
@@ -62,9 +62,9 @@ static const T ZERO = 0.0Q + 0.0Qi;
         if (N >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
-                ptrdiff_t nt  = omp_get_num_threads();                            \
-                ptrdiff_t js  = blas_part_bound(N, tid, nt);                   \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);             \
+                ptrdiff_t nth  = omp_get_num_threads();                            \
+                ptrdiff_t js  = blas_part_bound(N, tid, nth);                   \
+                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);             \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
         } else { core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag); }     \
@@ -75,9 +75,9 @@ static const T ZERO = 0.0Q + 0.0Qi;
         if (M >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
-                ptrdiff_t nt  = omp_get_num_threads();                            \
-                ptrdiff_t is  = blas_part_bound(M, tid, nt);                   \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);             \
+                ptrdiff_t nth  = omp_get_num_threads();                            \
+                ptrdiff_t is  = blas_part_bound(M, tid, nth);                   \
+                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);             \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
         } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }            \
@@ -88,9 +88,9 @@ static const T ZERO = 0.0Q + 0.0Qi;
         if (M >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
-                ptrdiff_t nt  = omp_get_num_threads();                            \
-                ptrdiff_t is  = blas_part_bound(M, tid, nt);                   \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);             \
+                ptrdiff_t nth  = omp_get_num_threads();                            \
+                ptrdiff_t is  = blas_part_bound(M, tid, nth);                   \
+                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);             \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
         } else { core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag); }     \

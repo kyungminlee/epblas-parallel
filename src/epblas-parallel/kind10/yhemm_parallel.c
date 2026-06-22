@@ -67,15 +67,15 @@ static void yhemm_core(
         return;
     }
 
-    ptrdiff_t nt = 1;
+    ptrdiff_t nthreads = 1;
 #ifdef _OPENMP
-    nt = blas_omp_max_threads();
+    nthreads = blas_omp_max_threads();
 #endif
     const ptrdiff_t nb = yhemm_nb();
 
     if (SIDE == 'L' && M <= nb) {
 #ifdef _OPENMP
-        const bool use_omp = (N >= YHEMM_OMP_MIN && nt > 1);
+        const bool use_omp = (N >= YHEMM_OMP_MIN && nthreads > 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < N; ++j)
@@ -86,11 +86,11 @@ static void yhemm_core(
     if (SIDE == 'L') {
         ptrdiff_t pw = nb;
 #ifdef _OPENMP
-        const bool use_omp = (N >= YHEMM_OMP_MIN && nt > 1);
+        const bool use_omp = (N >= YHEMM_OMP_MIN && nthreads > 1);
         /* Thin the column panels so the team has ~1 panel/thread at small N
          * (N=64, nb=32 -> 2 panels -> 2 idle threads); inner nb is preserved
          * for the trailing-GEMM blocking. Rectangular work -> ppt=1, static. */
-        if (use_omp) pw = blas_omp_panel_width(N, nt, nb, 1);
+        if (use_omp) pw = blas_omp_panel_width(N, nthreads, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t jc = 0; jc < N; jc += pw) {
@@ -100,8 +100,8 @@ static void yhemm_core(
     } else {
         ptrdiff_t pw = nb;
 #ifdef _OPENMP
-        const bool use_omp = (M >= YHEMM_OMP_MIN && nt > 1);
-        if (use_omp) pw = blas_omp_panel_width(M, nt, nb, 1);
+        const bool use_omp = (M >= YHEMM_OMP_MIN && nthreads > 1);
+        if (use_omp) pw = blas_omp_panel_width(M, nthreads, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t ic = 0; ic < M; ic += pw) {

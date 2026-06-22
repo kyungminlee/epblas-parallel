@@ -75,12 +75,12 @@ static void msymm_core(
     if (SIDE == 'L') {
         std::ptrdiff_t pw = nb;
 #ifdef _OPENMP
-        const std::ptrdiff_t nt = blas_omp_max_threads();
-        const bool use_omp = (M >= MSYMM_OMP_MIN && nt > 1);
-        /* Shrink the block step so the team gets ~nt panels at small M
+        const std::ptrdiff_t nthreads = blas_omp_max_threads();
+        const bool use_omp = (M >= MSYMM_OMP_MIN && nthreads > 1);
+        /* Shrink the block step so the team gets ~nthreads panels at small M
          * (M=64, nb=32 -> 2 blocks -> 2 idle threads of 4). Rectangular work
          * (each row block multiplies its rows against full A·B) -> ppt=1. */
-        if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(M, nt, nb, 1);
+        if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(M, nthreads, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
         for (std::ptrdiff_t ic = 0; ic < M; ic += pw) {
@@ -90,9 +90,9 @@ static void msymm_core(
     } else {
         std::ptrdiff_t pw = nb;
 #ifdef _OPENMP
-        const std::ptrdiff_t nt = blas_omp_max_threads();
-        const bool use_omp = (N >= MSYMM_OMP_MIN && nt > 1);
-        if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(N, nt, nb, 1);
+        const std::ptrdiff_t nthreads = blas_omp_max_threads();
+        const bool use_omp = (N >= MSYMM_OMP_MIN && nthreads > 1);
+        if (use_omp) pw = (std::ptrdiff_t)blas_omp_panel_width(N, nthreads, nb, 1);
         #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
 #endif
         for (std::ptrdiff_t jc = 0; jc < N; jc += pw) {

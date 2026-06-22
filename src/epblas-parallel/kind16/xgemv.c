@@ -160,10 +160,10 @@ void xgemv_core(
         const bool use_omp = (M >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
-            ptrdiff_t tid = 0, nt = 1;
-            if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
-            const ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
-            const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
+            ptrdiff_t tid = 0, nth = 1;
+            if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
+            const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
+            const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
             xgemv_n_stride1_slice(N, i_lo, i_hi, alpha, a, lda, x, y);
         }
 #else
@@ -175,10 +175,10 @@ void xgemv_core(
         const bool use_omp = (N >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
-            ptrdiff_t tid = 0, nt = 1;
-            if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
-            const ptrdiff_t j_lo = blas_part_bound(N, tid, nt);
-            const ptrdiff_t j_hi = blas_part_bound(N, tid + 1, nt);
+            ptrdiff_t tid = 0, nth = 1;
+            if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
+            const ptrdiff_t j_lo = blas_part_bound(N, tid, nth);
+            const ptrdiff_t j_hi = blas_part_bound(N, tid + 1, nth);
             xgemv_tc_stride1_slice(M, j_lo, j_hi, conj_a, alpha, a, lda, x, y);
         }
 #else
@@ -191,10 +191,10 @@ void xgemv_core(
         const bool use_omp = (span >= XGEMV_OMP_MIN && blas_omp_max_threads() > 1 && !in_parallel);
         #pragma omp parallel if(use_omp)
         {
-            ptrdiff_t tid = 0, nt = 1;
-            if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
-            const ptrdiff_t lo = blas_part_bound(span, tid, nt);
-            const ptrdiff_t hi = blas_part_bound(span, tid + 1, nt);
+            ptrdiff_t tid = 0, nth = 1;
+            if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
+            const ptrdiff_t lo = blas_part_bound(span, tid, nth);
+            const ptrdiff_t hi = blas_part_bound(span, tid + 1, nth);
             xgemv_general_stride_slice(M, N, TR, conj_a, alpha, a, lda, x, incx, y, incy, lo, hi);
         }
 #else

@@ -230,9 +230,9 @@ void qtrsv_blocked_(
     #pragma omp parallel if(use_omp)
 #endif
     {
-        ptrdiff_t tid = 0, nt = 1;
+        ptrdiff_t tid = 0, nth = 1;
 #ifdef _OPENMP
-        if (use_omp) { tid = omp_get_thread_num(); nt = omp_get_num_threads(); }
+        if (use_omp) { tid = omp_get_thread_num(); nth = omp_get_num_threads(); }
 #endif
 
         if (TR == 'N' && UPLO == 'L') {
@@ -251,8 +251,8 @@ void qtrsv_blocked_(
                 ptrdiff_t mt = N - j - jb;
                 if (mt > 0) {
                     ptrdiff_t j2 = j + jb;
-                    ptrdiff_t lo = blas_part_bound(mt, tid, nt);
-                    ptrdiff_t hi = blas_part_bound(mt, tid + 1, nt);
+                    ptrdiff_t lo = blas_part_bound(mt, tid, nth);
+                    ptrdiff_t hi = blas_part_bound(mt, tid + 1, nth);
                     ptrdiff_t m_slice = (ptrdiff_t)(hi - lo);
                     if (m_slice > 0) {
                         const ptrdiff_t i_off = j2 + (ptrdiff_t)lo;
@@ -283,8 +283,8 @@ void qtrsv_blocked_(
                 }
 #endif
                 if (j > 0) {
-                    ptrdiff_t lo = blas_part_bound(j, tid, nt);
-                    ptrdiff_t hi = blas_part_bound(j, tid + 1, nt);
+                    ptrdiff_t lo = blas_part_bound(j, tid, nth);
+                    ptrdiff_t hi = blas_part_bound(j, tid + 1, nth);
                     ptrdiff_t m_slice = (ptrdiff_t)(hi - lo);
                     if (m_slice > 0) {
                         const ptrdiff_t i_off = (ptrdiff_t)lo;
@@ -316,8 +316,8 @@ void qtrsv_blocked_(
                 }
 #endif
                 if (j > 0) {
-                    ptrdiff_t lo = blas_part_bound(j, tid, nt);
-                    ptrdiff_t hi = blas_part_bound(j, tid + 1, nt);
+                    ptrdiff_t lo = blas_part_bound(j, tid, nth);
+                    ptrdiff_t hi = blas_part_bound(j, tid + 1, nth);
                     ptrdiff_t n_slice = (ptrdiff_t)(hi - lo);
                     if (n_slice > 0) {
                         const ptrdiff_t n_off = (ptrdiff_t)lo;
@@ -351,8 +351,8 @@ void qtrsv_blocked_(
                 ptrdiff_t mt = N - j - jb;
                 if (mt > 0) {
                     ptrdiff_t j2 = j + jb;
-                    ptrdiff_t lo = blas_part_bound(mt, tid, nt);
-                    ptrdiff_t hi = blas_part_bound(mt, tid + 1, nt);
+                    ptrdiff_t lo = blas_part_bound(mt, tid, nth);
+                    ptrdiff_t hi = blas_part_bound(mt, tid + 1, nth);
                     ptrdiff_t n_slice = (ptrdiff_t)(hi - lo);
                     if (n_slice > 0) {
                         const ptrdiff_t n_off = j2 + (ptrdiff_t)lo;

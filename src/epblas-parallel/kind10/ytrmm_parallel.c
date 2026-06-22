@@ -49,9 +49,9 @@ static void blocked_dispatch_L(enum ytrmm_variant_L V, ptrdiff_t M, ptrdiff_t N,
         #pragma omp parallel
         {
             ptrdiff_t tid = omp_get_thread_num();
-            ptrdiff_t nt  = omp_get_num_threads();
-            ptrdiff_t js  = blas_part_bound(N, tid, nt);
-            ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);
+            ptrdiff_t nth  = omp_get_num_threads();
+            ptrdiff_t js  = blas_part_bound(N, tid, nth);
+            ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);
             ytrmm_blocked_chunk_L(V, js, je, M, nb, alpha, a, lda, b, ldb, nounit);
         }
         return;
@@ -69,9 +69,9 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
         #pragma omp parallel
         {
             ptrdiff_t tid = omp_get_thread_num();
-            ptrdiff_t nt  = omp_get_num_threads();
-            ptrdiff_t is  = blas_part_bound(M, tid, nt);
-            ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);
+            ptrdiff_t nth  = omp_get_num_threads();
+            ptrdiff_t is  = blas_part_bound(M, tid, nth);
+            ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);
             ytrmm_blocked_chunk_R(V, is, ie, N, nb, alpha, a, lda, b, ldb, nounit);
         }
         return;
@@ -89,9 +89,9 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
         if (N >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
-                ptrdiff_t nt  = omp_get_num_threads();                            \
-                ptrdiff_t js  = blas_part_bound(N, tid, nt);                   \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);             \
+                ptrdiff_t nth  = omp_get_num_threads();                            \
+                ptrdiff_t js  = blas_part_bound(N, tid, nth);                   \
+                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);             \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
         } else { core(0, N, M, alpha, a, lda, b, ldb, nounit); }            \
@@ -102,9 +102,9 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
         if (N >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
-                ptrdiff_t nt  = omp_get_num_threads();                            \
-                ptrdiff_t js  = blas_part_bound(N, tid, nt);                   \
-                ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);             \
+                ptrdiff_t nth  = omp_get_num_threads();                            \
+                ptrdiff_t js  = blas_part_bound(N, tid, nth);                   \
+                ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);             \
                 core(js, je, M, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
         } else { core(0, N, M, alpha, a, lda, b, ldb, nounit, cflag); }     \
@@ -115,9 +115,9 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
         if (M >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
-                ptrdiff_t nt  = omp_get_num_threads();                            \
-                ptrdiff_t is  = blas_part_bound(M, tid, nt);                   \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);             \
+                ptrdiff_t nth  = omp_get_num_threads();                            \
+                ptrdiff_t is  = blas_part_bound(M, tid, nth);                   \
+                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);             \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit);             \
             }                                                               \
         } else { core(0, M, N, alpha, a, lda, b, ldb, nounit); }            \
@@ -128,9 +128,9 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t M, ptrdiff_t N,
         if (M >= YTRMM_OMP_MIN && blas_omp_max_threads() > 1) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
-                ptrdiff_t nt  = omp_get_num_threads();                            \
-                ptrdiff_t is  = blas_part_bound(M, tid, nt);                   \
-                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nt);             \
+                ptrdiff_t nth  = omp_get_num_threads();                            \
+                ptrdiff_t is  = blas_part_bound(M, tid, nth);                   \
+                ptrdiff_t ie  = blas_part_bound(M, tid + 1, nth);             \
                 core(is, ie, N, alpha, a, lda, b, ldb, nounit, cflag);      \
             }                                                               \
         } else { core(0, M, N, alpha, a, lda, b, ldb, nounit, cflag); }     \

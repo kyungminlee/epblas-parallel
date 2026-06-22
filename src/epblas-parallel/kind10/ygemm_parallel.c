@@ -100,9 +100,9 @@ static void ygemm_core(
         #pragma omp parallel
         {
             ptrdiff_t tid = omp_get_thread_num();
-            ptrdiff_t nt  = omp_get_num_threads();
-            ptrdiff_t js  = blas_part_bound(N, tid, nt);
-            ptrdiff_t je  = blas_part_bound(N, tid + 1, nt);
+            ptrdiff_t nth  = omp_get_num_threads();
+            ptrdiff_t js  = blas_part_bound(N, tid, nth);
+            ptrdiff_t je  = blas_part_bound(N, tid + 1, nth);
             ygemm_dispatch(klass, js, je, M, K, alpha, a, lda, b, ldb,
                            c, ldc, conj_a, conj_b);
         }

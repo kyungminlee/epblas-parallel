@@ -100,9 +100,9 @@ void ygemv_core(
                 #pragma omp parallel
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    const ptrdiff_t nt  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
-                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
+                    const ptrdiff_t nth  = omp_get_num_threads();
+                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
+                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
                     ptrdiff_t j = 0;
                     for (; j + 1 < N; j += 2) {
                         const T t0 = alpha * x[j];
@@ -195,9 +195,9 @@ void ygemv_core(
                 #pragma omp parallel
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    const ptrdiff_t nt  = omp_get_num_threads();
-                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nt);
-                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nt);
+                    const ptrdiff_t nth  = omp_get_num_threads();
+                    const ptrdiff_t i_lo = blas_part_bound(M, tid, nth);
+                    const ptrdiff_t i_hi = blas_part_bound(M, tid + 1, nth);
                     YGEMV_N_STRIDED_BODY(i_lo, i_hi);
                 }
 #endif

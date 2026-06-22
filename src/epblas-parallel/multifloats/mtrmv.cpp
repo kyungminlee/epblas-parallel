@@ -123,7 +123,7 @@ static void mtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
  *     (disjoint writes → no reduction), cyclic schedule(static,1).
  *   - NoTrans: OpenBLAS contiguous row-block scheme via mf_omp::tri_area_bounds —
  *     each thread reads only its column block and merges its BOUNDED spill rows,
- *     replacing the old per-thread accumulator + O(nt·n) reduction (which floored
+ *     replacing the old per-thread accumulator + O(nthreads·n) reduction (which floored
  *     par4 scaling at large n; see [[project_l2_rowgather_scaling]]).
  * DD addition reorders vs the serial path → within fuzz tol; the serial path
  * stays bit-exact. Operates on a contiguous x; the strided dispatch gathers /
@@ -131,12 +131,12 @@ static void mtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
  * (caller falls back to serial). */
 static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
                              std::ptrdiff_t n, const T *a, std::size_t lda,
-                             T *x, std::ptrdiff_t nt)
+                             T *x, std::ptrdiff_t nthreads)
 {
     if (trans) {
         T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
         if (!y_buf) return false;
-        #pragma omp parallel num_threads(nt)
+        #pragma omp parallel num_threads(nthreads)
         {
             if (!upper) {
                 #pragma omp for schedule(static, 1)
@@ -161,14 +161,14 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
     } else {
         /* NoTrans: contiguous row-block scheme. Each thread reads only its matrix
          * column block (good cache locality vs cyclic) and merges its bounded
-         * spill rows — beats the full per-thread accumulator + O(nt·n) reduction
+         * spill rows — beats the full per-thread accumulator + O(nthreads·n) reduction
          * at large n. Same equal-area split as wtrmv: UPPER column work grows with
          * the index ⇒ heavy_high=upper; the forward slices are read REVERSED for
          * upper so the thin top slice carries the heavy top rows. */
         std::ptrdiff_t *range = static_cast<std::ptrdiff_t *>(
-            std::malloc((std::size_t)(nt + 1) * sizeof(std::ptrdiff_t)));
+            std::malloc((std::size_t)(nthreads + 1) * sizeof(std::ptrdiff_t)));
         if (!range) return false;
-        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nt, 7, 16, upper,
+        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 7, 16, upper,
                                            MTRMV_MAX_CPUS, range);
         T *buf_all = static_cast<T *>(
             std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(T)));

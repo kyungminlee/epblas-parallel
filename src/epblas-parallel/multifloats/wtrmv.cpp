@@ -121,12 +121,12 @@ static void wtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
  * Returns true on success, false if a scratch alloc failed. */
 static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
                              std::ptrdiff_t n, const T *a, std::size_t lda,
-                             T *x, std::ptrdiff_t nt)
+                             T *x, std::ptrdiff_t nthreads)
 {
     if (trans) {
         T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
         if (!y_buf) return false;
-        #pragma omp parallel num_threads(nt)
+        #pragma omp parallel num_threads(nthreads)
         {
             #pragma omp for schedule(static, 1)
             for (std::ptrdiff_t j = 0; j < n; ++j) {
@@ -145,16 +145,16 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
     } else {
         /* NoTrans: OpenBLAS contiguous row-block scheme. Each thread reads only
          * its matrix column block (good cache locality vs cyclic) and merges its
-         * bounded spill rows — beats the full per-thread accumulator + O(nt·n)
+         * bounded spill rows — beats the full per-thread accumulator + O(nthreads·n)
          * reduction at large n. */
         std::ptrdiff_t *range = static_cast<std::ptrdiff_t *>(
-            std::malloc((std::size_t)(nt + 1) * sizeof(std::ptrdiff_t)));
+            std::malloc((std::size_t)(nthreads + 1) * sizeof(std::ptrdiff_t)));
         if (!range) return false;
         /* Same equal-area split as mspmv (proof in the simd-audit log): UPPER
          * column work grows with the index ⇒ heavy_high=upper. The forward
          * ascending slices are read REVERSED for upper so the thin top slice
          * carries the heavy top rows. mask 7/min 16 are this routine's tuning. */
-        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nt, 7, 16, upper,
+        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 7, 16, upper,
                                            WTRMV_MAX_CPUS, range);
         T *buf_all = static_cast<T *>(
             std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(T)));

@@ -141,12 +141,12 @@ using mf_packed::kk_lower;
  *     (escapes the old cyclic scheme's O(nthreads*n) full fold).
  * DD addition reorders vs serial → within fuzz tol; serial stays bit-exact. */
 static bool wtpmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
-                             std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t nt)
+                             std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t nthreads)
 {
     if (trans) {
         T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
         if (!y_buf) return false;
-        #pragma omp parallel num_threads(nt)
+        #pragma omp parallel num_threads(nthreads)
         {
             #pragma omp for schedule(static, 1)
             for (std::ptrdiff_t j = 0; j < n; ++j) {
@@ -169,7 +169,7 @@ static bool wtpmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
         const T one_cdd{ R{1.0, 0.0}, R{0.0, 0.0} };
         std::ptrdiff_t range[WTPMV_MAX_CPUS + 1];
         /* per-column work ~j (upper) / ~(n-j) (lower) -> heavy_high=upper. */
-        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nt, 3, 4, upper,
+        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 3, 4, upper,
                                            WTPMV_MAX_CPUS, range);
         if (ncpu <= 1) return false;
         T *buf = static_cast<T *>(std::calloc((std::size_t)ncpu * n, sizeof(T)));

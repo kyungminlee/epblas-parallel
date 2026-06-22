@@ -125,7 +125,7 @@ static void esymv_core(
 
     /* The unit-stride path: stride-1 column walks of A. */
     if (incx == 1 && incy == 1) {
-        const ptrdiff_t nt = blas_omp_max_threads();
+        const ptrdiff_t nthreads = blas_omp_max_threads();
         const bool use_omp = (N >= ESYMV_OMP_MIN && blas_omp_should_thread());
         if (use_omp) {
             /* Parallel two-pass with per-thread private y accumulator.
@@ -140,10 +140,10 @@ static void esymv_core(
              * schedule(static, 1) interleaves columns across threads to
              * balance the triangular work (per-column work is linear in
              * (N - j) for L, j for U). */
-            T *y_priv_all = (T *)calloc((size_t)nt * (size_t)N, sizeof(T));
+            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)N, sizeof(T));
             if (y_priv_all) {
 #ifdef _OPENMP
-                #pragma omp parallel num_threads(nt)
+                #pragma omp parallel num_threads(nthreads)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
                     T *y_priv = &y_priv_all[(size_t)tid * N];  /* calloc-zeroed */
@@ -173,7 +173,7 @@ static void esymv_core(
                     #pragma omp for schedule(static)
                     for (ptrdiff_t i = 0; i < N; ++i) {
                         T s = zero;
-                        for (ptrdiff_t t = 0; t < nt; ++t)
+                        for (ptrdiff_t t = 0; t < nthreads; ++t)
                             s += y_priv_all[(size_t)t * N + i];
                         y[i] += s;
                     }

@@ -89,16 +89,16 @@ void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
  *     schedule(static,1) cyclic balancing.
  *   - NoTrans: area-balanced contiguous COLUMN partition (packed twin of the
  *     mspmv axpydot) + per-thread slot + BOUNDED reduction, escaping the old
- *     cyclic O(nt*n) full fold that floored par4/par1 at ~0.47.
+ *     cyclic O(nthreads*n) full fold that floored par4/par1 at ~0.47.
  * DD addition reorders vs serial → within fuzz tol; serial stays bit-exact.
  * Returns true on success, false if a scratch alloc failed. */
 static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
-                             std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t nt)
+                             std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t nthreads)
 {
     if (trans) {
         T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
         if (!y_buf) return false;
-        #pragma omp parallel num_threads(nt)
+        #pragma omp parallel num_threads(nthreads)
         {
             #pragma omp for schedule(static, 1)
             for (std::ptrdiff_t j = 0; j < n; ++j) {
@@ -120,7 +120,7 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
         const T one_dd{1.0, 0.0};
         std::ptrdiff_t range[MTPMV_MAX_CPUS + 1];
         /* per-column work ~j (upper) / ~(n-j) (lower) -> heavy_high=upper. */
-        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nt, 3, 4, upper,
+        std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 3, 4, upper,
                                            MTPMV_MAX_CPUS, range);
         if (ncpu <= 1) return false;
         T *buf = static_cast<T *>(std::calloc((std::size_t)ncpu * n, sizeof(T)));
