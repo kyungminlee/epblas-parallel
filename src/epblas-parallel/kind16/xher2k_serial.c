@@ -35,6 +35,8 @@
 #include <ctype.h>
 
 typedef __float128 T;
+typedef xher2k_TC TC;
+typedef xher2k_TR TR;
 
 #define MR QBLAS_YGEMM_MR
 #define NR QBLAS_YGEMM_NR
@@ -44,12 +46,17 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 void xher2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_c,
+    const TC *a_c, ptrdiff_t lda,
+    const TC *b_c, ptrdiff_t ldb,
+    const TR *beta_,
+    TC *c_c, ptrdiff_t ldc)
 {
+    /* Reinterpret the complex ABI as interleaved (re,im) __float128 storage. */
+    const T *alpha_ = (const T *)alpha_c;
+    const T *a = (const T *)a_c;
+    const T *b = (const T *)b_c;
+    T *c = (T *)c_c;
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0];
     const char UPLO  = blas_up(uplo);

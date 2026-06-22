@@ -26,8 +26,9 @@
  * Nesting guard: when xher2k_ is called from inside another routine's parallel
  * region, delegate to xher2k_serial and open no team of our own.
  *
- * Arrays are interleaved (re,im) __float128; ld-args, k, n and offset are in COMPLEX
- * elements, so every pointer step is ×2.
+ * Public ABI is complex (__complex128 A/B/C/alpha) + real (__float128 beta);
+ * the core reinterprets to interleaved (re,im) __float128 storage, ld-args, k, n
+ * and offset in COMPLEX elements, so every internal pointer step is ×2.
  */
 
 #include "xher2k_kernel.h"
@@ -53,20 +54,25 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 static void xher2k_core(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_c,
+    const TC *a_c, ptrdiff_t lda,
+    const TC *b_c, ptrdiff_t ldb,
+    const TR *beta_,
+    TC *c_c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        xher2k_serial(uplo, trans, n, k, alpha_, a, lda, b, ldb,
-                      beta_, c, ldc);
+        xher2k_serial(uplo, trans, n, k, alpha_c, a_c, lda, b_c, ldb,
+                      beta_, c_c, ldc);
         return;
     }
 #endif
+    /* Reinterpret the complex ABI as interleaved (re,im) __float128 storage. */
+    const T *alpha_ = (const T *)alpha_c;
+    const T *a = (const T *)a_c;
+    const T *b = (const T *)b_c;
+    T *c = (T *)c_c;
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0];
     const char UPLO  = blas_up(uplo);
@@ -210,6 +216,6 @@ static void xher2k_core(
 }
 
 /* Emit xher2k_ (LP64) + xher2k_64_ (ILP64) around the shared ptrdiff_t core.
- * alpha=complex (TC), beta=real (TR), matrices=complex (TC) — mirrors kind10
- * yher2k's EPBLAS_FACADE_SYR2K(yher2k, TC, TR, TC). */
+ * alpha=complex (TC=__complex128), beta=real (TR=__float128), matrices=complex
+ * (TC) — mirrors kind10 yher2k's EPBLAS_FACADE_SYR2K(yher2k, TC, TR, TC). */
 EPBLAS_FACADE_SYR2K(xher2k, TC, TR, TC)

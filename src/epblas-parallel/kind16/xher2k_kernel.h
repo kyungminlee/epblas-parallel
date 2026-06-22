@@ -42,20 +42,22 @@
 #define EPBLAS_PARALLEL_KIND16_XHER2K_KERNEL_H
 
 #include <stddef.h>
+#include <quadmath.h>
 
-/* Arrays are interleaved (re,im) pairs of __float128, indexed as the ob
- * driver does (×2 per complex element); ld* are in COMPLEX elements. alpha is
- * a (re,im) pair; beta is a single real __float128.
+/* Public ABI is the genuine complex/real type pair, mirroring kind10 yher2k's
+ * EPBLAS_FACADE_SYR2K(yher2k, TC, TR, TC): the complex matrices A/B/C and the
+ * complex alpha are __complex128 (TC), the real beta is __float128 (TR).
  *
- * In the interleaved representation every operand — the complex matrices A/B/C
- * AND the complex alpha (re,im) pair AND the real beta — is addressed as
- * __float128, so the complex (TC) and real (TR) type aliases below both resolve
- * to xher2k_T; they document intent for the EPBLAS_FACADE_SYR2K invocation
- * (alpha=complex TC, beta=real TR, matrices=complex TC), mirroring kind10
- * yher2k's EPBLAS_FACADE_SYR2K(yher2k, TC, TR, TC). */
-typedef __float128 xher2k_T;
-typedef xher2k_T   xher2k_TC;   /* complex operands: A, B, C, alpha (re,im) */
-typedef xher2k_T   xher2k_TR;   /* real operand: beta */
+ * Internally the math is a faithful OpenBLAS port that indexes operands as the
+ * interleaved (re,im) __float128 storage the ob driver expects (×2 per complex
+ * element; ld* in COMPLEX elements). Each entry reinterpret-casts its TC
+ * pointers to xher2k_T (= __float128) at the top — a complex value is exactly
+ * two contiguous reals — and runs the interleaved kernel unchanged. So TC is
+ * always complex and TR always real; xher2k_T is just the internal storage
+ * element, never spelled in the public ABI. */
+typedef __float128   xher2k_T;    /* internal interleaved (re,im) storage */
+typedef __complex128 xher2k_TC;   /* complex operands: A, B, C, alpha */
+typedef __float128   xher2k_TR;   /* real operand: beta */
 
 /* Pure-serial by-value entry (no OpenMP). Shares the ptrdiff_t core ABI of
  * xher2k_core so callers already inside a parallel region can swap the symbol
@@ -63,10 +65,10 @@ typedef xher2k_T   xher2k_TR;   /* real operand: beta */
 void xher2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const xher2k_T *alpha_,
-    const xher2k_T *a, ptrdiff_t lda,
-    const xher2k_T *b, ptrdiff_t ldb,
-    const xher2k_T *beta_,
-    xher2k_T *c, ptrdiff_t ldc);
+    const xher2k_TC *alpha_,
+    const xher2k_TC *a, ptrdiff_t lda,
+    const xher2k_TC *b, ptrdiff_t ldb,
+    const xher2k_TR *beta_,
+    xher2k_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XHER2K_KERNEL_H */
