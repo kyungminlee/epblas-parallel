@@ -34,22 +34,22 @@
 
 namespace mf_kernels {
 
-using T = multifloats::float64x2;
-using CT = multifloats::complex64x2;
+using TR = multifloats::float64x2;
+using TC = multifloats::complex64x2;
 
 /* scalar complex ops matching the wtrmv/wtpmv references (faithful tails); the
  * shared scalar-complex API for the w family (whbmv/whpmv/wgbmv/wher/.../wtbsv). */
-inline CT cmul(const CT &a, const CT &b) {
-    return CT{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
+inline TC cmul(const TC &a, const TC &b) {
+    return TC{ a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re };
 }
-inline CT cadd(const CT &a, const CT &b) { return CT{ a.re + b.re, a.im + b.im }; }
-inline CT csub(const CT &a, const CT &b) { return CT{ a.re - b.re, a.im - b.im }; }
-inline CT cconj(const CT &a) {
-    return CT{ a.re, T{ -a.im.limbs[0], -a.im.limbs[1] } };
+inline TC cadd(const TC &a, const TC &b) { return TC{ a.re + b.re, a.im + b.im }; }
+inline TC csub(const TC &a, const TC &b) { return TC{ a.re - b.re, a.im - b.im }; }
+inline TC cconj(const TC &a) {
+    return TC{ a.re, TR{ -a.im.limbs[0], -a.im.limbs[1] } };
 }
 /* real scalar * complex (the old scale_r / cmul_r / rcmul trio; scalar-first.
  * DD multiply is commutative bit-for-bit, so the operand order is cosmetic). */
-inline CT rcmul(const T &r, const CT &z) { return CT{ r * z.re, r * z.im }; }
+inline TC rcmul(const TR &r, const TC &z) { return TC{ r * z.re, r * z.im }; }
 
 /* y := beta*y, or y := 0 when beta == 0, over the length-n vector y with stride
  * inc — the beta prologue every dense/banded/packed L2 matvec runs on its output
@@ -59,16 +59,16 @@ inline CT rcmul(const T &r, const CT &z) { return CT{ r * z.re, r * z.im }; }
  * come from mf_pred. DD (and complex-DD) multiply is commutative bit-for-bit, so
  * the operand order is cosmetic — call sites that wrote beta*y and y*beta both
  * map here unchanged. */
-static inline void scale_y(std::ptrdiff_t n, const T &beta, T *y, std::ptrdiff_t inc) {
+static inline void scale_y(std::ptrdiff_t n, const TR &beta, TR *y, std::ptrdiff_t inc) {
     if (mf_pred::eq1(beta)) return;
     std::ptrdiff_t iy = (inc < 0) ? -(n - 1) * inc : 0;
-    if (mf_pred::eq0(beta)) for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = T{}; iy += inc; }
+    if (mf_pred::eq0(beta)) for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = TR{}; iy += inc; }
     else                    for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += inc; }
 }
-static inline void cscale_y(std::ptrdiff_t n, const CT &beta, CT *y, std::ptrdiff_t inc) {
+static inline void cscale_y(std::ptrdiff_t n, const TC &beta, TC *y, std::ptrdiff_t inc) {
     if (mf_pred::ceq1(beta)) return;
     std::ptrdiff_t iy = (inc < 0) ? -(n - 1) * inc : 0;
-    if (mf_pred::ceq0(beta)) for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = CT{}; iy += inc; }
+    if (mf_pred::ceq0(beta)) for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = TC{}; iy += inc; }
     else                     for (std::ptrdiff_t i = 0; i < n; ++i) { y[iy] = cmul(beta, y[iy]); iy += inc; }
 }
 
@@ -94,7 +94,7 @@ static inline void scatter_strided(std::ptrdiff_t n, V *x, std::ptrdiff_t inc, c
 #ifdef MBLAS_SIMD_DD
 
 /* xp[i] += t*cp[i] — 4-wide SoA, scalar tail. Order-free -> bit-exact. */
-static inline void axpy_add(std::ptrdiff_t len, T *xp, const T *cp, const T &t) {
+static inline void axpy_add(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
     const __m256d th = _mm256_set1_pd(t.limbs[0]);
     const __m256d tl = _mm256_set1_pd(t.limbs[1]);
     std::ptrdiff_t i = 0;
@@ -109,7 +109,7 @@ static inline void axpy_add(std::ptrdiff_t len, T *xp, const T *cp, const T &t) 
 }
 
 /* xp[i] -= t*cp[i] — 4-wide SoA, scalar tail. Order-free -> bit-exact. */
-static inline void axpy_sub(std::ptrdiff_t len, T *xp, const T *cp, const T &t) {
+static inline void axpy_sub(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
     const __m256d th = _mm256_set1_pd(t.limbs[0]);
     const __m256d tl = _mm256_set1_pd(t.limbs[1]);
     std::ptrdiff_t i = 0;
@@ -125,7 +125,7 @@ static inline void axpy_sub(std::ptrdiff_t len, T *xp, const T *cp, const T &t) 
 
 /* sum_i cp[i]*xp[i] — vector accumulator + one hreduce, scalar tail. The fold
  * reorders the reduction -> within tolerance, not bit-exact. */
-static inline T dot(std::ptrdiff_t len, const T *cp, const T *xp) {
+static inline TR dot(std::ptrdiff_t len, const TR *cp, const TR *xp) {
     __m256d sh = _mm256_setzero_pd(), sl = _mm256_setzero_pd();
     std::ptrdiff_t i = 0;
     for (; i + 4 <= len; i += 4) {
@@ -134,7 +134,7 @@ static inline T dot(std::ptrdiff_t len, const T *cp, const T *xp) {
         __m256d ph, pl; simd_exact::mul(mh, ml, xh, xl, ph, pl);
         simd_exact::add(sh, sl, ph, pl, sh, sl);
     }
-    T s = (i >= 4) ? simd_exact::hreduce(sh, sl) : T{0.0, 0.0};
+    TR s = (i >= 4) ? simd_exact::hreduce(sh, sl) : TR{0.0, 0.0};
     for (; i < len; ++i) s = s + cp[i] * xp[i];
     return s;
 }
@@ -142,7 +142,7 @@ static inline T dot(std::ptrdiff_t len, const T *cp, const T *xp) {
 /* ---- complex double-double kernels (w family) --------------------------- */
 
 /* xp[i] += t*cp[i] — 4-wide complex SoA, scalar tail. Order-free -> bit-exact. */
-static inline void caxpy_add(std::ptrdiff_t len, CT *xp, const CT *cp, const CT &t) {
+static inline void caxpy_add(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
     const simd_exact::cx4 tt = simd_exact::vbcast(t);
     std::ptrdiff_t i = 0;
     /* 8-wide head: two INDEPENDENT 4-lane complex chains. A complex MAC
@@ -172,7 +172,7 @@ static inline void caxpy_add(std::ptrdiff_t len, CT *xp, const CT *cp, const CT 
 }
 
 /* xp[i] -= t*cp[i] — 4-wide complex SoA, scalar tail. Order-free -> bit-exact. */
-static inline void caxpy_sub(std::ptrdiff_t len, CT *xp, const CT *cp, const CT &t) {
+static inline void caxpy_sub(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
     const simd_exact::cx4 tt = simd_exact::vbcast(t);
     std::ptrdiff_t i = 0;
     for (; i + 4 <= len; i += 4) {
@@ -186,7 +186,7 @@ static inline void caxpy_sub(std::ptrdiff_t len, CT *xp, const CT *cp, const CT 
 
 /* sum_i [conj]cp[i]*xp[i] — vector accumulator + one chreduce, scalar tail.
  * Reorders the reduction -> within tolerance, not bit-exact. */
-static inline CT cdot(std::ptrdiff_t len, const CT *cp, const CT *xp, bool conj) {
+static inline TC cdot(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj) {
     simd_exact::cx4 s{ _mm256_setzero_pd(), _mm256_setzero_pd(),
                     _mm256_setzero_pd(), _mm256_setzero_pd() };
     std::ptrdiff_t i = 0;
@@ -196,9 +196,9 @@ static inline CT cdot(std::ptrdiff_t len, const CT *cp, const CT *xp, bool conj)
         simd_exact::cx4 x = simd_exact::cload4(xp + i);
         s = simd_exact::cadd_soa(s, simd_exact::cmul_soa(a, x));
     }
-    CT acc = (i >= 4) ? simd_exact::chreduce(s) : CT{ T{0.0, 0.0}, T{0.0, 0.0} };
+    TC acc = (i >= 4) ? simd_exact::chreduce(s) : TC{ TR{0.0, 0.0}, TR{0.0, 0.0} };
     for (; i < len; ++i) {
-        const CT e = conj ? cconj(cp[i]) : cp[i];
+        const TC e = conj ? cconj(cp[i]) : cp[i];
         acc = cadd(acc, cmul(e, xp[i]));
     }
     return acc;
@@ -303,28 +303,28 @@ dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double
 
 #else  /* scalar fallbacks */
 
-static inline void axpy_add(std::ptrdiff_t len, T *xp, const T *cp, const T &t) {
+static inline void axpy_add(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
     for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] = xp[i] + t * cp[i];
 }
-static inline void axpy_sub(std::ptrdiff_t len, T *xp, const T *cp, const T &t) {
+static inline void axpy_sub(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
     for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] = xp[i] - t * cp[i];
 }
-static inline T dot(std::ptrdiff_t len, const T *cp, const T *xp) {
-    T s{0.0, 0.0};
+static inline TR dot(std::ptrdiff_t len, const TR *cp, const TR *xp) {
+    TR s{0.0, 0.0};
     for (std::ptrdiff_t i = 0; i < len; ++i) s = s + cp[i] * xp[i];
     return s;
 }
 
-static inline void caxpy_add(std::ptrdiff_t len, CT *xp, const CT *cp, const CT &t) {
+static inline void caxpy_add(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
     for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] = cadd(xp[i], cmul(t, cp[i]));
 }
-static inline void caxpy_sub(std::ptrdiff_t len, CT *xp, const CT *cp, const CT &t) {
+static inline void caxpy_sub(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
     for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] = csub(xp[i], cmul(t, cp[i]));
 }
-static inline CT cdot(std::ptrdiff_t len, const CT *cp, const CT *xp, bool conj) {
-    CT acc{ T{0.0, 0.0}, T{0.0, 0.0} };
+static inline TC cdot(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj) {
+    TC acc{ TR{0.0, 0.0}, TR{0.0, 0.0} };
     for (std::ptrdiff_t i = 0; i < len; ++i) {
-        const CT e = conj ? cconj(cp[i]) : cp[i];
+        const TC e = conj ? cconj(cp[i]) : cp[i];
         acc = cadd(acc, cmul(e, xp[i]));
     }
     return acc;
@@ -362,9 +362,9 @@ dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double
  * low-pressure kernel are ~3x faster. Reassociating the per-element sum
  * ((xp+t1*c1)+t2*c2 vs xp+(t1*c1+t2*c2)) matches the scalar reference within DD
  * fuzz tol, not bit-for-bit. */
-static inline void caxpy2_add(std::ptrdiff_t len, CT *xp,
-                              const CT *c1, const CT &t1,
-                              const CT *c2, const CT &t2) {
+static inline void caxpy2_add(std::ptrdiff_t len, TC *xp,
+                              const TC *c1, const TC &t1,
+                              const TC *c2, const TC &t2) {
     caxpy_add(len, xp, c1, t1);
     caxpy_add(len, xp, c2, t2);
 }
@@ -373,7 +373,7 @@ static inline void caxpy2_add(std::ptrdiff_t len, CT *xp,
  * 3-limb accumulator kernels, defined out-of-line in wdotu.cpp/wdotc.cpp and
  * shared by the OpenMP partial-reduction and the packed/banded complex Trans
  * matvecs (wtpmv). */
-CT wdotu_unit(std::ptrdiff_t n, const CT *x, const CT *y);
-CT wdotc_unit(std::ptrdiff_t n, const CT *x, const CT *y);
+TC wdotu_unit(std::ptrdiff_t n, const TC *x, const TC *y);
+TC wdotc_unit(std::ptrdiff_t n, const TC *x, const TC *y);
 
 }  // namespace mf_kernels
