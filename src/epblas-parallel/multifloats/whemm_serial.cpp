@@ -64,11 +64,11 @@ constexpr std::ptrdiff_t kMaxBlockM = 128;          /* 4 cdd scratch × 128 × 4
 /* Pack `count` cells from cm[ic..ic+count, j_start..j_start+j_count) into
  * 4 SoA arrays {re_h, re_l, im_h, im_l}, indexed [0..count-1, 0..3]. */
 inline void pack_4col_cdd(std::ptrdiff_t count, std::ptrdiff_t row_start,
-                          const T *m, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
+                          const T *mat, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                           double *rh, double *rl, double *ih, double *il)
 {
     for (std::ptrdiff_t j = 0; j < j_count; ++j) {
-        const T *col = m + static_cast<std::size_t>(j_start + j) * ldm;
+        const T *col = mat + static_cast<std::size_t>(j_start + j) * ldm;
         for (std::ptrdiff_t i = 0; i < count; ++i) {
             rh[i * kSimdLane + j] = col[row_start + i].re.limbs[0];
             rl[i * kSimdLane + j] = col[row_start + i].re.limbs[1];
@@ -86,12 +86,12 @@ inline void pack_4col_cdd(std::ptrdiff_t count, std::ptrdiff_t row_start,
 }
 
 inline void unpack_4col_cdd(std::ptrdiff_t count, std::ptrdiff_t row_start,
-                            T *m, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
+                            T *mat, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                             const double *rh, const double *rl,
                             const double *ih, const double *il)
 {
     for (std::ptrdiff_t j = 0; j < j_count; ++j) {
-        T *col = m + static_cast<std::size_t>(j_start + j) * ldm;
+        T *col = mat + static_cast<std::size_t>(j_start + j) * ldm;
         for (std::ptrdiff_t i = 0; i < count; ++i) {
             col[row_start + i].re.limbs[0] = rh[i * kSimdLane + j];
             col[row_start + i].re.limbs[1] = rl[i * kSimdLane + j];

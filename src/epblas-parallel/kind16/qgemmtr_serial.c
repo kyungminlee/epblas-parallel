@@ -62,20 +62,20 @@ void qgemmtr_compute_core(
             if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
             else if (beta != one)  for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
             if (tb == 'N') {
-                for (ptrdiff_t k = 0; k < K; ++k) {
-                    const T bkj = B_(k, j);
+                for (ptrdiff_t p = 0; p < K; ++p) {
+                    const T bkj = B_(p, j);
                     if (bkj != zero) {
                         const T t = alpha * bkj;
-                        const T *ak = &A_(0, k);
+                        const T *ak = &A_(0, p);
                         for (ptrdiff_t i = is; i < ie; ++i) cj[i] += t * ak[i];
                     }
                 }
             } else {
-                for (ptrdiff_t k = 0; k < K; ++k) {
-                    const T bjk = B_(j, k);
+                for (ptrdiff_t p = 0; p < K; ++p) {
+                    const T bjk = B_(j, p);
                     if (bjk != zero) {
                         const T t = alpha * bjk;
-                        const T *ak = &A_(0, k);
+                        const T *ak = &A_(0, p);
                         for (ptrdiff_t i = is; i < ie; ++i) cj[i] += t * ak[i];
                     }
                 }
@@ -84,13 +84,13 @@ void qgemmtr_compute_core(
             if (tb == 'N') {
                 for (ptrdiff_t i = is; i < ie; ++i) {
                     T s = zero;
-                    for (ptrdiff_t k = 0; k < K; ++k) s += A_(k, i) * B_(k, j);
+                    for (ptrdiff_t p = 0; p < K; ++p) s += A_(p, i) * B_(p, j);
                     cj[i] = (beta == zero) ? alpha * s : alpha * s + beta * cj[i];
                 }
             } else {
                 for (ptrdiff_t i = is; i < ie; ++i) {
                     T s = zero;
-                    for (ptrdiff_t k = 0; k < K; ++k) s += A_(k, i) * B_(j, k);
+                    for (ptrdiff_t p = 0; p < K; ++p) s += A_(p, i) * B_(j, p);
                     cj[i] = (beta == zero) ? alpha * s : alpha * s + beta * cj[i];
                 }
             }

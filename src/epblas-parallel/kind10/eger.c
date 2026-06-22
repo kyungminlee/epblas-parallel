@@ -31,9 +31,9 @@ typedef long double T;
  * aj[i] store can't force an x[i] reload. Bit-exact: each aj[i] is independent. */
 static void eger_col_unit(ptrdiff_t M, T t, const T *restrict x, T *restrict aj)
 {
-    const ptrdiff_t m = M % 8;
-    for (ptrdiff_t i = 0; i < m; ++i) aj[i] += t * x[i];
-    for (ptrdiff_t i = m; i < M; i += 8) {
+    const ptrdiff_t rem = M % 8;
+    for (ptrdiff_t i = 0; i < rem; ++i) aj[i] += t * x[i];
+    for (ptrdiff_t i = rem; i < M; i += 8) {
         aj[i    ] += t * x[i    ];
         aj[i + 1] += t * x[i + 1];
         aj[i + 2] += t * x[i + 2];

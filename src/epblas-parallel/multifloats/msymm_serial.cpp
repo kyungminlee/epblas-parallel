@@ -55,11 +55,11 @@ constexpr std::ptrdiff_t kMaxBlockM = 256;
 /* Pack `count` cells from B[ic..ic+count, j_start..j_start+j_count)
  * into SoA scratch [bh,bl][0..count-1, 0..3]. Zero-pad lanes ≥ j_count. */
 inline void pack_4col(std::ptrdiff_t count, std::ptrdiff_t row_start,
-                      const T *m, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
+                      const T *mat, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                       double *h, double *l)
 {
     for (std::ptrdiff_t j = 0; j < j_count; ++j) {
-        const T *col = m + static_cast<std::size_t>(j_start + j) * ldm;
+        const T *col = mat + static_cast<std::size_t>(j_start + j) * ldm;
         for (std::ptrdiff_t i = 0; i < count; ++i) {
             h[i * kSimdLane + j] = col[row_start + i].limbs[0];
             l[i * kSimdLane + j] = col[row_start + i].limbs[1];
@@ -73,11 +73,11 @@ inline void pack_4col(std::ptrdiff_t count, std::ptrdiff_t row_start,
 }
 
 inline void unpack_4col(std::ptrdiff_t count, std::ptrdiff_t row_start,
-                        T *m, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
+                        T *mat, std::ptrdiff_t ldm, std::ptrdiff_t j_start, std::ptrdiff_t j_count,
                         const double *h, const double *l)
 {
     for (std::ptrdiff_t j = 0; j < j_count; ++j) {
-        T *col = m + static_cast<std::size_t>(j_start + j) * ldm;
+        T *col = mat + static_cast<std::size_t>(j_start + j) * ldm;
         for (std::ptrdiff_t i = 0; i < count; ++i) {
             col[row_start + i].limbs[0] = h[i * kSimdLane + j];
             col[row_start + i].limbs[1] = l[i * kSimdLane + j];
