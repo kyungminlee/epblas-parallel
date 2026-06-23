@@ -36,7 +36,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef long double T;
+typedef long double TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -50,22 +50,22 @@ static ptrdiff_t etrsv_blocked_nb(void) {
 void etrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TR *restrict a, const ptrdiff_t *lda_,
+    TR *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void etrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TR *restrict a, const ptrdiff_t *lda_,
+    TR *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void etrsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TR *restrict a, ptrdiff_t lda,
+    TR *restrict x, ptrdiff_t incx)
 {
     if (n == 0) return;
 
@@ -99,8 +99,8 @@ void etrsv_core(
 void etrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TR *restrict a, const ptrdiff_t *lda_,
+    TR *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
@@ -114,7 +114,7 @@ void etrsv_serial_(
 
     if (n == 0) return;
 
-    const T zero = 0.0L;
+    const TR zero = 0.0L;
 
     (void)zero;
     if (incx == 1) {
@@ -130,21 +130,21 @@ void etrsv_serial_(
                 ptrdiff_t i = 0;
                 for (; i + 1 < n; i += 2) {
                     if (nounit) x[i] /= A_(i, i);
-                    const T xi = x[i];
+                    const TR xi = x[i];
                     /* Apply column i's contribution to x[i+1] before solving it. */
                     x[i + 1] -= xi * A_(i + 1, i);
                     if (nounit) x[i + 1] /= A_(i + 1, i + 1);
-                    const T xi1 = x[i + 1];
-                    const T *a0 = &A_(0, i);
-                    const T *a1 = &A_(0, i + 1);
+                    const TR xi1 = x[i + 1];
+                    const TR *a0 = &A_(0, i);
+                    const TR *a1 = &A_(0, i + 1);
                     for (ptrdiff_t k = i + 2; k < n; ++k) {
                         x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
                     }
                 }
                 if (i < n) {
                     if (nounit) x[i] /= A_(i, i);
-                    const T xi = x[i];
-                    const T *ai = &A_(0, i);
+                    const TR xi = x[i];
+                    const TR *ai = &A_(0, i);
                     for (ptrdiff_t k = i + 1; k < n; ++k) x[k] -= xi * ai[k];
                 }
             } else {
@@ -157,21 +157,21 @@ void etrsv_serial_(
                 ptrdiff_t i = n - 1;
                 for (; i - 1 >= 0; i -= 2) {
                     if (nounit) x[i] /= A_(i, i);
-                    const T xi = x[i];
+                    const TR xi = x[i];
                     /* Apply column i's contribution to x[i-1] before solving it. */
                     x[i - 1] -= xi * A_(i - 1, i);
                     if (nounit) x[i - 1] /= A_(i - 1, i - 1);
-                    const T xi1 = x[i - 1];
-                    const T *a0 = &A_(0, i);
-                    const T *a1 = &A_(0, i - 1);
+                    const TR xi1 = x[i - 1];
+                    const TR *a0 = &A_(0, i);
+                    const TR *a1 = &A_(0, i - 1);
                     for (ptrdiff_t k = 0; k < i - 1; ++k) {
                         x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
                     }
                 }
                 if (i >= 0) {
                     if (nounit) x[i] /= A_(i, i);
-                    const T xi = x[i];
-                    const T *ai = &A_(0, i);
+                    const TR xi = x[i];
+                    const TR *ai = &A_(0, i);
                     for (ptrdiff_t k = 0; k < i; ++k) x[k] -= xi * ai[k];
                 }
             }
@@ -195,15 +195,15 @@ void etrsv_serial_(
                  * single-acc fmul→fadd dep chain (same x87-latency fix as
                  * etrmv TRANS='T' and ytrsv U-T; Addendum 19 / Rule 22). */
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T t0 = x[i], t1 = zero;
-                    const T *ai = &A_(0, i);
+                    TR t0 = x[i], t1 = zero;
+                    const TR *ai = &A_(0, i);
                     ptrdiff_t k = n - 1;
                     for (; k - 1 > i; k -= 2) {
                         t0 -= ai[k]     * x[k];
                         t1 -= ai[k - 1] * x[k - 1];
                     }
                     for (; k > i; --k) t0 -= ai[k] * x[k];
-                    T t = t0 + t1;
+                    TR t = t0 + t1;
                     if (nounit) t /= ai[i];
                     x[i] = t;
                 }
@@ -214,15 +214,15 @@ void etrsv_serial_(
                  * K-unroll-by-2 with split accumulators — see LT branch
                  * note above. */
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    T t0 = x[i], t1 = zero;
-                    const T *ai = &A_(0, i);
+                    TR t0 = x[i], t1 = zero;
+                    const TR *ai = &A_(0, i);
                     ptrdiff_t k = 0;
                     for (; k + 1 < i; k += 2) {
                         t0 -= ai[k]     * x[k];
                         t1 -= ai[k + 1] * x[k + 1];
                     }
                     if (k < i) t0 -= ai[k] * x[k];
-                    T t = t0 + t1;
+                    TR t = t0 + t1;
                     if (nounit) t /= ai[i];
                     x[i] = t;
                 }
@@ -236,10 +236,10 @@ void etrsv_serial_(
             if (UPLO == 'L') {
                 ptrdiff_t ix = kx;
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    const T *ai = &A_(0, i);
+                    const TR *ai = &A_(0, i);
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= ai[i];
-                        const T xi = x[ix];
+                        const TR xi = x[ix];
                         ptrdiff_t kk = ix + incx;
                         for (ptrdiff_t k = i + 1; k < n; ++k) {
                             x[kk] -= xi * ai[k];
@@ -251,10 +251,10 @@ void etrsv_serial_(
             } else {
                 ptrdiff_t ix = kx + (n - 1) * incx;
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    const T *ai = &A_(0, i);
+                    const TR *ai = &A_(0, i);
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= ai[i];
-                        const T xi = x[ix];
+                        const TR xi = x[ix];
                         ptrdiff_t kk = kx;
                         for (ptrdiff_t k = 0; k < i; ++k) {
                             x[kk] -= xi * ai[k];
@@ -272,8 +272,8 @@ void etrsv_serial_(
                  * accumulators (Addendum 19 / Rule 22). */
                 ptrdiff_t ix = kx + (n - 1) * incx;
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    const T *ai = &A_(0, i);
-                    T t0 = x[ix], t1 = zero;
+                    const TR *ai = &A_(0, i);
+                    TR t0 = x[ix], t1 = zero;
                     ptrdiff_t k = n - 1;
                     ptrdiff_t xk = kx + (n - 1) * incx;
                     for (; k - 1 > i; k -= 2) {
@@ -282,7 +282,7 @@ void etrsv_serial_(
                         xk -= 2 * incx;
                     }
                     for (; k > i; --k) { t0 -= ai[k] * x[xk]; xk -= incx; }
-                    T t = t0 + t1;
+                    TR t = t0 + t1;
                     if (nounit) t /= ai[i];
                     x[ix] = t;
                     ix -= incx;
@@ -291,8 +291,8 @@ void etrsv_serial_(
                 /* K-unroll-by-2 with split accumulators. */
                 ptrdiff_t ix = kx;
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    const T *ai = &A_(0, i);
-                    T t0 = x[ix], t1 = zero;
+                    const TR *ai = &A_(0, i);
+                    TR t0 = x[ix], t1 = zero;
                     ptrdiff_t k = 0;
                     ptrdiff_t xk = kx;
                     for (; k + 1 < i; k += 2) {
@@ -301,7 +301,7 @@ void etrsv_serial_(
                         xk += 2 * incx;
                     }
                     if (k < i) t0 -= ai[k] * x[xk];
-                    T t = t0 + t1;
+                    TR t = t0 + t1;
                     if (nounit) t /= ai[i];
                     x[ix] = t;
                     ix += incx;
@@ -327,17 +327,17 @@ void etrsv_serial_(
 extern void egemv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha,
-    const T *a, ptrdiff_t lda,
-    const T *x, ptrdiff_t incx,
-    const T *beta,
-    T *y, ptrdiff_t incy);
+    const TR *alpha,
+    const TR *a, ptrdiff_t lda,
+    const TR *x, ptrdiff_t incx,
+    const TR *beta,
+    TR *y, ptrdiff_t incy);
 
 void etrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TR *restrict a, const ptrdiff_t *lda_,
+    TR *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     const ptrdiff_t n = *n_;
@@ -355,8 +355,8 @@ void etrsv_blocked_(
         return;
     }
 
-    const T neg_one = -1.0L;
-    const T one_v   =  1.0L;
+    const TR neg_one = -1.0L;
+    const TR one_v   =  1.0L;
     const char NN[1] = {'N'};
     const char TT[1] = {'T'};
     const ptrdiff_t one_i = 1;
@@ -509,6 +509,6 @@ void etrsv_blocked_(
     }
 }
 
-EPBLAS_FACADE_TRMV(etrsv, T)
+EPBLAS_FACADE_TRMV(etrsv, TR)
 
 #undef A_

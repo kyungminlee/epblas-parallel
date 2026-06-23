@@ -16,7 +16,7 @@
 
 #define EGER_OMP_MIN 64
 
-typedef long double T;
+typedef long double TR;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -29,7 +29,7 @@ typedef long double T;
  * per-element increment/compare/branch cost and recovers it. restrict re-states
  * the aj/x no-alias fact the caller has but a plain helper would lose, so the
  * aj[i] store can't force an x[i] reload. Bit-exact: each aj[i] is independent. */
-static void eger_col_unit(ptrdiff_t m, T t, const T *restrict x, T *restrict aj)
+static void eger_col_unit(ptrdiff_t m, TR t, const TR *restrict x, TR *restrict aj)
 {
     const ptrdiff_t rem = m % 8;
     for (ptrdiff_t i = 0; i < rem; ++i) aj[i] += t * x[i];
@@ -47,13 +47,13 @@ static void eger_col_unit(ptrdiff_t m, T t, const T *restrict x, T *restrict aj)
 
 static void eger_core(
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict a, ptrdiff_t lda)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *restrict y, ptrdiff_t incy,
+    TR *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0L;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0L;
 
     if (m == 0 || n == 0 || alpha == zero) return;
 
@@ -62,7 +62,7 @@ static void eger_core(
         /* C-source branch on use_omp to dodge Add-16 outlining tax. */
 #define EGER_BODY                                                            \
         for (ptrdiff_t j = 0; j < n; ++j) {                                  \
-            const T yj = y[j];                                               \
+            const TR yj = y[j];                                               \
             if (yj != zero) eger_col_unit(m, alpha * yj, x, &A_(0, j));      \
         }
         if (use_omp) {
@@ -87,10 +87,10 @@ static void eger_core(
          * same values copied in order, same per-column accumulation. Serial keeps
          * the strided load (its inner loop isn't on a shared/contended path, and a
          * malloc per call there would only add overhead). */
-        const T *xp = x;
-        T *x_buf = NULL;
+        const TR *xp = x;
+        TR *x_buf = NULL;
         if (use_omp && incx != 1) {
-            x_buf = malloc((size_t)m * sizeof(T));
+            x_buf = malloc((size_t)m * sizeof(TR));
             if (x_buf) {
                 ptrdiff_t ix = ix0;
                 for (ptrdiff_t i = 0; i < m; ++i) { x_buf[i] = x[ix]; ix += incx; }
@@ -100,10 +100,10 @@ static void eger_core(
         const bool x_unit = (incx == 1) || (x_buf != NULL);
 #define EGER_STRIDED_BODY                                                    \
         for (ptrdiff_t j = 0; j < n; ++j) {                                  \
-            const T yj = y[jy0 + j * incy];                                  \
+            const TR yj = y[jy0 + j * incy];                                  \
             if (yj != zero) {                                                \
-                const T t = alpha * yj;                                      \
-                T *aj = &A_(0, j);                                           \
+                const TR t = alpha * yj;                                      \
+                TR *aj = &A_(0, j);                                           \
                 if (x_unit) {                                                \
                     eger_col_unit(m, t, xp, aj);                             \
                 } else {                                                     \
@@ -128,6 +128,6 @@ static void eger_core(
     }
 }
 
-EPBLAS_FACADE_GER(eger, T)
+EPBLAS_FACADE_GER(eger, TR)
 
 #undef A_

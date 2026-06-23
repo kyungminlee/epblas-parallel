@@ -23,7 +23,7 @@
 #include <ctype.h>
 #include <stddef.h>
 
-typedef ytrmm_T T;
+typedef ytrmm_TC TC;
 
 static ptrdiff_t g_nb_trmm = 0;
 ptrdiff_t ytrmm_nb(void) {
@@ -34,34 +34,34 @@ ptrdiff_t ytrmm_nb(void) {
 extern void ygemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const T *alpha,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta,
-    T *c, ptrdiff_t ldc);
+    const TC *alpha,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
+    const TC *beta,
+    TC *c, ptrdiff_t ldc);
 
 
-static const T ZERO = 0.0L + 0.0Li;
-static const T ONE  = 1.0L + 0.0Li;
+static const TC ZERO = 0.0L + 0.0Li;
+static const TC ONE  = 1.0L + 0.0Li;
 
-static inline T cconj(T a) { return ~a; }
+static inline TC cconj(TC a) { return ~a; }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
-static inline T A_op(const T *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, bool conj_flag) {
+static inline TC A_op(const TC *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, bool conj_flag) {
     return conj_flag ? cconj(A_(row, col)) : A_(row, col);
 }
 
 /* ── Scalar column-range cores (SIDE='L') ───────────────────────── */
 
-void ytrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+void ytrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
+                    const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t k = m - 1; k >= 0; --k) {
             if (B_(k, j) != ZERO) {
-                T temp = alpha * B_(k, j);
+                TC temp = alpha * B_(k, j);
                 for (ptrdiff_t i = m - 1; i > k; --i)
                     B_(i, j) += temp * A_(i, k);
                 if (nounit) temp *= A_(k, k);
@@ -71,13 +71,13 @@ void ytrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
     }
 }
 
-void ytrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+void ytrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
+                    const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t k = 0; k < m; ++k) {
             if (B_(k, j) != ZERO) {
-                T temp = alpha * B_(k, j);
+                TC temp = alpha * B_(k, j);
                 for (ptrdiff_t i = 0; i < k; ++i)
                     B_(i, j) += temp * A_(i, k);
                 if (nounit) temp *= A_(k, k);
@@ -87,13 +87,13 @@ void ytrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
     }
 }
 
-void ytrmm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+void ytrmm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = 0; i < m; ++i) {
-            T t = B_(i, j);
+            TC t = B_(i, j);
             if (nounit) t *= A_op(a, lda, i, i, conj_flag);
             for (ptrdiff_t k = i + 1; k < m; ++k)
                 t += A_op(a, lda, k, i, conj_flag) * B_(k, j);
@@ -102,13 +102,13 @@ void ytrmm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
     }
 }
 
-void ytrmm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+void ytrmm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = m - 1; i >= 0; --i) {
-            T t = B_(i, j);
+            TC t = B_(i, j);
             if (nounit) t *= A_op(a, lda, i, i, conj_flag);
             for (ptrdiff_t k = 0; k < i; ++k)
                 t += A_op(a, lda, k, i, conj_flag) * B_(k, j);
@@ -119,17 +119,17 @@ void ytrmm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
 
 /* ── Scalar row-range cores (SIDE='R') ──────────────────────────── */
 
-void ytrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+void ytrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, TC alpha,
+                    const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = 0; j < n; ++j) {
-        T t = alpha;
+        TC t = alpha;
         if (nounit) t *= A_(j, j);
         if (t != ONE)
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= t;
         for (ptrdiff_t k = j + 1; k < n; ++k) {
             if (A_(k, j) != ZERO) {
-                const T akj = alpha * A_(k, j);
+                const TC akj = alpha * A_(k, j);
                 for (ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) += akj * B_(i, k);
             }
@@ -137,17 +137,17 @@ void ytrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
     }
 }
 
-void ytrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+void ytrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, TC alpha,
+                    const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = n - 1; j >= 0; --j) {
-        T t = alpha;
+        TC t = alpha;
         if (nounit) t *= A_(j, j);
         if (t != ONE)
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= t;
         for (ptrdiff_t k = 0; k < j; ++k) {
             if (A_(k, j) != ZERO) {
-                const T akj = alpha * A_(k, j);
+                const TC akj = alpha * A_(k, j);
                 for (ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) += akj * B_(i, k);
             }
@@ -155,40 +155,40 @@ void ytrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
     }
 }
 
-void ytrmm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+void ytrmm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, TC alpha,
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t k = n - 1; k >= 0; --k) {
         for (ptrdiff_t j = k + 1; j < n; ++j) {
-            const T ajk = A_op(a, lda, j, k, conj_flag);
+            const TC ajk = A_op(a, lda, j, k, conj_flag);
             if (ajk != ZERO) {
-                const T scaled = alpha * ajk;
+                const TC scaled = alpha * ajk;
                 for (ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) += scaled * B_(i, k);
             }
         }
-        T t = alpha;
+        TC t = alpha;
         if (nounit) t *= A_op(a, lda, k, k, conj_flag);
         if (t != ONE)
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= t;
     }
 }
 
-void ytrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+void ytrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, TC alpha,
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t k = 0; k < n; ++k) {
         for (ptrdiff_t j = 0; j < k; ++j) {
-            const T ajk = A_op(a, lda, j, k, conj_flag);
+            const TC ajk = A_op(a, lda, j, k, conj_flag);
             if (ajk != ZERO) {
-                const T scaled = alpha * ajk;
+                const TC scaled = alpha * ajk;
                 for (ptrdiff_t i = i_start; i < i_end; ++i)
                     B_(i, j) += scaled * B_(i, k);
             }
         }
-        T t = alpha;
+        TC t = alpha;
         if (nounit) t *= A_op(a, lda, k, k, conj_flag);
         if (t != ONE)
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= t;
@@ -198,13 +198,13 @@ void ytrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
 /* ── Blocked SIDE='L' worker ────────────────────────────────────── */
 
 void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t j_end,
-                           ptrdiff_t m, ptrdiff_t nb, T alpha,
-                           const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+                           ptrdiff_t m, ptrdiff_t nb, TC alpha,
+                           const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t my_N = j_end - j_start;
     if (my_N <= 0) return;
 
-    T *B_chunk = &B_(0, j_start);
+    TC *B_chunk = &B_(0, j_start);
 
     if (V == YLLN) {
         ptrdiff_t ic = ((m - 1) / nb) * nb;
@@ -272,12 +272,12 @@ void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t 
 /* ── Blocked SIDE='R' worker ────────────────────────────────────── */
 
 void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t i_end,
-                           ptrdiff_t n, ptrdiff_t nb, T alpha,
-                           const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+                           ptrdiff_t n, ptrdiff_t nb, TC alpha,
+                           const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     const ptrdiff_t my_M = i_end - i_start;
     if (my_M <= 0) return;
-    T *B_chunk = &B_(i_start, 0);
+    TC *B_chunk = &B_(i_start, 0);
 
     if (V == YRLN) {
         for (ptrdiff_t jc = 0; jc < n; jc += nb) {
@@ -347,11 +347,11 @@ void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t 
 void ytrmm_serial(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    TC *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
     const char TRANS = blas_up(transa);

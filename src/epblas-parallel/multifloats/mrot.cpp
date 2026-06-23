@@ -18,7 +18,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 namespace {
 #ifdef MBLAS_SIMD_DD
@@ -29,7 +29,7 @@ using simd_exact::store_dd4;
 
 /* Givens rotation over a contiguous unit-stride range — serial kernel,
  * unchanged. X and Y slices are disjoint per thread → safe to partition. */
-static void mrot_unit(std::ptrdiff_t n, const T c, const T s, T *x, T *y)
+static void mrot_unit(std::ptrdiff_t n, const TR c, const TR s, TR *x, TR *y)
 {
 #ifdef MBLAS_SIMD_DD
     const __m256d ch = _mm256_set1_pd(c.limbs[0]);
@@ -52,13 +52,13 @@ static void mrot_unit(std::ptrdiff_t n, const T c, const T s, T *x, T *y)
         store_dd4(&y[i], nyh, nyl);
     }
     for (std::ptrdiff_t i = n4; i < n; ++i) {
-        T tx = c * x[i] + s * y[i];
+        TR tx = c * x[i] + s * y[i];
         y[i] = c * y[i] - s * x[i];
         x[i] = tx;
     }
 #else
     for (std::ptrdiff_t i = 0; i < n; ++i) {
-        T tx = c * x[i] + s * y[i];
+        TR tx = c * x[i] + s * y[i];
         y[i] = c * y[i] - s * x[i];
         x[i] = tx;
     }
@@ -67,7 +67,7 @@ static void mrot_unit(std::ptrdiff_t n, const T c, const T s, T *x, T *y)
 
 #ifdef _OPENMP
 #define MROT_OMP_MIN 2048
-__attribute__((noinline)) static std::ptrdiff_t mrot_omp(std::ptrdiff_t n, T c, T s, T *x, T *y)
+__attribute__((noinline)) static std::ptrdiff_t mrot_omp(std::ptrdiff_t n, TR c, TR s, TR *x, TR *y)
 {
     if (n <= MROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -84,11 +84,11 @@ __attribute__((noinline)) static std::ptrdiff_t mrot_omp(std::ptrdiff_t n, T c, 
 #endif
 
 static void mrot_core(std::ptrdiff_t n,
-                      T *x, std::ptrdiff_t incx,
-                      T *y, std::ptrdiff_t incy,
-                      const T *c_, const T *s_)
+                      TR *x, std::ptrdiff_t incx,
+                      TR *y, std::ptrdiff_t incy,
+                      const TR *c_, const TR *s_)
 {
-    const T c = *c_, s = *s_;
+    const TR c = *c_, s = *s_;
     if (n <= 0) return;
 
     if (incx == 1 && incy == 1) {
@@ -100,7 +100,7 @@ static void mrot_core(std::ptrdiff_t n,
         std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         std::ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
         for (std::ptrdiff_t i = 0; i < n; ++i) {
-            T tx = c * x[ix] + s * y[iy];
+            TR tx = c * x[ix] + s * y[iy];
             y[iy] = c * y[iy] - s * x[ix];
             x[ix] = tx;
             ix += incx; iy += incy;
@@ -108,4 +108,4 @@ static void mrot_core(std::ptrdiff_t n,
     }
 }
 
-extern "C" { EPBLAS_FACADE_ROT(mrot, T, T) }
+extern "C" { EPBLAS_FACADE_ROT(mrot, TR, TR) }

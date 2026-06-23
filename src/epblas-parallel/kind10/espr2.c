@@ -14,7 +14,7 @@
 
 #define ESPR2_OMP_MIN 64
 
-typedef long double T;
+typedef long double TR;
 
 
 /* Per-column rank-2 updates, carved out as their own functions so the inner
@@ -24,29 +24,29 @@ typedef long double T;
  * function restores parity with the reference and lets both the serial and
  * threaded paths share one tight loop. */
 __attribute__((noinline))
-static void espr2_col_upper(ptrdiff_t j, T t1, T t2,
-                            const T *restrict x, const T *restrict y, T *restrict ap) {
-    T *restrict c = ap + (size_t)j * (j + 1) / 2;
+static void espr2_col_upper(ptrdiff_t j, TR t1, TR t2,
+                            const TR *restrict x, const TR *restrict y, TR *restrict ap) {
+    TR *restrict c = ap + (size_t)j * (j + 1) / 2;
     for (ptrdiff_t i = 0; i <= j; ++i) c[i] += x[i] * t1 + y[i] * t2;
 }
 
 __attribute__((noinline))
-static void espr2_col_lower(ptrdiff_t j, ptrdiff_t n, T t1, T t2,
-                            const T *restrict x, const T *restrict y, T *restrict ap) {
-    T *restrict c = ap + ((size_t)j * n - (size_t)j * (j - 1) / 2) - j;
+static void espr2_col_lower(ptrdiff_t j, ptrdiff_t n, TR t1, TR t2,
+                            const TR *restrict x, const TR *restrict y, TR *restrict ap) {
+    TR *restrict c = ap + ((size_t)j * n - (size_t)j * (j - 1) / 2) - j;
     for (ptrdiff_t i = j; i < n; ++i) c[i] += x[i] * t1 + y[i] * t2;
 }
 
 static void espr2_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict ap)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *restrict y, ptrdiff_t incy,
+    TR *restrict ap)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0L;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0L;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -90,8 +90,8 @@ static void espr2_core(
         if (UPLO == 'U') {
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
-                    const T t1 = alpha * y[jy];
-                    const T t2 = alpha * x[jx];
+                    const TR t1 = alpha * y[jy];
+                    const TR t2 = alpha * x[jx];
                     ptrdiff_t ix = kx, iy = ky;
                     for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
@@ -104,8 +104,8 @@ static void espr2_core(
         } else {
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
-                    const T t1 = alpha * y[jy];
-                    const T t2 = alpha * x[jx];
+                    const TR t1 = alpha * y[jy];
+                    const TR t2 = alpha * x[jx];
                     ptrdiff_t ix = jx, iy = jy;
                     for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
@@ -119,4 +119,4 @@ static void espr2_core(
     }
 }
 
-EPBLAS_FACADE_SPR2(espr2, T)
+EPBLAS_FACADE_SPR2(espr2, TR)

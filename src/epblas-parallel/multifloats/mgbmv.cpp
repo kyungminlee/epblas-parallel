@@ -19,7 +19,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -30,7 +30,7 @@ using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 #define MGBMV_OMP_MIN 64
 #define MGBMV_MAX_CPUS 256
-const T zero_dd{0.0, 0.0};
+const TR zero_dd{0.0, 0.0};
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
@@ -51,23 +51,23 @@ namespace {
  * (y[i] += tmp*col[i], distinct rows, ascending j -> bit-exact). Trans reduces it
  * against x via a vector dot (within DD fuzz tol). The strided entries gather
  * x/y to scratch and reuse these. */
-void mgbmv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
-                    const T *a, std::size_t lda, const T *x, T *y)
+void mgbmv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, TR alpha,
+                    const TR *a, std::size_t lda, const TR *x, TR *y)
 {
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const T tmp = alpha * x[j];
+        const TR tmp = alpha * x[j];
         std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, m, KL, KU, i_lo, i_hi);
         const std::ptrdiff_t k = KU - j;
         if (i_hi > i_lo) mf_kernels::axpy_add(i_hi - i_lo, &y[i_lo], &A_(k + i_lo, j), tmp);
     }
 }
-void mgbmv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
-                    const T *a, std::size_t lda, const T *x, T *y)
+void mgbmv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, TR alpha,
+                    const TR *a, std::size_t lda, const TR *x, TR *y)
 {
     for (std::ptrdiff_t j = 0; j < n; ++j) {
         std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, m, KL, KU, i_lo, i_hi);
         const std::ptrdiff_t k = KU - j;
-        const T s = (i_hi > i_lo) ? mf_kernels::dot(i_hi - i_lo, &A_(k + i_lo, j), &x[i_lo]) : zero_dd;
+        const TR s = (i_hi > i_lo) ? mf_kernels::dot(i_hi - i_lo, &A_(k + i_lo, j), &x[i_lo]) : zero_dd;
         y[j] = y[j] + alpha * s;
     }
 }
@@ -84,9 +84,9 @@ void mgbmv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::
  * the serial/netlib scatter (bit-exact). alpha*x[j] is recomputed per column
  * (read-only x), which removes the shared ax buffer and its barrier. NoTrans
  * reads N of x, writes M of y. Returns true if handled. */
-static bool mgbmv_n_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
-                        const T *a, std::ptrdiff_t lda,
-                        const T *x, std::ptrdiff_t incx, T *y, std::ptrdiff_t incy)
+static bool mgbmv_n_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, TR alpha,
+                        const TR *a, std::ptrdiff_t lda,
+                        const TR *x, std::ptrdiff_t incx, TR *y, std::ptrdiff_t incy)
 {
     if (m < MGBMV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -105,15 +105,15 @@ static bool mgbmv_n_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, s
         std::ptrdiff_t jlo = (lo - KL > 0) ? (lo - KL) : 0;
         std::ptrdiff_t jhi = (hi - 1 + KU + 1 < n) ? (hi + KU) : n;
         for (std::ptrdiff_t j = jlo; j < jhi; ++j) {
-            const T tmp = alpha * x[ix0 + j * incx];
+            const TR tmp = alpha * x[ix0 + j * incx];
             std::ptrdiff_t i_lo = (j - KU > lo) ? (j - KU) : lo;
             std::ptrdiff_t i_hi = (j + KL + 1 < hi) ? (j + KL + 1) : hi;
-            const T *col = &A_(KU - j + i_lo, j);   /* contiguous in i */
+            const TR *col = &A_(KU - j + i_lo, j);   /* contiguous in i */
             if (incy == 1) {                        /* contiguous owned rows -> SoA AXPY */
                 mf_kernels::axpy_add(i_hi - i_lo, &y[iy0 + i_lo], col, tmp);
             } else {
                 for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                    T *yi = &y[iy0 + i * incy];
+                    TR *yi = &y[iy0 + i * incy];
                     *yi = *yi + tmp * (*col++);
                 }
             }
@@ -126,9 +126,9 @@ static bool mgbmv_n_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, s
  * Output columns partition across threads (each y[j]=alpha*Σ_i A(i,j)*x[i] disjoint).
  * Strided x gathered to contiguous so the inner dot reads x[i] directly. Trans reads
  * M of x, writes N of y. Bit-identical to the serial strided gather (ascending-i). */
-static bool mgbmv_t_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, T alpha,
-                        const T *a, std::ptrdiff_t lda,
-                        const T *x, std::ptrdiff_t incx, T *y, std::ptrdiff_t incy)
+static bool mgbmv_t_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, std::ptrdiff_t KU, TR alpha,
+                        const TR *a, std::ptrdiff_t lda,
+                        const TR *x, std::ptrdiff_t incx, TR *y, std::ptrdiff_t incy)
 {
     if (n < MGBMV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -137,10 +137,10 @@ static bool mgbmv_t_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, s
 
     if (incy < 0) y -= static_cast<std::ptrdiff_t>(n - 1) * incy;
 
-    const T *xptr = x;
-    T *xbuf = nullptr;
+    const TR *xptr = x;
+    TR *xbuf = nullptr;
     if (incx != 1) {
-        xbuf = static_cast<T *>(std::malloc(static_cast<std::size_t>(m) * sizeof(T)));
+        xbuf = static_cast<TR *>(std::malloc(static_cast<std::size_t>(m) * sizeof(TR)));
         if (!xbuf) return false;
         mf_kernels::gather_strided(m, x, incx, xbuf);
         xptr = xbuf;
@@ -155,8 +155,8 @@ static bool mgbmv_t_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, s
             std::ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
             std::ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;
             std::ptrdiff_t k = KU - j;
-            const T *col = &A_(k + i_lo, j);
-            T s = mf_kernels::dot(i_hi - i_lo, col, &xptr[i_lo]);
+            const TR *col = &A_(k + i_lo, j);
+            TR s = mf_kernels::dot(i_hi - i_lo, col, &xptr[i_lo]);
             y[j * incy] = y[j * incy] + alpha * s;
         }
     }
@@ -169,13 +169,13 @@ static void mgbmv_core(
     char trans,
     std::ptrdiff_t m, std::ptrdiff_t n,
     std::ptrdiff_t KL, std::ptrdiff_t KU,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *x, std::ptrdiff_t incx,
-    const T *beta_,
-    T *y, std::ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *a, std::ptrdiff_t lda,
+    const TR *x, std::ptrdiff_t incx,
+    const TR *beta_,
+    TR *y, std::ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     char TRANS = up(&trans);
     if (TRANS == 'C') TRANS = 'T';
 
@@ -203,8 +203,8 @@ static void mgbmv_core(
          * scratch, run the SIMD scatter core, scatter y back. O(M+N) gather vs
          * O(M*band) work; the in-place strided walk is the alloc-fail fallback. */
         {
-            T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
-            T *ys = static_cast<T *>(std::malloc((std::size_t)m * sizeof(T)));
+            TR *xs = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR)));
+            TR *ys = static_cast<TR *>(std::malloc((std::size_t)m * sizeof(TR)));
             if (xs && ys) {
                 mf_kernels::gather_strided(n, x, incx, xs);
                 mf_kernels::gather_strided(m, y, incy, ys);
@@ -220,7 +220,7 @@ static void mgbmv_core(
             std::ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
             std::ptrdiff_t jx = kx;
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T tmp = alpha * x[jx];
+                const TR tmp = alpha * x[jx];
                 std::ptrdiff_t iy = ky;
                 std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, m, KL, KU, i_lo, i_hi);
                 const std::ptrdiff_t k = KU - j;
@@ -247,8 +247,8 @@ static void mgbmv_core(
         /* Strided: gather x (len M) and beta-scaled y (len N), run the SIMD dot
          * core, scatter y back; the in-place strided walk is the alloc-fail fallback. */
         {
-            T *xs = static_cast<T *>(std::malloc((std::size_t)m * sizeof(T)));
-            T *ys = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+            TR *xs = static_cast<TR *>(std::malloc((std::size_t)m * sizeof(TR)));
+            TR *ys = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR)));
             if (xs && ys) {
                 mf_kernels::gather_strided(m, x, incx, xs);
                 mf_kernels::gather_strided(n, y, incy, ys);
@@ -264,7 +264,7 @@ static void mgbmv_core(
             std::ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
             std::ptrdiff_t jy = ky;
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                T s = zero_dd;
+                TR s = zero_dd;
                 std::ptrdiff_t ix = kx;
                 std::ptrdiff_t i_lo, i_hi; mgbmv_band(j, m, KL, KU, i_lo, i_hi);
                 const std::ptrdiff_t k = KU - j;
@@ -281,7 +281,7 @@ static void mgbmv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_GBMV(mgbmv, T)
+EPBLAS_FACADE_GBMV(mgbmv, TR)
 }
 
 #undef A_

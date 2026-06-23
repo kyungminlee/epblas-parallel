@@ -24,7 +24,7 @@
 #include <ctype.h>
 #include <stddef.h>
 
-typedef qsymm_T T;
+typedef qsymm_TR TR;
 
 #define MR QGEMM_MR
 #define NR QGEMM_NR
@@ -41,15 +41,15 @@ char qsymm_uplo(const char *p) {
  * diagonal at most once per strip. Because A is symmetric, sym(r,c) ==
  * sym(c,r), so the SIDE=L (A-into-Ap) and SIDE=R (A-into-Bp) packs are the
  * SAME walk with posX/posY swapped — one routine serves both. */
-static void qsymm_pack_u(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
-                         ptrdiff_t posX, ptrdiff_t posY, T *b)
+static void qsymm_pack_u(ptrdiff_t m, ptrdiff_t n, const TR *a, ptrdiff_t lda,
+                         ptrdiff_t posX, ptrdiff_t posY, TR *b)
 {
     ptrdiff_t js = n >> 1;
     while (js > 0) {
         ptrdiff_t offset = posX - posY;
-        const T *ao1 = (offset >  0) ? a + (size_t)posY + (size_t)(posX + 0) * lda
+        const TR *ao1 = (offset >  0) ? a + (size_t)posY + (size_t)(posX + 0) * lda
                                      : a + (size_t)(posX + 0) + (size_t)posY * lda;
-        const T *ao2 = (offset > -1) ? a + (size_t)posY + (size_t)(posX + 1) * lda
+        const TR *ao2 = (offset > -1) ? a + (size_t)posY + (size_t)(posX + 1) * lda
                                      : a + (size_t)(posX + 1) + (size_t)posY * lda;
         for (ptrdiff_t i = m; i > 0; --i) {
             b[0] = ao1[0]; b[1] = ao2[0]; b += 2;
@@ -64,7 +64,7 @@ static void qsymm_pack_u(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
         /* Lone trailing strip at panel stride MR (kernel_edge reads
          * Apanel[p*MR], so the odd panel keeps the same stride). */
         ptrdiff_t offset = posX - posY;
-        const T *ao1 = (offset > 0) ? a + (size_t)posY + (size_t)(posX + 0) * lda
+        const TR *ao1 = (offset > 0) ? a + (size_t)posY + (size_t)(posX + 0) * lda
                                     : a + (size_t)(posX + 0) + (size_t)posY * lda;
         for (ptrdiff_t i = m; i > 0; --i) {
             b[0] = ao1[0]; b += MR;
@@ -74,15 +74,15 @@ static void qsymm_pack_u(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
     }
 }
 
-static void qsymm_pack_l(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
-                         ptrdiff_t posX, ptrdiff_t posY, T *b)
+static void qsymm_pack_l(ptrdiff_t m, ptrdiff_t n, const TR *a, ptrdiff_t lda,
+                         ptrdiff_t posX, ptrdiff_t posY, TR *b)
 {
     ptrdiff_t js = n >> 1;
     while (js > 0) {
         ptrdiff_t offset = posX - posY;
-        const T *ao1 = (offset >  0) ? a + (size_t)(posX + 0) + (size_t)posY * lda
+        const TR *ao1 = (offset >  0) ? a + (size_t)(posX + 0) + (size_t)posY * lda
                                      : a + (size_t)posY + (size_t)(posX + 0) * lda;
-        const T *ao2 = (offset > -1) ? a + (size_t)(posX + 1) + (size_t)posY * lda
+        const TR *ao2 = (offset > -1) ? a + (size_t)(posX + 1) + (size_t)posY * lda
                                      : a + (size_t)posY + (size_t)(posX + 1) * lda;
         for (ptrdiff_t i = m; i > 0; --i) {
             b[0] = ao1[0]; b[1] = ao2[0]; b += 2;
@@ -96,7 +96,7 @@ static void qsymm_pack_l(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
     if (n & 1) {
         /* Lone trailing strip at panel stride MR — see qsymm_pack_u. */
         ptrdiff_t offset = posX - posY;
-        const T *ao1 = (offset > 0) ? a + (size_t)(posX + 0) + (size_t)posY * lda
+        const TR *ao1 = (offset > 0) ? a + (size_t)(posX + 0) + (size_t)posY * lda
                                     : a + (size_t)posY + (size_t)(posX + 0) * lda;
         for (ptrdiff_t i = m; i > 0; --i) {
             b[0] = ao1[0]; b += MR;
@@ -106,9 +106,9 @@ static void qsymm_pack_l(ptrdiff_t m, ptrdiff_t n, const T *a, ptrdiff_t lda,
     }
 }
 
-void qsymm_pack_a_sym(const T *a, ptrdiff_t lda,
+void qsymm_pack_a_sym(const TR *a, ptrdiff_t lda,
                       ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
-                      char UPLO, T *Ap)
+                      char UPLO, TR *Ap)
 {
     /* SIDE=L: A is the M×K symmetric operand. Rows (ib) form the panel/strip
      * axis (posX), the K depth (pb) streams (m, posY). */
@@ -116,9 +116,9 @@ void qsymm_pack_a_sym(const T *a, ptrdiff_t lda,
     else             qsymm_pack_l(pb, ib, a, lda, ic, pc, Ap);
 }
 
-void qsymm_pack_b_sym(const T *a, ptrdiff_t lda,
+void qsymm_pack_b_sym(const TR *a, ptrdiff_t lda,
                       ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
-                      char UPLO, T *Bp)
+                      char UPLO, TR *Bp)
 {
     /* SIDE=R: A is the K×N symmetric operand in the B slot. Columns (jb) form
      * the panel/strip axis (posX), the K depth (pb) streams (m, posY). By
@@ -130,13 +130,13 @@ void qsymm_pack_b_sym(const T *a, ptrdiff_t lda,
 void qsymm_serial(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *b, ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
 
@@ -151,10 +151,10 @@ void qsymm_serial(
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(T);
-    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(TR);
+    TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
         for (ptrdiff_t jc = 0; jc < n; jc += NC) {
             const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;

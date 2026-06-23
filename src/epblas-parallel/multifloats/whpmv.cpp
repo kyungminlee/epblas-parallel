@@ -20,7 +20,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -30,7 +30,7 @@ using mf_pred::ceq1;
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 const R rzero{0.0, 0.0};
-const T czero{ rzero, rzero };
+const TC czero{ rzero, rzero };
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::rcmul;
@@ -42,22 +42,22 @@ using mf_kernels::rcmul;
  * j -> AXPY half bit-exact) and the threaded path (yacc = a private zero buffer,
  * disjoint cyclic columns -> within DD fuzz tol). The conj-dot reorders its
  * reduction either way. kk is the packed base of column j. */
-inline void whpmv_col_upper(std::ptrdiff_t j, const T *ap, const T *x, T alpha, T *yacc) {
+inline void whpmv_col_upper(std::ptrdiff_t j, const TC *ap, const TC *x, TC alpha, TC *yacc) {
     const std::size_t kk = static_cast<std::size_t>(j) * (j + 1) / 2;
-    const T t1 = cmul(alpha, x[j]);
+    const TC t1 = cmul(alpha, x[j]);
     mf_kernels::caxpy_add(j, yacc, &ap[kk], t1);
-    const T t2 = mf_kernels::cdot(j, &ap[kk], x, true);
+    const TC t2 = mf_kernels::cdot(j, &ap[kk], x, true);
     yacc[j] = cadd(yacc[j], cadd(rcmul(ap[kk + j].re, t1), cmul(alpha, t2)));
 }
 
-inline void whpmv_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, const T *ap, const T *x, T alpha, T *yacc) {
+inline void whpmv_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, const TC *ap, const TC *x, TC alpha, TC *yacc) {
     const std::size_t kk =
         static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2;
-    const T t1 = cmul(alpha, x[j]);
+    const TC t1 = cmul(alpha, x[j]);
     yacc[j] = cadd(yacc[j], rcmul(ap[kk].re, t1));
     const std::ptrdiff_t len = n - j - 1;
     mf_kernels::caxpy_add(len, &yacc[j + 1], &ap[kk + 1], t1);
-    const T t2 = mf_kernels::cdot(len, &ap[kk + 1], &x[j + 1], true);
+    const TC t2 = mf_kernels::cdot(len, &ap[kk + 1], &x[j + 1], true);
     yacc[j] = cadd(yacc[j], cmul(alpha, t2));
 }
 }
@@ -74,7 +74,7 @@ inline void whpmv_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, const T *ap, con
  * par4/par1 at ~0.47. Reorders the per-row sum vs serial -> within DD fuzz tol.
  * Returns true if handled. */
 __attribute__((noinline)) static bool whpmv_omp(
-    bool upper, std::ptrdiff_t n, const T *ap, const T *x, T alpha, T *y)
+    bool upper, std::ptrdiff_t n, const TC *ap, const TC *x, TC alpha, TC *y)
 {
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (!blas_omp_should_thread()) return false;
@@ -87,7 +87,7 @@ __attribute__((noinline)) static bool whpmv_omp(
                                           WHPMV_MAX_CPUS, range);
     if (num_cpu <= 1) return false;
 
-    T *buf = static_cast<T *>(std::calloc((std::size_t)num_cpu * n, sizeof(T)));
+    TC *buf = static_cast<TC *>(std::calloc((std::size_t)num_cpu * n, sizeof(TC)));
     if (!buf) return false;
 
     #pragma omp parallel num_threads(num_cpu)
@@ -95,12 +95,12 @@ __attribute__((noinline)) static bool whpmv_omp(
         std::ptrdiff_t t = omp_get_thread_num();
         std::ptrdiff_t m_from = range[t];
         std::ptrdiff_t m_to   = range[t + 1];
-        T *slot = buf + (std::size_t)t * n;
+        TC *slot = buf + (std::size_t)t * n;
         if (upper) {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
-                const T temp1 = x[j];                          /* alpha deferred */
-                const T *aj = &ap[(std::size_t)j * (j + 1) / 2];
-                T temp2 = czero;
+                const TC temp1 = x[j];                          /* alpha deferred */
+                const TC *aj = &ap[(std::size_t)j * (j + 1) / 2];
+                TC temp2 = czero;
                 if (j > 0) {
                     mf_kernels::caxpy_add((std::ptrdiff_t)j, &slot[0], aj, temp1);
                     temp2 = mf_kernels::cdot((std::ptrdiff_t)j, aj, &x[0], true);
@@ -109,8 +109,8 @@ __attribute__((noinline)) static bool whpmv_omp(
             }
         } else {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
-                const T temp1 = x[j];
-                const T *aj =
+                const TC temp1 = x[j];
+                const TC *aj =
                     &ap[(std::size_t)j * n - (std::size_t)j * (j - 1) / 2];
                 slot[j] = cadd(slot[j], rcmul(aj[0].re, temp1));
                 const std::ptrdiff_t len = n - (std::ptrdiff_t)j - 1;
@@ -126,7 +126,7 @@ __attribute__((noinline)) static bool whpmv_omp(
     /* Bounded reduction: fold each thread's populated row window (alpha deferred
      * to here) straight onto y. */
     for (std::ptrdiff_t t = 0; t < num_cpu; ++t) {
-        const T *slot = buf + (std::size_t)t * n;
+        const TC *slot = buf + (std::size_t)t * n;
         std::ptrdiff_t from, to;
         mf_omp::tri_row_window(t, upper, range, n, from, to);
         for (std::ptrdiff_t k = from; k < to; ++k) y[k] = cadd(y[k], cmul(alpha, slot[k]));
@@ -139,7 +139,7 @@ __attribute__((noinline)) static bool whpmv_omp(
 /* Contiguous (unit-stride x,y) core: Hermitian packed matvec y += alpha*A*x,
  * with y already beta-applied. Threaded private-accumulator sweep when enabled,
  * else a serial SIMD column sweep. Strided callers gather x,y around this. */
-static void whpmv_contig(bool upper, std::ptrdiff_t n, const T *ap, const T *x, T alpha, T *y)
+static void whpmv_contig(bool upper, std::ptrdiff_t n, const TC *ap, const TC *x, TC alpha, TC *y)
 {
 #ifdef _OPENMP
     if (n >= WHPMV_OMP_MIN && blas_omp_available()
@@ -153,13 +153,13 @@ static void whpmv_contig(bool upper, std::ptrdiff_t n, const T *ap, const T *x, 
 static void whpmv_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *ap,
-    const T *x, std::ptrdiff_t incx,
-    const T *beta_,
-    T *y, std::ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *ap,
+    const TC *x, std::ptrdiff_t incx,
+    const TC *beta_,
+    TC *y, std::ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
 
     if (n == 0 || (ceq0(alpha) && ceq1(beta))) return;
@@ -173,7 +173,7 @@ static void whpmv_core(
     }
     /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
      * core, scatter y back. Handles negative increments; O(N) vs O(N^2) work. */
-    std::vector<T> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
+    std::vector<TC> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
     mf_kernels::gather_strided(n, x, incx, xs.data());
     mf_kernels::gather_strided(n, y, incy, ys.data());
     whpmv_contig(UPLO == 'U', n, ap, xs.data(), alpha, ys.data());
@@ -181,5 +181,5 @@ static void whpmv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SPMV(whpmv, T)
+EPBLAS_FACADE_SPMV(whpmv, TC)
 }

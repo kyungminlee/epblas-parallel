@@ -27,7 +27,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -35,16 +35,16 @@ using mf_pred::ceq0;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::csub;
 using mf_kernels::cconj;
-inline T cdiv(T const &a, T const &b) {
+inline TC cdiv(TC const &a, TC const &b) {
     /* a / b = a·conj(b) / |b|², direct DD divide (canonical form shared with
      * wtbsv/wtpsv/wtrsm_serial — see F2, simd_audit). */
     const R denom = b.re * b.re + b.im * b.im;
-    return T{ (a.re * b.re + a.im * b.im) / denom,
+    return TC{ (a.re * b.re + a.im * b.im) / denom,
               (a.im * b.re - a.re * b.im) / denom };
 }
 
@@ -56,7 +56,7 @@ using simd_fast::chreduce;
  * msub: x[k] = csub(x[k], cmul(xi, ai[k]))  for k in [lo,hi)  (NoTrans).
  * dot : returns sum_{k in [lo,hi)} (conj?conj(ai[k]):ai[k]) * x[k]  (Trans). */
 static inline void
-wtrsv_col_msub(T *x, const T *ai, T xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
+wtrsv_col_msub(TC *x, const TC *ai, TC xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
 {
     double *xp = reinterpret_cast<double *>(x);
     const double *aip = reinterpret_cast<const double *>(ai);
@@ -82,8 +82,8 @@ wtrsv_col_msub(T *x, const T *ai, T xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
     }
     for (; k < hi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
 }
-static inline T
-wtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi, bool conj_a)
+static inline TC
+wtrsv_dot_range(const TC *ai, const TC *x, std::ptrdiff_t lo, std::ptrdiff_t hi, bool conj_a)
 {
     const double *aip = reinterpret_cast<const double *>(ai);
     const double *xp  = reinterpret_cast<const double *>(x);
@@ -102,9 +102,9 @@ wtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi, b
         simd_fast::cadd(srh, srl, sih, sil, prh, prl, pih, pil,
                          srh, srl, sih, sil);
     }
-    T s = chreduce(srh, srl, sih, sil);
+    TC s = chreduce(srh, srl, sih, sil);
     for (; k < hi; ++k) {
-        const T e = conj_a ? cconj(ai[k]) : ai[k];
+        const TC e = conj_a ? cconj(ai[k]) : ai[k];
         s = cadd(s, cmul(e, x[k]));
     }
     return s;
@@ -117,7 +117,7 @@ wtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi, b
 /* Bit-exact serial path (the SIMD-packed reference). Also reused as the
  * diagonal-block solver by the threaded path below. */
 static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
-                         std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
+                         std::ptrdiff_t n, const TC *a, std::ptrdiff_t lda, TC *x, std::ptrdiff_t incx)
 {
     if (n == 0) return;
 
@@ -137,17 +137,17 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
         }
         const __m256d zerov = _mm256_setzero_pd();
 
-        auto load_x = [&](std::ptrdiff_t k) -> T {
-            return T{ R{x_rh[k], x_rl[k]}, R{x_ih[k], x_il[k]} };
+        auto load_x = [&](std::ptrdiff_t k) -> TC {
+            return TC{ R{x_rh[k], x_rl[k]}, R{x_ih[k], x_il[k]} };
         };
-        auto store_x = [&](std::ptrdiff_t k, const T &v) {
+        auto store_x = [&](std::ptrdiff_t k, const TC &v) {
             x_rh[k] = v.re.limbs[0]; x_rl[k] = v.re.limbs[1];
             x_ih[k] = v.im.limbs[0]; x_il[k] = v.im.limbs[1];
         };
 
         if (TRANS == 'N') {
             auto do_axpy_range = [&](std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi) {
-                T xi = load_x(i);
+                TC xi = load_x(i);
                 if (ceq0(xi)) return;
                 if (nounit) { xi = cdiv(xi, A_(i, i)); store_x(i, xi); }
                 const __m256d xrh = _mm256_set1_pd(xi.re.limbs[0]);
@@ -157,7 +157,7 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
                 const double *aip = reinterpret_cast<const double *>(&A_(0, i));
                 std::ptrdiff_t k = k_lo;
                 for (; k < k_hi && (k & 3) != 0; ++k) {
-                    T aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
+                    TC aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
                     store_x(k, csub(load_x(k), cmul(xi, aki)));
                 }
                 for (; k + 3 < k_hi; k += 4) {
@@ -181,7 +181,7 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
                     _mm256_storeu_pd(x_il + k, nil);
                 }
                 for (; k < k_hi; ++k) {
-                    T aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
+                    TC aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
                     store_x(k, csub(load_x(k), cmul(xi, aki)));
                 }
             };
@@ -195,10 +195,10 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
             auto do_dot_range = [&](std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi) {
                 const double *aip = reinterpret_cast<const double *>(&A_(0, i));
                 __m256d s_rh = zerov, s_rl = zerov, s_ih = zerov, s_il = zerov;
-                T t = load_x(i);
+                TC t = load_x(i);
                 std::ptrdiff_t k = k_lo;
                 for (; k < k_hi && (k & 3) != 0; ++k) {
-                    T aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
+                    TC aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
                     if (conj_a) aki = cconj(aki);
                     t = csub(t, cmul(aki, load_x(k)));
                 }
@@ -218,15 +218,15 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
                                      nsrh, nsrl, nsih, nsil);
                     s_rh = nsrh; s_rl = nsrl; s_ih = nsih; s_il = nsil;
                 }
-                T s_red = chreduce(s_rh, s_rl, s_ih, s_il);
+                TC s_red = chreduce(s_rh, s_rl, s_ih, s_il);
                 t = csub(t, s_red);
                 for (; k < k_hi; ++k) {
-                    T aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
+                    TC aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
                     if (conj_a) aki = cconj(aki);
                     t = csub(t, cmul(aki, load_x(k)));
                 }
                 if (nounit) {
-                    T diag_v{ R{aip[4*i], aip[4*i+1]}, R{aip[4*i+2], aip[4*i+3]} };
+                    TC diag_v{ R{aip[4*i], aip[4*i+1]}, R{aip[4*i+2], aip[4*i+3]} };
                     if (conj_a) diag_v = cconj(diag_v);
                     t = cdiv(t, diag_v);
                 }
@@ -249,8 +249,8 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     if (!ceq0(x[i])) {
                         if (nounit) x[i] = cdiv(x[i], A_(i, i));
-                        const T xi = x[i];
-                        const T *ai = &A_(0, i);
+                        const TC xi = x[i];
+                        const TC *ai = &A_(0, i);
                         for (std::ptrdiff_t k = i + 1; k < n; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
                     }
                 }
@@ -258,8 +258,8 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
                     if (!ceq0(x[i])) {
                         if (nounit) x[i] = cdiv(x[i], A_(i, i));
-                        const T xi = x[i];
-                        const T *ai = &A_(0, i);
+                        const TC xi = x[i];
+                        const TC *ai = &A_(0, i);
                         for (std::ptrdiff_t k = 0; k < i; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
                     }
                 }
@@ -268,8 +268,8 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
             const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TC t = x[i];
+                    const TC *ai = &A_(0, i);
                     if (conj_a) {
                         for (std::ptrdiff_t k = i + 1; k < n; ++k) t = csub(t, cmul(cconj(ai[k]), x[k]));
                         if (nounit) t = cdiv(t, cconj(ai[i]));
@@ -281,8 +281,8 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
                 }
             } else {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TC t = x[i];
+                    const TC *ai = &A_(0, i);
                     if (conj_a) {
                         for (std::ptrdiff_t k = 0; k < i; ++k) t = csub(t, cmul(cconj(ai[k]), x[k]));
                         if (nounit) t = cdiv(t, cconj(ai[i]));
@@ -298,8 +298,8 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
     } else {
         /* Strided: gather x to a contiguous scratch, run the SIMD incx==1 core,
          * scatter back. O(N) gather vs the O(N^2) strided scalar sweep. */
-        T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
-        std::vector<T> xs(static_cast<std::size_t>(n));
+        TC *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
+        std::vector<TC> xs(static_cast<std::size_t>(n));
         for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
         wtrsv_serial(UPLO, TRANS, nounit, n, a, lda, xs.data(), 1);
         for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
@@ -313,7 +313,7 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
  * rows. Serial fallback stays bit-exact; threaded path matches within DD fuzz
  * tol. Returns true if it handled the call. */
 __attribute__((noinline)) static bool wtrsv_omp(
-    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x)
+    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const TC *a, std::ptrdiff_t lda, TC *x)
 {
     if (n < WTRSV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -337,9 +337,9 @@ __attribute__((noinline)) static bool wtrsv_omp(
                     std::ptrdiff_t rlo = j1 + blas_part_bound(n - j1, tid, nthreads);
                     std::ptrdiff_t rhi = j1 + blas_part_bound(n - j1, tid + 1, nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
-                        const T xi = x[i];
+                        const TC xi = x[i];
                         if (ceq0(xi)) continue;
-                        const T *ai = &A_(0, i);
+                        const TC *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         wtrsv_col_msub(x, ai, xi, rlo, rhi);
 #else
@@ -359,9 +359,9 @@ __attribute__((noinline)) static bool wtrsv_omp(
                     std::ptrdiff_t rlo = blas_part_bound(j0, tid, nthreads);
                     std::ptrdiff_t rhi = blas_part_bound(j0, tid + 1, nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
-                        const T xi = x[i];
+                        const TC xi = x[i];
                         if (ceq0(xi)) continue;
-                        const T *ai = &A_(0, i);
+                        const TC *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         wtrsv_col_msub(x, ai, xi, rlo, rhi);
 #else
@@ -385,13 +385,13 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, nthreads);
                         std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *ai = &A_(0, i);
+                            const TC *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
-                            T s = wtrsv_dot_range(ai, x, j1, n, conj_a);
+                            TC s = wtrsv_dot_range(ai, x, j1, n, conj_a);
 #else
-                            T s = zero_cdd;
+                            TC s = zero_cdd;
                             for (std::ptrdiff_t k = j1; k < n; ++k) {
-                                const T e = conj_a ? cconj(ai[k]) : ai[k];
+                                const TC e = conj_a ? cconj(ai[k]) : ai[k];
                                 s = cadd(s, cmul(e, x[k]));
                             }
 #endif
@@ -411,13 +411,13 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, nthreads);
                         std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *ai = &A_(0, i);
+                            const TC *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
-                            T s = wtrsv_dot_range(ai, x, 0, j0, conj_a);
+                            TC s = wtrsv_dot_range(ai, x, 0, j0, conj_a);
 #else
-                            T s = zero_cdd;
+                            TC s = zero_cdd;
                             for (std::ptrdiff_t k = 0; k < j0; ++k) {
-                                const T e = conj_a ? cconj(ai[k]) : ai[k];
+                                const TC e = conj_a ? cconj(ai[k]) : ai[k];
                                 s = cadd(s, cmul(e, x[k]));
                             }
 #endif
@@ -436,8 +436,8 @@ __attribute__((noinline)) static bool wtrsv_omp(
 static void wtrsv_core(
     char uplo, char trans, char diag,
     std::ptrdiff_t n,
-    const T *a, std::ptrdiff_t lda,
-    T *x, std::ptrdiff_t incx)
+    const TC *a, std::ptrdiff_t lda,
+    TC *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
     const char TRANS   = up(&trans);
@@ -456,7 +456,7 @@ static void wtrsv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_TRMV(wtrsv, T)
+EPBLAS_FACADE_TRMV(wtrsv, TC)
 }
 
 #undef A_

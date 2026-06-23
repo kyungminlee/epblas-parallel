@@ -6,7 +6,7 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef long double T;
+typedef long double TR;
 
 #ifdef _OPENMP
 /* Threaded unit-stride COPY — cache-bandwidth rationale as eaxpy_omp (see
@@ -19,7 +19,7 @@ typedef long double T;
  * thread memcpy's its own slice. */
 #define ECOPY_OMP_MIN 2048
 #define ECOPY_OMP_MAX 524288
-static bool ecopy_omp(ptrdiff_t n, const T *x, T *y)
+static bool ecopy_omp(ptrdiff_t n, const TR *x, TR *y)
 {
     if (n <= ECOPY_OMP_MIN || n > ECOPY_OMP_MAX ||
         !blas_omp_should_thread())
@@ -30,20 +30,20 @@ static bool ecopy_omp(ptrdiff_t n, const T *x, T *y)
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
         ptrdiff_t lo = blas_part_bound(n, tid, nth);
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
-        if (lo < hi) memcpy(y + lo, x + lo, (size_t)(hi - lo) * sizeof(T));
+        if (lo < hi) memcpy(y + lo, x + lo, (size_t)(hi - lo) * sizeof(TR));
     }
     return 1;
 }
 #endif
 
-static void ecopy_core(ptrdiff_t n, const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
+static void ecopy_core(ptrdiff_t n, const TR *x, ptrdiff_t incx, TR *y, ptrdiff_t incy)
 {
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if (ecopy_omp(n, x, y)) return;
 #endif
-        memcpy(y, x, (size_t)n * sizeof(T));
+        memcpy(y, x, (size_t)n * sizeof(TR));
     } else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
@@ -51,4 +51,4 @@ static void ecopy_core(ptrdiff_t n, const T *x, ptrdiff_t incx, T *y, ptrdiff_t 
     }
 }
 
-EPBLAS_FACADE_COPY(ecopy, T)
+EPBLAS_FACADE_COPY(ecopy, TR)

@@ -16,7 +16,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
@@ -36,7 +36,7 @@ using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (
 /* Pass-1 unit kernel: max|x.hi| over a contiguous (incx==1) slice. Max is
  * exact (no rounding), so the combined global scale is order-independent and
  * BIT-EXACT regardless of how the slice is split. */
-static double mnrm2_maxabs_unit(std::ptrdiff_t n, const T *x)
+static double mnrm2_maxabs_unit(std::ptrdiff_t n, const TR *x)
 {
     double scale_hi = 0.0;
 #ifdef MBLAS_SIMD_DD
@@ -53,12 +53,12 @@ static double mnrm2_maxabs_unit(std::ptrdiff_t n, const T *x)
     _mm256_store_pd(mxa, mx);
     for (std::ptrdiff_t k = 0; k < 4; ++k) if (mxa[k] > scale_hi) scale_hi = mxa[k];
     for (std::ptrdiff_t i = n4; i < n; ++i) {
-        T ax = fabsdd(x[i]);
+        TR ax = fabsdd(x[i]);
         if (ax.limbs[0] > scale_hi) scale_hi = ax.limbs[0];
     }
 #else
     for (std::ptrdiff_t i = 0; i < n; ++i) {
-        T ax = fabsdd(x[i]);
+        TR ax = fabsdd(x[i]);
         if (ax.limbs[0] > scale_hi) scale_hi = ax.limbs[0];
     }
 #endif
@@ -66,12 +66,12 @@ static double mnrm2_maxabs_unit(std::ptrdiff_t n, const T *x)
 }
 
 /* Pass-2 unit kernel: Σ (x/scale)² over a contiguous (incx==1) slice. */
-static T mnrm2_ssq_unit(std::ptrdiff_t n, const T *x, T scale)
+static TR mnrm2_ssq_unit(std::ptrdiff_t n, const TR *x, TR scale)
 {
-    T s{0.0, 0.0};
+    TR s{0.0, 0.0};
 #ifdef MBLAS_SIMD_DD
     /* Precompute inverse so the inner loop avoids dd_div. */
-    T inv = T{1.0, 0.0} / scale;
+    TR inv = TR{1.0, 0.0} / scale;
     __m256d invh = _mm256_set1_pd(inv.limbs[0]);
     __m256d invl = _mm256_set1_pd(inv.limbs[1]);
     __m256d a0 = _mm256_setzero_pd();
@@ -110,9 +110,9 @@ static T mnrm2_ssq_unit(std::ptrdiff_t n, const T *x, T scale)
     }
     __m256d t = _mm256_add_pd(a1, a2);
     s = horizontal_dd(a0, t);
-    for (std::ptrdiff_t i = n4; i < n; ++i) { T u = x[i] / scale; s = s + u * u; }
+    for (std::ptrdiff_t i = n4; i < n; ++i) { TR u = x[i] / scale; s = s + u * u; }
 #else
-    for (std::ptrdiff_t i = 0; i < n; ++i) { T u = x[i] / scale; s = s + u * u; }
+    for (std::ptrdiff_t i = 0; i < n; ++i) { TR u = x[i] / scale; s = s + u * u; }
 #endif
     return s;
 }
@@ -123,7 +123,7 @@ static T mnrm2_ssq_unit(std::ptrdiff_t n, const T *x, T scale)
  * cross-slice summation reorders, so the squared-sum matches serial within
  * fuzz tol). Returns false (caller falls through to serial) when below the
  * threshold or already inside a parallel region. */
-__attribute__((noinline)) static bool mnrm2_omp(std::ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static bool mnrm2_omp(std::ptrdiff_t n, const TR *x, TR *out)
 {
     if (n <= MNRM2_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -140,38 +140,38 @@ __attribute__((noinline)) static bool mnrm2_omp(std::ptrdiff_t n, const T *x, T 
             if (local > scale_hi) scale_hi = local;
         }
     }
-    if (scale_hi == 0.0) { *out = T{0.0, 0.0}; return true; }
-    T scale{scale_hi, 0.0};
+    if (scale_hi == 0.0) { *out = TR{0.0, 0.0}; return true; }
+    TR scale{scale_hi, 0.0};
 
-    T partial[MNRM2_MAX_CPUS];
-    for (std::ptrdiff_t t = 0; t < nthreads; ++t) partial[t] = T{0.0, 0.0};
+    TR partial[MNRM2_MAX_CPUS];
+    for (std::ptrdiff_t t = 0; t < nthreads; ++t) partial[t] = TR{0.0, 0.0};
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
         std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         if (lo < hi) partial[tid] = mnrm2_ssq_unit(hi - lo, x + lo, scale);
     }
-    T s{0.0, 0.0};
+    TR s{0.0, 0.0};
     for (std::ptrdiff_t t = 0; t < nthreads; ++t) s = s + partial[t];
     *out = scale * sqrtdd(s);
     return true;
 }
 #endif
 
-static T mnrm2_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
+static TR mnrm2_core(std::ptrdiff_t n, const TR *x, std::ptrdiff_t incx)
 {
-    T zero{0.0, 0.0};
+    TR zero{0.0, 0.0};
     if (n < 1 || incx < 1) return zero;
     if (n == 1) return fabsdd(x[0]);
 
     if (incx == 1) {
 #ifdef _OPENMP
-        T out;
+        TR out;
         if (mnrm2_omp(n, x, &out)) return out;
 #endif
         double scale_hi = mnrm2_maxabs_unit(n, x);
         if (scale_hi == 0.0) return zero;
-        T scale{scale_hi, 0.0};
+        TR scale{scale_hi, 0.0};
         return scale * sqrtdd(mnrm2_ssq_unit(n, x, scale));
     }
 
@@ -179,20 +179,20 @@ static T mnrm2_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
     double scale_hi = 0.0;
     std::ptrdiff_t ix = 0;
     for (std::ptrdiff_t i = 0; i < n; ++i) {
-        T ax = fabsdd(x[ix]);
+        TR ax = fabsdd(x[ix]);
         if (ax.limbs[0] > scale_hi) scale_hi = ax.limbs[0];
         ix += incx;
     }
     if (scale_hi == 0.0) return zero;
-    T scale{scale_hi, 0.0};
-    T s = zero;
+    TR scale{scale_hi, 0.0};
+    TR s = zero;
     ix = 0;
     for (std::ptrdiff_t i = 0; i < n; ++i) {
-        T t = x[ix] / scale;
+        TR t = x[ix] / scale;
         s = s + t * t;
         ix += incx;
     }
     return scale * sqrtdd(s);
 }
 
-extern "C" { EPBLAS_FACADE_ASUM(mnrm2, T, T) }
+extern "C" { EPBLAS_FACADE_ASUM(mnrm2, TR, TR) }

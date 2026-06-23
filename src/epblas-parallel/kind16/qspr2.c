@@ -15,19 +15,19 @@
 
 #define QSPR2_OMP_MIN 64
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 void qspr2_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict ap)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *restrict y, ptrdiff_t incy,
+    TR *restrict ap)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0Q;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0Q;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -40,8 +40,8 @@ void qspr2_core(
 #endif
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != zero || y[j] != zero) {
-                    const T t1 = alpha * y[j];
-                    const T t2 = alpha * x[j];
+                    const TR t1 = alpha * y[j];
+                    const TR t2 = alpha * x[j];
                     const ptrdiff_t kk = (j * (j + 1)) / 2;
                     for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
                 }
@@ -53,8 +53,8 @@ void qspr2_core(
 #endif
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != zero || y[j] != zero) {
-                    const T t1 = alpha * y[j];
-                    const T t2 = alpha * x[j];
+                    const TR t1 = alpha * y[j];
+                    const TR t2 = alpha * x[j];
                     const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
                     for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
                 }
@@ -68,8 +68,8 @@ void qspr2_core(
         if (UPLO == 'U') {
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
-                    const T t1 = alpha * y[jy];
-                    const T t2 = alpha * x[jx];
+                    const TR t1 = alpha * y[jy];
+                    const TR t2 = alpha * x[jx];
                     ptrdiff_t ix = kx, iy = ky;
                     for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
@@ -82,8 +82,8 @@ void qspr2_core(
         } else {
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
-                    const T t1 = alpha * y[jy];
-                    const T t2 = alpha * x[jx];
+                    const TR t1 = alpha * y[jy];
+                    const TR t2 = alpha * x[jx];
                     ptrdiff_t ix = jx, iy = jy;
                     for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
@@ -97,4 +97,4 @@ void qspr2_core(
     }
 }
 
-EPBLAS_FACADE_SPR2(qspr2, T)
+EPBLAS_FACADE_SPR2(qspr2, TR)

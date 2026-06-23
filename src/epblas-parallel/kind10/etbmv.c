@@ -34,7 +34,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef long double T;
+typedef long double TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
@@ -53,14 +53,14 @@ typedef long double T;
 
 #ifdef _OPENMP
 static ptrdiff_t etbmv_omp(bool upper, bool trans, bool nounit, ptrdiff_t n, ptrdiff_t k,
-                     const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
+                     const TR *restrict a, ptrdiff_t lda, TR *restrict x, ptrdiff_t incx);
 #endif
 
 static void etbmv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TR *restrict a, ptrdiff_t lda,
+    TR *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
     char TRANS = blas_up(trans);
@@ -89,17 +89,17 @@ static void etbmv_core(
             const ptrdiff_t s1 = lda - 1;
             if (UPLO == 'U') {
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    const T *base = &A_(0, i);
+                    const TR *base = &A_(0, i);
                     const ptrdiff_t len = (n - 1 - i < k) ? (n - 1 - i) : k;
-                    T s = nounit ? base[k] * x[i] : x[i];
+                    TR s = nounit ? base[k] * x[i] : x[i];
                     for (ptrdiff_t d = 1; d <= len; ++d) s += base[k + (ptrdiff_t)d * s1] * x[i + d];
                     x[i] = s;
                 }
             } else {
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    const T *base = &A_(0, i);
+                    const TR *base = &A_(0, i);
                     const ptrdiff_t len = (i < k) ? i : k;
-                    T s = nounit ? base[0] * x[i] : x[i];
+                    TR s = nounit ? base[0] * x[i] : x[i];
                     for (ptrdiff_t d = 1; d <= len; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
                     x[i] = s;
                 }
@@ -107,7 +107,7 @@ static void etbmv_core(
         } else {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[j];
+                    TR tmp = x[j];
                     const ptrdiff_t L = k - j;
                     if (nounit) tmp *= A_(k, j);
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
@@ -116,7 +116,7 @@ static void etbmv_core(
                 }
             } else {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[j];
+                    TR tmp = x[j];
                     if (nounit) tmp *= A_(0, j);
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += A_(i - j, j) * x[i];
@@ -134,20 +134,20 @@ static void etbmv_core(
             const ptrdiff_t s1 = lda - 1;
             if (UPLO == 'U') {
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    const T *base = &A_(0, i);
+                    const TR *base = &A_(0, i);
                     const ptrdiff_t len = (n - 1 - i < k) ? (n - 1 - i) : k;
                     const ptrdiff_t ii = off0 + (ptrdiff_t)i * incx;
-                    T s = nounit ? base[k] * x[ii] : x[ii];
+                    TR s = nounit ? base[k] * x[ii] : x[ii];
                     ptrdiff_t ix = ii + incx;
                     for (ptrdiff_t d = 1; d <= len; ++d) { s += base[k + (ptrdiff_t)d * s1] * x[ix]; ix += incx; }
                     x[ii] = s;
                 }
             } else {
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    const T *base = &A_(0, i);
+                    const TR *base = &A_(0, i);
                     const ptrdiff_t len = (i < k) ? i : k;
                     const ptrdiff_t ii = off0 + (ptrdiff_t)i * incx;
-                    T s = nounit ? base[0] * x[ii] : x[ii];
+                    TR s = nounit ? base[0] * x[ii] : x[ii];
                     ptrdiff_t ix = ii - incx;
                     for (ptrdiff_t d = 1; d <= len; ++d) { s += base[-(ptrdiff_t)d * s1] * x[ix]; ix -= incx; }
                     x[ii] = s;
@@ -159,7 +159,7 @@ static void etbmv_core(
                 kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     kx -= incx;
                     ptrdiff_t ix = kx;
                     const ptrdiff_t L = k - j;
@@ -175,7 +175,7 @@ static void etbmv_core(
             } else {
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     kx += incx;
                     ptrdiff_t ix = kx;
                     if (nounit) tmp *= A_(0, j);
@@ -203,24 +203,24 @@ static void etbmv_core(
  * stride) vs contiguous (Trans). */
 static void tbmv_rowgather(bool upper, bool trans, bool nounit,
                            ptrdiff_t n, ptrdiff_t k, ptrdiff_t lo, ptrdiff_t hi,
-                           const T *restrict a, ptrdiff_t lda,
-                           const T *restrict x, T *restrict y)
+                           const TR *restrict a, ptrdiff_t lda,
+                           const TR *restrict x, TR *restrict y)
 {
     const ptrdiff_t s1 = lda - 1;               /* NoTrans diagonal-walk stride */
     if (!trans) {
         if (upper) {                             /* y[i] = A(i,i)x[i] + Σ A(i,i+d)x[i+d] */
             for (ptrdiff_t i = lo; i < hi; ++i) {
-                const T *base = &A_(0, i);
+                const TR *base = &A_(0, i);
                 ptrdiff_t len = (n - 1 - i < k) ? n - 1 - i : k;
-                T s = nounit ? base[k] * x[i] : x[i];
+                TR s = nounit ? base[k] * x[i] : x[i];
                 for (ptrdiff_t d = 1; d <= len; ++d) s += base[k + d * s1] * x[i + d];
                 y[i] = s;
             }
         } else {                                 /* y[i] = A(i,i)x[i] + Σ A(i,i-d)x[i-d] */
             for (ptrdiff_t i = lo; i < hi; ++i) {
-                const T *base = &A_(0, i);
+                const TR *base = &A_(0, i);
                 ptrdiff_t len = (i < k) ? i : k;
-                T s = nounit ? base[0] * x[i] : x[i];
+                TR s = nounit ? base[0] * x[i] : x[i];
                 for (ptrdiff_t d = 1; d <= len; ++d) s += base[-d * s1] * x[i - d];
                 y[i] = s;
             }
@@ -228,17 +228,17 @@ static void tbmv_rowgather(bool upper, bool trans, bool nounit,
     } else {
         if (upper) {                             /* y[i] = A(i,i)x[i] + Σ A(i-d,i)x[i-d] */
             for (ptrdiff_t i = lo; i < hi; ++i) {
-                const T *base = &A_(0, i);
+                const TR *base = &A_(0, i);
                 ptrdiff_t len = (i < k) ? i : k;
-                T s = nounit ? base[k] * x[i] : x[i];
+                TR s = nounit ? base[k] * x[i] : x[i];
                 for (ptrdiff_t d = 1; d <= len; ++d) s += base[k - d] * x[i - d];
                 y[i] = s;
             }
         } else {                                 /* y[i] = A(i,i)x[i] + Σ A(i+d,i)x[i+d] */
             for (ptrdiff_t i = lo; i < hi; ++i) {
-                const T *base = &A_(0, i);
+                const TR *base = &A_(0, i);
                 ptrdiff_t len = (n - 1 - i < k) ? n - 1 - i : k;
-                T s = nounit ? base[0] * x[i] : x[i];
+                TR s = nounit ? base[0] * x[i] : x[i];
                 for (ptrdiff_t d = 1; d <= len; ++d) s += base[d] * x[i + d];
                 y[i] = s;
             }
@@ -252,7 +252,7 @@ static void tbmv_rowgather(bool upper, bool trans, bool nounit,
  * barrier — near-linear scaling. Returns 1 if handled, 0 to fall back. */
 __attribute__((noinline)) static ptrdiff_t etbmv_omp(
     bool upper, bool trans, bool nounit, ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx)
+    const TR *restrict a, ptrdiff_t lda, TR *restrict x, ptrdiff_t incx)
 {
     ptrdiff_t omp_min = trans ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
     if (n < omp_min || !blas_omp_should_thread())
@@ -264,15 +264,15 @@ __attribute__((noinline)) static ptrdiff_t etbmv_omp(
 
     /* Gather strided input to contiguous; y is the disjoint output scratch
      * (written once per element, so no zero-fill). */
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TR *xptr = x;
+    TR *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TR *)malloc((size_t)n * sizeof(TR));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[i * incx];
         xptr = xbuf;
     }
-    T *y = (T *)malloc((size_t)n * sizeof(T));
+    TR *y = (TR *)malloc((size_t)n * sizeof(TR));
     if (!y) { free(xbuf); return 0; }
 
     #pragma omp parallel num_threads(nthreads)
@@ -291,6 +291,6 @@ __attribute__((noinline)) static ptrdiff_t etbmv_omp(
 }
 #endif /* _OPENMP */
 
-EPBLAS_FACADE_TBMV(etbmv, T)
+EPBLAS_FACADE_TBMV(etbmv, TR)
 
 #undef A_

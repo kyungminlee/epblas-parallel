@@ -25,21 +25,21 @@
 #include "ysyr2k_kernel.h"
 #include "../common/epblas_facade.h"
 
-typedef ysyr2k_T T;
+typedef ysyr2k_TC TC;
 
 #define YSYR2K_OMP_MIN 32
 
-static const T ZERO = 0.0L + 0.0Li;
-static const T ONE  = 1.0L + 0.0Li;
+static const TC ZERO = 0.0L + 0.0Li;
+static const TC ONE  = 1.0L + 0.0Li;
 
 static void ysyr2k_core(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict b, ptrdiff_t ldb,
-    const T *beta_,
-    T *restrict c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict b, ptrdiff_t ldb,
+    const TC *beta_,
+    TC *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -49,7 +49,7 @@ static void ysyr2k_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
@@ -85,4 +85,4 @@ static void ysyr2k_core(
     }
 }
 
-EPBLAS_FACADE_SYR2K(ysyr2k, T, T, T)
+EPBLAS_FACADE_SYR2K(ysyr2k, TC, TC, TC)

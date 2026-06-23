@@ -34,15 +34,15 @@
 
 #define XGEMMTR_OMP_MIN 32
 
-typedef xgemmtr_T T;
+typedef xgemmtr_TC TC;
 
 static void xgemmtr_core(char uplo, char transa, char transb,
               ptrdiff_t n, ptrdiff_t k,
-              const T *alpha_,
-              const T *a, ptrdiff_t lda,
-              const T *b, ptrdiff_t ldb,
-              const T *beta_,
-              T *c, ptrdiff_t ldc)
+              const TC *alpha_,
+              const TC *a, ptrdiff_t lda,
+              const TC *b, ptrdiff_t ldb,
+              const TC *beta_,
+              TC *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -52,14 +52,14 @@ static void xgemmtr_core(char uplo, char transa, char transb,
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
     const char ta = xgemmtr_trans_code(transa);
     const char tb = xgemmtr_trans_code(transb);
 
     if (n <= 0) return;
-    const T zero = 0.0Q + 0.0Qi;
-    const T one  = 1.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
+    const TC one  = 1.0Q + 0.0Qi;
 
     const bool conj_a = (ta == 'C');
     const bool conj_b = (tb == 'C');
@@ -87,4 +87,4 @@ static void xgemmtr_core(char uplo, char transa, char transb,
                              alpha, beta, a, lda, b, ldb, c, ldc);
 }
 
-EPBLAS_FACADE_GEMMTR(xgemmtr, T)
+EPBLAS_FACADE_GEMMTR(xgemmtr, TC)

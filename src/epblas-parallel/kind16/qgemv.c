@@ -24,7 +24,7 @@
 
 #define QGEMV_OMP_MIN 64
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -33,16 +33,16 @@ typedef __float128 T;
  * Each thread (or the lone serial caller) writes a disjoint slice of y. */
 static void qgemv_n_stride1_slice(
     ptrdiff_t n, ptrdiff_t i_lo, ptrdiff_t i_hi,
-    T alpha,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, T *restrict y)
+    TR alpha,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, TR *restrict y)
 {
-    const T zero = 0.0Q;
+    const TR zero = 0.0Q;
     for (ptrdiff_t j = 0; j < n; ++j) {
-        const T xj = x[j];
+        const TR xj = x[j];
         if (xj != zero) {
-            const T t = alpha * xj;
-            const T *aj = &A_(0, j);
+            const TR t = alpha * xj;
+            const TR *aj = &A_(0, j);
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) y[i] += t * aj[i];
         }
     }
@@ -52,14 +52,14 @@ static void qgemv_n_stride1_slice(
  * Each thread (or the lone serial caller) writes a disjoint slice of y. */
 static void qgemv_t_stride1_slice(
     ptrdiff_t m, ptrdiff_t j_lo, ptrdiff_t j_hi,
-    T alpha,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, T *restrict y)
+    TR alpha,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, TR *restrict y)
 {
-    const T zero = 0.0Q;
+    const TR zero = 0.0Q;
     for (ptrdiff_t j = j_lo; j < j_hi; ++j) {
-        const T *aj = &A_(0, j);
-        T s = zero;
+        const TR *aj = &A_(0, j);
+        TR s = zero;
         for (ptrdiff_t i = 0; i < m; ++i) s += aj[i] * x[i];
         y[j] += alpha * s;
     }
@@ -71,17 +71,17 @@ static void qgemv_t_stride1_slice(
  * full serial loop → race-free and bit-exact (iy0/jy0/ix recomputed). */
 static void qgemv_general_stride_slice(
     ptrdiff_t m, ptrdiff_t n, char TRANS,
-    T alpha, const T *a, ptrdiff_t lda,
-    const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy, ptrdiff_t lo, ptrdiff_t hi)
+    TR alpha, const TR *a, ptrdiff_t lda,
+    const TR *x, ptrdiff_t incx, TR *y, ptrdiff_t incy, ptrdiff_t lo, ptrdiff_t hi)
 {
-    const T zero = 0.0Q;
+    const TR zero = 0.0Q;
     if (TRANS == 'N') {
         const ptrdiff_t iy0 = (incy < 0) ? -(m - 1) * incy : 0;
         ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[jx];
+            const TR xj = x[jx];
             if (xj != zero) {
-                const T t = alpha * xj;
+                const TR t = alpha * xj;
                 ptrdiff_t iy = iy0 + lo * incy;
                 for (ptrdiff_t i = lo; i < hi; ++i) {
                     y[iy] += t * A_(i, j);
@@ -93,7 +93,7 @@ static void qgemv_general_stride_slice(
     } else {
         const ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
         for (ptrdiff_t j = lo; j < hi; ++j) {
-            T s = zero;
+            TR s = zero;
             ptrdiff_t ix = (incx < 0) ? -(m - 1) * incx : 0;
             for (ptrdiff_t i = 0; i < m; ++i) {
                 s += A_(i, j) * x[ix];
@@ -105,9 +105,9 @@ static void qgemv_general_stride_slice(
 }
 
 /* Apply beta scaling to y[0:leny] (with stride incy). */
-static void qgemv_apply_beta(ptrdiff_t leny, ptrdiff_t incy, T beta, T *y)
+static void qgemv_apply_beta(ptrdiff_t leny, ptrdiff_t incy, TR beta, TR *y)
 {
-    const T zero = 0.0Q, one = 1.0Q;
+    const TR zero = 0.0Q, one = 1.0Q;
     if (beta == one) return;
     ptrdiff_t iy = (incy < 0) ? -(leny - 1) * incy : 0;
     for (ptrdiff_t i = 0; i < leny; ++i) {
@@ -124,19 +124,19 @@ static void qgemv_apply_beta(ptrdiff_t leny, ptrdiff_t incy, T beta, T *y)
 void qgemv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *beta_,
+    TR *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
 
     if (m == 0 || n == 0) return;
 
-    const T zero = 0.0Q;
+    const TR zero = 0.0Q;
     const ptrdiff_t leny = (TRANS == 'N') ? m : n;
 
     qgemv_apply_beta(leny, incy, beta, y);
@@ -196,6 +196,6 @@ void qgemv_core(
     }
 }
 
-EPBLAS_FACADE_GEMV(qgemv, T)
+EPBLAS_FACADE_GEMV(qgemv, TR)
 
 #undef A_

@@ -22,7 +22,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
@@ -41,7 +41,7 @@ using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (
 
 /* Σ X·Y over contiguous unit-stride ranges — the serial kernel, unchanged.
  * Carved out so the OpenMP partial-reduction can call it per sub-range. */
-static T mdot_unit(std::ptrdiff_t n, const T *x, const T *y)
+static TR mdot_unit(std::ptrdiff_t n, const TR *x, const TR *y)
 {
 #ifdef MBLAS_SIMD_DD
     __m256d a0 = _mm256_setzero_pd();
@@ -78,11 +78,11 @@ static T mdot_unit(std::ptrdiff_t n, const T *x, const T *y)
         }
     }
     __m256d t = _mm256_add_pd(a1, a2);
-    T s = horizontal_dd(a0, t);
+    TR s = horizontal_dd(a0, t);
     for (std::ptrdiff_t i = n4; i < n; ++i) s = s + x[i] * y[i];
     return s;
 #else
-    T s0{0.0, 0.0}, s1{0.0, 0.0}, s{0.0, 0.0};
+    TR s0{0.0, 0.0}, s1{0.0, 0.0}, s{0.0, 0.0};
     std::ptrdiff_t i = 0;
     for (; i + 1 < n; i += 2) {
         s0 = s0 + x[i]     * y[i];
@@ -100,32 +100,32 @@ static T mdot_unit(std::ptrdiff_t n, const T *x, const T *y)
  * Reduction order differs from serial → within fuzz tolerance (kind10 edot). */
 #define MDOT_OMP_MIN 8192
 #define MDOT_MAX_CPUS 64
-__attribute__((noinline)) static std::ptrdiff_t mdot_omp(std::ptrdiff_t n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static std::ptrdiff_t mdot_omp(std::ptrdiff_t n, const TR *x, const TR *y, TR *out)
 {
     if (n <= MDOT_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MDOT_MAX_CPUS) nthreads = MDOT_MAX_CPUS;
-    T partial[MDOT_MAX_CPUS];
+    TR partial[MDOT_MAX_CPUS];
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
         std::ptrdiff_t nth = omp_get_num_threads();
         std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        partial[tid] = (lo < hi) ? mdot_unit(hi - lo, x + lo, y + lo) : T{0.0, 0.0};
+        partial[tid] = (lo < hi) ? mdot_unit(hi - lo, x + lo, y + lo) : TR{0.0, 0.0};
     }
-    T s{0.0, 0.0};
+    TR s{0.0, 0.0};
     for (std::ptrdiff_t i = 0; i < nthreads; ++i) s = s + partial[i];
     *out = s;
     return 1;
 }
 #endif
 
-static T mdot_core(std::ptrdiff_t n,
-                   const T *x, std::ptrdiff_t incx,
-                   const T *y, std::ptrdiff_t incy)
+static TR mdot_core(std::ptrdiff_t n,
+                   const TR *x, std::ptrdiff_t incx,
+                   const TR *y, std::ptrdiff_t incy)
 {
-    T s{0.0, 0.0};
+    TR s{0.0, 0.0};
     if (n <= 0) return s;
 
     if (incx == 1 && incy == 1) {
@@ -142,4 +142,4 @@ static T mdot_core(std::ptrdiff_t n,
     return s;
 }
 
-extern "C" { EPBLAS_FACADE_DOT(mdot, T, T) }
+extern "C" { EPBLAS_FACADE_DOT(mdot, TR, TR) }

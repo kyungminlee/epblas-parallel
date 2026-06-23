@@ -21,20 +21,20 @@
 
 #include "etrmm_kernel.h"
 
-typedef etrmm_T T;
+typedef etrmm_TR TR;
 
 void etrmm_kernel(bool left, bool trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
-                        T alpha,
-                        const T *ba, const T *bb,
-                        T *C, ptrdiff_t ldc,
+                        TR alpha,
+                        const TR *ba, const TR *bb,
+                        TR *C, ptrdiff_t ldc,
                         ptrdiff_t offset)
 {
     ptrdiff_t i, j, k;
-    T *C0, *C1;
-    const T *ptrba, *ptrbb;
-    T res0, res1, res2, res3;
-    T load0, load1, load2, load3, load4, load5, load6, load7;
+    TR *C0, *C1;
+    const TR *ptrba, *ptrbb;
+    TR res0, res1, res2, res3;
+    TR load0, load1, load2, load3, load4, load5, load6, load7;
     ptrdiff_t off, temp;
 
     /* if defined(TRMMKERNEL) && !defined(LEFT) → off = -offset, else 0 */

@@ -29,7 +29,7 @@
 #include <stddef.h>
 #include <quadmath.h>   /* __complex128 */
 
-typedef __complex128 xgemmtr_T;
+typedef __complex128 xgemmtr_TC;
 
 /* Normalize a Fortran trans char to a code (upper-cased; 'C' kept distinct
  * from 'T' so conjugation can be applied for complex input). */
@@ -40,8 +40,8 @@ char xgemmtr_trans_code(char c);
  * Only reached when beta != one. */
 void xgemmtr_beta_core(
     ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper,
-    xgemmtr_T beta,
-    xgemmtr_T *c, ptrdiff_t ldc);
+    xgemmtr_TC beta,
+    xgemmtr_TC *c, ptrdiff_t ldc);
 
 /* Full compute pass over columns [j0,j1):
  *
@@ -54,10 +54,10 @@ void xgemmtr_beta_core(
 void xgemmtr_compute_core(
     ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper, ptrdiff_t k,
     bool trans_a, bool trans_b, bool conj_a, bool conj_b,
-    xgemmtr_T alpha, xgemmtr_T beta,
-    const xgemmtr_T *a, ptrdiff_t lda,
-    const xgemmtr_T *b, ptrdiff_t ldb,
-    xgemmtr_T *c, ptrdiff_t ldc);
+    xgemmtr_TC alpha, xgemmtr_TC beta,
+    const xgemmtr_TC *a, ptrdiff_t lda,
+    const xgemmtr_TC *b, ptrdiff_t ldb,
+    xgemmtr_TC *c, ptrdiff_t ldc);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
  * invoke from inside another function's `#pragma omp parallel` region. Shares
@@ -65,10 +65,10 @@ void xgemmtr_compute_core(
 void xgemmtr_serial(
     char uplo, char transa, char transb,
     ptrdiff_t n, ptrdiff_t k,
-    const xgemmtr_T *alpha_,
-    const xgemmtr_T *a, ptrdiff_t lda,
-    const xgemmtr_T *b, ptrdiff_t ldb,
-    const xgemmtr_T *beta_,
-    xgemmtr_T *c, ptrdiff_t ldc);
+    const xgemmtr_TC *alpha_,
+    const xgemmtr_TC *a, ptrdiff_t lda,
+    const xgemmtr_TC *b, ptrdiff_t ldb,
+    const xgemmtr_TC *beta_,
+    xgemmtr_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XGEMMTR_KERNEL_H */

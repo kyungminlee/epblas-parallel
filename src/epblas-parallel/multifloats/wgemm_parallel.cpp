@@ -29,23 +29,23 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 namespace {
 using mf_kernels::cmul;
 using mf_pred::ceq0;
 using mf_pred::ceq1;
-const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 }  // namespace
 
 static void wgemm_core(
     char transa, char transb,
     std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t k,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const T *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TC *b, std::ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Already inside a team → run serially in this thread, no nested region. */
@@ -56,7 +56,7 @@ static void wgemm_core(
     }
 #endif
 
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const std::ptrdiff_t ta = wgemm_trans_code(&transa, 1);
     const std::ptrdiff_t tb = wgemm_trans_code(&transb, 1);
 
@@ -65,7 +65,7 @@ static void wgemm_core(
     /* beta pre-pass runs serially in the calling thread (matches the
      * pre-split wgemm_). */
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        T *cj = &c[static_cast<std::size_t>(j) * ldc];
+        TC *cj = &c[static_cast<std::size_t>(j) * ldc];
         if (ceq0(beta)) {
             for (std::ptrdiff_t i = 0; i < m; ++i) cj[i] = zero_cdd;
         } else if (!ceq1(beta)) {
@@ -81,8 +81,8 @@ static void wgemm_core(
     #pragma omp parallel
 #endif
     {
-        T *Ap = static_cast<T *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(MC) * KC * sizeof(T)));
+        TC *Ap = static_cast<TC *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(MC) * KC * sizeof(TC)));
 #ifdef WBLAS_SIMD_DD
         const std::ptrdiff_t W_simd = wgemm_simd_pack_W();
         const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
@@ -121,8 +121,8 @@ static void wgemm_core(
         std::free(Bp_ih);
         std::free(Bp_il);
 #else
-        T *Bp = static_cast<T *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC * sizeof(T)));
+        TC *Bp = static_cast<TC *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(KC) * NC * sizeof(TC)));
         if (Ap && Bp) {
 #ifdef _OPENMP
             #pragma omp for schedule(static)
@@ -149,5 +149,5 @@ static void wgemm_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_GEMM(wgemm, T)
+EPBLAS_FACADE_GEMM(wgemm, TC)
 }

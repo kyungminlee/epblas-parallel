@@ -36,7 +36,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-typedef esyr2k_T T;
+typedef esyr2k_TR TR;
 
 #define MR ESYR2K_MR
 #define NR ESYR2K_NR
@@ -48,11 +48,11 @@ typedef esyr2k_T T;
  * diagonal block, whose merge adds the symmetric pair (subbuf + subbuf^T) so a
  * single pass 1 covers both A·B^T and B·A^T on the NR×NR diagonal tile.
  * Subbuffer sized NR*(NR+1) to match OpenBLAS's safety pad. */
-void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
-                     const T *a, const T *b,
-                     T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag)
+void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                     const TR *a, const TR *b,
+                     TR *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag)
 {
-    T subbuf[NR * (NR + 1)];
+    TR subbuf[NR * (NR + 1)];
 
     if (m + offset < 0) {
         etri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
@@ -99,7 +99,7 @@ void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
             etri_gemm_kernel(nn, nn, k, alpha,
                              a + loop * k, b + loop * k, subbuf, nn);
 
-            T *cc = c + loop + loop * ldc;
+            TR *cc = c + loop + loop * ldc;
             for (ptrdiff_t j = 0; j < nn; ++j) {
                 for (ptrdiff_t i = 0; i <= j; ++i) {
                     cc[i + j * ldc] += subbuf[i + j * nn]
@@ -110,11 +110,11 @@ void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
     }
 }
 
-void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
-                     const T *a, const T *b,
-                     T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag)
+void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                     const TR *a, const TR *b,
+                     TR *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag)
 {
-    T subbuf[NR * (NR + 1)];
+    TR subbuf[NR * (NR + 1)];
 
     if (m + offset < 0) {
         return;
@@ -159,7 +159,7 @@ void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
             etri_gemm_kernel(nn, nn, k, alpha,
                              a + loop * k, b + loop * k, subbuf, nn);
 
-            T *cc = c + loop + loop * ldc;
+            TR *cc = c + loop + loop * ldc;
             for (ptrdiff_t j = 0; j < nn; ++j) {
                 for (ptrdiff_t i = j; i < nn; ++i) {
                     cc[i + j * ldc] += subbuf[i + j * nn]
@@ -186,13 +186,13 @@ void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
 void esyr2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *b, ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
@@ -206,12 +206,12 @@ void esyr2k_serial(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
-    T *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
+    TR *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap_A && Ap_B && Bp_A && Bp_B) {
         for (ptrdiff_t js = 0; js < n; js += NC) {
             const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
@@ -246,7 +246,7 @@ void esyr2k_serial(
                         etri_ncopy(pb, min_i, &b[(size_t)is * ldb + ls], ldb, Ap_B);
                     }
 
-                    T *cij = &c[(size_t)js * ldc + is];
+                    TR *cij = &c[(size_t)js * ldc + is];
                     const ptrdiff_t off = (ptrdiff_t)(is - js);
 
                     /* Pass 1: alpha·A·B^T + symmetric diagonal merge. */

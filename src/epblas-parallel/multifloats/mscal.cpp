@@ -19,7 +19,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -33,7 +33,7 @@ using simd_exact::store_dd4;
 }  // namespace
 
 /* X := α·X over a contiguous unit-stride range — serial kernel, unchanged. */
-static void mscal_unit(std::ptrdiff_t n, T alpha, T *x)
+static void mscal_unit(std::ptrdiff_t n, TR alpha, TR *x)
 {
 #ifdef MBLAS_SIMD_DD
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
@@ -55,7 +55,7 @@ static void mscal_unit(std::ptrdiff_t n, T alpha, T *x)
 #ifdef _OPENMP
 /* Threaded scale: disjoint output slices, each running the SIMD kernel. */
 #define MSCAL_OMP_MIN 2048
-__attribute__((noinline)) static std::ptrdiff_t mscal_omp(std::ptrdiff_t n, T alpha, T *x)
+__attribute__((noinline)) static std::ptrdiff_t mscal_omp(std::ptrdiff_t n, TR alpha, TR *x)
 {
     if (n <= MSCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -71,9 +71,9 @@ __attribute__((noinline)) static std::ptrdiff_t mscal_omp(std::ptrdiff_t n, T al
 }
 #endif
 
-static void mscal_core(std::ptrdiff_t n, const T *alpha_, T *x, std::ptrdiff_t incx)
+static void mscal_core(std::ptrdiff_t n, const TR *alpha_, TR *x, std::ptrdiff_t incx)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     if (n <= 0 || eq1(alpha)) return;
 
     if (incx == 1) {
@@ -87,4 +87,4 @@ static void mscal_core(std::ptrdiff_t n, const T *alpha_, T *x, std::ptrdiff_t i
     }
 }
 
-extern "C" { EPBLAS_FACADE_SCAL(mscal, T, T) }
+extern "C" { EPBLAS_FACADE_SCAL(mscal, TR, TR) }

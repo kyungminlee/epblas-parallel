@@ -5,10 +5,10 @@
  * fabsq is a function call (~50 cycles).
  */
 #include <quadmath.h>
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 R;
-R qcabs1_(const T *z) {
+R qcabs1_(const TC *z) {
     return __builtin_fabsf128(__real__ *z) + __builtin_fabsf128(__imag__ *z);
 }
 /* ILP64 twin — no integer args, so the ABI is identical to LP64. */
-R qcabs1_64_(const T *z) { return qcabs1_(z); }
+R qcabs1_64_(const TC *z) { return qcabs1_(z); }

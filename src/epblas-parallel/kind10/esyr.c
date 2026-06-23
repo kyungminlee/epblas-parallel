@@ -14,7 +14,7 @@
 
 #define ESYR_OMP_MIN 64
 
-typedef long double T;
+typedef long double TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -22,12 +22,12 @@ typedef long double T;
 static void esyr_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    T *restrict a, ptrdiff_t lda)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    TR *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0L;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0L;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -40,10 +40,10 @@ static void esyr_core(
          * for this small kernel. See Addendum 16. */
 #define ESYR_BODY                                                            \
         for (ptrdiff_t j = 0; j < n; ++j) {                                        \
-            const T xj = x[j];                                               \
+            const TR xj = x[j];                                               \
             if (xj != zero) {                                                \
-                const T t = alpha * xj;                                      \
-                T *aj = &A_(0, j);                                           \
+                const TR t = alpha * xj;                                      \
+                TR *aj = &A_(0, j);                                           \
                 if (UPLO == 'L') {                                           \
                     for (ptrdiff_t i = j; i < n; ++i) aj[i] += t * x[i];           \
                 } else {                                                     \
@@ -69,10 +69,10 @@ static void esyr_core(
         const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t jx = kx;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[jx];
+            const TR xj = x[jx];
             if (xj != zero) {
-                const T t = alpha * xj;
-                T *aj = &A_(0, j);
+                const TR t = alpha * xj;
+                TR *aj = &A_(0, j);
                 if (UPLO == 'L') {
                     ptrdiff_t ix = jx;
                     for (ptrdiff_t i = j; i < n; ++i) { aj[i] += t * x[ix]; ix += incx; }
@@ -86,6 +86,6 @@ static void esyr_core(
     }
 }
 
-EPBLAS_FACADE_SYR(esyr, T, T)
+EPBLAS_FACADE_SYR(esyr, TR, TR)
 
 #undef A_

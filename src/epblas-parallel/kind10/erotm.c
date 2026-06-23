@@ -11,19 +11,19 @@
  * paths each shrink from 14 insns + 2 fxch to 12 insns + 1 fxch in
  * the flag<0 branch. */
 #include "../common/epblas_facade.h"
-typedef long double T;
+typedef long double TR;
 
-static inline void step(const T flag, const T h11, const T h12, const T h21, const T h22,
-                        T *xi, T *yi)
+static inline void step(const TR flag, const TR h11, const TR h12, const TR h21, const TR h22,
+                        TR *xi, TR *yi)
 {
-    T w = *xi, z = *yi;
+    TR w = *xi, z = *yi;
     if (flag < 0.0L)        { *xi = w * h11 + z * h12; *yi = z * h22 + w * h21; }
     else if (flag == 0.0L)  { *xi = w + z * h12;       *yi = z + w * h21; }
     else                    { *xi = w * h11 + z;       *yi = z * h22 - w; }
 }
 
 /* Unit-stride kernel, shared by the serial entry and the per-thread OMP slices. */
-static void erotm_unit(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y)
+static void erotm_unit(ptrdiff_t n, TR flag, TR h11, TR h12, TR h21, TR h22, TR *x, TR *y)
 {
     for (ptrdiff_t i = 0; i < n; ++i) step(flag, h11, h12, h21, h22, &x[i], &y[i]);
 }
@@ -34,7 +34,7 @@ static void erotm_unit(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T 
  * keeps rotm serial at small N). Measured under iomp5: par4/ob4 1.09@1024, then
  * 0.95@1536 — break-even ~1536, stay serial through 1024. */
 #define EROTM_OMP_MIN 1024
-static bool erotm_omp(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *y)
+static bool erotm_omp(ptrdiff_t n, TR flag, TR h11, TR h12, TR h21, TR h22, TR *x, TR *y)
 {
     if (n <= EROTM_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -50,12 +50,12 @@ static bool erotm_omp(ptrdiff_t n, T flag, T h11, T h12, T h21, T h22, T *x, T *
 }
 #endif
 
-static void erotm_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
-                       const T *dparam)
+static void erotm_core(ptrdiff_t n, TR *x, ptrdiff_t incx, TR *y, ptrdiff_t incy,
+                       const TR *dparam)
 {
-    const T flag = dparam[0];
+    const TR flag = dparam[0];
     if (n <= 0 || flag == -2.0L) return;
-    const T h11 = dparam[1], h21 = dparam[2], h12 = dparam[3], h22 = dparam[4];
+    const TR h11 = dparam[1], h21 = dparam[2], h12 = dparam[3], h22 = dparam[4];
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if (erotm_omp(n, flag, h11, h12, h21, h22, x, y)) return;
@@ -69,4 +69,4 @@ static void erotm_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
     }
 }
 
-EPBLAS_FACADE_ROTM(erotm, T)
+EPBLAS_FACADE_ROTM(erotm, TR)

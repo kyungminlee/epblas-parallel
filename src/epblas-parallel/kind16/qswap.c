@@ -6,7 +6,7 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef __float128 T;
+typedef __float128 TR;
 
 /* Unit-stride 4-way kernel + strided fallback, shared by the serial entry and
  * the per-thread OMP slices (mirrors ob swap_kernel / kind10 eswap_unit). The
@@ -15,21 +15,21 @@ typedef __float128 T;
  * slower serial), and the OMP body was an un-unrolled scalar indexed swap that
  * under-threaded at large N. One unrolled kernel fixes both. Independent
  * elements ⇒ bit-exact regardless of grouping. */
-static void qswap_kernel(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
+static void qswap_kernel(ptrdiff_t n, TR *x, ptrdiff_t incx, TR *y, ptrdiff_t incy)
 {
     if (incx == 1 && incy == 1) {
         const ptrdiff_t n1 = n & -4;
         ptrdiff_t i;
         for (i = 0; i < n1; i += 4) {
-            T t0 = x[i], t1 = x[i + 1], t2 = x[i + 2], t3 = x[i + 3];
+            TR t0 = x[i], t1 = x[i + 1], t2 = x[i + 2], t3 = x[i + 3];
             x[i] = y[i]; x[i + 1] = y[i + 1]; x[i + 2] = y[i + 2]; x[i + 3] = y[i + 3];
             y[i] = t0; y[i + 1] = t1; y[i + 2] = t2; y[i + 3] = t3;
         }
-        for (; i < n; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
+        for (; i < n; ++i) { TR t = x[i]; x[i] = y[i]; y[i] = t; }
         return;
     }
     for (ptrdiff_t i = 0; i < n; ++i) {
-        T t = x[i * incx]; x[i * incx] = y[i * incy]; y[i * incy] = t;
+        TR t = x[i * incx]; x[i * incx] = y[i * incy]; y[i * incy] = t;
     }
 }
 
@@ -39,8 +39,8 @@ static void qswap_kernel(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy
  * slice via the unrolled kernel. Real-quad swap only wins past L2 (crossover
  * ~8K; n=4096 still washes). */
 #define QSWAP_OMP_MIN 8192
-__attribute__((noinline)) static bool qswap_omp(ptrdiff_t n, T *x, ptrdiff_t incx,
-                                               T *y, ptrdiff_t incy)
+__attribute__((noinline)) static bool qswap_omp(ptrdiff_t n, TR *x, ptrdiff_t incx,
+                                               TR *y, ptrdiff_t incy)
 {
     if (n <= QSWAP_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -57,7 +57,7 @@ __attribute__((noinline)) static bool qswap_omp(ptrdiff_t n, T *x, ptrdiff_t inc
 }
 #endif
 
-static void qswap_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
+static void qswap_core(ptrdiff_t n, TR *x, ptrdiff_t incx, TR *y, ptrdiff_t incy)
 {
     if (n <= 0) return;
     /* Shift to the first logical element for negative strides, then walk forward
@@ -70,4 +70,4 @@ static void qswap_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
     qswap_kernel(n, x, incx, y, incy);
 }
 
-EPBLAS_FACADE_SWAP(qswap, T)
+EPBLAS_FACADE_SWAP(qswap, TR)

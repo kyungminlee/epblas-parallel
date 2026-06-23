@@ -12,7 +12,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
@@ -30,7 +30,7 @@ using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (
 
 /* Σ(|re|+|im|) over a contiguous unit-stride range — serial kernel, unchanged.
  * Carved out so the OpenMP partial-reduction can call it per sub-range. */
-static R mwasum_unit(std::ptrdiff_t n, const T *x)
+static R mwasum_unit(std::ptrdiff_t n, const TC *x)
 {
 #ifdef MBLAS_SIMD_DD
     __m256d a0 = _mm256_setzero_pd();
@@ -88,7 +88,7 @@ static R mwasum_unit(std::ptrdiff_t n, const T *x)
 #ifdef _OPENMP
 #define MWASUM_OMP_MIN 8192
 #define MWASUM_MAX_CPUS 64
-__attribute__((noinline)) static std::ptrdiff_t mwasum_omp(std::ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static std::ptrdiff_t mwasum_omp(std::ptrdiff_t n, const TC *x, R *out)
 {
     if (n <= MWASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -109,7 +109,7 @@ __attribute__((noinline)) static std::ptrdiff_t mwasum_omp(std::ptrdiff_t n, con
 }
 #endif
 
-static R mwasum_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
+static R mwasum_core(std::ptrdiff_t n, const TC *x, std::ptrdiff_t incx)
 {
     R s{0.0, 0.0};
     if (n < 1 || incx < 1) return s;
@@ -126,4 +126,4 @@ static R mwasum_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
     return s;
 }
 
-extern "C" { EPBLAS_FACADE_ASUM(mwasum, R, T) }
+extern "C" { EPBLAS_FACADE_ASUM(mwasum, R, TC) }

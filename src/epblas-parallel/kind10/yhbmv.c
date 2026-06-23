@@ -53,9 +53,9 @@
 #include "../common/blas_omp.h"
 #endif
 
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double TR;
-static inline T cconj(T z) { return ~z; }
+static inline TC cconj(TC z) { return ~z; }
 
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
@@ -84,22 +84,22 @@ static inline T cconj(T z) { return ~z; }
 
 #ifdef _OPENMP
 static ptrdiff_t yhbmv_omp(bool upper, ptrdiff_t n, ptrdiff_t k,
-                     const T *restrict a, ptrdiff_t lda,
-                     const T *restrict x, ptrdiff_t incx,
-                     T alpha, T *restrict y, ptrdiff_t incy);
+                     const TC *restrict a, ptrdiff_t lda,
+                     const TC *restrict x, ptrdiff_t incx,
+                     TC alpha, TC *restrict y, ptrdiff_t incy);
 #endif
 
 static void yhbmv_core(
     char uplo,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *beta_,
+    TC *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
-    const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
+    const TC alpha = *alpha_, beta = *beta_;
+    const TC zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || (alpha == zero && beta == one)) return;
@@ -129,8 +129,8 @@ static void yhbmv_core(
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T *base = &A_(0, i);
-                T s = (TR)__real__ base[k] * x[i];
+                const TC *base = &A_(0, i);
+                TC s = (TR)__real__ base[k] * x[i];
                 const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
                 for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[k + (ptrdiff_t)d * s1] * x[i + d];
                 const ptrdiff_t llen = (i < k) ? i : k;
@@ -139,8 +139,8 @@ static void yhbmv_core(
             }
         } else {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T *base = &A_(0, i);
-                T s = (TR)__real__ base[0] * x[i];
+                const TC *base = &A_(0, i);
+                TC s = (TR)__real__ base[0] * x[i];
                 const ptrdiff_t llen = (i < k) ? i : k;
                 for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
                 const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
@@ -153,9 +153,9 @@ static void yhbmv_core(
         const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(n - 1) * incy : 0;
         if (UPLO == 'U') {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T *base = &A_(0, i);
+                const TC *base = &A_(0, i);
                 const ptrdiff_t xi = ix0 + (ptrdiff_t)i * incx;
-                T s = (TR)__real__ base[k] * x[xi];
+                TC s = (TR)__real__ base[k] * x[xi];
                 const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
                 ptrdiff_t xx = xi + incx;
                 for (ptrdiff_t d = 1; d <= rlen; ++d) { s += base[k + (ptrdiff_t)d * s1] * x[xx]; xx += incx; }
@@ -166,9 +166,9 @@ static void yhbmv_core(
             }
         } else {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T *base = &A_(0, i);
+                const TC *base = &A_(0, i);
                 const ptrdiff_t xi = ix0 + (ptrdiff_t)i * incx;
-                T s = (TR)__real__ base[0] * x[xi];
+                TC s = (TR)__real__ base[0] * x[xi];
                 const ptrdiff_t llen = (i < k) ? i : k;
                 ptrdiff_t xx = xi - incx;
                 for (ptrdiff_t d = 1; d <= llen; ++d) { s += base[-(ptrdiff_t)d * s1] * x[xx]; xx -= incx; }
@@ -191,15 +191,15 @@ static void yhbmv_core(
  * no reduction, no barrier (x and y distinct). Branch hoisted out of i-loop. */
 static void hbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
                            ptrdiff_t lo, ptrdiff_t hi,
-                           const T *restrict a, ptrdiff_t lda,
-                           const T *restrict x, T alpha,
-                           T *restrict y, ptrdiff_t incy)
+                           const TC *restrict a, ptrdiff_t lda,
+                           const TC *restrict x, TC alpha,
+                           TC *restrict y, ptrdiff_t incy)
 {
     const ptrdiff_t s1 = lda - 1;
     if (upper) {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = (TR)__real__ base[k] * x[i];
+            const TC *base = &A_(0, i);
+            TC s = (TR)__real__ base[k] * x[i];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
             for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[k + d * s1] * x[i + d];
             ptrdiff_t llen = (i < k) ? i : k;
@@ -208,8 +208,8 @@ static void hbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
         }
     } else {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = (TR)__real__ base[0] * x[i];
+            const TC *base = &A_(0, i);
+            TC s = (TR)__real__ base[0] * x[i];
             ptrdiff_t llen = (i < k) ? i : k;
             for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-d * s1] * x[i - d];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
@@ -226,9 +226,9 @@ static void hbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
  * does not pressure the serial gather's x87 allocation. */
 __attribute__((noinline)) static ptrdiff_t yhbmv_omp(
     bool upper, ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy)
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, ptrdiff_t incx,
+    TC alpha, TC *restrict y, ptrdiff_t incy)
 {
     if (n < YHBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -241,10 +241,10 @@ __attribute__((noinline)) static ptrdiff_t yhbmv_omp(
 
     /* Gather strided x to contiguous (logical order) so the inner dot is unit
      * stride; y is written disjointly per thread in place. */
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TC *xptr = x;
+    TC *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TC *)malloc((size_t)n * sizeof(TC));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[i * incx];
         xptr = xbuf;
@@ -263,6 +263,6 @@ __attribute__((noinline)) static ptrdiff_t yhbmv_omp(
 }
 #endif /* _OPENMP */
 
-EPBLAS_FACADE_SBMV(yhbmv, T)
+EPBLAS_FACADE_SBMV(yhbmv, TC)
 
 #undef A_

@@ -110,11 +110,11 @@ void xsymm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xsymm_plan_t *p,
 void xsymm_serial(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const xsymm_T *alpha_,
-    const xsymm_T *a, ptrdiff_t lda,
-    const xsymm_T *b, ptrdiff_t ldb,
-    const xsymm_T *beta_,
-    xsymm_T *c, ptrdiff_t ldc)
+    const xsymm_TC *alpha_,
+    const xsymm_TC *a, ptrdiff_t lda,
+    const xsymm_TC *b, ptrdiff_t ldb,
+    const xsymm_TC *beta_,
+    xsymm_TC *c, ptrdiff_t ldc)
 {
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;

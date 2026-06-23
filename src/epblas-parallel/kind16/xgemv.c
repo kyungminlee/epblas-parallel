@@ -25,10 +25,10 @@
 
 #define XGEMV_OMP_MIN 64
 
-typedef __complex128 T;
+typedef __complex128 TC;
 
 
-static inline T cconj(T z) { return conjq(z); }
+static inline TC cconj(TC z) { return conjq(z); }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -36,16 +36,16 @@ static inline T cconj(T z) { return conjq(z); }
  * Each thread (or the lone serial caller) writes a disjoint slice of y. */
 static void xgemv_n_stride1_slice(
     ptrdiff_t n, ptrdiff_t i_lo, ptrdiff_t i_hi,
-    T alpha,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, T *restrict y)
+    TC alpha,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, TC *restrict y)
 {
-    const T zero = 0.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
     for (ptrdiff_t j = 0; j < n; ++j) {
-        const T xj = x[j];
+        const TC xj = x[j];
         if (xj != zero) {
-            const T t = alpha * xj;
-            const T *aj = &A_(0, j);
+            const TC t = alpha * xj;
+            const TC *aj = &A_(0, j);
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) y[i] += t * aj[i];
         }
     }
@@ -55,14 +55,14 @@ static void xgemv_n_stride1_slice(
  * Each thread (or the lone serial caller) writes a disjoint slice of y. */
 static void xgemv_tc_stride1_slice(
     ptrdiff_t m, ptrdiff_t j_lo, ptrdiff_t j_hi, bool conj_a,
-    T alpha,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, T *restrict y)
+    TC alpha,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, TC *restrict y)
 {
-    const T zero = 0.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
     for (ptrdiff_t j = j_lo; j < j_hi; ++j) {
-        const T *aj = &A_(0, j);
-        T s = zero;
+        const TC *aj = &A_(0, j);
+        TC s = zero;
         if (conj_a) {
             for (ptrdiff_t i = 0; i < m; ++i) s += cconj(aj[i]) * x[i];
         } else {
@@ -78,17 +78,17 @@ static void xgemv_tc_stride1_slice(
  * full serial loop → race-free and bit-exact (iy0/jy0/ix recomputed). */
 static void xgemv_general_stride_slice(
     ptrdiff_t m, ptrdiff_t n, char TRANS, bool conj_a,
-    T alpha, const T *a, ptrdiff_t lda,
-    const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy, ptrdiff_t lo, ptrdiff_t hi)
+    TC alpha, const TC *a, ptrdiff_t lda,
+    const TC *x, ptrdiff_t incx, TC *y, ptrdiff_t incy, ptrdiff_t lo, ptrdiff_t hi)
 {
-    const T zero = 0.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
     if (TRANS == 'N') {
         const ptrdiff_t iy0 = (incy < 0) ? -(m - 1) * incy : 0;
         ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[jx];
+            const TC xj = x[jx];
             if (xj != zero) {
-                const T t = alpha * xj;
+                const TC t = alpha * xj;
                 ptrdiff_t iy = iy0 + lo * incy;
                 for (ptrdiff_t i = lo; i < hi; ++i) {
                     y[iy] += t * A_(i, j);
@@ -100,7 +100,7 @@ static void xgemv_general_stride_slice(
     } else {
         const ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
         for (ptrdiff_t j = lo; j < hi; ++j) {
-            T s = zero;
+            TC s = zero;
             ptrdiff_t ix = (incx < 0) ? -(m - 1) * incx : 0;
             for (ptrdiff_t i = 0; i < m; ++i) {
                 s += (conj_a ? cconj(A_(i, j)) : A_(i, j)) * x[ix];
@@ -112,9 +112,9 @@ static void xgemv_general_stride_slice(
 }
 
 /* Apply beta scaling to y[0:leny] (with stride incy). */
-static void xgemv_apply_beta(ptrdiff_t leny, ptrdiff_t incy, T beta, T *y)
+static void xgemv_apply_beta(ptrdiff_t leny, ptrdiff_t incy, TC beta, TC *y)
 {
-    const T zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
     if (beta == one) return;
     ptrdiff_t iy = (incy < 0) ? -(leny - 1) * incy : 0;
     for (ptrdiff_t i = 0; i < leny; ++i) {
@@ -131,18 +131,18 @@ static void xgemv_apply_beta(ptrdiff_t leny, ptrdiff_t incy, T beta, T *y)
 void xgemv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *beta_,
+    TC *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char TRANS = blas_up(trans);
 
     if (m == 0 || n == 0) return;
 
-    const T zero = 0.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
     const ptrdiff_t leny = (TRANS == 'N') ? m : n;
 
     xgemv_apply_beta(leny, incy, beta, y);
@@ -204,6 +204,6 @@ void xgemv_core(
     }
 }
 
-EPBLAS_FACADE_GEMV(xgemv, T)
+EPBLAS_FACADE_GEMV(xgemv, TC)
 
 #undef A_

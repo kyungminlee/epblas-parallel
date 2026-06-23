@@ -25,21 +25,21 @@
 #include "yhemm_kernel.h"
 #include "../common/epblas_facade.h"
 
-typedef yhemm_T T;
+typedef yhemm_TC TC;
 
 #define YHEMM_OMP_MIN 32
 
-static const T ZERO = 0.0L + 0.0Li;
-static const T ONE  = 1.0L + 0.0Li;
+static const TC ZERO = 0.0L + 0.0Li;
+static const TC ONE  = 1.0L + 0.0Li;
 
 static void yhemm_core(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict b, ptrdiff_t ldb,
-    const T *beta_,
-    T *restrict c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict b, ptrdiff_t ldb,
+    const TC *beta_,
+    TC *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -49,7 +49,7 @@ static void yhemm_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
 
@@ -111,4 +111,4 @@ static void yhemm_core(
     }
 }
 
-EPBLAS_FACADE_SYMM(yhemm, T)
+EPBLAS_FACADE_SYMM(yhemm, TC)

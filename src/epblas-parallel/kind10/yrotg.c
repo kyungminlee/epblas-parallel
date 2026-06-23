@@ -14,12 +14,12 @@
  * Falls back to the same scaled algorithm in the extreme branches.
  */
 #include <math.h>
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double R;
 
-void yrotg_(T *a_, const T *b_, R *c, T *s)
+void yrotg_(TC *a_, const TC *b_, R *c, TC *s)
 {
-    const T a = *a_, b = *b_;
+    const TC a = *a_, b = *b_;
     const R ar = __real__ a, ai = __imag__ a;
     const R br = __real__ b, bi = __imag__ b;
     const R g2 = br * br + bi * bi;     /* |b|² */
@@ -41,9 +41,9 @@ void yrotg_(T *a_, const T *b_, R *c, T *s)
     *a_ = a / *c;                       /* r = a/c = sgn(a)·sqrt(|a|²+|b|²) */
     /* s = conj(b) * (a / sqrt(f2*h2)) — equivalent to sgn(a)·conj(b)/sqrt(h2) */
     const R d = sqrtl(f2 * h2);
-    const T conjb = br - bi * 1.0iL;
+    const TC conjb = br - bi * 1.0iL;
     *s = conjb * (a / d);
 }
 
 /* No integer arguments -> LP64/ILP64 ABIs identical; _64_ twin tail-calls. */
-void yrotg_64_(T *a_, const T *b_, R *c, T *s) { yrotg_(a_, b_, c, s); }
+void yrotg_64_(TC *a_, const TC *b_, R *c, TC *s) { yrotg_(a_, b_, c, s); }

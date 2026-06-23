@@ -14,7 +14,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
@@ -32,7 +32,7 @@ using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (
 
 /* Σ|x| over a contiguous unit-stride range — the serial kernel, unchanged.
  * Carved out so the OpenMP partial-reduction can call it per sub-range. */
-static T masum_unit(std::ptrdiff_t n, const T *x)
+static TR masum_unit(std::ptrdiff_t n, const TR *x)
 {
 #ifdef MBLAS_SIMD_DD
     __m256d a0 = _mm256_setzero_pd();
@@ -67,11 +67,11 @@ static T masum_unit(std::ptrdiff_t n, const T *x)
         }
     }
     __m256d t = _mm256_add_pd(a1, a2);
-    T s = horizontal_dd(a0, t);
+    TR s = horizontal_dd(a0, t);
     for (std::ptrdiff_t i = n4; i < n; ++i) s = s + fabsdd(x[i]);
     return s;
 #else
-    T s0{0.0, 0.0}, s1{0.0, 0.0};
+    TR s0{0.0, 0.0}, s1{0.0, 0.0};
     std::ptrdiff_t i = 0;
     for (; i + 1 < n; i += 2) {
         s0 = s0 + fabsdd(x[i]);
@@ -89,30 +89,30 @@ static T masum_unit(std::ptrdiff_t n, const T *x)
  * tolerance for a sum of magnitudes (same rationale as kind10 easum). */
 #define MASUM_OMP_MIN 8192
 #define MASUM_MAX_CPUS 64
-__attribute__((noinline)) static std::ptrdiff_t masum_omp(std::ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static std::ptrdiff_t masum_omp(std::ptrdiff_t n, const TR *x, TR *out)
 {
     if (n <= MASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > MASUM_MAX_CPUS) nthreads = MASUM_MAX_CPUS;
-    T partial[MASUM_MAX_CPUS];
+    TR partial[MASUM_MAX_CPUS];
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
         std::ptrdiff_t nth = omp_get_num_threads();
         std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        partial[tid] = (lo < hi) ? masum_unit(hi - lo, x + lo) : T{0.0, 0.0};
+        partial[tid] = (lo < hi) ? masum_unit(hi - lo, x + lo) : TR{0.0, 0.0};
     }
-    T s{0.0, 0.0};
+    TR s{0.0, 0.0};
     for (std::ptrdiff_t i = 0; i < nthreads; ++i) s = s + partial[i];
     *out = s;
     return 1;
 }
 #endif
 
-static T masum_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
+static TR masum_core(std::ptrdiff_t n, const TR *x, std::ptrdiff_t incx)
 {
-    T s{0.0, 0.0};
+    TR s{0.0, 0.0};
     if (n < 1 || incx < 1) return s;
 
     if (incx == 1) {
@@ -122,10 +122,10 @@ static T masum_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
         return masum_unit(n, x);
     }
 
-    T s0{0.0, 0.0}, s1{0.0, 0.0};
+    TR s0{0.0, 0.0}, s1{0.0, 0.0};
     for (std::ptrdiff_t i = 0, ix = 0; i < n; ++i, ix += incx)
         s0 = s0 + fabsdd(x[ix]);
     return s0 + s1;
 }
 
-extern "C" { EPBLAS_FACADE_ASUM(masum, T, T) }
+extern "C" { EPBLAS_FACADE_ASUM(masum, TR, TR) }

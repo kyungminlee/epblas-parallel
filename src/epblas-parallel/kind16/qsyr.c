@@ -15,7 +15,7 @@
 
 #define QSYR_OMP_MIN 64
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -23,12 +23,12 @@ typedef __float128 T;
 void qsyr_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    T *restrict a, ptrdiff_t lda)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    TR *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0Q;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0Q;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -39,10 +39,10 @@ void qsyr_core(
          * if(use_omp)` outlines unconditionally. */
 #define QSYR_BODY                                                            \
         for (ptrdiff_t j = 0; j < n; ++j) {                                        \
-            const T xj = x[j];                                               \
+            const TR xj = x[j];                                               \
             if (xj != zero) {                                                \
-                const T t = alpha * xj;                                      \
-                T *aj = &A_(0, j);                                           \
+                const TR t = alpha * xj;                                      \
+                TR *aj = &A_(0, j);                                           \
                 if (UPLO == 'L') {                                           \
                     for (ptrdiff_t i = j; i < n; ++i) aj[i] += t * x[i];           \
                 } else {                                                     \
@@ -65,9 +65,9 @@ void qsyr_core(
     } else {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[kx + j * incx];
+            const TR xj = x[kx + j * incx];
             if (xj != zero) {
-                const T t = alpha * xj;
+                const TR t = alpha * xj;
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j; i < n; ++i) A_(i, j) += t * x[kx + i * incx];
                 } else {
@@ -79,6 +79,6 @@ void qsyr_core(
 }
 
 
-EPBLAS_FACADE_SYR(qsyr, T, T)
+EPBLAS_FACADE_SYR(qsyr, TR, TR)
 
 #undef A_

@@ -14,7 +14,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 namespace {
 /* Inline magnitude/compare from mf_pred — mf_pred::mag stays header-inline (the
@@ -35,7 +35,7 @@ using mf_pred::gt;
  * tail keep the lowest index on exact ties — identical result to the left-to-
  * right scan. (Normalised DDs never have hi==0 with lo!=0, the one input where
  * the branchless sign-of-value would diverge from the scalar a<0 test.) */
-inline void deint4(const T *p, __m256d &hi, __m256d &lo) {
+inline void deint4(const TR *p, __m256d &hi, __m256d &lo) {
     __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double *>(p));
     __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double *>(p + 2));
     __m256d a = _mm256_unpacklo_pd(v0, v1);
@@ -50,7 +50,7 @@ inline void deint4(const T *p, __m256d &hi, __m256d &lo) {
  * cmp→and→or→blendv (~8 cy / 4 elts) and a single accumulator leaves the scan
  * latency-bound at compute-bound sizes; two interleaved chains overlap and let
  * the loop hit its throughput ceiling instead. */
-inline void amax_step(const T *p, __m256i idx, __m256d sgn,
+inline void amax_step(const TR *p, __m256i idx, __m256d sgn,
                       __m256d &vmh, __m256d &vml, __m256i &vidx) {
     __m256d h, l;
     deint4(p, h, l);
@@ -67,13 +67,13 @@ inline void amax_step(const T *p, __m256i idx, __m256d sgn,
                                 _mm256_castsi256_pd(idx), upd));
 }
 
-__attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_out)
+__attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const TR *x, TR *bv_out)
 {
     if (n < 8) {            /* SIMD setup not worth it for tiny ranges */
         ptrdiff_t best = 0;
-        T bv = mag(x[0]);
+        TR bv = mag(x[0]);
         for (ptrdiff_t i = 1; i < n; ++i) {
-            T v = mag(x[i]);
+            TR v = mag(x[i]);
             if (v > bv) { bv = v; best = i; }
         }
         *bv_out = bv;
@@ -110,9 +110,9 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
     _mm256_store_si256(reinterpret_cast<__m256i *>(li),     vidxA);
     _mm256_store_si256(reinterpret_cast<__m256i *>(li + 4), vidxB);
     ptrdiff_t best = (ptrdiff_t)li[0];
-    T bv{mh[0], ml[0]};
+    TR bv{mh[0], ml[0]};
     for (std::ptrdiff_t k = 1; k < 8; ++k) {
-        T cv{mh[k], ml[k]};
+        TR cv{mh[k], ml[k]};
         if (gt(cv, bv) || (cv.limbs[0] == bv.limbs[0] &&
                               cv.limbs[1] == bv.limbs[1] && li[k] < best)) {
             bv = cv; best = (ptrdiff_t)li[k];
@@ -120,7 +120,7 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
     }
     /* Scalar tail (< 4 leftover); strict '>' preserves the lower held index. */
     for (; i < n; ++i) {
-        T v = mag(x[i]);
+        TR v = mag(x[i]);
         if (v > bv) { bv = v; best = i; }
     }
     *bv_out = bv;
@@ -130,12 +130,12 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
 /* Scan a contiguous unit-stride range [0,n); return the 0-based index of the
  * first element with maximal |x| and store that magnitude in *bv_out.
  * Strictly-greater update keeps the lowest index on ties. */
-__attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_out)
+__attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const TR *x, TR *bv_out)
 {
     ptrdiff_t best = 0;
-    T bv = mag(x[0]);
+    TR bv = mag(x[0]);
     for (ptrdiff_t i = 1; i < n; ++i) {
-        T v = mag(x[i]);
+        TR v = mag(x[i]);
         if (v > bv) { bv = v; best = i; }   /* lexicographic >, matches ob clone */
     }
     *bv_out = bv;
@@ -151,23 +151,23 @@ __attribute__((noinline)) ptrdiff_t imamax_scan(ptrdiff_t n, const T *x, T *bv_o
  * wins any tie, bit-identical to the serial left-to-right scan. */
 #define IMAMAX_OMP_MIN 8192
 #define IMAMAX_MAX_CPUS 64
-__attribute__((noinline)) static std::ptrdiff_t imamax_omp(std::ptrdiff_t n, const T *x, std::ptrdiff_t *out)
+__attribute__((noinline)) static std::ptrdiff_t imamax_omp(std::ptrdiff_t n, const TR *x, std::ptrdiff_t *out)
 {
     if (n <= IMAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > IMAMAX_MAX_CPUS) nthreads = IMAMAX_MAX_CPUS;
     std::ptrdiff_t   idx[IMAMAX_MAX_CPUS];
-    T     val[IMAMAX_MAX_CPUS];
+    TR     val[IMAMAX_MAX_CPUS];
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
         std::ptrdiff_t nth = omp_get_num_threads();
         std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         std::ptrdiff_t b = 0;
-        T bv{0.0, 0.0};
+        TR bv{0.0, 0.0};
         if (lo < hi) {
-            T sv;
+            TR sv;
             ptrdiff_t li = imamax_scan(hi - lo, x + lo, &sv);
             b = lo + (std::ptrdiff_t)li + 1;   /* 1-based global index */
             bv = sv;
@@ -175,7 +175,7 @@ __attribute__((noinline)) static std::ptrdiff_t imamax_omp(std::ptrdiff_t n, con
         idx[tid] = b; val[tid] = bv;
     }
     std::ptrdiff_t best = 0;
-    T bestv{0.0, 0.0};
+    TR bestv{0.0, 0.0};
     for (std::ptrdiff_t t = 0; t < nthreads; ++t) {
         if (idx[t] == 0) continue;
         if (best == 0 || gt(val[t], bestv)) { best = idx[t]; bestv = val[t]; }
@@ -185,7 +185,7 @@ __attribute__((noinline)) static std::ptrdiff_t imamax_omp(std::ptrdiff_t n, con
 }
 #endif
 
-static std::ptrdiff_t imamax_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
+static std::ptrdiff_t imamax_core(std::ptrdiff_t n, const TR *x, std::ptrdiff_t incx)
 {
     if (n < 1 || incx <= 0) return 0;
     if (n == 1) return 1;
@@ -196,18 +196,18 @@ static std::ptrdiff_t imamax_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t i
     }
 #endif
     if (incx == 1) {
-        T bv;
+        TR bv;
         return (std::ptrdiff_t)imamax_scan(n, x, &bv) + 1;
     }
     std::ptrdiff_t best = 1;
-    T bestv = mag(x[0]);
+    TR bestv = mag(x[0]);
     std::ptrdiff_t ix = incx;
     for (std::ptrdiff_t i = 2; i <= n; ++i) {
-        T av = mag(x[ix]);
+        TR av = mag(x[ix]);
         if (gt(av, bestv)) { bestv = av; best = i; }
         ix += incx;
     }
     return best;
 }
 
-extern "C" { EPBLAS_FACADE_IAMAX(imamax, T) }
+extern "C" { EPBLAS_FACADE_IAMAX(imamax, TR) }

@@ -29,7 +29,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef __complex128 T;
+typedef __complex128 TC;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -43,22 +43,22 @@ static ptrdiff_t xtrsv_blocked_nb(void) {
 void xtrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TC *restrict a, const ptrdiff_t *lda_,
+    TC *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void xtrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TC *restrict a, const ptrdiff_t *lda_,
+    TC *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void xtrsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TC *restrict a, ptrdiff_t lda,
+    TC *restrict x, ptrdiff_t incx)
 {
     if (n == 0) return;
 
@@ -83,8 +83,8 @@ void xtrsv_core(
 void xtrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TC *restrict a, const ptrdiff_t *lda_,
+    TC *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
@@ -97,7 +97,7 @@ void xtrsv_serial_(
 
     if (n == 0) return;
 
-    const T zero = 0.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
 
     if (incx == 1) {
         if (TRANS == 'N') {
@@ -105,8 +105,8 @@ void xtrsv_serial_(
                 for (ptrdiff_t i = 0; i < n; ++i) {
                     if (x[i] != zero) {
                         if (nounit) x[i] /= A_(i, i);
-                        const T xi = x[i];
-                        const T *ai = &A_(0, i);
+                        const TC xi = x[i];
+                        const TC *ai = &A_(0, i);
                         for (ptrdiff_t k = i + 1; k < n; ++k) x[k] -= xi * ai[k];
                     }
                 }
@@ -114,8 +114,8 @@ void xtrsv_serial_(
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     if (x[i] != zero) {
                         if (nounit) x[i] /= A_(i, i);
-                        const T xi = x[i];
-                        const T *ai = &A_(0, i);
+                        const TC xi = x[i];
+                        const TC *ai = &A_(0, i);
                         for (ptrdiff_t k = 0; k < i; ++k) x[k] -= xi * ai[k];
                     }
                 }
@@ -124,8 +124,8 @@ void xtrsv_serial_(
             const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TC t = x[i];
+                    const TC *ai = &A_(0, i);
                     if (conj_a) {
                         for (ptrdiff_t k = i + 1; k < n; ++k) t -= conjq(ai[k]) * x[k];
                         if (nounit) t /= conjq(ai[i]);
@@ -137,8 +137,8 @@ void xtrsv_serial_(
                 }
             } else {
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TC t = x[i];
+                    const TC *ai = &A_(0, i);
                     if (conj_a) {
                         for (ptrdiff_t k = 0; k < i; ++k) t -= conjq(ai[k]) * x[k];
                         if (nounit) t /= conjq(ai[i]);
@@ -158,7 +158,7 @@ void xtrsv_serial_(
                     const ptrdiff_t ix = kx + i * incx;
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= A_(i, i);
-                        const T xi = x[ix];
+                        const TC xi = x[ix];
                         for (ptrdiff_t k = i + 1; k < n; ++k) x[kx + k * incx] -= xi * A_(k, i);
                     }
                 }
@@ -167,7 +167,7 @@ void xtrsv_serial_(
                     const ptrdiff_t ix = kx + i * incx;
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= A_(i, i);
-                        const T xi = x[ix];
+                        const TC xi = x[ix];
                         for (ptrdiff_t k = 0; k < i; ++k) x[kx + k * incx] -= xi * A_(k, i);
                     }
                 }
@@ -176,9 +176,9 @@ void xtrsv_serial_(
             const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T t = x[kx + i * incx];
+                    TC t = x[kx + i * incx];
                     for (ptrdiff_t k = i + 1; k < n; ++k) {
-                        const T aki = conj_a ? conjq(A_(k, i)) : A_(k, i);
+                        const TC aki = conj_a ? conjq(A_(k, i)) : A_(k, i);
                         t -= aki * x[kx + k * incx];
                     }
                     if (nounit) t /= (conj_a ? conjq(A_(i, i)) : A_(i, i));
@@ -186,9 +186,9 @@ void xtrsv_serial_(
                 }
             } else {
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    T t = x[kx + i * incx];
+                    TC t = x[kx + i * incx];
                     for (ptrdiff_t k = 0; k < i; ++k) {
-                        const T aki = conj_a ? conjq(A_(k, i)) : A_(k, i);
+                        const TC aki = conj_a ? conjq(A_(k, i)) : A_(k, i);
                         t -= aki * x[kx + k * incx];
                     }
                     if (nounit) t /= (conj_a ? conjq(A_(i, i)) : A_(i, i));
@@ -209,17 +209,17 @@ void xtrsv_serial_(
 extern void xgemv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha,
-    const T *a, ptrdiff_t lda,
-    const T *x, ptrdiff_t incx,
-    const T *beta,
-    T *y, ptrdiff_t incy);
+    const TC *alpha,
+    const TC *a, ptrdiff_t lda,
+    const TC *x, ptrdiff_t incx,
+    const TC *beta,
+    TC *y, ptrdiff_t incy);
 
 void xtrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TC *restrict a, const ptrdiff_t *lda_,
+    TC *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     const ptrdiff_t n = *n_;
@@ -236,8 +236,8 @@ void xtrsv_blocked_(
         return;
     }
 
-    const T neg_one = -1.0Q + 0.0Qi;
-    const T one_v   =  1.0Q + 0.0Qi;
+    const TC neg_one = -1.0Q + 0.0Qi;
+    const TC one_v   =  1.0Q + 0.0Qi;
     const char NN[1] = {'N'};
     const char TT[1] = {(TRANS == 'C') ? 'C' : 'T'};
     const ptrdiff_t one_i = 1;
@@ -396,6 +396,6 @@ void xtrsv_blocked_(
     }
 }
 
-EPBLAS_FACADE_TRMV(xtrsv, T)
+EPBLAS_FACADE_TRMV(xtrsv, TC)
 
 #undef A_

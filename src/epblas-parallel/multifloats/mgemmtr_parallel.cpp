@@ -23,7 +23,7 @@
 #endif
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -37,11 +37,11 @@ namespace {
 static void mgemmtr_core(
     char uplo, char transa, char transb,
     std::ptrdiff_t n, std::ptrdiff_t k,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const T *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, std::ptrdiff_t lda,
+    const TR *b, std::ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
@@ -50,7 +50,7 @@ static void mgemmtr_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const bool upper = (up(&uplo) == 'U');
     char ta = up(&transa); if (ta == 'C') ta = 'T';
     char tb = up(&transb); if (tb == 'C') tb = 'T';
@@ -81,5 +81,5 @@ static void mgemmtr_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_GEMMTR(mgemmtr, T)
+EPBLAS_FACADE_GEMMTR(mgemmtr, TR)
 }

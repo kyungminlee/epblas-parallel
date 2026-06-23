@@ -9,14 +9,14 @@
 /* fabsq via __builtin_fabsf128 — single `pand` instead of a libquadmath function call. */
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
-typedef __float128 T;
+typedef __float128 TR;
 
 /* Σ|x| over a logical range; 2-accumulator unroll on the unit-stride path.
  * Carved out so the OMP partial-reduction can call it per chunk; serial
  * behaviour is identical to the pre-threading version. */
-static T qasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static TR qasum_kernel(ptrdiff_t n, const TR *x, ptrdiff_t incx)
 {
-    T s0 = 0.0Q, s1 = 0.0Q;
+    TR s0 = 0.0Q, s1 = 0.0Q;
     if (incx == 1) {
         ptrdiff_t i = 0;
         for (; i + 1 < n; i += 2) { s0 += fabsq(x[i]); s1 += fabsq(x[i + 1]); }
@@ -35,13 +35,13 @@ static T qasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
  * (not bit-identical), but within fuzz tolerance for a sum of magnitudes. */
 #define QASUM_OMP_MIN 128
 #define QASUM_MAX_CPUS 64
-__attribute__((noinline)) static bool qasum_omp(ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static bool qasum_omp(ptrdiff_t n, const TR *x, TR *out)
 {
     if (n <= QASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QASUM_MAX_CPUS) nthreads = QASUM_MAX_CPUS;
-    T partial[QASUM_MAX_CPUS] = {0};
+    TR partial[QASUM_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -50,23 +50,23 @@ __attribute__((noinline)) static bool qasum_omp(ptrdiff_t n, const T *x, T *out)
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) partial[tid] = qasum_kernel(hi - lo, x + lo, 1);
     }
-    T s = 0.0Q;
+    TR s = 0.0Q;
     for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }
 #endif
 
-static T qasum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static TR qasum_core(ptrdiff_t n, const TR *x, ptrdiff_t incx)
 {
     if (n < 1 || incx < 1) return 0.0Q;
 #ifdef _OPENMP
     if (incx == 1) {
-        T s;
+        TR s;
         if (qasum_omp(n, x, &s)) return s;
     }
 #endif
     return qasum_kernel(n, x, incx);
 }
 
-EPBLAS_FACADE_ASUM(qasum, T, T)
+EPBLAS_FACADE_ASUM(qasum, TR, TR)

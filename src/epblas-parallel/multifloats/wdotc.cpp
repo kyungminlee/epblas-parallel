@@ -12,7 +12,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 namespace {
 using mf_kernels::cconj;
@@ -92,33 +92,33 @@ mf_kernels::wdotc_unit(std::ptrdiff_t n, const multifloats::complex64x2 *x,
 #ifdef _OPENMP
 #define WDOTC_OMP_MIN 8192
 #define WDOTC_MAX_CPUS 64
-__attribute__((noinline)) static std::ptrdiff_t wdotc_omp(std::ptrdiff_t n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static std::ptrdiff_t wdotc_omp(std::ptrdiff_t n, const TC *x, const TC *y, TC *out)
 {
     if (n <= WDOTC_OMP_MIN || !blas_omp_should_thread())
         return 0;
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > WDOTC_MAX_CPUS) nthreads = WDOTC_MAX_CPUS;
-    T partial[WDOTC_MAX_CPUS];
+    TC partial[WDOTC_MAX_CPUS];
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
         std::ptrdiff_t nth = omp_get_num_threads();
         std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
         partial[tid] = (lo < hi) ? mf_kernels::wdotc_unit(hi - lo, x + lo, y + lo)
-                                 : T{R{0.0, 0.0}, R{0.0, 0.0}};
+                                 : TC{R{0.0, 0.0}, R{0.0, 0.0}};
     }
-    T s{R{0.0, 0.0}, R{0.0, 0.0}};
+    TC s{R{0.0, 0.0}, R{0.0, 0.0}};
     for (std::ptrdiff_t i = 0; i < nthreads; ++i) s = cadd(s, partial[i]);
     *out = s;
     return 1;
 }
 #endif
 
-static T wdotc_core(std::ptrdiff_t n,
-                    const T *x, std::ptrdiff_t incx,
-                    const T *y, std::ptrdiff_t incy)
+static TC wdotc_core(std::ptrdiff_t n,
+                    const TC *x, std::ptrdiff_t incx,
+                    const TC *y, std::ptrdiff_t incy)
 {
-    T s{R{0.0, 0.0}, R{0.0, 0.0}};
+    TC s{R{0.0, 0.0}, R{0.0, 0.0}};
     if (n <= 0) return s;
 
     if (incx == 1 && incy == 1) {
@@ -135,5 +135,5 @@ static T wdotc_core(std::ptrdiff_t n,
 }
 
 extern "C" {
-EPBLAS_FACADE_DOT(wdotc, T, T)
+EPBLAS_FACADE_DOT(wdotc, TC, TC)
 }

@@ -39,7 +39,7 @@
 #include <omp.h>
 #endif
 
-typedef qsyr2k_T T;
+typedef qsyr2k_TR TR;
 
 #define MR QSYR2K_MR
 #define NR QSYR2K_NR
@@ -47,11 +47,11 @@ typedef qsyr2k_T T;
 static void qsyr2k_core(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *b, ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
@@ -61,7 +61,7 @@ static void qsyr2k_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO  = blas_up(uplo);
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
@@ -77,8 +77,8 @@ static void qsyr2k_core(
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(T);
+    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -106,10 +106,10 @@ static void qsyr2k_core(
     /* Two shared B-packs (A and B in B-shape), two private A-packs per thread,
      * all allocated BEFORE the region: a thread that skipped the loop on a
      * failed in-region alloc would deadlock the others at the Bp barrier. */
-    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
-    T **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
+    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
+    TR **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
     bool alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_A_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -127,8 +127,8 @@ static void qsyr2k_core(
 #else
             const ptrdiff_t tid = 0, nth = 1;
 #endif
-            T *Ap_A = Ap_A_arr[tid];
-            T *Ap_B = Ap_B_arr[tid];
+            TR *Ap_A = Ap_A_arr[tid];
+            TR *Ap_B = Ap_B_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks, sized
              * by triangular AREA so each thread carries equal work (an equal-
@@ -166,7 +166,7 @@ static void qsyr2k_core(
                         qtri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap_A);
                         qtri_tcopy(pb, min_i, &b[(size_t)ls * ldb + is], ldb, Ap_B);
 
-                        T *cij = &c[(size_t)js * ldc + is];
+                        TR *cij = &c[(size_t)js * ldc + is];
                         const ptrdiff_t off = (ptrdiff_t)(is - js);
 
                         /* Pass 1: alpha·A·B^T + symmetric diagonal merge. */
@@ -194,4 +194,4 @@ static void qsyr2k_core(
     free(Bp_B);
 }
 
-EPBLAS_FACADE_SYR2K(qsyr2k, T, T, T)
+EPBLAS_FACADE_SYR2K(qsyr2k, TR, TR, TR)

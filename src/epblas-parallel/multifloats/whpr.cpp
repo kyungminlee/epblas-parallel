@@ -19,7 +19,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -39,7 +39,7 @@ using mf_kernels::rcmul;
 /* Contiguous (unit-stride x) core: packed Hermitian rank-1 A += alpha*x*x^H.
  * Off-diagonal packed-column run is a SIMD column-AXPY (caxpy_add, bit-exact;
  * cmul commutes so t=alpha*conj(x[j]) factors out); diagonal forced real. */
-static void whpr_contig(char UPLO, std::ptrdiff_t n, R alpha, T *ap, const T *x)
+static void whpr_contig(char UPLO, std::ptrdiff_t n, R alpha, TC *ap, const TC *x)
 {
     if (UPLO == 'U') {
 #ifdef _OPENMP
@@ -51,12 +51,12 @@ static void whpr_contig(char UPLO, std::ptrdiff_t n, R alpha, T *ap, const T *x)
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             const std::ptrdiff_t kk = (j * (j + 1)) / 2;
             if (!ceq0(x[j])) {
-                const T tmp = rcmul(alpha, cconj(x[j]));
+                const TC tmp = rcmul(alpha, cconj(x[j]));
                 mf_kernels::caxpy_add(j, &ap[kk], &x[0], tmp);
                 const R new_re = ap[kk + j].re + cmul(x[j], tmp).re;
-                ap[kk + j] = T{ new_re, rzero };
+                ap[kk + j] = TC{ new_re, rzero };
             } else {
-                ap[kk + j] = T{ ap[kk + j].re, rzero };
+                ap[kk + j] = TC{ ap[kk + j].re, rzero };
             }
         }
     } else {
@@ -67,12 +67,12 @@ static void whpr_contig(char UPLO, std::ptrdiff_t n, R alpha, T *ap, const T *x)
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             const std::ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
             if (!ceq0(x[j])) {
-                const T tmp = rcmul(alpha, cconj(x[j]));
+                const TC tmp = rcmul(alpha, cconj(x[j]));
                 const R new_re = ap[kk].re + cmul(tmp, x[j]).re;
-                ap[kk] = T{ new_re, rzero };
+                ap[kk] = TC{ new_re, rzero };
                 mf_kernels::caxpy_add(n - (j + 1), &ap[kk + 1], &x[j + 1], tmp);
             } else {
-                ap[kk] = T{ ap[kk].re, rzero };
+                ap[kk] = TC{ ap[kk].re, rzero };
             }
         }
     }
@@ -82,8 +82,8 @@ static void whpr_core(
     char uplo,
     std::ptrdiff_t n,
     const R *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    T *ap)
+    const TC *x, std::ptrdiff_t incx,
+    TC *ap)
 {
     const R alpha = *alpha_;
     const char UPLO = up(&uplo);
@@ -95,12 +95,12 @@ static void whpr_core(
         return;
     }
     /* Strided x: gather to unit-stride scratch, run the SIMD core. */
-    const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
-    std::vector<T> xs(static_cast<std::size_t>(n));
+    const TC *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
+    std::vector<TC> xs(static_cast<std::size_t>(n));
     for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
     whpr_contig(UPLO, n, alpha, ap, xs.data());
 }
 
 extern "C" {
-EPBLAS_FACADE_SPR(whpr, R, T)
+EPBLAS_FACADE_SPR(whpr, R, TC)
 }

@@ -32,34 +32,34 @@
 
 #include <stddef.h>
 
-typedef long double esyrk_T;
+typedef long double esyrk_TR;
 
 #define ESYRK_MR 2
 #define ESYRK_NR 2
 
 /* Triangular β pre-pass: C := β·C over the UPLO triangle of C only (the
  * off-UPLO triangle is left untouched — the SYRK fuzz sentinel checks this). */
-void esyrk_beta_u(ptrdiff_t n, esyrk_T beta, esyrk_T *c, ptrdiff_t ldc);
-void esyrk_beta_l(ptrdiff_t n, esyrk_T beta, esyrk_T *c, ptrdiff_t ldc);
+void esyrk_beta_u(ptrdiff_t n, esyrk_TR beta, esyrk_TR *c, ptrdiff_t ldc);
+void esyrk_beta_l(ptrdiff_t n, esyrk_TR beta, esyrk_TR *c, ptrdiff_t ldc);
 
 /* Diagonal-aware writeback kernel for one packed (m,n,k) block whose top-left
  * corner sits at global diagonal offset (row_base - col_base). Off-diagonal
  * strict-triangle remainders are full GEMMs (etri_gemm_kernel); the diagonal
  * NR×NR blocks go through a subbuffer so only the UPLO triangle merges into C. */
-void esyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyrk_T alpha,
-                    const esyrk_T *a, const esyrk_T *b,
-                    esyrk_T *c, ptrdiff_t ldc, ptrdiff_t offset);
-void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyrk_T alpha,
-                    const esyrk_T *a, const esyrk_T *b,
-                    esyrk_T *c, ptrdiff_t ldc, ptrdiff_t offset);
+void esyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyrk_TR alpha,
+                    const esyrk_TR *a, const esyrk_TR *b,
+                    esyrk_TR *c, ptrdiff_t ldc, ptrdiff_t offset);
+void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyrk_TR alpha,
+                    const esyrk_TR *a, const esyrk_TR *b,
+                    esyrk_TR *c, ptrdiff_t ldc, ptrdiff_t offset);
 
 /* Pure-serial by-value core (no OpenMP). Same shape as esyrk_core. */
 void esyrk_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const esyrk_T *alpha_,
-    const esyrk_T *a, ptrdiff_t lda,
-    const esyrk_T *beta_,
-    esyrk_T *c, ptrdiff_t ldc);
+    const esyrk_TR *alpha_,
+    const esyrk_TR *a, ptrdiff_t lda,
+    const esyrk_TR *beta_,
+    esyrk_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ESYRK_KERNEL_H */

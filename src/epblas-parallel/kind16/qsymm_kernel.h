@@ -24,7 +24,7 @@
 
 #include <stddef.h>
 
-typedef __float128 qsymm_T;
+typedef __float128 qsymm_TR;
 
 /* Normalize a Fortran uplo/side char to its uppercase code. */
 char qsymm_uplo(const char *p);
@@ -40,21 +40,21 @@ char qsymm_uplo(const char *p);
  *
  * `uplo` is 'U' or 'L' (already upper-cased by the caller).
  */
-void qsymm_pack_a_sym(const qsymm_T *a, ptrdiff_t lda,
+void qsymm_pack_a_sym(const qsymm_TR *a, ptrdiff_t lda,
                       ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
-                      char uplo, qsymm_T *Ap);
-void qsymm_pack_b_sym(const qsymm_T *a, ptrdiff_t lda,
+                      char uplo, qsymm_TR *Ap);
+void qsymm_pack_b_sym(const qsymm_TR *a, ptrdiff_t lda,
                       ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
-                      char uplo, qsymm_T *Bp);
+                      char uplo, qsymm_TR *Bp);
 
 /* Pure-serial by-value entry (no OpenMP); shares the ptrdiff_t core ABI. */
 void qsymm_serial(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const qsymm_T *alpha_,
-    const qsymm_T *a, ptrdiff_t lda,
-    const qsymm_T *b, ptrdiff_t ldb,
-    const qsymm_T *beta_,
-    qsymm_T *c, ptrdiff_t ldc);
+    const qsymm_TR *alpha_,
+    const qsymm_TR *a, ptrdiff_t lda,
+    const qsymm_TR *b, ptrdiff_t ldb,
+    const qsymm_TR *beta_,
+    qsymm_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QSYMM_KERNEL_H */

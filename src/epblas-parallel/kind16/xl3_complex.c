@@ -18,7 +18,7 @@
 #include <quadmath.h>
 #include <stdlib.h>
 
-typedef __float128 T;
+typedef __float128 TR;
 
 #define MR QBLAS_YGEMM_MR
 #define NR QBLAS_YGEMM_NR
@@ -38,28 +38,28 @@ typedef __float128 T;
  * float-summation order is identical across the K-loop.
  */
 void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
-                        T alphar, T alphai,
-                        const T *Ap,
-                        const T *Bp,
-                        T *C, ptrdiff_t ldc)
+                        TR alphar, TR alphai,
+                        const TR *Ap,
+                        const TR *Bp,
+                        TR *C, ptrdiff_t ldc)
 {
     /* ldc passed in complex elements; ldc2 = stride in __float128s. */
     const ptrdiff_t ldc2 = 2 * ldc;
 
-    const T *ptrba_base = Ap;
-    const T *ptrbb = Bp;
-    T *Cj = C;
+    const TR *ptrba_base = Ap;
+    const TR *ptrbb = Bp;
+    TR *Cj = C;
 
     for (ptrdiff_t j = 0; j < bn / NR; ++j) {
-        T *C0 = Cj;
-        T *C1 = C0 + ldc2;
-        const T *ptrba = ptrba_base;
+        TR *C0 = Cj;
+        TR *C1 = C0 + ldc2;
+        const TR *ptrba = ptrba_base;
 
         /* MR=2 full tiles. */
         for (ptrdiff_t i = 0; i < bm / MR; ++i) {
-            const T *ptrbb_loc = ptrbb;
-            T res0 = 0, res1 = 0, res2 = 0, res3 = 0;
-            T res4 = 0, res5 = 0, res6 = 0, res7 = 0;
+            const TR *ptrbb_loc = ptrbb;
+            TR res0 = 0, res1 = 0, res2 = 0, res3 = 0;
+            TR res4 = 0, res5 = 0, res6 = 0, res7 = 0;
 
             /* K-loop unrolled by 4 to match OpenBLAS's hand-unroll;
                4 sub-iters per outer iter, each consumes 4 floats
@@ -67,10 +67,10 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
             ptrdiff_t k4 = bk / 4;
             for (ptrdiff_t k = 0; k < k4; ++k) {
                 for (ptrdiff_t u = 0; u < 4; ++u) {
-                    T a0 = ptrba[0], a1 = ptrba[1];
-                    T a2 = ptrba[2], a3 = ptrba[3];
-                    T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
-                    T b2 = ptrbb_loc[2], b3 = ptrbb_loc[3];
+                    TR a0 = ptrba[0], a1 = ptrba[1];
+                    TR a2 = ptrba[2], a3 = ptrba[3];
+                    TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                    TR b2 = ptrbb_loc[2], b3 = ptrbb_loc[3];
                     res0 += a0 * b0;  res1 += a1 * b0;
                     res0 -= a1 * b1;  res1 += a0 * b1;
                     res2 += a2 * b0;  res3 += a3 * b0;
@@ -84,10 +84,10 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                 }
             }
             for (ptrdiff_t k = 0; k < (bk & 3); ++k) {
-                T a0 = ptrba[0], a1 = ptrba[1];
-                T a2 = ptrba[2], a3 = ptrba[3];
-                T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
-                T b2 = ptrbb_loc[2], b3 = ptrbb_loc[3];
+                TR a0 = ptrba[0], a1 = ptrba[1];
+                TR a2 = ptrba[2], a3 = ptrba[3];
+                TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                TR b2 = ptrbb_loc[2], b3 = ptrbb_loc[3];
                 res0 += a0 * b0;  res1 += a1 * b0;
                 res0 -= a1 * b1;  res1 += a0 * b1;
                 res2 += a2 * b0;  res3 += a3 * b0;
@@ -118,12 +118,12 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
 
         /* bm & 1 — single-M-row tail (mr=1, nr=2). */
         for (ptrdiff_t i = 0; i < (bm & 1); ++i) {
-            const T *ptrbb_loc = ptrbb;
-            T res0 = 0, res1 = 0, res2 = 0, res3 = 0;
+            const TR *ptrbb_loc = ptrbb;
+            TR res0 = 0, res1 = 0, res2 = 0, res3 = 0;
             for (ptrdiff_t k = 0; k < bk; ++k) {
-                T a0 = ptrba[0], a1 = ptrba[1];
-                T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
-                T b2 = ptrbb_loc[2], b3 = ptrbb_loc[3];
+                TR a0 = ptrba[0], a1 = ptrba[1];
+                TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                TR b2 = ptrbb_loc[2], b3 = ptrbb_loc[3];
                 res0 += a0 * b0;  res1 += a1 * b0;
                 res0 -= a1 * b1;  res1 += a0 * b1;
                 res2 += a0 * b2;  res3 += a1 * b2;
@@ -145,16 +145,16 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
 
     /* bn & 1 — single-N-col tail. */
     for (ptrdiff_t j = 0; j < (bn & 1); ++j) {
-        T *C0 = Cj;
-        const T *ptrba = ptrba_base;
+        TR *C0 = Cj;
+        const TR *ptrba = ptrba_base;
 
         for (ptrdiff_t i = 0; i < bm / MR; ++i) {
-            const T *ptrbb_loc = ptrbb;
-            T res0 = 0, res1 = 0, res2 = 0, res3 = 0;
+            const TR *ptrbb_loc = ptrbb;
+            TR res0 = 0, res1 = 0, res2 = 0, res3 = 0;
             for (ptrdiff_t k = 0; k < bk; ++k) {
-                T a0 = ptrba[0], a1 = ptrba[1];
-                T a2 = ptrba[2], a3 = ptrba[3];
-                T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                TR a0 = ptrba[0], a1 = ptrba[1];
+                TR a2 = ptrba[2], a3 = ptrba[3];
+                TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
                 res0 += a0 * b0;  res1 += a1 * b0;
                 res0 -= a1 * b1;  res1 += a0 * b1;
                 res2 += a2 * b0;  res3 += a3 * b0;
@@ -169,11 +169,11 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
             C0 += 4;
         }
         for (ptrdiff_t i = 0; i < (bm & 1); ++i) {
-            const T *ptrbb_loc = ptrbb;
-            T res0 = 0, res1 = 0;
+            const TR *ptrbb_loc = ptrbb;
+            TR res0 = 0, res1 = 0;
             for (ptrdiff_t k = 0; k < bk; ++k) {
-                T a0 = ptrba[0], a1 = ptrba[1];
-                T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                TR a0 = ptrba[0], a1 = ptrba[1];
+                TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
                 res0 += a0 * b0;  res1 += a1 * b0;
                 res0 -= a1 * b1;  res1 += a0 * b1;
                 ptrba += 2;
@@ -197,18 +197,18 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
  */
 void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
                        bool conj,
-                       const T *a, ptrdiff_t lda,
-                       T *b)
+                       const TR *a, ptrdiff_t lda,
+                       TR *b)
 {
-    const T sign = conj ? -1.0Q : 1.0Q;
-    const T *a_off = a;
-    T *b_off = b;
+    const TR sign = conj ? -1.0Q : 1.0Q;
+    const TR *a_off = a;
+    TR *b_off = b;
     const ptrdiff_t lda2 = lda * 2;
     ptrdiff_t j = n >> 1;
 
     while (j > 0) {
-        const T *a_off1 = a_off;
-        const T *a_off2 = a_off + lda2;
+        const TR *a_off1 = a_off;
+        const TR *a_off2 = a_off + lda2;
         a_off += 2 * lda2;
 
         ptrdiff_t i = m >> 2;
@@ -263,22 +263,22 @@ void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
 /* ── tcopy: faithful port of OpenBLAS zgemm_tcopy_2.c, with conj ──── */
 void qblas_ygemm_tcopy(ptrdiff_t m, ptrdiff_t n,
                        bool conj,
-                       const T *a, ptrdiff_t lda,
-                       T *b)
+                       const TR *a, ptrdiff_t lda,
+                       TR *b)
 {
-    const T sign = conj ? -1.0Q : 1.0Q;
-    const T *a_off = a;
-    T *b_off = b;
-    T *b_off2 = b + m * (n & ~(ptrdiff_t)1) * 2;
+    const TR sign = conj ? -1.0Q : 1.0Q;
+    const TR *a_off = a;
+    TR *b_off = b;
+    TR *b_off2 = b + m * (n & ~(ptrdiff_t)1) * 2;
     const ptrdiff_t lda2 = lda * 2;
 
     ptrdiff_t i = m >> 1;
     while (i > 0) {
-        const T *a_off1 = a_off;
-        const T *a_off2 = a_off + lda2;
+        const TR *a_off1 = a_off;
+        const TR *a_off2 = a_off + lda2;
         a_off += 2 * lda2;
 
-        T *b_off1 = b_off;
+        TR *b_off1 = b_off;
         b_off += 8;
 
         ptrdiff_t j = n >> 2;
@@ -321,7 +321,7 @@ void qblas_ygemm_tcopy(ptrdiff_t m, ptrdiff_t n,
     }
 
     if (m & 1) {
-        T *b_off1 = b_off;
+        TR *b_off1 = b_off;
         ptrdiff_t j = n >> 2;
         while (j > 0) {
             b_off1[0] = a_off[0]; b_off1[1] = sign * a_off[1];
@@ -347,8 +347,8 @@ void qblas_ygemm_tcopy(ptrdiff_t m, ptrdiff_t n,
 
 /* ── Beta pre-pass: C := beta * C with complex beta ──────────────── */
 void qblas_ygemm_beta(ptrdiff_t m, ptrdiff_t n,
-                      T beta_r, T beta_i,
-                      T *c, ptrdiff_t ldc)
+                      TR beta_r, TR beta_i,
+                      TR *c, ptrdiff_t ldc)
 {
     const ptrdiff_t ldc2 = ldc * 2;
 
@@ -356,17 +356,17 @@ void qblas_ygemm_beta(ptrdiff_t m, ptrdiff_t n,
 
     if (beta_r == 0.0Q && beta_i == 0.0Q) {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc2;
+            TR *cj = c + j * ldc2;
             for (ptrdiff_t i = 0; i < m * 2; ++i) cj[i] = 0;
         }
         return;
     }
 
     for (ptrdiff_t j = 0; j < n; ++j) {
-        T *cj = c + j * ldc2;
+        TR *cj = c + j * ldc2;
         for (ptrdiff_t i = 0; i < m; ++i) {
-            T re = cj[2*i + 0];
-            T im = cj[2*i + 1];
+            TR re = cj[2*i + 0];
+            TR im = cj[2*i + 1];
             cj[2*i + 0] = beta_r * re - beta_i * im;
             cj[2*i + 1] = beta_r * im + beta_i * re;
         }
@@ -394,13 +394,13 @@ void qblas_ygemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc) {
  * across the diagonal (column-walk vs row-walk in storage).
  */
 void qblas_ysymm_ucopy(ptrdiff_t m, ptrdiff_t n,
-                       const T *a, ptrdiff_t lda,
+                       const TR *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
-                       T *b)
+                       TR *b)
 {
     ptrdiff_t i, js, offset;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
     const ptrdiff_t lda2 = lda * 2;
 
     js = n >> 1;
@@ -457,13 +457,13 @@ void qblas_ysymm_ucopy(ptrdiff_t m, ptrdiff_t n,
 
 
 void qblas_ysymm_lcopy(ptrdiff_t m, ptrdiff_t n,
-                       const T *a, ptrdiff_t lda,
+                       const TR *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
-                       T *b)
+                       TR *b)
 {
     ptrdiff_t i, js, offset;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
     const ptrdiff_t lda2 = lda * 2;
 
     js = n >> 1;
@@ -537,13 +537,13 @@ void qblas_ysymm_lcopy(ptrdiff_t m, ptrdiff_t n,
  * ucopy (upper triangle stored) and lcopy (lower triangle stored).
  */
 void qblas_yhemm_ucopy(ptrdiff_t m, ptrdiff_t n,
-                       const T *a, ptrdiff_t lda,
+                       const TR *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
-                       T *b)
+                       TR *b)
 {
     ptrdiff_t i, js, offset;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
     const ptrdiff_t lda2 = lda * 2;
 
     js = n >> 1;
@@ -628,13 +628,13 @@ void qblas_yhemm_ucopy(ptrdiff_t m, ptrdiff_t n,
 
 
 void qblas_yhemm_lcopy(ptrdiff_t m, ptrdiff_t n,
-                       const T *a, ptrdiff_t lda,
+                       const TR *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
-                       T *b)
+                       TR *b)
 {
     ptrdiff_t i, js, offset;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
     const ptrdiff_t lda2 = lda * 2;
 
     js = n >> 1;
@@ -730,13 +730,13 @@ void qblas_yhemm_lcopy(ptrdiff_t m, ptrdiff_t n,
  * upstream OpenBLAS does).
  */
 void qblas_yhemm_ucopy_oc(ptrdiff_t m, ptrdiff_t n,
-                          const T *a, ptrdiff_t lda,
+                          const TR *a, ptrdiff_t lda,
                           ptrdiff_t posX, ptrdiff_t posY,
-                          T *b)
+                          TR *b)
 {
     ptrdiff_t i, js, offset;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
     const ptrdiff_t lda2 = lda * 2;
 
     js = n >> 1;
@@ -823,13 +823,13 @@ void qblas_yhemm_ucopy_oc(ptrdiff_t m, ptrdiff_t n,
 
 
 void qblas_yhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
-                          const T *a, ptrdiff_t lda,
+                          const TR *a, ptrdiff_t lda,
                           ptrdiff_t posX, ptrdiff_t posY,
-                          T *b)
+                          TR *b)
 {
     ptrdiff_t i, js, offset;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
     const ptrdiff_t lda2 = lda * 2;
 
     js = n >> 1;
@@ -921,9 +921,9 @@ void qblas_yhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
  * inside the row loop instead of touching `qblas_ygemm_beta`'s full-
  * rectangle helper.
  */
-static inline void xsyrk_scale_strip(T *cj_re,
+static inline void xsyrk_scale_strip(TR *cj_re,
                                      ptrdiff_t lo, ptrdiff_t hi,
-                                     T br, T bi)
+                                     TR br, TR bi)
 {
     if (br == 1.0Q && bi == 0.0Q) return;
     if (br == 0.0Q && bi == 0.0Q) {
@@ -933,15 +933,15 @@ static inline void xsyrk_scale_strip(T *cj_re,
         }
     } else {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            T re = cj_re[2*i + 0];
-            T im = cj_re[2*i + 1];
+            TR re = cj_re[2*i + 0];
+            TR im = cj_re[2*i + 1];
             cj_re[2*i + 0] = br * re - bi * im;
             cj_re[2*i + 1] = br * im + bi * re;
         }
     }
 }
 
-void qblas_ysyrk_beta_u(ptrdiff_t n, T br, T bi, T *c, ptrdiff_t ldc) {
+void qblas_ysyrk_beta_u(ptrdiff_t n, TR br, TR bi, TR *c, ptrdiff_t ldc) {
     if (br == 1.0Q && bi == 0.0Q) return;
     const ptrdiff_t ldc2 = 2 * ldc;
     for (ptrdiff_t j = 0; j < n; ++j) {
@@ -949,7 +949,7 @@ void qblas_ysyrk_beta_u(ptrdiff_t n, T br, T bi, T *c, ptrdiff_t ldc) {
     }
 }
 
-void qblas_ysyrk_beta_l(ptrdiff_t n, T br, T bi, T *c, ptrdiff_t ldc) {
+void qblas_ysyrk_beta_l(ptrdiff_t n, TR br, TR bi, TR *c, ptrdiff_t ldc) {
     if (br == 1.0Q && bi == 0.0Q) return;
     const ptrdiff_t ldc2 = 2 * ldc;
     for (ptrdiff_t j = 0; j < n; ++j) {
@@ -967,10 +967,10 @@ void qblas_ysyrk_beta_l(ptrdiff_t n, T br, T bi, T *c, ptrdiff_t ldc) {
  * Diagonal handling deviates from xsyrk_beta: we ALWAYS write imag=0
  * on the diagonal, even when beta == 1.0Q (matches zherk_beta).
  */
-void qblas_yherk_beta_u(ptrdiff_t n, T br, T *c, ptrdiff_t ldc) {
+void qblas_yherk_beta_u(ptrdiff_t n, TR br, TR *c, ptrdiff_t ldc) {
     const ptrdiff_t ldc2 = 2 * ldc;
     for (ptrdiff_t j = 0; j < n; ++j) {
-        T *col = c + j * ldc2;
+        TR *col = c + j * ldc2;
         if (br == 0.0Q) {
             for (ptrdiff_t i = 0; i < j; ++i) {
                 col[2*i + 0] = 0;
@@ -991,10 +991,10 @@ void qblas_yherk_beta_u(ptrdiff_t n, T br, T *c, ptrdiff_t ldc) {
     }
 }
 
-void qblas_yherk_beta_l(ptrdiff_t n, T br, T *c, ptrdiff_t ldc) {
+void qblas_yherk_beta_l(ptrdiff_t n, TR br, TR *c, ptrdiff_t ldc) {
     const ptrdiff_t ldc2 = 2 * ldc;
     for (ptrdiff_t j = 0; j < n; ++j) {
-        T *col = c + j * ldc2;
+        TR *col = c + j * ldc2;
         if (br == 0.0Q) {
             col[2*j + 0] = 0;
             col[2*j + 1] = 0;
@@ -1027,11 +1027,11 @@ void qblas_yherk_beta_l(ptrdiff_t n, T br, T *c, ptrdiff_t ldc) {
  * complex element. ldc, k, m, n are in complex elements.
  */
 void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-                           T alphar, T alphai,
-                           const T *a, const T *b,
-                           T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
+                           TR alphar, TR alphai,
+                           const TR *a, const TR *b,
+                           TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
-    T subbuf[NR * (NR + 1) * 2];
+    TR subbuf[NR * (NR + 1) * 2];
     const ptrdiff_t ldc2 = 2 * ldc;
 
     if (m + offset < 0) {
@@ -1079,7 +1079,7 @@ void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                                a + loop * k * 2, b + loop * k * 2,
                                subbuf, nn);
 
-            T *cc = c + 2 * loop + loop * ldc2;
+            TR *cc = c + 2 * loop + loop * ldc2;
             for (ptrdiff_t j = 0; j < nn; ++j) {
                 for (ptrdiff_t i = 0; i <= j; ++i) {
                     cc[2*i + 0 + j * ldc2] += subbuf[(i + j * nn) * 2 + 0]
@@ -1093,11 +1093,11 @@ void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 }
 
 void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-                           T alphar, T alphai,
-                           const T *a, const T *b,
-                           T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
+                           TR alphar, TR alphai,
+                           const TR *a, const TR *b,
+                           TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
-    T subbuf[NR * (NR + 1) * 2];
+    TR subbuf[NR * (NR + 1) * 2];
     const ptrdiff_t ldc2 = 2 * ldc;
 
     if (m + offset < 0) {
@@ -1144,7 +1144,7 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                                a + loop * k * 2, b + loop * k * 2,
                                subbuf, nn);
 
-            T *cc = c + 2 * loop + loop * ldc2;
+            TR *cc = c + 2 * loop + loop * ldc2;
             for (ptrdiff_t j = 0; j < nn; ++j) {
                 for (ptrdiff_t i = j; i < nn; ++i) {
                     cc[2*i + 0 + j * ldc2] += subbuf[(i + j * nn) * 2 + 0]
@@ -1177,11 +1177,11 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
  * absorbed by the caller's packers per upstream's GEMM_KERNEL_R/L pick.
  */
 void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-                           T alphar, T alphai,
-                           const T *a, const T *b,
-                           T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
+                           TR alphar, TR alphai,
+                           const TR *a, const TR *b,
+                           TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
-    T subbuf[NR * (NR + 1) * 2];
+    TR subbuf[NR * (NR + 1) * 2];
     const ptrdiff_t ldc2 = 2 * ldc;
 
     if (m + offset < 0) {
@@ -1229,7 +1229,7 @@ void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                                a + loop * k * 2, b + loop * k * 2,
                                subbuf, nn);
 
-            T *cc = c + 2 * loop + loop * ldc2;
+            TR *cc = c + 2 * loop + loop * ldc2;
             for (ptrdiff_t j = 0; j < nn; ++j) {
                 for (ptrdiff_t i = 0; i <= j; ++i) {
                     cc[2*i + 0 + j * ldc2] += subbuf[(i + j * nn) * 2 + 0]
@@ -1247,11 +1247,11 @@ void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 }
 
 void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-                           T alphar, T alphai,
-                           const T *a, const T *b,
-                           T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
+                           TR alphar, TR alphai,
+                           const TR *a, const TR *b,
+                           TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
-    T subbuf[NR * (NR + 1) * 2];
+    TR subbuf[NR * (NR + 1) * 2];
     const ptrdiff_t ldc2 = 2 * ldc;
 
     if (m + offset < 0) {
@@ -1298,7 +1298,7 @@ void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                                a + loop * k * 2, b + loop * k * 2,
                                subbuf, nn);
 
-            T *cc = c + 2 * loop + loop * ldc2;
+            TR *cc = c + 2 * loop + loop * ldc2;
             for (ptrdiff_t j = 0; j < nn; ++j) {
                 for (ptrdiff_t i = j; i < nn; ++i) {
                     cc[2*i + 0 + j * ldc2] += subbuf[(i + j * nn) * 2 + 0]

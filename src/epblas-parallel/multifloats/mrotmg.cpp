@@ -8,7 +8,7 @@
 #include <multifloats/float64x2.h>
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 namespace {
 /* lt0/eq0/gt0/mag/abs_gt from mf_pred (limb-lexicographic; mag stays inline to
@@ -20,48 +20,48 @@ using mf_pred::mag;
 using mf_pred::abs_gt;
 }
 
-extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
+extern "C" void mrotmg_(TR *d1_, TR *d2_, TR *x1_, const TR *y1_, TR *dparam)
 {
-    const T zero{0.0, 0.0}, one{1.0, 0.0}, two{2.0, 0.0};
-    const T gam{4096.0, 0.0};
-    const T gamsq{16777216.0, 0.0};
-    const T rgamsq{5.9604645e-8, 0.0};
-    T d1 = *d1_, d2 = *d2_, x1 = *x1_, y1 = *y1_;
-    T flag, h11{}, h12{}, h21{}, h22{};
+    const TR zero{0.0, 0.0}, one{1.0, 0.0}, two{2.0, 0.0};
+    const TR gam{4096.0, 0.0};
+    const TR gamsq{16777216.0, 0.0};
+    const TR rgamsq{5.9604645e-8, 0.0};
+    TR d1 = *d1_, d2 = *d2_, x1 = *x1_, y1 = *y1_;
+    TR flag, h11{}, h12{}, h21{}, h22{};
 
     if (lt0(d1)) {
-        flag = T{-1.0, 0.0};
+        flag = TR{-1.0, 0.0};
         h11 = h12 = h21 = h22 = zero;
         d1 = d2 = x1 = zero;
     } else {
-        T p2 = d2 * y1;
-        if (eq0(p2)) { dparam[0] = T{-2.0, 0.0}; return; }
-        T p1 = d1 * x1;
-        T q2 = p2 * y1;
-        T q1 = p1 * x1;
+        TR p2 = d2 * y1;
+        if (eq0(p2)) { dparam[0] = TR{-2.0, 0.0}; return; }
+        TR p1 = d1 * x1;
+        TR q2 = p2 * y1;
+        TR q1 = p1 * x1;
         if (abs_gt(q1, q2)) {
-            h21 = T{-y1.limbs[0], -y1.limbs[1]} / x1;
+            h21 = TR{-y1.limbs[0], -y1.limbs[1]} / x1;
             h12 = p2 / p1;
-            T u = one - h12 * h21;
+            TR u = one - h12 * h21;
             if (gt0(u)) {
                 flag = zero;
                 d1 = d1 / u; d2 = d2 / u; x1 = x1 * u;
             } else {
-                flag = T{-1.0, 0.0};
+                flag = TR{-1.0, 0.0};
                 h11 = h12 = h21 = h22 = zero;
                 d1 = d2 = x1 = zero;
             }
         } else {
             if (lt0(q2)) {
-                flag = T{-1.0, 0.0};
+                flag = TR{-1.0, 0.0};
                 h11 = h12 = h21 = h22 = zero;
                 d1 = d2 = x1 = zero;
             } else {
                 flag = one;
                 h11 = p1 / p2;
                 h22 = x1 / y1;
-                T u = one + h11 * h22;
-                T tmp = d2 / u;
+                TR u = one + h11 * h22;
+                TR tmp = d2 / u;
                 d2 = d1 / u;
                 d1 = tmp;
                 x1 = y1 * u;
@@ -70,8 +70,8 @@ extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
         /* SCALE-CHECK */
         if (!eq0(d1)) {
             while ((abs_gt(rgamsq, d1) || !abs_gt(gamsq, d1))) {
-                if (eq0(flag)) { h11 = one; h22 = one; flag = T{-1.0, 0.0}; }
-                else              { h21 = T{-1.0, 0.0}; h12 = one; flag = T{-1.0, 0.0}; }
+                if (eq0(flag)) { h11 = one; h22 = one; flag = TR{-1.0, 0.0}; }
+                else              { h21 = TR{-1.0, 0.0}; h12 = one; flag = TR{-1.0, 0.0}; }
                 if (abs_gt(rgamsq, d1)) { d1 = d1 * gam * gam; x1 = x1 / gam;
                     h11 = h11 / gam; h12 = h12 / gam; }
                 else                       { d1 = d1 / (gam * gam); x1 = x1 * gam;
@@ -81,8 +81,8 @@ extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
         }
         if (!eq0(d2)) {
             while (abs_gt(rgamsq, mag(d2)) || !abs_gt(gamsq, mag(d2))) {
-                if (eq0(flag)) { h11 = one; h22 = one; flag = T{-1.0, 0.0}; }
-                else              { h21 = T{-1.0, 0.0}; h12 = one; flag = T{-1.0, 0.0}; }
+                if (eq0(flag)) { h11 = one; h22 = one; flag = TR{-1.0, 0.0}; }
+                else              { h21 = TR{-1.0, 0.0}; h12 = one; flag = TR{-1.0, 0.0}; }
                 if (abs_gt(rgamsq, mag(d2))) { d2 = d2 * gam * gam;
                     h21 = h21 / gam; h22 = h22 / gam; }
                 else                                { d2 = d2 / (gam * gam);
@@ -98,5 +98,5 @@ extern "C" void mrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
     *d1_ = d1; *d2_ = d2; *x1_ = x1;
 }
 /* ILP64 twin — no integer args, so the ABI is identical to LP64. */
-extern "C" void mrotmg_64_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
+extern "C" void mrotmg_64_(TR *d1_, TR *d2_, TR *x1_, const TR *y1_, TR *dparam)
 { mrotmg_(d1_, d2_, x1_, y1_, dparam); }

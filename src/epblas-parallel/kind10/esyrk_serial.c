@@ -36,7 +36,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-typedef esyrk_T T;
+typedef esyrk_TR TR;
 
 #define MR ESYRK_MR
 #define NR ESYRK_NR
@@ -44,31 +44,31 @@ typedef esyrk_T T;
 /* ── Triangular β pre-pass ─────────────────────────────────────────────
  * Port of OpenBLAS driver/level3/syrk_k.c's `syrk_beta`. Scales only the
  * UPLO triangle of C; the off-UPLO triangle is left untouched. */
-void esyrk_beta_u(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+void esyrk_beta_u(ptrdiff_t n, TR beta, TR *c, ptrdiff_t ldc) {
     if (beta == 1.0L) return;
     if (beta == 0.0L) {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc;
+            TR *cj = c + j * ldc;
             for (ptrdiff_t i = 0; i <= j; ++i) cj[i] = 0.0L;
         }
     } else {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc;
+            TR *cj = c + j * ldc;
             for (ptrdiff_t i = 0; i <= j; ++i) cj[i] *= beta;
         }
     }
 }
 
-void esyrk_beta_l(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+void esyrk_beta_l(ptrdiff_t n, TR beta, TR *c, ptrdiff_t ldc) {
     if (beta == 1.0L) return;
     if (beta == 0.0L) {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc;
+            TR *cj = c + j * ldc;
             for (ptrdiff_t i = j; i < n; ++i) cj[i] = 0.0L;
         }
     } else {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc;
+            TR *cj = c + j * ldc;
             for (ptrdiff_t i = j; i < n; ++i) cj[i] *= beta;
         }
     }
@@ -81,11 +81,11 @@ void esyrk_beta_l(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
  * GEMMs into C; each diagonal NR×NR sub-block is GEMMed into a zeroed
  * subbuffer (etri_gemm_kernel accumulates), then only its UPLO triangle is
  * merged into C. Subbuffer sized NR*(NR+1) to match OpenBLAS's safety pad. */
-void esyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
-                    const T *a, const T *b,
-                    T *c, ptrdiff_t ldc, ptrdiff_t offset)
+void esyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                    const TR *a, const TR *b,
+                    TR *c, ptrdiff_t ldc, ptrdiff_t offset)
 {
-    T subbuf[NR * (NR + 1)];
+    TR subbuf[NR * (NR + 1)];
 
     if (m + offset < 0) {
         etri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
@@ -132,8 +132,8 @@ void esyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
         etri_gemm_kernel(nn, nn, k, alpha,
                          a + loop * k, b + loop * k, subbuf, nn);
 
-        T *cc = c + loop + loop * ldc;
-        const T *ss = subbuf;
+        TR *cc = c + loop + loop * ldc;
+        const TR *ss = subbuf;
         for (ptrdiff_t j = 0; j < nn; ++j) {
             for (ptrdiff_t i = 0; i <= j; ++i) cc[i] += ss[i];
             ss += nn;
@@ -142,11 +142,11 @@ void esyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
     }
 }
 
-void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
-                    const T *a, const T *b,
-                    T *c, ptrdiff_t ldc, ptrdiff_t offset)
+void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                    const TR *a, const TR *b,
+                    TR *c, ptrdiff_t ldc, ptrdiff_t offset)
 {
-    T subbuf[NR * (NR + 1)];
+    TR subbuf[NR * (NR + 1)];
 
     if (m + offset < 0) {
         return;
@@ -192,8 +192,8 @@ void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
         etri_gemm_kernel(nn, nn, k, alpha,
                          a + loop * k, b + loop * k, subbuf, nn);
 
-        T *cc = c + loop + loop * ldc;
-        const T *ss = subbuf;
+        TR *cc = c + loop + loop * ldc;
+        const TR *ss = subbuf;
         for (ptrdiff_t j = 0; j < nn; ++j) {
             for (ptrdiff_t i = j; i < nn; ++i) cc[i] += ss[i];
             ss += nn;
@@ -216,12 +216,12 @@ void esyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
 void esyrk_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
@@ -235,10 +235,10 @@ void esyrk_serial(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
-    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
+    TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
         for (ptrdiff_t js = 0; js < n; js += NC) {
             const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;

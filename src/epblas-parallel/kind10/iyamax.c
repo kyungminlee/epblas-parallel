@@ -6,13 +6,13 @@
 #include <stddef.h>
 #endif
 #include "../common/epblas_facade.h"
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double R;
 
 /* Scan a contiguous unit-stride range [0,n); return the 0-based index of the
  * first element with maximal |re|+|im| and store that magnitude in *bv_out.
  * Strictly-greater update keeps the lowest index on ties. */
-static ptrdiff_t iyamax_kernel(ptrdiff_t n, const T *x, R *bv_out)
+static ptrdiff_t iyamax_kernel(ptrdiff_t n, const TC *x, R *bv_out)
 {
     ptrdiff_t best = 0;
     R bv = fabsl(__real__ x[0]) + fabsl(__imag__ x[0]);
@@ -32,7 +32,7 @@ static ptrdiff_t iyamax_kernel(ptrdiff_t n, const T *x, R *bv_out)
  * reference IxAMAX "first occurrence" semantics. */
 #define IYAMAX_OMP_MIN 10000
 #define IYAMAX_MAX_CPUS 64
-__attribute__((noinline)) static ptrdiff_t iyamax_omp(ptrdiff_t n, const T *x, ptrdiff_t *out)
+__attribute__((noinline)) static ptrdiff_t iyamax_omp(ptrdiff_t n, const TC *x, ptrdiff_t *out)
 {
     if (n <= IYAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -64,7 +64,7 @@ __attribute__((noinline)) static ptrdiff_t iyamax_omp(ptrdiff_t n, const T *x, p
 }
 #endif
 
-static ptrdiff_t iyamax_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static ptrdiff_t iyamax_core(ptrdiff_t n, const TC *x, ptrdiff_t incx)
 {
     if (n < 1 || incx <= 0) return 0;
     if (n == 1) return 1;
@@ -86,4 +86,4 @@ static ptrdiff_t iyamax_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
     return best;
 }
 
-EPBLAS_FACADE_IAMAX(iyamax, T)
+EPBLAS_FACADE_IAMAX(iyamax, TC)

@@ -26,7 +26,7 @@
 #include "../common/blas_omp.h"
 #endif
 
-typedef qsymm_T T;
+typedef qsymm_TR TR;
 
 #define MR QGEMM_MR
 #define NR QGEMM_NR
@@ -34,11 +34,11 @@ typedef qsymm_T T;
 static void qsymm_core(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict b, ptrdiff_t ldb,
-    const T *beta_,
-    T *restrict c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict b, ptrdiff_t ldb,
+    const TR *beta_,
+    TR *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
@@ -48,7 +48,7 @@ static void qsymm_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
 
@@ -76,14 +76,14 @@ static void qsymm_core(
     /* Tiny problems: the team setup + Bp barrier cost outweighs the split. */
     if ((long)m * (long)n * (long)k < 64L * 64L * 64L) nthreads = 1;
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(T);
+    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(TR);
 
     /* Pre-allocate the shared Bp and one private Ap per thread BEFORE the
      * region: a thread that skipped the loop on a failed in-region alloc
      * would deadlock the others at the Bp barrier. */
-    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
     bool alloc_ok = (Bp && Ap_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -100,7 +100,7 @@ static void qsymm_core(
 #else
             const ptrdiff_t tid = 0, nth = 1;
 #endif
-            T *Ap = Ap_arr[tid];
+            TR *Ap = Ap_arr[tid];
 
             const ptrdiff_t m_chunk = qgemm_round_up((m + nth - 1) / nth, MR);
             const ptrdiff_t m_lo = tid * m_chunk;
@@ -110,7 +110,7 @@ static void qsymm_core(
             /* C := beta*C over this thread's rows only (handles beta 0/1). */
             if (beta != 1.0Q && m_lo < m_hi) {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T *cj = &c[(size_t)j * ldc];
+                    TR *cj = &c[(size_t)j * ldc];
                     if (beta == 0.0Q) for (ptrdiff_t i = m_lo; i < m_hi; ++i) cj[i]  = 0.0Q;
                     else              for (ptrdiff_t i = m_lo; i < m_hi; ++i) cj[i] *= beta;
                 }
@@ -152,4 +152,4 @@ static void qsymm_core(
     free(Bp);
 }
 
-EPBLAS_FACADE_SYMM(qsymm, T)
+EPBLAS_FACADE_SYMM(qsymm, TR)

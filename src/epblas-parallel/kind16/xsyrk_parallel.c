@@ -24,21 +24,21 @@
 #include "xsyrk_kernel.h"
 #include "../common/epblas_facade.h"
 
-typedef xsyrk_T T;
+typedef xsyrk_TC TC;
 
 #define XSYRK_OMP_MIN 32
 #define XSYRK_OMP_NB  8   /* fine panel for triangular dynamic balance */
 
-static const T ZERO = 0.0Q + 0.0Qi;
-static const T ONE  = 1.0Q + 0.0Qi;
+static const TC ZERO = 0.0Q + 0.0Qi;
+static const TC ONE  = 1.0Q + 0.0Qi;
 
 static void xsyrk_core(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *beta_,
-    T *restrict c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *beta_,
+    TC *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -48,7 +48,7 @@ static void xsyrk_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
     const char TRANS   = blas_up(trans);
 
@@ -94,4 +94,4 @@ static void xsyrk_core(
     }
 }
 
-EPBLAS_FACADE_SYRK(xsyrk, T, T)
+EPBLAS_FACADE_SYRK(xsyrk, TC, TC)

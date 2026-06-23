@@ -32,23 +32,23 @@
 
 #define QGEMMTR_OMP_MIN 32
 
-typedef qgemmtr_T T;
+typedef qgemmtr_TR TR;
 
 static void qgemmtr_core(char uplo, char transa, char transb,
               ptrdiff_t n, ptrdiff_t k,
-              const T *alpha_,
-              const T *a, ptrdiff_t lda,
-              const T *b, ptrdiff_t ldb,
-              const T *beta_,
-              T *c, ptrdiff_t ldc)
+              const TR *alpha_,
+              const TR *a, ptrdiff_t lda,
+              const TR *b, ptrdiff_t ldb,
+              const TR *beta_,
+              TR *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
     const char ta = qgemmtr_trans_code(&transa);
     const char tb = qgemmtr_trans_code(&transb);
 
     if (n <= 0) return;
-    const T zero = 0.0Q, one = 1.0Q;
+    const TR zero = 0.0Q, one = 1.0Q;
 
     if (alpha == zero || k == 0) {
         if (beta == one) return;
@@ -70,4 +70,4 @@ static void qgemmtr_core(char uplo, char transa, char transb,
                              alpha, beta, a, lda, b, ldb, c, ldc);
 }
 
-EPBLAS_FACADE_GEMMTR(qgemmtr, T)
+EPBLAS_FACADE_GEMMTR(qgemmtr, TR)

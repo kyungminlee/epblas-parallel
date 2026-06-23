@@ -29,7 +29,7 @@
 #include <stddef.h>
 #include <complex.h>
 
-typedef _Complex long double ytrsm_T;
+typedef _Complex long double ytrsm_TC;
 
 /* Blocked SIDE='L' variant selector. */
 enum ytrsm_variant { YLLN, YLUN, YLLT, YLUT, YLLC, YLUC };
@@ -39,37 +39,37 @@ ptrdiff_t ytrsm_nb(void);
 
 /* ── SIDE='L' column-range cores: serial work over columns
  *    [j_start, j_end) of B; A is M×M. ──────────────────────────── */
-void ytrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_T alpha,
-                    const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_T alpha,
-                    const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb, bool nounit);
+void ytrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_TC alpha,
+                    const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb, bool nounit);
+void ytrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_TC alpha,
+                    const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb, bool nounit);
 /* (L, L, T or C): conj_flag selects 'C' over 'T'. */
-void ytrsm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_T alpha,
-                     const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+void ytrsm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_TC alpha,
+                     const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 /* (L, U, T or C). */
-void ytrsm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_T alpha,
-                     const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+void ytrsm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_TC alpha,
+                     const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
 /* ── SIDE='R' row-range cores: serial work over rows [i_start, i_end)
  *    of B; A is N×N. ────────────────────────────────────────────── */
-void ytrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrsm_T alpha,
-                    const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrsm_T alpha,
-                    const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrsm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrsm_T alpha,
-                     const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+void ytrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrsm_TC alpha,
+                    const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb, bool nounit);
+void ytrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrsm_TC alpha,
+                    const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb, bool nounit);
+void ytrsm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrsm_TC alpha,
+                     const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void ytrsm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrsm_T alpha,
-                     const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+void ytrsm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrsm_TC alpha,
+                     const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
 /* Per-thread serial blocked-TRSM on a column slice [j_start, j_end) of B
  * (SIDE='L'). Trailing updates call ygemm_serial. */
 void ytrsm_blocked_chunk(enum ytrsm_variant V, ptrdiff_t j_start, ptrdiff_t j_end,
-                         ptrdiff_t m, ptrdiff_t nb, ytrsm_T alpha,
-                         const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+                         ptrdiff_t m, ptrdiff_t nb, ytrsm_TC alpha,
+                         const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb,
                          bool nounit);
 
 /* Per-thread serial blocked-TRSM on a row band [i_start, i_end) of B
@@ -77,16 +77,16 @@ void ytrsm_blocked_chunk(enum ytrsm_variant V, ptrdiff_t j_start, ptrdiff_t j_en
  * update runs through ygemm_serial, only the jb×jb diagonal block goes
  * through the naive R cores. (upper, trans, conj) select the variant. */
 void ytrsm_R_blocked_chunk(bool upper, bool trans, bool conj,
-                           ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ptrdiff_t nb, ytrsm_T alpha,
-                           const ytrsm_T *a, ptrdiff_t lda, ytrsm_T *b, ptrdiff_t ldb,
+                           ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ptrdiff_t nb, ytrsm_TC alpha,
+                           const ytrsm_TC *a, ptrdiff_t lda, ytrsm_TC *b, ptrdiff_t ldb,
                            bool nounit);
 
 /* Pure-serial by-value entry (no OpenMP). */
 void ytrsm_serial(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const ytrsm_T *alpha_,
-    const ytrsm_T *a, ptrdiff_t lda,
-    ytrsm_T *b, ptrdiff_t ldb);
+    const ytrsm_TC *alpha_,
+    const ytrsm_TC *a, ptrdiff_t lda,
+    ytrsm_TC *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YTRSM_KERNEL_H */

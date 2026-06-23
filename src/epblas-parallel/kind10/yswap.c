@@ -5,18 +5,18 @@
 #endif
 #include "../common/epblas_facade.h"
 /* yswap — kind10 complex: swap X ↔ Y. */
-typedef _Complex long double T;
+typedef _Complex long double TC;
 
 /* Unit-stride kernel, shared by the serial entry and the per-thread OMP slices.
  * 3-way unrolled to amortize loop overhead over the complex load/store pairs. */
-static void yswap_unit(ptrdiff_t n, T *x, T *y)
+static void yswap_unit(ptrdiff_t n, TC *x, TC *y)
 {
     const ptrdiff_t m = n % 3;
-    for (ptrdiff_t i = 0; i < m; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
+    for (ptrdiff_t i = 0; i < m; ++i) { TC t = x[i]; x[i] = y[i]; y[i] = t; }
     for (ptrdiff_t i = m; i < n; i += 3) {
-        T t0 = x[i    ]; x[i    ] = y[i    ]; y[i    ] = t0;
-        T t1 = x[i + 1]; x[i + 1] = y[i + 1]; y[i + 1] = t1;
-        T t2 = x[i + 2]; x[i + 2] = y[i + 2]; y[i + 2] = t2;
+        TC t0 = x[i    ]; x[i    ] = y[i    ]; y[i    ] = t0;
+        TC t1 = x[i + 1]; x[i + 1] = y[i + 1]; y[i + 1] = t1;
+        TC t2 = x[i + 2]; x[i + 2] = y[i + 2]; y[i + 2] = t2;
     }
 }
 
@@ -34,7 +34,7 @@ static void yswap_unit(ptrdiff_t n, T *x, T *y)
  * thread from 2048 — par's serial is already fastest below break-even (par/ref
  * ~0.94), so threading there would only regress it. */
 #define YSWAP_OMP_MIN 1536
-static bool yswap_omp(ptrdiff_t n, T *x, T *y)
+static bool yswap_omp(ptrdiff_t n, TC *x, TC *y)
 {
     if (n <= YSWAP_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -50,7 +50,7 @@ static bool yswap_omp(ptrdiff_t n, T *x, T *y)
 }
 #endif
 
-static void yswap_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
+static void yswap_core(ptrdiff_t n, TC *x, ptrdiff_t incx, TC *y, ptrdiff_t incy)
 {
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
@@ -61,8 +61,8 @@ static void yswap_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
     } else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
-        for (ptrdiff_t i = 0; i < n; ++i) { T t = x[ix]; x[ix] = y[iy]; y[iy] = t; ix += incx; iy += incy; }
+        for (ptrdiff_t i = 0; i < n; ++i) { TC t = x[ix]; x[ix] = y[iy]; y[iy] = t; ix += incx; iy += incy; }
     }
 }
 
-EPBLAS_FACADE_SWAP(yswap, T)
+EPBLAS_FACADE_SWAP(yswap, TC)

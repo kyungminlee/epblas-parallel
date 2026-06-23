@@ -13,7 +13,7 @@
 #define EYNRM2_MAX_CPUS 64
 #endif
 #include "../common/epblas_facade.h"
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double R;
 
 static R btsml, btbig, bssml, bsbig, maxN;
@@ -67,7 +67,7 @@ static R eynrm2_finalize(R abig, R amed, R asml)
  * into (abig, amed, asml). Same register-resident hot-loop shape as the serial
  * path (see comment below). `notbig` is chunk-local & exact: asml is consumed by
  * the finalizer only when the GLOBAL abig==0. */
-static void eynrm2_bucket(ptrdiff_t nel, const T *x, R *abig_, R *amed_, R *asml_)
+static void eynrm2_bucket(ptrdiff_t nel, const TC *x, R *abig_, R *amed_, R *asml_)
 {
     R abig = 0.0L, amed = 0.0L, asml = 0.0L;
     bool notbig = 1;
@@ -95,7 +95,7 @@ static void eynrm2_bucket(ptrdiff_t nel, const T *x, R *abig_, R *amed_, R *asml
 /* Threaded reduction for large unit-stride X. Each thread buckets its own chunk
  * of complex elements; partial sums combine exactly. Reduction order differs
  * from serial (not bit-identical), but within fuzz tolerance. */
-__attribute__((noinline)) static bool eynrm2_omp(ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static bool eynrm2_omp(ptrdiff_t n, const TC *x, R *out)
 {
     if (n <= EYNRM2_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -117,7 +117,7 @@ __attribute__((noinline)) static bool eynrm2_omp(ptrdiff_t n, const T *x, R *out
 }
 #endif
 
-static R eynrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static R eynrm2_core(ptrdiff_t n, const TC *x, ptrdiff_t incx)
 {
     if (n <= 0) return 0.0L;
     if (!blue_inited) blue_init();
@@ -163,4 +163,4 @@ static R eynrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
     return eynrm2_finalize(abig, amed, asml);
 }
 
-EPBLAS_FACADE_ASUM(eynrm2, R, T)
+EPBLAS_FACADE_ASUM(eynrm2, R, TC)

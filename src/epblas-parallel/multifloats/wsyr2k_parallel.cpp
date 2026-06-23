@@ -27,7 +27,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -41,11 +41,11 @@ namespace {
 static void wsyr2k_core(
     char uplo, char trans,
     std::ptrdiff_t n, std::ptrdiff_t k,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const T *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TC *b, std::ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
@@ -54,7 +54,7 @@ static void wsyr2k_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
     char TRANS = up(&trans);
     if (TRANS == 'C') TRANS = 'T';
@@ -85,5 +85,5 @@ static void wsyr2k_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SYR2K(wsyr2k, T, T, T)
+EPBLAS_FACADE_SYR2K(wsyr2k, TC, TC, TC)
 }

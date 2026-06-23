@@ -30,9 +30,9 @@
 #include "ygemm_kernel.h"
 #include "../common/epblas_facade.h"
 
-typedef ygemm_T T;
+typedef ygemm_TC TC;
 
-static const T zero = 0.0L + 0.0iL;
+static const TC zero = 0.0L + 0.0iL;
 
 /* Threshold below which OMP parallel-for on the column axis isn't worth
  * the parallel-region setup. */
@@ -47,9 +47,9 @@ static ptrdiff_t trans_code(char c) {
 enum ygemm_klass { Y_NN, Y_TN, Y_NT, Y_TT };
 
 static inline void ygemm_dispatch(enum ygemm_klass klass, ptrdiff_t js, ptrdiff_t je,
-                                  ptrdiff_t m, ptrdiff_t k, T alpha,
-                                  const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                                  T *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
+                                  ptrdiff_t m, ptrdiff_t k, TC alpha,
+                                  const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                                  TC *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
 {
     switch (klass) {
     case Y_NN: ygemm_nn_core(js, je, m, k, alpha, a, lda, b, ldb, c, ldc); break;
@@ -62,11 +62,11 @@ static inline void ygemm_dispatch(enum ygemm_klass klass, ptrdiff_t js, ptrdiff_
 static void ygemm_core(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -78,7 +78,7 @@ static void ygemm_core(
     }
 #endif
 
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char ta = trans_code(transa);
     const char tb = trans_code(transb);
 
@@ -113,4 +113,4 @@ static void ygemm_core(
                    c, ldc, conj_a, conj_b);
 }
 
-EPBLAS_FACADE_GEMM(ygemm, T)
+EPBLAS_FACADE_GEMM(ygemm, TC)

@@ -42,7 +42,6 @@
 #include <omp.h>
 #endif
 
-typedef __float128 T;
 typedef xher2k_TC TC;
 typedef xher2k_TR TR;
 
@@ -69,12 +68,12 @@ static void xher2k_core(
     }
 #endif
     /* Reinterpret the complex ABI as interleaved (re,im) __float128 storage. */
-    const T *alpha_ = (const T *)alpha_c;
-    const T *a = (const T *)a_c;
-    const T *b = (const T *)b_c;
-    T *c = (T *)c_c;
-    const T alphar = alpha_[0], alphai = alpha_[1];
-    const T beta_r = beta_[0];
+    const TR *alpha_ = (const TR *)alpha_c;
+    const TR *a = (const TR *)a_c;
+    const TR *b = (const TR *)b_c;
+    TR *c = (TR *)c_c;
+    const TR alphar = alpha_[0], alphai = alpha_[1];
+    const TR beta_r = beta_[0];
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
@@ -91,7 +90,7 @@ static void xher2k_core(
 
     if (k <= KC) {
         const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(T));
+        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(TR));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
             MC = round_up((ptrdiff_t)target_mc, MR);
@@ -104,8 +103,8 @@ static void xher2k_core(
     const bool conj_a_pack = (TRANS == 'C') ? 1 : 0;
     const bool conj_b_pack = (TRANS == 'N') ? 1 : 0;
 
-    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(T);
+    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -120,10 +119,10 @@ static void xher2k_core(
     /* Two shared B-packs, two private A-packs per thread, all allocated BEFORE
      * the region: a thread that skipped the loop on a failed in-region alloc
      * would deadlock the others at the Bp barrier. */
-    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
-    T **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
+    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
+    TR **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
     bool alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_A_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -141,8 +140,8 @@ static void xher2k_core(
 #else
             const ptrdiff_t tid = 0, nth = 1;
 #endif
-            T *Ap_A = Ap_A_arr[tid];
-            T *Ap_B = Ap_B_arr[tid];
+            TR *Ap_A = Ap_A_arr[tid];
+            TR *Ap_B = Ap_B_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks. */
             const ptrdiff_t m_chunk = round_up((n + nth - 1) / nth, MR);
@@ -187,7 +186,7 @@ static void xher2k_core(
                             qblas_ygemm_ncopy(pb, min_i, conj_a_pack, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
                         }
 
-                        T *cij = &c[((size_t)js * ldc + is) * 2];
+                        TR *cij = &c[((size_t)js * ldc + is) * 2];
                         const ptrdiff_t off = is - js;
 
                         /* Pass 1: alpha·A·Bᴴ + Hermitian diagonal merge. */

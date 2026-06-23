@@ -25,9 +25,9 @@
 #include "../common/blas_omp.h"
 #endif
 
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double TR;
-static inline T cconj(T z) { return ~z; }
+static inline TC cconj(TC z) { return ~z; }
 
 /* RECALIBRATED 2026-06-07 (was 16384, i.e. N>128): the old break-even matched
  * OpenBLAS zhpmv's MULTI_THREAD_MINIMAL, calibrated under libgomp's fork/join
@@ -80,14 +80,14 @@ static ptrdiff_t yhpmv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, pt
 static void yhpmv_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict ap,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *restrict ap,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *beta_,
+    TC *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
-    const T zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
+    const TC alpha = *alpha_, beta = *beta_;
+    const TC zero = 0.0L + 0.0Li, one = 1.0L + 0.0Li;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || (alpha == zero && beta == one)) return;
@@ -108,19 +108,19 @@ static void yhpmv_core(
             if (nthreads > YHPMV_MAX_CPUS) nthreads = YHPMV_MAX_CPUS;
             ptrdiff_t range[YHPMV_MAX_CPUS + 1];
             ptrdiff_t num_cpu = yhpmv_partition(UPLO == 'U', n, nthreads, range);
-            T *buf = (num_cpu > 1)
-                ? (T *)calloc((size_t)num_cpu * (size_t)n, sizeof(T)) : NULL;
+            TC *buf = (num_cpu > 1)
+                ? (TC *)calloc((size_t)num_cpu * (size_t)n, sizeof(TC)) : NULL;
             if (buf) {
                 #pragma omp parallel num_threads(num_cpu)
                 {
                     ptrdiff_t t = omp_get_thread_num();
                     ptrdiff_t m_from = range[t], m_to = range[t + 1];
-                    T *restrict slot = buf + (size_t)t * (size_t)n;
+                    TC *restrict slot = buf + (size_t)t * (size_t)n;
                     if (UPLO == 'U') {
                         for (ptrdiff_t j = m_from; j < m_to; ++j) {
-                            const T *restrict aj = &ap[(size_t)j * (size_t)(j + 1) / 2];
-                            const T t1 = x[j];
-                            T t2 = zero;
+                            const TC *restrict aj = &ap[(size_t)j * (size_t)(j + 1) / 2];
+                            const TC t1 = x[j];
+                            TC t2 = zero;
                             for (ptrdiff_t i = 0; i < j; ++i) {
                                 slot[i] += t1 * aj[i];
                                 t2      += cconj(aj[i]) * x[i];
@@ -129,9 +129,9 @@ static void yhpmv_core(
                         }
                     } else {
                         for (ptrdiff_t j = m_from; j < m_to; ++j) {
-                            const T *restrict aj = &ap[(size_t)j * (size_t)(2 * n - j - 1) / 2];
-                            const T t1 = x[j];
-                            T t2 = zero;
+                            const TC *restrict aj = &ap[(size_t)j * (size_t)(2 * n - j - 1) / 2];
+                            const TC t1 = x[j];
+                            TC t2 = zero;
                             slot[j] += t1 * (TR)__real__ aj[j];       /* real diag */
                             for (ptrdiff_t i = j + 1; i < n; ++i) {
                                 slot[i] += t1 * aj[i];
@@ -144,17 +144,17 @@ static void yhpmv_core(
                 /* Range-limited reduction: UPPER thread touched [0,range[t+1]),
                  * LOWER thread [range[t],n). Fold into one slot, then alpha-AXPY. */
                 if (UPLO == 'U') {
-                    T *restrict target = buf + (size_t)(num_cpu - 1) * (size_t)n;
+                    TC *restrict target = buf + (size_t)(num_cpu - 1) * (size_t)n;
                     for (ptrdiff_t t = 0; t < num_cpu - 1; ++t) {
-                        const T *restrict src = buf + (size_t)t * (size_t)n;
+                        const TC *restrict src = buf + (size_t)t * (size_t)n;
                         ptrdiff_t len = range[t + 1];
                         for (ptrdiff_t k = 0; k < len; ++k) target[k] += src[k];
                     }
                     for (ptrdiff_t k = 0; k < n; ++k) y[k] += alpha * target[k];
                 } else {
-                    T *restrict target = buf;
+                    TC *restrict target = buf;
                     for (ptrdiff_t t = 1; t < num_cpu; ++t) {
-                        const T *restrict src = buf + (size_t)t * (size_t)n;
+                        const TC *restrict src = buf + (size_t)t * (size_t)n;
                         for (ptrdiff_t k = range[t]; k < n; ++k) target[k] += src[k];
                     }
                     for (ptrdiff_t k = 0; k < n; ++k) y[k] += alpha * target[k];
@@ -167,8 +167,8 @@ static void yhpmv_core(
 #endif
         if (UPLO == 'U') {
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero;
+                const TC t1 = alpha * x[j];
+                TC t2 = zero;
                 ptrdiff_t k = kk;
                 for (ptrdiff_t i = 0; i < j; ++i) {
                     y[i] += t1 * ap[k];
@@ -180,8 +180,8 @@ static void yhpmv_core(
             }
         } else {
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero;
+                const TC t1 = alpha * x[j];
+                TC t2 = zero;
                 y[j] += t1 * (TR)__real__ ap[kk];
                 ptrdiff_t k = kk + 1;
                 for (ptrdiff_t i = j + 1; i < n; ++i) {
@@ -199,8 +199,8 @@ static void yhpmv_core(
         if (UPLO == 'U') {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[jx];
-                T t2 = zero;
+                const TC t1 = alpha * x[jx];
+                TC t2 = zero;
                 ptrdiff_t ix = kx, iy = ky;
                 for (ptrdiff_t k = kk; k < kk + j; ++k) {
                     y[iy] += t1 * ap[k];
@@ -214,8 +214,8 @@ static void yhpmv_core(
         } else {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[jx];
-                T t2 = zero;
+                const TC t1 = alpha * x[jx];
+                TC t2 = zero;
                 y[jy] += t1 * (TR)__real__ ap[kk];
                 ptrdiff_t ix = jx, iy = jy;
                 for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
@@ -231,4 +231,4 @@ static void yhpmv_core(
     }
 }
 
-EPBLAS_FACADE_SPMV(yhpmv, T)
+EPBLAS_FACADE_SPMV(yhpmv, TC)

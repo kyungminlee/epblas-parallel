@@ -35,7 +35,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-typedef qsyr2k_T T;
+typedef qsyr2k_TR TR;
 
 #define MR QSYR2K_MR
 #define NR QSYR2K_NR
@@ -47,11 +47,11 @@ typedef qsyr2k_T T;
  * pair (subbuf + subbuf^T) so a single pass 1 covers both A·B^T and B·A^T on
  * the NR×NR diagonal tile. Subbuffer sized NR*(NR+1) to match OpenBLAS's safety
  * pad. */
-void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
-                     const T *a, const T *b,
-                     T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
+void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                     const TR *a, const TR *b,
+                     TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
-    T subbuf[NR * (NR + 1)];
+    TR subbuf[NR * (NR + 1)];
 
     if (m + offset < 0) {
         qtri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
@@ -98,7 +98,7 @@ void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
             qtri_gemm_kernel(nn, nn, k, alpha,
                              a + loop * k, b + loop * k, subbuf, nn);
 
-            T *cc = c + loop + loop * ldc;
+            TR *cc = c + loop + loop * ldc;
             for (ptrdiff_t j = 0; j < nn; ++j) {
                 for (ptrdiff_t i = 0; i <= j; ++i) {
                     cc[i + j * ldc] += subbuf[i + j * nn]
@@ -109,11 +109,11 @@ void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
     }
 }
 
-void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
-                     const T *a, const T *b,
-                     T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
+void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                     const TR *a, const TR *b,
+                     TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
 {
-    T subbuf[NR * (NR + 1)];
+    TR subbuf[NR * (NR + 1)];
 
     if (m + offset < 0) {
         return;
@@ -158,7 +158,7 @@ void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
             qtri_gemm_kernel(nn, nn, k, alpha,
                              a + loop * k, b + loop * k, subbuf, nn);
 
-            T *cc = c + loop + loop * ldc;
+            TR *cc = c + loop + loop * ldc;
             for (ptrdiff_t j = 0; j < nn; ++j) {
                 for (ptrdiff_t i = j; i < nn; ++i) {
                     cc[i + j * ldc] += subbuf[i + j * nn]
@@ -182,23 +182,23 @@ void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * applied. Each C(i,j) is accumulated in a register and written once — packing
  * has nothing to save here, so the clean unpacked loop matches the reference. */
 void qsyr2k_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
-                      T alpha, const T *a, ptrdiff_t lda,
-                      const T *b, ptrdiff_t ldb, T *c, ptrdiff_t ldc)
+                      TR alpha, const TR *a, ptrdiff_t lda,
+                      const TR *b, ptrdiff_t ldb, TR *c, ptrdiff_t ldc)
 {
     const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
     const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
-    const T *Aj = a + j * lda;
-    const T *Bj = b + j * ldb;
-    T *cj = c + j * ldc;
+    const TR *Aj = a + j * lda;
+    const TR *Bj = b + j * ldb;
+    TR *cj = c + j * ldc;
     for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
-        const T *Ai = a + i * lda;
-        const T *Bi = b + i * ldb;
+        const TR *Ai = a + i * lda;
+        const TR *Bi = b + i * ldb;
         /* Two independent accumulators (netlib's temp1/temp2): the A·B and
          * B·A dot chains have no mutual dependency, so the out-of-order core
          * overlaps consecutive libquadmath __addtf3 calls — fp128 has no FMA
          * and each add is a serial soft-float call, so a single fused `s`
          * chain is latency-bound; splitting hides it (~4-8% on Transpose). */
-        T s1 = 0.0Q, s2 = 0.0Q;
+        TR s1 = 0.0Q, s2 = 0.0Q;
         for (ptrdiff_t l = 0; l < k; ++l) {
             s1 += Ai[l] * Bj[l];
             s2 += Bi[l] * Aj[l];
@@ -216,13 +216,13 @@ void qsyr2k_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
 void qsyr2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *b, ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO  = blas_up(uplo);
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
@@ -244,12 +244,12 @@ void qsyr2k_serial(
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(T);
-    T *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(TR);
+    TR *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap_A && Ap_B && Bp_A && Bp_B) {
         for (ptrdiff_t js = 0; js < n; js += NC) {
             const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
@@ -275,7 +275,7 @@ void qsyr2k_serial(
                     qtri_tcopy(pb, min_i, &a[(size_t)ls * lda + is], lda, Ap_A);
                     qtri_tcopy(pb, min_i, &b[(size_t)ls * ldb + is], ldb, Ap_B);
 
-                    T *cij = &c[(size_t)js * ldc + is];
+                    TR *cij = &c[(size_t)js * ldc + is];
                     const ptrdiff_t off = (ptrdiff_t)(is - js);
 
                     /* Pass 1: alpha·A·B^T + symmetric diagonal merge. */

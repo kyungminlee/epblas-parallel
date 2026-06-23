@@ -28,7 +28,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -42,22 +42,22 @@ static ptrdiff_t qtrsv_blocked_nb(void) {
 void qtrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TR *restrict a, const ptrdiff_t *lda_,
+    TR *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void qtrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TR *restrict a, const ptrdiff_t *lda_,
+    TR *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void qtrsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TR *restrict a, ptrdiff_t lda,
+    TR *restrict x, ptrdiff_t incx)
 {
     if (n == 0) return;
 
@@ -82,8 +82,8 @@ void qtrsv_core(
 void qtrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TR *restrict a, const ptrdiff_t *lda_,
+    TR *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
@@ -96,7 +96,7 @@ void qtrsv_serial_(
     const bool nounit = (DIAG != 'U');
 
     if (n == 0) return;
-    const T zero = 0.0Q;
+    const TR zero = 0.0Q;
 
     if (incx == 1) {
         if (TRANS == 'N') {
@@ -104,8 +104,8 @@ void qtrsv_serial_(
                 for (ptrdiff_t i = 0; i < n; ++i) {
                     if (x[i] != zero) {
                         if (nounit) x[i] /= A_(i, i);
-                        const T xi = x[i];
-                        const T *ai = &A_(0, i);
+                        const TR xi = x[i];
+                        const TR *ai = &A_(0, i);
                         for (ptrdiff_t k = i + 1; k < n; ++k) x[k] -= xi * ai[k];
                     }
                 }
@@ -113,8 +113,8 @@ void qtrsv_serial_(
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     if (x[i] != zero) {
                         if (nounit) x[i] /= A_(i, i);
-                        const T xi = x[i];
-                        const T *ai = &A_(0, i);
+                        const TR xi = x[i];
+                        const TR *ai = &A_(0, i);
                         for (ptrdiff_t k = 0; k < i; ++k) x[k] -= xi * ai[k];
                     }
                 }
@@ -122,16 +122,16 @@ void qtrsv_serial_(
         } else {
             if (UPLO == 'L') {
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TR t = x[i];
+                    const TR *ai = &A_(0, i);
                     for (ptrdiff_t k = i + 1; k < n; ++k) t -= ai[k] * x[k];
                     if (nounit) t /= ai[i];
                     x[i] = t;
                 }
             } else {
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TR t = x[i];
+                    const TR *ai = &A_(0, i);
                     for (ptrdiff_t k = 0; k < i; ++k) t -= ai[k] * x[k];
                     if (nounit) t /= ai[i];
                     x[i] = t;
@@ -146,7 +146,7 @@ void qtrsv_serial_(
                     const ptrdiff_t ix = kx + i * incx;
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= A_(i, i);
-                        const T xi = x[ix];
+                        const TR xi = x[ix];
                         for (ptrdiff_t k = i + 1; k < n; ++k) x[kx + k * incx] -= xi * A_(k, i);
                     }
                 }
@@ -155,7 +155,7 @@ void qtrsv_serial_(
                     const ptrdiff_t ix = kx + i * incx;
                     if (x[ix] != zero) {
                         if (nounit) x[ix] /= A_(i, i);
-                        const T xi = x[ix];
+                        const TR xi = x[ix];
                         for (ptrdiff_t k = 0; k < i; ++k) x[kx + k * incx] -= xi * A_(k, i);
                     }
                 }
@@ -163,14 +163,14 @@ void qtrsv_serial_(
         } else {
             if (UPLO == 'L') {
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T t = x[kx + i * incx];
+                    TR t = x[kx + i * incx];
                     for (ptrdiff_t k = i + 1; k < n; ++k) t -= A_(k, i) * x[kx + k * incx];
                     if (nounit) t /= A_(i, i);
                     x[kx + i * incx] = t;
                 }
             } else {
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    T t = x[kx + i * incx];
+                    TR t = x[kx + i * incx];
                     for (ptrdiff_t k = 0; k < i; ++k) t -= A_(k, i) * x[kx + k * incx];
                     if (nounit) t /= A_(i, i);
                     x[kx + i * incx] = t;
@@ -190,17 +190,17 @@ void qtrsv_serial_(
 extern void qgemv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha,
-    const T *a, ptrdiff_t lda,
-    const T *x, ptrdiff_t incx,
-    const T *beta,
-    T *y, ptrdiff_t incy);
+    const TR *alpha,
+    const TR *a, ptrdiff_t lda,
+    const TR *x, ptrdiff_t incx,
+    const TR *beta,
+    TR *y, ptrdiff_t incy);
 
 void qtrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TR *restrict a, const ptrdiff_t *lda_,
+    TR *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     const ptrdiff_t n = *n_;
@@ -218,8 +218,8 @@ void qtrsv_blocked_(
         return;
     }
 
-    const T neg_one = -1.0Q;
-    const T one_v   =  1.0Q;
+    const TR neg_one = -1.0Q;
+    const TR one_v   =  1.0Q;
     const char NN[1] = {'N'};
     const char TT[1] = {'T'};
     const ptrdiff_t one_i = 1;
@@ -372,6 +372,6 @@ void qtrsv_blocked_(
     }
 }
 
-EPBLAS_FACADE_TRMV(qtrsv, T)
+EPBLAS_FACADE_TRMV(qtrsv, TR)
 
 #undef A_

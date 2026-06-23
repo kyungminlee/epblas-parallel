@@ -16,7 +16,7 @@
 
 #define XHER2_OMP_MIN 64
 
-typedef __complex128 T;
+typedef __complex128 TC;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -24,13 +24,13 @@ typedef __complex128 T;
 void xher2_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict a, ptrdiff_t lda)
+    const TC *alpha_,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *restrict y, ptrdiff_t incy,
+    TC *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0Q + 0.0Qi;
+    const TC alpha = *alpha_;
+    const TC zero = 0.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -41,11 +41,11 @@ void xher2_core(
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[j], yj = y[j];
+            const TC xj = x[j], yj = y[j];
             if (xj != zero || yj != zero) {
-                const T temp1 = alpha * conjq(yj);
-                const T temp2 = conjq(alpha * xj);
-                T *aj = &A_(0, j);
+                const TC temp1 = alpha * conjq(yj);
+                const TC temp2 = conjq(alpha * xj);
+                TC *aj = &A_(0, j);
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j + 1; i < n; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
                     aj[j] = crealq(aj[j]) + crealq(x[j] * temp1 + y[j] * temp2);
@@ -59,11 +59,11 @@ void xher2_core(
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[kx + (ptrdiff_t)j * incx];
-            const T yj = y[ky + (ptrdiff_t)j * incy];
+            const TC xj = x[kx + (ptrdiff_t)j * incx];
+            const TC yj = y[ky + (ptrdiff_t)j * incy];
             if (xj != zero || yj != zero) {
-                const T temp1 = alpha * conjq(yj);
-                const T temp2 = conjq(alpha * xj);
+                const TC temp1 = alpha * conjq(yj);
+                const TC temp2 = conjq(alpha * xj);
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j + 1; i < n; ++i)
                         A_(i, j) += x[kx + (ptrdiff_t)i * incx] * temp1 + y[ky + (ptrdiff_t)i * incy] * temp2;
@@ -79,6 +79,6 @@ void xher2_core(
 }
 
 
-EPBLAS_FACADE_SYR2(xher2, T)
+EPBLAS_FACADE_SYR2(xher2, TC)
 
 #undef A_

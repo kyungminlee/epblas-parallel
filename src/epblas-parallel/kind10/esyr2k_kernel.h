@@ -41,7 +41,7 @@
 
 #include <stddef.h>
 
-typedef long double esyr2k_T;
+typedef long double esyr2k_TR;
 
 #define ESYR2K_MR 2
 #define ESYR2K_NR 2
@@ -53,21 +53,21 @@ typedef long double esyr2k_T;
  * its UPLO triangle merged symmetrically (subbuf + subbuf^T) into C — this is
  * pass 1, which folds both A·B^T and B·A^T on the diagonal. flag == 0 (pass 2)
  * skips the diagonal block; the off-diagonal B·A^T strips land in C directly. */
-void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_T alpha,
-                     const esyr2k_T *a, const esyr2k_T *b,
-                     esyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag);
-void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_T alpha,
-                     const esyr2k_T *a, const esyr2k_T *b,
-                     esyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag);
+void esyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_TR alpha,
+                     const esyr2k_TR *a, const esyr2k_TR *b,
+                     esyr2k_TR *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag);
+void esyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, esyr2k_TR alpha,
+                     const esyr2k_TR *a, const esyr2k_TR *b,
+                     esyr2k_TR *c, ptrdiff_t ldc, ptrdiff_t offset, ptrdiff_t flag);
 
 /* Pure-serial by-value core (no OpenMP). */
 void esyr2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const esyr2k_T *alpha_,
-    const esyr2k_T *a, ptrdiff_t lda,
-    const esyr2k_T *b, ptrdiff_t ldb,
-    const esyr2k_T *beta_,
-    esyr2k_T *c, ptrdiff_t ldc);
+    const esyr2k_TR *alpha_,
+    const esyr2k_TR *a, ptrdiff_t lda,
+    const esyr2k_TR *b, ptrdiff_t ldb,
+    const esyr2k_TR *beta_,
+    esyr2k_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ESYR2K_KERNEL_H */

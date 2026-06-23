@@ -27,7 +27,7 @@
 #include <cctype>
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -37,8 +37,8 @@ using mf_pred::eq1;
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-const T zero_dd{0.0, 0.0};
-const T one_dd {1.0, 0.0};
+const TR zero_dd{0.0, 0.0};
+const TR one_dd {1.0, 0.0};
 
 #define A_(i, j)  a[(std::size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(std::size_t)(j) * ldb + (i)]
@@ -46,43 +46,43 @@ const T one_dd {1.0, 0.0};
 
 /* Scalar update of the jb×jb diagonal triangle at (jc, jc).
  * Assumes beta-scaling on C[is..ie, j] already done. */
-inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
-                     const T *a, std::ptrdiff_t lda,
-                     const T *b, std::ptrdiff_t ldb,
-                     T *c, std::ptrdiff_t ldc,
+inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TR alpha,
+                     const TR *a, std::ptrdiff_t lda,
+                     const TR *b, std::ptrdiff_t ldb,
+                     TR *c, std::ptrdiff_t ldc,
                      bool upper, char ta, char tb)
 {
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t is = upper ? jc        : j;
         const std::ptrdiff_t ie = upper ? (j + 1)   : (jc + jb);
-        T *cj = c + (std::size_t)j * ldc;
+        TR *cj = c + (std::size_t)j * ldc;
 
         if (ta == 'N') {
             if (tb == 'N') {
                 for (std::ptrdiff_t l = 0; l < k; ++l) {
-                    const T t = alpha * B_(l, j);
+                    const TR t = alpha * B_(l, j);
                     if (eq0(t)) continue;
-                    const T *al = &A_(0, l);
+                    const TR *al = &A_(0, l);
                     for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
                 }
             } else {
                 for (std::ptrdiff_t l = 0; l < k; ++l) {
-                    const T t = alpha * B_(j, l);
+                    const TR t = alpha * B_(j, l);
                     if (eq0(t)) continue;
-                    const T *al = &A_(0, l);
+                    const TR *al = &A_(0, l);
                     for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] + t * al[i];
                 }
             }
         } else {
             if (tb == 'N') {
                 for (std::ptrdiff_t i = is; i < ie; ++i) {
-                    T s = zero_dd;
+                    TR s = zero_dd;
                     for (std::ptrdiff_t l = 0; l < k; ++l) s = s + A_(l, i) * B_(l, j);
                     cj[i] = cj[i] + alpha * s;
                 }
             } else {
                 for (std::ptrdiff_t i = is; i < ie; ++i) {
-                    T s = zero_dd;
+                    TR s = zero_dd;
                     for (std::ptrdiff_t l = 0; l < k; ++l) s = s + A_(l, i) * B_(j, l);
                     cj[i] = cj[i] + alpha * s;
                 }
@@ -112,29 +112,29 @@ std::ptrdiff_t mgemmtr_block_nb(void) {
 }
 
 void mgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, bool upper,
-                       T beta, T *c, std::ptrdiff_t ldc)
+                       TR beta, TR *c, std::ptrdiff_t ldc)
 {
     for (std::ptrdiff_t j = j0; j < j1; ++j) {
         const std::ptrdiff_t is = upper ? 0 : j;
         const std::ptrdiff_t ie = upper ? (j + 1) : n;
-        T *cj = &C_(0, j);
+        TR *cj = &C_(0, j);
         if (eq0(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_dd;
         else                 for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] * beta;
     }
 }
 
 void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k,
-                        T alpha, T beta,
-                        const T *a, std::ptrdiff_t lda,
-                        const T *b, std::ptrdiff_t ldb,
-                        T *c, std::ptrdiff_t ldc,
+                        TR alpha, TR beta,
+                        const TR *a, std::ptrdiff_t lda,
+                        const TR *b, std::ptrdiff_t ldb,
+                        TR *c, std::ptrdiff_t ldc,
                         bool upper, char ta, char tb)
 {
     /* Beta-scale the triangle slice for cols [jc, jc+jb). */
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t is = upper ? 0 : j;
         const std::ptrdiff_t ie = upper ? (j + 1) : n;
-        T *cj = &C_(0, j);
+        TR *cj = &C_(0, j);
         if (eq0(beta))      for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_dd;
         else if (!eq1(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cj[i] * beta;
     }
@@ -146,8 +146,8 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, 
     if (upper) {
         if (jc > 0) {
             const std::ptrdiff_t m = jc;
-            const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
-            const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
+            const TR *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
+            const TR *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
             mgemm_serial(ta, tb, m, jb, k, &alpha,
                          ablk, lda, bblk, ldb,
                          &one_dd, &C_(0, jc), ldc);
@@ -156,8 +156,8 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, 
         const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t r0 = jc + jb;
-            const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
-            const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
+            const TR *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
+            const TR *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
             mgemm_serial(ta, tb, trailing, jb, k, &alpha,
                          ablk, lda, bblk, ldb,
                          &one_dd, &C_(r0, jc), ldc);
@@ -168,13 +168,13 @@ void mgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, 
 extern "C" void mgemmtr_serial(
     char uplo, char transa, char transb,
     std::ptrdiff_t n, std::ptrdiff_t k,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const T *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, std::ptrdiff_t lda,
+    const TR *b, std::ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, std::ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const bool upper = (up(&uplo) == 'U');
     char ta = up(&transa); if (ta == 'C') ta = 'T';
     char tb = up(&transb); if (tb == 'C') tb = 'T';

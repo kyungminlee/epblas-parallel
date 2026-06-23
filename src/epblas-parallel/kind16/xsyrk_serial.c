@@ -17,7 +17,7 @@
 #include <ctype.h>
 #include <stddef.h>
 
-typedef xsyrk_T T;
+typedef xsyrk_TC TC;
 
 char xsyrk_uplo(char c) {
     return blas_up(c);
@@ -32,23 +32,23 @@ ptrdiff_t xsyrk_nb(void) { return 32; }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
-static const T ZERO = 0.0Q + 0.0Qi;
-static const T ONE  = 1.0Q + 0.0Qi;
+static const TC ZERO = 0.0Q + 0.0Qi;
+static const TC ONE  = 1.0Q + 0.0Qi;
 
-static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, T alpha,
-                          const T *restrict a, ptrdiff_t lda,
-                          T *restrict c, ptrdiff_t ldc,
+static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TC alpha,
+                          const TC *restrict a, ptrdiff_t lda,
+                          TC *restrict c, ptrdiff_t ldc,
                           char UPLO, char TRANS)
 {
     if (TRANS == 'N') {
         for (ptrdiff_t j = jc; j < jc + jb; ++j) {
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
-            T *cj = c + (size_t)j * ldc;
+            TC *cj = c + (size_t)j * ldc;
             for (ptrdiff_t l = 0; l < k; ++l) {
-                const T ajl = A_(j, l);
+                const TC ajl = A_(j, l);
                 if (ajl != ZERO) {
-                    const T t = alpha * ajl;
+                    const TC t = alpha * ajl;
                     for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] += t * A_(i, l);
                 }
             }
@@ -57,11 +57,11 @@ static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, T alpha,
         for (ptrdiff_t j = jc; j < jc + jb; ++j) {
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
-            T *cj = c + (size_t)j * ldc;
-            const T *Aj = a + (size_t)j * lda;
+            TC *cj = c + (size_t)j * ldc;
+            const TC *Aj = a + (size_t)j * lda;
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                const T *Ai = a + (size_t)i * lda;
-                T s = ZERO;
+                const TC *Ai = a + (size_t)i * lda;
+                TC s = ZERO;
                 for (ptrdiff_t l = 0; l < k; ++l) s += Ai[l] * Aj[l];
                 cj[i] += alpha * s;
             }
@@ -69,25 +69,25 @@ static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, T alpha,
     }
 }
 
-void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, T beta,
-                      T *c, ptrdiff_t ldc, char UPLO)
+void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TC beta,
+                      TC *c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
         const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         if (beta == ZERO) for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = ZERO;
         else              for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
     }
 }
 
-void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, T alpha, T beta,
-                 const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc, char UPLO, char TRANS)
+void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha, TC beta,
+                 const TC *a, ptrdiff_t lda, TC *c, ptrdiff_t ldc, char UPLO, char TRANS)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
         const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i]  = ZERO;
         else if (beta != ONE)  for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
     }
@@ -126,12 +126,12 @@ void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, T alpha, 
 void xsyrk_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    const TC *beta_,
+    TC *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
     const char TRANS   = blas_up(trans);
 

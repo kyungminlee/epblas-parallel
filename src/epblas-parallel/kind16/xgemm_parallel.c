@@ -31,7 +31,7 @@
 #endif
 
 typedef __float128 R;
-typedef xgemm_T T;
+typedef xgemm_TC TC;
 
 #define MR QBLAS_YGEMM_MR
 
@@ -40,11 +40,11 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 static void xgemm_core(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const xgemm_T *alpha_,
-    const xgemm_T *a, ptrdiff_t lda,
-    const xgemm_T *b, ptrdiff_t ldb,
-    const xgemm_T *beta_,
-    xgemm_T *c, ptrdiff_t ldc)
+    const xgemm_TC *alpha_,
+    const xgemm_TC *a, ptrdiff_t lda,
+    const xgemm_TC *b, ptrdiff_t ldb,
+    const xgemm_TC *beta_,
+    xgemm_TC *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -160,4 +160,4 @@ static void xgemm_core(
     free(Bp);
 }
 
-EPBLAS_FACADE_GEMM(xgemm, T)
+EPBLAS_FACADE_GEMM(xgemm, TC)

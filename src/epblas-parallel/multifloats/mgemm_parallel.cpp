@@ -31,21 +31,21 @@
 #endif
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 namespace {
-const T zero_dd{0.0, 0.0};
-const T one_dd {1.0, 0.0};
+const TR zero_dd{0.0, 0.0};
+const TR one_dd {1.0, 0.0};
 }  // namespace
 
 static void mgemm_core(
     char transa, char transb,
     std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t k,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const T *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, std::ptrdiff_t lda,
+    const TR *b, std::ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Already inside a team → run serially in this thread, no nested region. */
@@ -56,7 +56,7 @@ static void mgemm_core(
     }
 #endif
 
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const std::ptrdiff_t ta = mgemm_trans_code(&transa, 1);
     const std::ptrdiff_t tb = mgemm_trans_code(&transb, 1);
 
@@ -65,7 +65,7 @@ static void mgemm_core(
     /* beta pre-pass runs serially in the calling thread (matches the
      * pre-split mgemm_). */
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        T *cj = &c[static_cast<std::size_t>(j) * ldc];
+        TR *cj = &c[static_cast<std::size_t>(j) * ldc];
         if (beta == zero_dd) {
             for (std::ptrdiff_t i = 0; i < m; ++i) cj[i] = zero_dd;
         } else if (beta != one_dd) {
@@ -81,8 +81,8 @@ static void mgemm_core(
     #pragma omp parallel
 #endif
     {
-        T *Ap = static_cast<T *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(MC) * KC * sizeof(T)));
+        TR *Ap = static_cast<TR *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(MC) * KC * sizeof(TR)));
 #ifdef MBLAS_SIMD_DD
         /* SoA Bp: round NC up to W = NR_LANE * NR_PAN for the trailing panel. */
         const std::ptrdiff_t W_simd = mgemm_simd_pack_W();
@@ -114,8 +114,8 @@ static void mgemm_core(
         std::free(Bp_hi);
         std::free(Bp_lo);
 #else
-        T *Bp = static_cast<T *>(std::aligned_alloc(
-            64, static_cast<std::size_t>(KC) * NC * sizeof(T)));
+        TR *Bp = static_cast<TR *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(KC) * NC * sizeof(TR)));
         if (Ap && Bp) {
 #ifdef _OPENMP
             #pragma omp for schedule(static)
@@ -142,5 +142,5 @@ static void mgemm_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_GEMM(mgemm, T)
+EPBLAS_FACADE_GEMM(mgemm, TR)
 }

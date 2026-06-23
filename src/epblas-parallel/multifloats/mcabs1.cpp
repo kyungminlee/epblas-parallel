@@ -5,7 +5,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 namespace {
 /* Inline magnitude from mf_pred — the public fabsdd() is out-of-line (two PLT
@@ -16,10 +16,10 @@ namespace {
 using mf_pred::mag;
 }
 
-extern "C" R mcabs1_(const T *z_)
+extern "C" R mcabs1_(const TC *z_)
 {
-    const T z = *z_;
+    const TC z = *z_;
     return mag(z.re) + mag(z.im);
 }
 /* ILP64 twin — no integer args, so the ABI is identical to LP64. */
-extern "C" R mcabs1_64_(const T *z_) { return mcabs1_(z_); }
+extern "C" R mcabs1_64_(const TC *z_) { return mcabs1_(z_); }

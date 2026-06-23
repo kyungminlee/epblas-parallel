@@ -13,36 +13,36 @@
 #include <ctype.h>
 #include <stddef.h>
 
-typedef ygemmtr_T T;
+typedef ygemmtr_TC TC;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
-static const T zero = 0.0L + 0.0iL;
-static const T one  = 1.0L + 0.0iL;
+static const TC zero = 0.0L + 0.0iL;
+static const TC one  = 1.0L + 0.0iL;
 
 void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, bool upper,
-                        T beta, T *c, ptrdiff_t ldc)
+                        TC beta, TC *c, ptrdiff_t ldc)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         const ptrdiff_t is = upper ? 0 : j;
         const ptrdiff_t ie = upper ? (j + 1) : n;
-        T *cj = &C_(0, j);
+        TC *cj = &C_(0, j);
         if (beta == zero) for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
         else              for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
     }
 }
 
 void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
-                 T alpha, T beta,
-                 const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                 T *c, ptrdiff_t ldc,
+                 TC alpha, TC beta,
+                 const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                 TC *c, ptrdiff_t ldc,
                  bool trans_a, bool conj_a, bool trans_b, bool conj_b)
 {
     const ptrdiff_t is = upper ? 0 : j;
     const ptrdiff_t ie = upper ? (j + 1) : n;
-    T *cj = &C_(0, j);
+    TC *cj = &C_(0, j);
 
     if (!trans_a) {
         if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
@@ -54,44 +54,44 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
         ptrdiff_t l = 0;
         if (!trans_b) {
             for (; l + 1 < k; l += 2) {
-                const T t0 = alpha * B_(l,     j);
-                const T t1 = alpha * B_(l + 1, j);
-                const T *al0 = &A_(0, l);
-                const T *al1 = &A_(0, l + 1);
+                const TC t0 = alpha * B_(l,     j);
+                const TC t1 = alpha * B_(l + 1, j);
+                const TC *al0 = &A_(0, l);
+                const TC *al1 = &A_(0, l + 1);
                 for (ptrdiff_t i = is; i < ie; ++i)
                     cj[i] += t0 * al0[i] + t1 * al1[i];
             }
         } else if (!conj_b) {
             for (; l + 1 < k; l += 2) {
-                const T t0 = alpha * B_(j, l);
-                const T t1 = alpha * B_(j, l + 1);
-                const T *al0 = &A_(0, l);
-                const T *al1 = &A_(0, l + 1);
+                const TC t0 = alpha * B_(j, l);
+                const TC t1 = alpha * B_(j, l + 1);
+                const TC *al0 = &A_(0, l);
+                const TC *al1 = &A_(0, l + 1);
                 for (ptrdiff_t i = is; i < ie; ++i)
                     cj[i] += t0 * al0[i] + t1 * al1[i];
             }
         } else {
             for (; l + 1 < k; l += 2) {
-                const T t0 = alpha * ~B_(j, l);
-                const T t1 = alpha * ~B_(j, l + 1);
-                const T *al0 = &A_(0, l);
-                const T *al1 = &A_(0, l + 1);
+                const TC t0 = alpha * ~B_(j, l);
+                const TC t1 = alpha * ~B_(j, l + 1);
+                const TC *al0 = &A_(0, l);
+                const TC *al1 = &A_(0, l + 1);
                 for (ptrdiff_t i = is; i < ie; ++i)
                     cj[i] += t0 * al0[i] + t1 * al1[i];
             }
         }
         for (; l < k; ++l) {
-            T bl;
+            TC bl;
             if (!trans_b)      bl = B_(l, j);
             else if (!conj_b)  bl = B_(j, l);
             else               bl = ~B_(j, l);
-            const T t = alpha * bl;
-            const T *al = &A_(0, l);
+            const TC t = alpha * bl;
+            const TC *al = &A_(0, l);
             for (ptrdiff_t i = is; i < ie; ++i) cj[i] += t * al[i];
         }
     } else {
         for (ptrdiff_t i = is; i < ie; ++i) {
-            T s = zero;
+            TC s = zero;
             if (!trans_b) {
                 if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i) * B_(l, j);
                 else         for (ptrdiff_t l = 0; l < k; ++l) s += ~A_(l, i) * B_(l, j);
@@ -109,13 +109,13 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
 
 void ygemmtr_serial(char uplo, char transa, char transb,
                     ptrdiff_t n, ptrdiff_t k,
-                    const T *alpha_,
-                    const T *a, ptrdiff_t lda,
-                    const T *b, ptrdiff_t ldb,
-                    const T *beta_,
-                    T *c, ptrdiff_t ldc)
+                    const TC *alpha_,
+                    const TC *a, ptrdiff_t lda,
+                    const TC *b, ptrdiff_t ldb,
+                    const TC *beta_,
+                    TC *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
     const char ta = blas_up(transa);
     const char tb = blas_up(transb);

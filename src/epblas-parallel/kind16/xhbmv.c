@@ -14,7 +14,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 TR;
 
 
@@ -33,22 +33,22 @@ typedef __float128 TR;
 
 #ifdef _OPENMP
 static ptrdiff_t xhbmv_omp(bool upper, ptrdiff_t n, ptrdiff_t k,
-                     const T *restrict a, ptrdiff_t lda,
-                     const T *restrict x, ptrdiff_t incx,
-                     T alpha, T *restrict y, ptrdiff_t incy);
+                     const TC *restrict a, ptrdiff_t lda,
+                     const TC *restrict x, ptrdiff_t incx,
+                     TC alpha, TC *restrict y, ptrdiff_t incy);
 #endif
 
 void xhbmv_core(
     char uplo,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *beta_,
+    TC *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
-    const T zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
+    const TC alpha = *alpha_, beta = *beta_;
+    const TC zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || (alpha == zero && beta == one)) return;
@@ -69,8 +69,8 @@ void xhbmv_core(
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero;
+                const TC t1 = alpha * x[j];
+                TC t2 = zero;
                 const ptrdiff_t L = k - j;
                 const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                 for (ptrdiff_t i = i_lo; i < j; ++i) {
@@ -81,8 +81,8 @@ void xhbmv_core(
             }
         } else {
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero;
+                const TC t1 = alpha * x[j];
+                TC t2 = zero;
                 y[j] += t1 * (TR)crealq(A_(0, j));
                 const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                 for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
@@ -98,8 +98,8 @@ void xhbmv_core(
         if (UPLO == 'U') {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[jx];
-                T t2 = zero;
+                const TC t1 = alpha * x[jx];
+                TC t2 = zero;
                 ptrdiff_t ix = kx, iy = ky;
                 const ptrdiff_t L = k - j;
                 const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
@@ -115,8 +115,8 @@ void xhbmv_core(
         } else {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[jx];
-                T t2 = zero;
+                const TC t1 = alpha * x[jx];
+                TC t2 = zero;
                 y[jy] += t1 * (TR)crealq(A_(0, j));
                 ptrdiff_t ix = jx, iy = jy;
                 const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
@@ -140,15 +140,15 @@ void xhbmv_core(
  * thread write dependence (x,y distinct) -> no scratch/barrier. */
 static void xhbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
                             ptrdiff_t lo, ptrdiff_t hi,
-                            const T *restrict a, ptrdiff_t lda,
-                            const T *restrict x, T alpha,
-                            T *restrict y, ptrdiff_t incy)
+                            const TC *restrict a, ptrdiff_t lda,
+                            const TC *restrict x, TC alpha,
+                            TC *restrict y, ptrdiff_t incy)
 {
     const ptrdiff_t s1 = lda - 1;
     if (upper) {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = (TR)crealq(base[k]) * x[i];
+            const TC *base = &A_(0, i);
+            TC s = (TR)crealq(base[k]) * x[i];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
             for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[k + d * s1] * x[i + d];
             ptrdiff_t llen = (i < k) ? i : k;
@@ -157,8 +157,8 @@ static void xhbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
         }
     } else {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = (TR)crealq(base[0]) * x[i];
+            const TC *base = &A_(0, i);
+            TC s = (TR)crealq(base[0]) * x[i];
             ptrdiff_t llen = (i < k) ? i : k;
             for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-d * s1] * x[i - d];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
@@ -174,9 +174,9 @@ static void xhbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
  * fall back. noinline so its bookkeeping does not pressure the serial path. */
 __attribute__((noinline)) static ptrdiff_t xhbmv_omp(
     bool upper, ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy)
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, ptrdiff_t incx,
+    TC alpha, TC *restrict y, ptrdiff_t incy)
 {
     if (n < XHBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -186,10 +186,10 @@ __attribute__((noinline)) static ptrdiff_t xhbmv_omp(
     if (incx < 0) x -= (n - 1) * incx;
     if (incy < 0) y -= (n - 1) * incy;
 
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TC *xptr = x;
+    TC *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TC *)malloc((size_t)n * sizeof(TC));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[i * incx];
         xptr = xbuf;
@@ -209,6 +209,6 @@ __attribute__((noinline)) static ptrdiff_t xhbmv_omp(
 #endif /* _OPENMP */
 
 
-EPBLAS_FACADE_SBMV(xhbmv, T)
+EPBLAS_FACADE_SBMV(xhbmv, TC)
 
 #undef A_

@@ -30,7 +30,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -43,7 +43,7 @@ namespace {
 #define WGEMV_OMP_MIN 64
 
 
-const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 
 
 using mf_kernels::cmul;
@@ -66,15 +66,15 @@ using simd_exact::cload4;
  * alpha*A*x into the SoA y buffers for rows in the slice only. i_lo (and i_hi
  * for interior threads) are multiples of 4 so the 4-wide vector blocks never
  * straddle a slice boundary; only the final slice (i_hi == M) runs a tail. */
-static inline void wgemv_n_simd_rows(std::ptrdiff_t i_lo, std::ptrdiff_t i_hi, std::ptrdiff_t n, T alpha,
-                                     const T *a, std::size_t lda, const T *x,
+static inline void wgemv_n_simd_rows(std::ptrdiff_t i_lo, std::ptrdiff_t i_hi, std::ptrdiff_t n, TC alpha,
+                                     const TC *a, std::size_t lda, const TC *x,
                                      double *y_rh, double *y_rl,
                                      double *y_ih, double *y_il)
 {
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const T xj = x[j];
+        const TC xj = x[j];
         if (ceq0(xj)) continue;
-        const T t = cmul(alpha, xj);
+        const TC t = cmul(alpha, xj);
         const __m256d trh = _mm256_set1_pd(t.re.limbs[0]);
         const __m256d trl = _mm256_set1_pd(t.re.limbs[1]);
         const __m256d tih = _mm256_set1_pd(t.im.limbs[0]);
@@ -99,9 +99,9 @@ static inline void wgemv_n_simd_rows(std::ptrdiff_t i_lo, std::ptrdiff_t i_hi, s
             _mm256_storeu_pd(y_ih + i, nih);
             _mm256_storeu_pd(y_il + i, nil);
         }
-        const T *ajs = &A_(0, j);
+        const TC *ajs = &A_(0, j);
         for (; i < i_hi; ++i) {
-            T yi = T{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
+            TC yi = TC{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
             yi = cadd(yi, cmul(t, ajs[i]));
             y_rh[i] = yi.re.limbs[0]; y_rl[i] = yi.re.limbs[1];
             y_ih[i] = yi.im.limbs[0]; y_il[i] = yi.im.limbs[1];
@@ -110,8 +110,8 @@ static inline void wgemv_n_simd_rows(std::ptrdiff_t i_lo, std::ptrdiff_t i_hi, s
 }
 #endif
 
-static void wgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T *a, std::size_t lda,
-                           const T *x, T *y)
+static void wgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const TC *a, std::size_t lda,
+                           const TC *x, TC *y)
 {
 #ifdef MBLAS_SIMD_DD
     /* Pack y to SoA (4 buffers: re_hi, re_lo, im_hi, im_lo). */
@@ -160,20 +160,20 @@ static void wgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
         const std::ptrdiff_t i_lo = blas_part_bound(m, tid, nth);
         const std::ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
         for (std::ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[j];
+            const TC xj = x[j];
             if (!ceq0(xj)) {
-                const T t = cmul(alpha, xj);
-                const T *aj = &A_(0, j);
+                const TC t = cmul(alpha, xj);
+                const TC *aj = &A_(0, j);
                 for (std::ptrdiff_t i = i_lo; i < i_hi; ++i) y[i] = cadd(y[i], cmul(t, aj[i]));
             }
         }
     }
 #else
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const T xj = x[j];
+        const TC xj = x[j];
         if (!ceq0(xj)) {
-            const T t = cmul(alpha, xj);
-            const T *aj = &A_(0, j);
+            const TC t = cmul(alpha, xj);
+            const TC *aj = &A_(0, j);
             for (std::ptrdiff_t i = 0; i < m; ++i) y[i] = cadd(y[i], cmul(t, aj[i]));
         }
     }
@@ -184,8 +184,8 @@ static void wgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
 /* Contiguous (unit-stride) Trans/ConjTrans core: y += alpha * op(A) * x, with x
  * length M and y length N (beta already applied). conj_a selects C (conjugate A)
  * vs T. SIMD-serial when MBLAS_SIMD_DD; scalar fallback threads over output cols. */
-static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T *a, std::size_t lda,
-                           const T *x, T *y, bool conj_a)
+static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const TC *a, std::size_t lda,
+                           const TC *x, TC *y, bool conj_a)
 {
 #ifdef MBLAS_SIMD_DD
     /* Pre-pack x to SoA; 4-lane cmul/cadd accumulator over i for each j;
@@ -248,10 +248,10 @@ static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
         double red_rh[4], red_rl[4], red_ih[4], red_il[4];
         _mm256_storeu_pd(red_rh, r_rh); _mm256_storeu_pd(red_rl, r_rl);
         _mm256_storeu_pd(red_ih, r_ih); _mm256_storeu_pd(red_il, r_il);
-        T s{ R{red_rh[0], red_rl[0]}, R{red_ih[0], red_il[0]} };
-        const T *ajs = &A_(0, j);
+        TC s{ R{red_rh[0], red_rl[0]}, R{red_ih[0], red_il[0]} };
+        const TC *ajs = &A_(0, j);
         for (; i < m; ++i) {
-            const T aij = conj_a ? cconj(ajs[i]) : ajs[i];
+            const TC aij = conj_a ? cconj(ajs[i]) : ajs[i];
             s = cadd(s, cmul(aij, x[i]));
         }
         y[j] = cadd(y[j], cmul(alpha, s));
@@ -263,8 +263,8 @@ static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const T *aj = &A_(0, j);
-        T s = zero_cdd;
+        const TC *aj = &A_(0, j);
+        TC s = zero_cdd;
         if (conj_a) {
             for (std::ptrdiff_t i = 0; i < m; ++i) s = cadd(s, cmul(cconj(aj[i]), x[i]));
         } else {
@@ -278,13 +278,13 @@ static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
 static void wgemv_core(
     char trans,
     std::ptrdiff_t m, std::ptrdiff_t n,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *x, std::ptrdiff_t incx,
-    const T *beta_,
-    T *y, std::ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TC *x, std::ptrdiff_t incx,
+    const TC *beta_,
+    TC *y, std::ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char TRANS = up(&trans);
 
     if (m == 0 || n == 0) return;
@@ -303,7 +303,7 @@ static void wgemv_core(
         }
         /* Strided: gather x (len N) to contiguous, run the SIMD core on a
          * contiguous y scratch (already beta-applied), scatter back. */
-        std::vector<T> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(m));
+        std::vector<TC> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(m));
         mf_kernels::gather_strided(n, x, incx, xs.data());
         mf_kernels::gather_strided(m, y, incy, ys.data());
         wgemv_n_contig(m, n, alpha, a, lda, xs.data(), ys.data());
@@ -314,7 +314,7 @@ static void wgemv_core(
             return;
         }
         /* Strided: gather x (len M), contiguous y scratch (len N), scatter back. */
-        std::vector<T> xs(static_cast<std::size_t>(m)), ys(static_cast<std::size_t>(n));
+        std::vector<TC> xs(static_cast<std::size_t>(m)), ys(static_cast<std::size_t>(n));
         mf_kernels::gather_strided(m, x, incx, xs.data());
         mf_kernels::gather_strided(n, y, incy, ys.data());
         wgemv_t_contig(m, n, alpha, a, lda, xs.data(), ys.data(), conj_a);
@@ -323,7 +323,7 @@ static void wgemv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_GEMV(wgemv, T)
+EPBLAS_FACADE_GEMV(wgemv, TC)
 }
 
 #undef A_

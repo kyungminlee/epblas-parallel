@@ -109,11 +109,11 @@ void xhemm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xhemm_plan_t *p,
 void xhemm_serial(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const xhemm_T *alpha_,
-    const xhemm_T *a, ptrdiff_t lda,
-    const xhemm_T *b, ptrdiff_t ldb,
-    const xhemm_T *beta_,
-    xhemm_T *c, ptrdiff_t ldc)
+    const xhemm_TC *alpha_,
+    const xhemm_TC *a, ptrdiff_t lda,
+    const xhemm_TC *b, ptrdiff_t ldb,
+    const xhemm_TC *beta_,
+    xhemm_TC *c, ptrdiff_t ldc)
 {
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;

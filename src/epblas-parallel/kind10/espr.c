@@ -14,18 +14,18 @@
 
 #define ESPR_OMP_MIN 64
 
-typedef long double T;
+typedef long double TR;
 
 
 static void espr_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    T *restrict ap)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    TR *restrict ap)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0L;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0L;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -59,10 +59,10 @@ static void espr_core(
 #endif
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
-                        const T tmp = alpha * x[j];
-                        T *restrict apk  = &ap[(size_t)j * (j + 1) / 2];
-                        T *restrict aend = apk + j + 1;
-                        const T *restrict xp = x;
+                        const TR tmp = alpha * x[j];
+                        TR *restrict apk  = &ap[(size_t)j * (j + 1) / 2];
+                        TR *restrict aend = apk + j + 1;
+                        const TR *restrict xp = x;
                         for (; apk < aend; ++apk, ++xp) *apk += *xp * tmp;
                     }
                 }
@@ -74,16 +74,16 @@ static void espr_core(
                  * but not for U — the U path's two pointers start at
                  * different bases (apk = &ap[kk], xp = &x[0]) so gcc
                  * doesn't fold them; the explicit char* form forces it. */
-                T *restrict apk_base = ap;
+                TR *restrict apk_base = ap;
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
-                        const T tmp = alpha * x[j];
+                        const TR tmp = alpha * x[j];
                         char *restrict apkb = (char *)apk_base;
                         const char *restrict xpb = (const char *)x;
-                        const size_t end = (size_t)(j + 1) * sizeof(T);
-                        for (size_t k = 0; k < end; k += sizeof(T)) {
-                            T *apk  = (T *)(apkb + k);
-                            const T *xp = (const T *)(xpb + k);
+                        const size_t end = (size_t)(j + 1) * sizeof(TR);
+                        for (size_t k = 0; k < end; k += sizeof(TR)) {
+                            TR *apk  = (TR *)(apkb + k);
+                            const TR *xp = (const TR *)(xpb + k);
                             *apk += *xp * tmp;
                         }
                     }
@@ -97,20 +97,20 @@ static void espr_core(
 #endif
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
-                        const T tmp = alpha * x[j];
-                        T *restrict apk  = &ap[(size_t)j * n - (size_t)j * (j - 1) / 2];
-                        T *restrict aend = apk + (n - j);
-                        const T *restrict xp = &x[j];
+                        const TR tmp = alpha * x[j];
+                        TR *restrict apk  = &ap[(size_t)j * n - (size_t)j * (j - 1) / 2];
+                        TR *restrict aend = apk + (n - j);
+                        const TR *restrict xp = &x[j];
                         for (; apk < aend; ++apk, ++xp) *apk += *xp * tmp;
                     }
                 }
             } else {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
-                        const T tmp = alpha * x[j];
-                        T *restrict apk  = &ap[(size_t)j * n - (size_t)j * (j - 1) / 2];
-                        T *restrict aend = apk + (n - j);
-                        const T *restrict xp = &x[j];
+                        const TR tmp = alpha * x[j];
+                        TR *restrict apk  = &ap[(size_t)j * n - (size_t)j * (j - 1) / 2];
+                        TR *restrict aend = apk + (n - j);
+                        const TR *restrict xp = &x[j];
                         for (; apk < aend; ++apk, ++xp) *apk += *xp * tmp;
                     }
                 }
@@ -123,7 +123,7 @@ static void espr_core(
             ptrdiff_t jx = kx;
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero) {
-                    const T tmp = alpha * x[jx];
+                    const TR tmp = alpha * x[jx];
                     ptrdiff_t ix = kx;
                     for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
                         ap[k] += x[ix] * tmp;
@@ -137,7 +137,7 @@ static void espr_core(
             ptrdiff_t jx = kx;
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero) {
-                    const T tmp = alpha * x[jx];
+                    const TR tmp = alpha * x[jx];
                     ptrdiff_t ix = jx;
                     for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
                         ap[k] += x[ix] * tmp;
@@ -151,4 +151,4 @@ static void espr_core(
     }
 }
 
-EPBLAS_FACADE_SPR(espr, T, T)
+EPBLAS_FACADE_SPR(espr, TR, TR)

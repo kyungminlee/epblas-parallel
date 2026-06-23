@@ -27,7 +27,7 @@
 #include <stddef.h>
 #include <complex.h>
 
-typedef _Complex long double ysyrk_T;
+typedef _Complex long double ysyrk_TC;
 
 /* Env-tunable block size (YSYRK_NB). */
 ptrdiff_t ysyrk_nb(void);
@@ -35,22 +35,22 @@ ptrdiff_t ysyrk_nb(void);
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's triangular
  * columns, the scalar diagonal rank-k add, and the trailing ygemm_serial
  * update against the rest of the panel. */
-void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, ysyrk_T alpha, ysyrk_T beta,
-                 const ysyrk_T *a, ptrdiff_t lda, ysyrk_T *c, ptrdiff_t ldc,
+void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, ysyrk_TC alpha, ysyrk_TC beta,
+                 const ysyrk_TC *a, ptrdiff_t lda, ysyrk_TC *c, ptrdiff_t ldc,
                  char UPLO, char TRANS);
 
 /* C := beta*C over the triangular columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. */
-void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, ysyrk_T beta,
-                      ysyrk_T *c, ptrdiff_t ldc, char UPLO);
+void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, ysyrk_TC beta,
+                      ysyrk_TC *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial by-value core (no OpenMP). */
 void ysyrk_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const ysyrk_T *alpha_,
-    const ysyrk_T *a, ptrdiff_t lda,
-    const ysyrk_T *beta_,
-    ysyrk_T *c, ptrdiff_t ldc);
+    const ysyrk_TC *alpha_,
+    const ysyrk_TC *a, ptrdiff_t lda,
+    const ysyrk_TC *beta_,
+    ysyrk_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YSYRK_KERNEL_H */

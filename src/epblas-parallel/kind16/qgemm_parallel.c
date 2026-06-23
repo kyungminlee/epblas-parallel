@@ -29,7 +29,7 @@
 #include "../common/blas_omp.h"
 #endif
 
-typedef qgemm_T T;
+typedef qgemm_TR TR;
 
 #define MR QGEMM_MR
 #define NR QGEMM_NR
@@ -37,11 +37,11 @@ typedef qgemm_T T;
 static void qgemm_core(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *b, ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Already inside a team → run serially in this thread, no nested region.
@@ -53,7 +53,7 @@ static void qgemm_core(
     }
 #endif
 
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char ta = qgemm_trans_code(transa);
     const char tb = qgemm_trans_code(transb);
 
@@ -94,15 +94,15 @@ static void qgemm_core(
 
     /* Single outer `omp parallel`, shared Bp packed once per (jc, pc) via
      * `omp single` (implicit barrier), then `omp for` over the ic loop. */
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(T);
-    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(TR);
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (!Bp) return;
 #ifdef _OPENMP
     #pragma omp parallel
 #endif
     {
-        T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (Ap) {
             for (ptrdiff_t jc = 0; jc < n; jc += NC) {
                 const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
@@ -133,4 +133,4 @@ static void qgemm_core(
     free(Bp);
 }
 
-EPBLAS_FACADE_GEMM(qgemm, T)
+EPBLAS_FACADE_GEMM(qgemm, TR)

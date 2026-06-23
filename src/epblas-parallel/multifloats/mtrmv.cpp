@@ -17,7 +17,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -36,21 +36,21 @@ using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
  * NoTrans, folded into the dot seed for Trans. A strided x is gathered to a
  * contiguous scratch by the caller and scattered back. */
 static void mtrmv_contig(bool upper, bool trans, bool nounit,
-                         std::ptrdiff_t n, const T *a, std::size_t lda, T *x)
+                         std::ptrdiff_t n, const TR *a, std::size_t lda, TR *x)
 {
     if (!trans) {
         if (!upper) {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const T *aj = &A_(0, j);
-                const T temp = x[j];
+                const TR *aj = &A_(0, j);
+                const TR temp = x[j];
                 if (!eq0(temp))
                     mf_kernels::axpy_add(n - 1 - j, &x[j + 1], &aj[j + 1], temp);
                 if (nounit) x[j] = x[j] * aj[j];
             }
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T *aj = &A_(0, j);
-                const T temp = x[j];
+                const TR *aj = &A_(0, j);
+                const TR temp = x[j];
                 if (!eq0(temp))
                     mf_kernels::axpy_add(j, &x[0], &aj[0], temp);
                 if (nounit) x[j] = x[j] * aj[j];
@@ -59,15 +59,15 @@ static void mtrmv_contig(bool upper, bool trans, bool nounit,
     } else {
         if (!upper) {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T *aj = &A_(0, j);
-                T temp = nounit ? (x[j] * aj[j]) : x[j];
+                const TR *aj = &A_(0, j);
+                TR temp = nounit ? (x[j] * aj[j]) : x[j];
                 temp = temp + mf_kernels::dot(n - 1 - j, &aj[j + 1], &x[j + 1]);
                 x[j] = temp;
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const T *aj = &A_(0, j);
-                T temp = nounit ? (x[j] * aj[j]) : x[j];
+                const TR *aj = &A_(0, j);
+                TR temp = nounit ? (x[j] * aj[j]) : x[j];
                 temp = temp + mf_kernels::dot(j, &aj[0], &x[0]);
                 x[j] = temp;
             }
@@ -84,32 +84,32 @@ static void mtrmv_contig(bool upper, bool trans, bool nounit,
  * vectorized like the serial one. */
 static void mtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
                            std::ptrdiff_t m_from, std::ptrdiff_t m_to,
-                           const T *a, std::size_t lda, const T *x, T *y)
+                           const TR *a, std::size_t lda, const TR *x, TR *y)
 {
     const std::ptrdiff_t TB = 32;
     for (std::ptrdiff_t is = m_from; is < m_to; is += TB) {
         std::ptrdiff_t min_i = (m_to - is < TB) ? m_to - is : TB;
         if (upper && is > 0) {
             for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
-                const T xj = x[j];
+                const TR xj = x[j];
                 if (!eq0(xj)) mf_kernels::axpy_add(is, &y[0], &A_(0, j), xj);
             }
         }
         for (std::ptrdiff_t i = is; i < is + min_i; ++i) {
             if (upper && i > is) {
-                const T xi = x[i];
+                const TR xi = x[i];
                 if (!eq0(xi)) mf_kernels::axpy_add(i - is, &y[is], &A_(is, i), xi);
             }
             y[i] = y[i] + (nounit ? A_(i, i) * x[i] : x[i]);
             if (!upper && i + 1 < is + min_i) {
-                const T xi = x[i];
+                const TR xi = x[i];
                 if (!eq0(xi))
                     mf_kernels::axpy_add(is + min_i - (i + 1), &y[i + 1], &A_(i + 1, i), xi);
             }
         }
         if (!upper && is + min_i < n) {
             for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
-                const T xj = x[j];
+                const TR xj = x[j];
                 if (!eq0(xj))
                     mf_kernels::axpy_add(n - (is + min_i), &y[is + min_i], &A_(is + min_i, j), xj);
             }
@@ -130,26 +130,26 @@ static void mtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
  * scatters around it. Returns true on success, false if a scratch alloc failed
  * (caller falls back to serial). */
 static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
-                             std::ptrdiff_t n, const T *a, std::size_t lda,
-                             T *x, std::ptrdiff_t nthreads)
+                             std::ptrdiff_t n, const TR *a, std::size_t lda,
+                             TR *x, std::ptrdiff_t nthreads)
 {
     if (trans) {
-        T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        TR *y_buf = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR)));
         if (!y_buf) return false;
         #pragma omp parallel num_threads(nthreads)
         {
             if (!upper) {
                 #pragma omp for schedule(static, 1)
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    T temp = nounit ? (x[j] * A_(j, j)) : x[j];
-                    const T *aj = &A_(0, j);
+                    TR temp = nounit ? (x[j] * A_(j, j)) : x[j];
+                    const TR *aj = &A_(0, j);
                     y_buf[j] = temp + mf_kernels::dot(n - 1 - j, &aj[j + 1], &x[j + 1]);
                 }
             } else {
                 #pragma omp for schedule(static, 1)
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    T temp = nounit ? (x[j] * A_(j, j)) : x[j];
-                    const T *aj = &A_(0, j);
+                    TR temp = nounit ? (x[j] * A_(j, j)) : x[j];
+                    const TR *aj = &A_(0, j);
                     y_buf[j] = temp + mf_kernels::dot(j, &aj[0], &x[0]);
                 }
             }
@@ -170,13 +170,13 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
         if (!range) return false;
         std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 7, 16, upper,
                                            MTRMV_MAX_CPUS, range);
-        T *buf_all = static_cast<T *>(
-            std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(T)));
+        TR *buf_all = static_cast<TR *>(
+            std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(TR)));
         if (!buf_all) { std::free(range); return false; }
         #pragma omp parallel num_threads(ncpu)
         {
             const std::ptrdiff_t tid = omp_get_thread_num();
-            T *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
+            TR *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
             std::ptrdiff_t m_from, m_to;
             if (upper) { m_from = range[ncpu - tid - 1]; m_to = range[ncpu - tid]; }
             else       { m_from = range[tid];            m_to = range[tid + 1]; }
@@ -187,14 +187,14 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
         if (upper) {
             for (std::ptrdiff_t t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_to_t = range[ncpu - t];
-                const T *slot = &buf_all[(std::size_t)t * n];
+                const TR *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = 0; i < m_to_t; ++i)
                     buf_all[i] = buf_all[i] + slot[i];
             }
         } else {
             for (std::ptrdiff_t t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_from_t = range[t];
-                const T *slot = &buf_all[(std::size_t)t * n];
+                const TR *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = m_from_t; i < n; ++i)
                     buf_all[i] = buf_all[i] + slot[i];
             }
@@ -210,7 +210,7 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
  * back. Returns true if handled. */
 __attribute__((noinline)) static bool mtrmv_omp(
     bool upper, bool trans, bool nounit, std::ptrdiff_t n,
-    const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
+    const TR *a, std::size_t lda, TR *x, std::ptrdiff_t incx)
 {
     if (n < MTRMV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -220,8 +220,8 @@ __attribute__((noinline)) static bool mtrmv_omp(
     if (incx == 1)
         return mtrmv_omp_contig(upper, trans, nounit, n, a, lda, x, nthreads);
 
-    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
-    T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    TR *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
+    TR *xbuf = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR)));
     if (!xbuf) return false;
     for (std::ptrdiff_t i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
     bool ok = mtrmv_omp_contig(upper, trans, nounit, n, a, lda, xbuf, nthreads);
@@ -235,8 +235,8 @@ __attribute__((noinline)) static bool mtrmv_omp(
 static void mtrmv_core(
     char uplo, char trans, char diag,
     std::ptrdiff_t n,
-    const T *a, std::ptrdiff_t lda,
-    T *x, std::ptrdiff_t incx)
+    const TR *a, std::ptrdiff_t lda,
+    TR *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
     char TRANS = up(&trans);
@@ -261,7 +261,7 @@ static void mtrmv_core(
      * SIMD contiguous core, scatter back (2N copies vs O(N^2) band work). The
      * in-place strided walk is kept only as the scratch-alloc-failure fallback. */
     const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(n - 1) * incx : 0;
-    T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    TR *xs = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR)));
     if (xs) {
         for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
         mtrmv_contig(UPLO == 'U', TRANS != 'N', nounit, n, a, (std::size_t)lda, xs);
@@ -274,14 +274,14 @@ static void mtrmv_core(
     if (TRANS == 'N') {
         if (UPLO == 'L') {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const T temp = x[kx + j * incx];
+                const TR temp = x[kx + j * incx];
                 if (!eq0(temp))
                     for (std::ptrdiff_t i = j + 1; i < n; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
                 if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
             }
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T temp = x[kx + j * incx];
+                const TR temp = x[kx + j * incx];
                 if (!eq0(temp))
                     for (std::ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] = x[kx + i * incx] + temp * A_(i, j);
                 if (nounit) x[kx + j * incx] = x[kx + j * incx] * A_(j, j);
@@ -290,14 +290,14 @@ static void mtrmv_core(
     } else {
         if (UPLO == 'L') {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                T temp = x[kx + j * incx];
+                TR temp = x[kx + j * incx];
                 if (nounit) temp = temp * A_(j, j);
                 for (std::ptrdiff_t i = j + 1; i < n; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
                 x[kx + j * incx] = temp;
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                T temp = x[kx + j * incx];
+                TR temp = x[kx + j * incx];
                 if (nounit) temp = temp * A_(j, j);
                 for (std::ptrdiff_t i = 0; i < j; ++i) temp = temp + A_(i, j) * x[kx + i * incx];
                 x[kx + j * incx] = temp;
@@ -307,7 +307,7 @@ static void mtrmv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_TRMV(mtrmv, T)
+EPBLAS_FACADE_TRMV(mtrmv, TR)
 }
 
 #undef A_

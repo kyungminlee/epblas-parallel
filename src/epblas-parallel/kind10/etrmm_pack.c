@@ -20,17 +20,17 @@
 
 #include "etrmm_kernel.h"
 
-typedef etrmm_T T;
+typedef etrmm_TR TR;
 
 void etrmm_iutcopy(ptrdiff_t m, ptrdiff_t n,
-                         const T *a, ptrdiff_t lda,
+                         const TR *a, ptrdiff_t lda,
                          ptrdiff_t posX, ptrdiff_t posY,
-                         T *b, bool unit)
+                         TR *b, bool unit)
 {
     ptrdiff_t i, js;
     ptrdiff_t X;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
 
     js = (n >> 1);
 
@@ -165,14 +165,14 @@ void etrmm_iutcopy(ptrdiff_t m, ptrdiff_t n,
 
 
 void etrmm_iuncopy(ptrdiff_t m, ptrdiff_t n,
-                         const T *a, ptrdiff_t lda,
+                         const TR *a, ptrdiff_t lda,
                          ptrdiff_t posX, ptrdiff_t posY,
-                         T *b, bool unit)
+                         TR *b, bool unit)
 {
     ptrdiff_t i, js;
     ptrdiff_t X;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
 
     js = (n >> 1);
 
@@ -305,14 +305,14 @@ void etrmm_iuncopy(ptrdiff_t m, ptrdiff_t n,
 
 
 void etrmm_iltcopy(ptrdiff_t m, ptrdiff_t n,
-                         const T *a, ptrdiff_t lda,
+                         const TR *a, ptrdiff_t lda,
                          ptrdiff_t posX, ptrdiff_t posY,
-                         T *b, bool unit)
+                         TR *b, bool unit)
 {
     ptrdiff_t i, js;
     ptrdiff_t X;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
 
     js = (n >> 1);
 
@@ -449,14 +449,14 @@ void etrmm_iltcopy(ptrdiff_t m, ptrdiff_t n,
 
 
 void etrmm_ilncopy(ptrdiff_t m, ptrdiff_t n,
-                         const T *a, ptrdiff_t lda,
+                         const TR *a, ptrdiff_t lda,
                          ptrdiff_t posX, ptrdiff_t posY,
-                         T *b, bool unit)
+                         TR *b, bool unit)
 {
     ptrdiff_t i, js;
     ptrdiff_t X;
-    T data01, data02, data03, data04;
-    const T *ao1, *ao2;
+    TR data01, data02, data03, data04;
+    const TR *ao1, *ao2;
 
     js = (n >> 1);
 

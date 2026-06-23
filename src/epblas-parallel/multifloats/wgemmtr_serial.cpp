@@ -23,7 +23,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -33,8 +33,8 @@ using mf_pred::ceq1;
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 
-const T zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
-const T one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
+const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+const TC one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::cconj;
@@ -45,10 +45,10 @@ using mf_kernels::cconj;
 
 /* Scalar update of the jb×jb diagonal triangle at (jc, jc).
  * Assumes beta-scaling on C[is..ie, j] already done. */
-inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T alpha,
-                     const T *a, std::ptrdiff_t lda,
-                     const T *b, std::ptrdiff_t ldb,
-                     T *c, std::ptrdiff_t ldc,
+inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
+                     const TC *a, std::ptrdiff_t lda,
+                     const TC *b, std::ptrdiff_t ldb,
+                     TC *c, std::ptrdiff_t ldc,
                      bool upper, char ta, char tb)
 {
     const bool trans_a = (ta != 'N');
@@ -59,22 +59,22 @@ inline void diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, T a
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t is = upper ? jc        : j;
         const std::ptrdiff_t ie = upper ? (j + 1)   : (jc + jb);
-        T *cj = c + (std::size_t)j * ldc;
+        TC *cj = c + (std::size_t)j * ldc;
 
         if (!trans_a) {
             for (std::ptrdiff_t l = 0; l < k; ++l) {
-                T bl;
+                TC bl;
                 if (!trans_b)      bl = B_(l, j);
                 else if (!conj_b)  bl = B_(j, l);
                 else               bl = cconj(B_(j, l));
-                const T t = cmul(alpha, bl);
+                const TC t = cmul(alpha, bl);
                 if (ceq0(t)) continue;
-                const T *al = &A_(0, l);
+                const TC *al = &A_(0, l);
                 for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cadd(cj[i], cmul(t, al[i]));
             }
         } else {
             for (std::ptrdiff_t i = is; i < ie; ++i) {
-                T s = zero_cdd;
+                TC s = zero_cdd;
                 if (!trans_b) {
                     if (!conj_a) for (std::ptrdiff_t l = 0; l < k; ++l) s = cadd(s, cmul(A_(l, i),        B_(l, j)));
                     else         for (std::ptrdiff_t l = 0; l < k; ++l) s = cadd(s, cmul(cconj(A_(l, i)), B_(l, j)));
@@ -111,22 +111,22 @@ std::ptrdiff_t wgemmtr_block_nb(void) {
 }
 
 void wgemmtr_beta_core(std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, bool upper,
-                       T beta, T *c, std::ptrdiff_t ldc)
+                       TC beta, TC *c, std::ptrdiff_t ldc)
 {
     for (std::ptrdiff_t j = j0; j < j1; ++j) {
         const std::ptrdiff_t is = upper ? 0 : j;
         const std::ptrdiff_t ie = upper ? (j + 1) : n;
-        T *cj = &C_(0, j);
+        TC *cj = &C_(0, j);
         if (ceq0(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_cdd;
         else                  for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
     }
 }
 
 void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, std::ptrdiff_t k,
-                        T alpha, T beta,
-                        const T *a, std::ptrdiff_t lda,
-                        const T *b, std::ptrdiff_t ldb,
-                        T *c, std::ptrdiff_t ldc,
+                        TC alpha, TC beta,
+                        const TC *a, std::ptrdiff_t lda,
+                        const TC *b, std::ptrdiff_t ldb,
+                        TC *c, std::ptrdiff_t ldc,
                         bool upper, char ta, char tb)
 {
     const char ta_s[1] = { ta };
@@ -136,7 +136,7 @@ void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, 
     for (std::ptrdiff_t j = jc; j < jc + jb; ++j) {
         const std::ptrdiff_t is = upper ? 0 : j;
         const std::ptrdiff_t ie = upper ? (j + 1) : n;
-        T *cj = &C_(0, j);
+        TC *cj = &C_(0, j);
         if (ceq0(beta))      for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = zero_cdd;
         else if (!ceq1(beta)) for (std::ptrdiff_t i = is; i < ie; ++i) cj[i] = cmul(cj[i], beta);
     }
@@ -148,16 +148,16 @@ void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, 
     if (upper) {
         if (jc > 0) {
             const std::ptrdiff_t m = jc;
-            const T *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
-            const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
+            const TC *ablk = (ta == 'N') ? &A_(0, 0) : &A_(0, 0);
+            const TC *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
             wgemm_serial(ta_s[0], tb_s[0], m, jb, k, &alpha, ablk, lda, bblk, ldb, &one_cdd, &C_(0, jc), ldc);
         }
     } else {
         const std::ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const std::ptrdiff_t r0 = jc + jb;
-            const T *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
-            const T *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
+            const TC *ablk = (ta == 'N') ? &A_(r0, 0) : &A_(0, r0);
+            const TC *bblk = (tb == 'N') ? &B_(0, jc) : &B_(jc, 0);
             wgemm_serial(ta_s[0], tb_s[0], trailing, jb, k, &alpha, ablk, lda, bblk, ldb, &one_cdd, &C_(r0, jc), ldc);
         }
     }
@@ -166,13 +166,13 @@ void wgemmtr_block_core(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t n, 
 extern "C" void wgemmtr_serial(
     char uplo, char transa, char transb,
     std::ptrdiff_t n, std::ptrdiff_t k,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const T *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TC *b, std::ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, std::ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const bool upper = (up(&uplo) == 'U');
     const char ta = up(&transa);
     const char tb = up(&transb);

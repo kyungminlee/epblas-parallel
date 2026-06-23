@@ -15,7 +15,7 @@
 
 #define QSYR2_OMP_MIN 64
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -23,13 +23,13 @@ typedef __float128 T;
 void qsyr2_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict a, ptrdiff_t lda)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *restrict y, ptrdiff_t incy,
+    TR *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0Q;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0Q;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -40,11 +40,11 @@ void qsyr2_core(
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[j], yj = y[j];
+            const TR xj = x[j], yj = y[j];
             if (xj != zero || yj != zero) {
-                const T tx = alpha * yj;
-                const T ty = alpha * xj;
-                T *aj = &A_(0, j);
+                const TR tx = alpha * yj;
+                const TR ty = alpha * xj;
+                TR *aj = &A_(0, j);
                 if (UPLO == 'L') for (ptrdiff_t i = j; i < n; ++i) aj[i] += x[i] * tx + y[i] * ty;
                 else             for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += x[i] * tx + y[i] * ty;
             }
@@ -53,11 +53,11 @@ void qsyr2_core(
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[kx + j * incx];
-            const T yj = y[ky + j * incy];
+            const TR xj = x[kx + j * incx];
+            const TR yj = y[ky + j * incy];
             if (xj != zero || yj != zero) {
-                const T tx = alpha * yj;
-                const T ty = alpha * xj;
+                const TR tx = alpha * yj;
+                const TR ty = alpha * xj;
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j; i < n; ++i)
                         A_(i, j) += x[kx + i * incx] * tx + y[ky + i * incy] * ty;
@@ -71,6 +71,6 @@ void qsyr2_core(
 }
 
 
-EPBLAS_FACADE_SYR2(qsyr2, T)
+EPBLAS_FACADE_SYR2(qsyr2, TR)
 
 #undef A_

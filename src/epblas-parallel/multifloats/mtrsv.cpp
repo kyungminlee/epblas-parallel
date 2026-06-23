@@ -24,7 +24,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -32,7 +32,7 @@ using mf_pred::eq0;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-const T zero_dd{0.0, 0.0};
+const TR zero_dd{0.0, 0.0};
 
 #ifdef MBLAS_SIMD_DD
 using simd_exact::load_dd4;
@@ -42,7 +42,7 @@ using simd_fast::hreduce;
  * msub:  x[k] -= xi * ai[k]  for k in [lo,hi)  (NoTrans axpy form).
  * dot :  returns sum_{k in [lo,hi)} ai[k] * x[k] (Trans dot form). */
 static inline void
-mtrsv_col_msub(T *x, const T *ai, T xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
+mtrsv_col_msub(TR *x, const TR *ai, TR xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
 {
     double *xp = reinterpret_cast<double *>(x);
     const double *aip = reinterpret_cast<const double *>(ai);
@@ -62,8 +62,8 @@ mtrsv_col_msub(T *x, const T *ai, T xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
     }
     for (; k < hi; ++k) x[k] = x[k] - xi * ai[k];
 }
-static inline T
-mtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
+static inline TR
+mtrsv_dot_range(const TR *ai, const TR *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
 {
     const double *aip = reinterpret_cast<const double *>(ai);
     const double *xp  = reinterpret_cast<const double *>(x);
@@ -77,7 +77,7 @@ mtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
         simd_fast::mul(ah, al, xih, xil, ph, pl);
         simd_fast::add(sh, sl, ph, pl, sh, sl);
     }
-    T s = hreduce(sh, sl);
+    TR s = hreduce(sh, sl);
     for (; k < hi; ++k) s = s + ai[k] * x[k];
     return s;
 }
@@ -90,7 +90,7 @@ mtrsv_dot_range(const T *ai, const T *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
  * diagonal-block solver by the threaded path below. TRANS is already normalized
  * ('C' folded to 'T' by the caller). */
 static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
-                         std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
+                         std::ptrdiff_t n, const TR *a, std::ptrdiff_t lda, TR *x, std::ptrdiff_t incx)
 {
     if (n == 0) return;
 
@@ -106,7 +106,7 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
         if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
-                    T xi{x_hi[i], x_lo[i]};
+                    TR xi{x_hi[i], x_lo[i]};
                     if (eq0(xi)) continue;
                     if (nounit) xi = xi / A_(i, i);
                     x_hi[i] = xi.limbs[0]; x_lo[i] = xi.limbs[1];
@@ -115,8 +115,8 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                     const double *aip = reinterpret_cast<const double *>(&A_(0, i));
                     std::ptrdiff_t k = i + 1;
                     for (; k < n && (k & 3) != 0; ++k) {
-                        T xk{x_hi[k], x_lo[k]};
-                        T aki{aip[2*k], aip[2*k+1]};
+                        TR xk{x_hi[k], x_lo[k]};
+                        TR aki{aip[2*k], aip[2*k+1]};
                         xk = xk - xi * aki;
                         x_hi[k] = xk.limbs[0]; x_lo[k] = xk.limbs[1];
                     }
@@ -134,15 +134,15 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                         _mm256_storeu_pd(x_lo + k, nxl);
                     }
                     for (; k < n; ++k) {
-                        T xk{x_hi[k], x_lo[k]};
-                        T aki{aip[2*k], aip[2*k+1]};
+                        TR xk{x_hi[k], x_lo[k]};
+                        TR aki{aip[2*k], aip[2*k+1]};
                         xk = xk - xi * aki;
                         x_hi[k] = xk.limbs[0]; x_lo[k] = xk.limbs[1];
                     }
                 }
             } else {
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T xi{x_hi[i], x_lo[i]};
+                    TR xi{x_hi[i], x_lo[i]};
                     if (eq0(xi)) continue;
                     if (nounit) xi = xi / A_(i, i);
                     x_hi[i] = xi.limbs[0]; x_lo[i] = xi.limbs[1];
@@ -164,8 +164,8 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                         _mm256_storeu_pd(x_lo + k, nxl);
                     }
                     for (; k < i; ++k) {
-                        T xk{x_hi[k], x_lo[k]};
-                        T aki{aip[2*k], aip[2*k+1]};
+                        TR xk{x_hi[k], x_lo[k]};
+                        TR aki{aip[2*k], aip[2*k+1]};
                         xk = xk - xi * aki;
                         x_hi[k] = xk.limbs[0]; x_lo[k] = xk.limbs[1];
                     }
@@ -176,11 +176,11 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
                     const double *aip = reinterpret_cast<const double *>(&A_(0, i));
                     __m256d s_h = zerov, s_l = zerov;
-                    T t{x_hi[i], x_lo[i]};
+                    TR t{x_hi[i], x_lo[i]};
                     std::ptrdiff_t k = i + 1;
                     for (; k < n && (k & 3) != 0; ++k) {
-                        T xk{x_hi[k], x_lo[k]};
-                        T aki{aip[2*k], aip[2*k+1]};
+                        TR xk{x_hi[k], x_lo[k]};
+                        TR aki{aip[2*k], aip[2*k+1]};
                         t = t - aki * xk;
                     }
                     for (; k + 3 < n; k += 4) {
@@ -194,11 +194,11 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                         simd_fast::add(s_h, s_l, p_h, p_l, nsh, nsl);
                         s_h = nsh; s_l = nsl;
                     }
-                    T s_red = hreduce(s_h, s_l);
+                    TR s_red = hreduce(s_h, s_l);
                     t = t - s_red;
                     for (; k < n; ++k) {
-                        T xk{x_hi[k], x_lo[k]};
-                        T aki{aip[2*k], aip[2*k+1]};
+                        TR xk{x_hi[k], x_lo[k]};
+                        TR aki{aip[2*k], aip[2*k+1]};
                         t = t - aki * xk;
                     }
                     if (nounit) t = t / A_(i, i);
@@ -208,7 +208,7 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     const double *aip = reinterpret_cast<const double *>(&A_(0, i));
                     __m256d s_h = zerov, s_l = zerov;
-                    T t{x_hi[i], x_lo[i]};
+                    TR t{x_hi[i], x_lo[i]};
                     std::ptrdiff_t k = 0;
                     for (; k + 3 < i; k += 4) {
                         __m256d a_h, a_l;
@@ -221,11 +221,11 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                         simd_fast::add(s_h, s_l, p_h, p_l, nsh, nsl);
                         s_h = nsh; s_l = nsl;
                     }
-                    T s_red = hreduce(s_h, s_l);
+                    TR s_red = hreduce(s_h, s_l);
                     t = t - s_red;
                     for (; k < i; ++k) {
-                        T xk{x_hi[k], x_lo[k]};
-                        T aki{aip[2*k], aip[2*k+1]};
+                        TR xk{x_hi[k], x_lo[k]};
+                        TR aki{aip[2*k], aip[2*k+1]};
                         t = t - aki * xk;
                     }
                     if (nounit) t = t / A_(i, i);
@@ -241,8 +241,8 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     if (!eq0(x[i])) {
                         if (nounit) x[i] = x[i] / A_(i, i);
-                        const T xi = x[i];
-                        const T *ai = &A_(0, i);
+                        const TR xi = x[i];
+                        const TR *ai = &A_(0, i);
                         for (std::ptrdiff_t k = i + 1; k < n; ++k) x[k] = x[k] - xi * ai[k];
                     }
                 }
@@ -250,8 +250,8 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
                     if (!eq0(x[i])) {
                         if (nounit) x[i] = x[i] / A_(i, i);
-                        const T xi = x[i];
-                        const T *ai = &A_(0, i);
+                        const TR xi = x[i];
+                        const TR *ai = &A_(0, i);
                         for (std::ptrdiff_t k = 0; k < i; ++k) x[k] = x[k] - xi * ai[k];
                     }
                 }
@@ -259,16 +259,16 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
         } else {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TR t = x[i];
+                    const TR *ai = &A_(0, i);
                     for (std::ptrdiff_t k = i + 1; k < n; ++k) t = t - ai[k] * x[k];
                     if (nounit) t = t / ai[i];
                     x[i] = t;
                 }
             } else {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TR t = x[i];
+                    const TR *ai = &A_(0, i);
                     for (std::ptrdiff_t k = 0; k < i; ++k) t = t - ai[k] * x[k];
                     if (nounit) t = t / ai[i];
                     x[i] = t;
@@ -287,9 +287,9 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
         const std::ptrdiff_t sx = incx;
         const std::ptrdiff_t kx = (sx < 0) ? -(n - 1) * sx : 0;
         std::ptrdiff_t ix;
-        T stackbuf[512];
-        T *buf = (n <= 512) ? stackbuf
-                            : static_cast<T *>(std::malloc(static_cast<std::size_t>(n) * sizeof(T)));
+        TR stackbuf[512];
+        TR *buf = (n <= 512) ? stackbuf
+                            : static_cast<TR *>(std::malloc(static_cast<std::size_t>(n) * sizeof(TR)));
         if (buf) {
             std::ptrdiff_t ix = kx;
             for (std::ptrdiff_t i = 0; i < n; ++i) { buf[i] = x[ix]; ix += sx; }
@@ -302,9 +302,9 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     const std::ptrdiff_t ixi = kx + i * sx;
                     if (!eq0(x[ixi])) {
-                        const T *ai = &A_(0, i);
+                        const TR *ai = &A_(0, i);
                         if (nounit) x[ixi] = x[ixi] / ai[i];
-                        const T xi = x[ixi];
+                        const TR xi = x[ixi];
                         ix = ixi;
                         for (std::ptrdiff_t k = i + 1; k < n; ++k) { ix += sx; x[ix] -= xi * ai[k]; }
                     }
@@ -313,9 +313,9 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
                     const std::ptrdiff_t ixi = kx + i * sx;
                     if (!eq0(x[ixi])) {
-                        const T *ai = &A_(0, i);
+                        const TR *ai = &A_(0, i);
                         if (nounit) x[ixi] = x[ixi] / ai[i];
-                        const T xi = x[ixi];
+                        const TR xi = x[ixi];
                         ix = kx;
                         for (std::ptrdiff_t k = 0; k < i; ++k) { x[ix] -= xi * ai[k]; ix += sx; }
                     }
@@ -325,8 +325,8 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = n - 1; i >= 0; --i) {
                     const std::ptrdiff_t ixi = kx + i * sx;
-                    const T *ai = &A_(0, i);
-                    T t = x[ixi];
+                    const TR *ai = &A_(0, i);
+                    TR t = x[ixi];
                     ix = ixi;
                     for (std::ptrdiff_t k = i + 1; k < n; ++k) { ix += sx; t = t - ai[k] * x[ix]; }
                     if (nounit) t = t / ai[i];
@@ -335,8 +335,8 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
             } else {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
                     const std::ptrdiff_t ixi = kx + i * sx;
-                    const T *ai = &A_(0, i);
-                    T t = x[ixi];
+                    const TR *ai = &A_(0, i);
+                    TR t = x[ixi];
                     ix = kx;
                     for (std::ptrdiff_t k = 0; k < i; ++k) { t = t - ai[k] * x[ix]; ix += sx; }
                     if (nounit) t = t / ai[i];
@@ -356,7 +356,7 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
  * (the off-diagonal contribution is regrouped / scalar rather than SIMD).
  * Returns true if it handled the call. */
 __attribute__((noinline)) static bool mtrsv_omp(
-    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const T *a, std::ptrdiff_t lda, T *x)
+    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const TR *a, std::ptrdiff_t lda, TR *x)
 {
     if (n < MTRSV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -379,9 +379,9 @@ __attribute__((noinline)) static bool mtrsv_omp(
                     std::ptrdiff_t rlo = j1 + blas_part_bound((n - j1), tid, nthreads);
                     std::ptrdiff_t rhi = j1 + blas_part_bound((n - j1), tid + 1, nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
-                        const T xi = x[i];
+                        const TR xi = x[i];
                         if (eq0(xi)) continue;
-                        const T *ai = &A_(0, i);
+                        const TR *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         mtrsv_col_msub(x, ai, xi, rlo, rhi);
 #else
@@ -401,9 +401,9 @@ __attribute__((noinline)) static bool mtrsv_omp(
                     std::ptrdiff_t rlo = blas_part_bound(j0, tid, nthreads);
                     std::ptrdiff_t rhi = blas_part_bound(j0, tid + 1, nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
-                        const T xi = x[i];
+                        const TR xi = x[i];
                         if (eq0(xi)) continue;
-                        const T *ai = &A_(0, i);
+                        const TR *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
                         mtrsv_col_msub(x, ai, xi, rlo, rhi);
 #else
@@ -427,11 +427,11 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, nthreads);
                         std::ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *ai = &A_(0, i);
+                            const TR *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
-                            T s = mtrsv_dot_range(ai, x, j1, n);
+                            TR s = mtrsv_dot_range(ai, x, j1, n);
 #else
-                            T s = zero_dd;
+                            TR s = zero_dd;
                             for (std::ptrdiff_t k = j1; k < n; ++k) s = s + ai[k] * x[k];
 #endif
                             x[i] = x[i] - s;
@@ -450,11 +450,11 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, nthreads);
                         std::ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *ai = &A_(0, i);
+                            const TR *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
-                            T s = mtrsv_dot_range(ai, x, 0, j0);
+                            TR s = mtrsv_dot_range(ai, x, 0, j0);
 #else
-                            T s = zero_dd;
+                            TR s = zero_dd;
                             for (std::ptrdiff_t k = 0; k < j0; ++k) s = s + ai[k] * x[k];
 #endif
                             x[i] = x[i] - s;
@@ -472,8 +472,8 @@ __attribute__((noinline)) static bool mtrsv_omp(
 static void mtrsv_core(
     char uplo, char trans, char diag,
     std::ptrdiff_t n,
-    const T *a, std::ptrdiff_t lda,
-    T *x, std::ptrdiff_t incx)
+    const TR *a, std::ptrdiff_t lda,
+    TR *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
     char TRANS = up(&trans);
@@ -493,7 +493,7 @@ static void mtrsv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_TRMV(mtrsv, T)
+EPBLAS_FACADE_TRMV(mtrsv, TR)
 }
 
 #undef A_

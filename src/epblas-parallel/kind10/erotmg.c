@@ -1,26 +1,26 @@
 /* erotmg — kind10 real: generate modified Givens. Port of LAPACK DROTMG. */
 #include <math.h>
-typedef long double T;
+typedef long double TR;
 
-void erotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
+void erotmg_(TR *d1_, TR *d2_, TR *x1_, const TR *y1_, TR *dparam)
 {
-    T d1 = *d1_, d2 = *d2_, x1 = *x1_;
-    const T y1 = *y1_;
-    const T gam = 4096.0L, gamsq = 16777216.0L, rgamsq = 5.9604645e-8L;
-    T flag, h11 = 0, h12 = 0, h21 = 0, h22 = 0;
+    TR d1 = *d1_, d2 = *d2_, x1 = *x1_;
+    const TR y1 = *y1_;
+    const TR gam = 4096.0L, gamsq = 16777216.0L, rgamsq = 5.9604645e-8L;
+    TR flag, h11 = 0, h12 = 0, h21 = 0, h22 = 0;
 
     if (d1 < 0.0L) {
         flag = -1.0L;
         d1 = d2 = x1 = 0.0L;
     } else {
-        T p2 = d2 * y1;
+        TR p2 = d2 * y1;
         if (p2 == 0.0L) { dparam[0] = -2.0L; return; }
-        T p1 = d1 * x1;
-        T q1 = p1 * x1, q2 = p2 * y1;
+        TR p1 = d1 * x1;
+        TR q1 = p1 * x1, q2 = p2 * y1;
         if (fabsl(q1) > fabsl(q2)) {
             h21 = -y1 / x1;
             h12 = p2 / p1;
-            T u = 1.0L - h12 * h21;
+            TR u = 1.0L - h12 * h21;
             if (u > 0.0L) { flag = 0.0L; d1 /= u; d2 /= u; x1 *= u; }
             else          { flag = -1.0L; h12 = h21 = 0.0L; d1 = d2 = x1 = 0.0L; }
         } else {
@@ -29,8 +29,8 @@ void erotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
                 flag = 1.0L;
                 h11 = p1 / p2;
                 h22 = x1 / y1;
-                T u = 1.0L + h11 * h22;
-                T t = d2 / u; d2 = d1 / u; d1 = t; x1 = y1 * u;
+                TR u = 1.0L + h11 * h22;
+                TR t = d2 / u; d2 = d1 / u; d1 = t; x1 = y1 * u;
             }
         }
         /* Scale check loops */
@@ -55,5 +55,5 @@ void erotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
 }
 
 /* No integer arguments -> LP64/ILP64 ABIs identical; _64_ twin tail-calls. */
-void erotmg_64_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
+void erotmg_64_(TR *d1_, TR *d2_, TR *x1_, const TR *y1_, TR *dparam)
 { erotmg_(d1_, d2_, x1_, y1_, dparam); }

@@ -5,7 +5,7 @@
 #endif
 #include "../common/epblas_facade.h"
 /* escal — kind10 real: X := α · X. x87 fp80, no SIMD path. */
-typedef long double T;
+typedef long double TR;
 
 /* Unit-stride kernel, shared by the serial entry and the per-thread OMP slices.
  * 8-way unrolled: each x87 `fmulp` has ~3-cycle latency; unrolling lets the OOO
@@ -16,7 +16,7 @@ typedef long double T;
  * L2-band size (N~64k), where the per-element loop overhead is still exposed —
  * matching the 8-way head closes it. Each *= is independent, so the wider
  * unroll and the head→tail remainder move are bit-identical. */
-static void escal_unit(ptrdiff_t n, T alpha, T *x)
+static void escal_unit(ptrdiff_t n, TR alpha, TR *x)
 {
     ptrdiff_t i, n1 = n & -8;
     for (i = 0; i < n1; i += 8) {
@@ -37,7 +37,7 @@ static void escal_unit(ptrdiff_t n, T alpha, T *x)
  * 1.68@1536, 1.23@3072, 1.08@6144, then 1.006@8192 — break-even ~8192, stay
  * serial through 6144. */
 #define ESCAL_OMP_MIN 6144
-static bool escal_omp(ptrdiff_t n, T alpha, T *x)
+static bool escal_omp(ptrdiff_t n, TR alpha, TR *x)
 {
     if (n <= ESCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -55,9 +55,9 @@ static bool escal_omp(ptrdiff_t n, T alpha, T *x)
 
 /* core: ints by value, alpha forwarded as `const T*` (facade derefs nothing
  * but the integers). Body verbatim from the old escal_ past the deref lines. */
-static void escal_core(ptrdiff_t n, const T *alpha_, T *x, ptrdiff_t incx)
+static void escal_core(ptrdiff_t n, const TR *alpha_, TR *x, ptrdiff_t incx)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     if (n <= 0 || alpha == 1.0L) return;
     if (incx == 1) {
 #ifdef _OPENMP
@@ -70,4 +70,4 @@ static void escal_core(ptrdiff_t n, const T *alpha_, T *x, ptrdiff_t incx)
     }
 }
 
-EPBLAS_FACADE_SCAL(escal, T, T)
+EPBLAS_FACADE_SCAL(escal, TR, TR)

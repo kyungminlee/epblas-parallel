@@ -40,20 +40,20 @@
 
 #include <stddef.h>
 
-typedef long double etrsm_T;
+typedef long double etrsm_TR;
 
 /* ── Diagonal-inverting A-packers (etrsm_pack.c) ─────────────────────
  * Pack an m×n slab of triangular A into the packed buffer `b`, storing
  * 1/diag on the diagonal register-block and reading only the relevant
  * triangle. `offset` positions the diagonal; `unit` selects unit-diag. */
-void etrsm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, bool unit);
-void etrsm_iltcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, bool unit);
-void etrsm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, bool unit);
-void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, etrsm_T *b, bool unit);
+void etrsm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_TR *a, ptrdiff_t lda,
+                   ptrdiff_t offset, etrsm_TR *b, bool unit);
+void etrsm_iltcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_TR *a, ptrdiff_t lda,
+                   ptrdiff_t offset, etrsm_TR *b, bool unit);
+void etrsm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrsm_TR *a, ptrdiff_t lda,
+                   ptrdiff_t offset, etrsm_TR *b, bool unit);
+void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_TR *a, ptrdiff_t lda,
+                   ptrdiff_t offset, etrsm_TR *b, bool unit);
 
 /* ── Diagonal-aware TRSM micro-kernel (etrsm_kernel.c) ───────────────
  * Pairs the shared ob-convention GEMM substrate (etri_kernel.h) with the
@@ -63,8 +63,8 @@ void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrsm_T *a, ptrdiff_t lda,
  * egemm. */
 void etrsm_solve_kernel(bool left, bool trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
-                        const etrsm_T *ba, const etrsm_T *bb,
-                        etrsm_T *C, ptrdiff_t ldc, ptrdiff_t offset);
+                        const etrsm_TR *ba, const etrsm_TR *bb,
+                        etrsm_TR *C, ptrdiff_t ldc, ptrdiff_t offset);
 
 /* ── Band drivers (etrsm_serial.c) ───────────────────────────────────
  * Run the full L3 nest for one slice of the partition axis: a column
@@ -73,21 +73,21 @@ void etrsm_solve_kernel(bool left, bool trans,
 void etrsm_L_band(bool upper, bool trans, bool unit,
                   ptrdiff_t m, ptrdiff_t js0, ptrdiff_t js1,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
-                  const etrsm_T *a, ptrdiff_t lda, etrsm_T *b, ptrdiff_t ldb,
-                  etrsm_T *Ap, etrsm_T *Bp);
+                  const etrsm_TR *a, ptrdiff_t lda, etrsm_TR *b, ptrdiff_t ldb,
+                  etrsm_TR *Ap, etrsm_TR *Bp);
 void etrsm_R_band(bool upper, bool trans, bool unit,
                   ptrdiff_t n, ptrdiff_t m_lo, ptrdiff_t m_hi,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
-                  const etrsm_T *a, ptrdiff_t lda, etrsm_T *b, ptrdiff_t ldb,
-                  etrsm_T *Ap, etrsm_T *Bp);
+                  const etrsm_TR *a, ptrdiff_t lda, etrsm_TR *b, ptrdiff_t ldb,
+                  etrsm_TR *Ap, etrsm_TR *Bp);
 
 /* Pure-serial by-value core (no OpenMP). Shares the ptrdiff_t signature
  * with etrsm_core in etrsm_parallel.c. */
 void etrsm_serial(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const etrsm_T *alpha_,
-    const etrsm_T *a, ptrdiff_t lda,
-    etrsm_T *b, ptrdiff_t ldb);
+    const etrsm_TR *alpha_,
+    const etrsm_TR *a, ptrdiff_t lda,
+    etrsm_TR *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ETRSM_KERNEL_H */

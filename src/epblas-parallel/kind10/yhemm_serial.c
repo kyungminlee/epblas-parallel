@@ -16,7 +16,7 @@
 #include <ctype.h>
 #include <stddef.h>
 
-typedef yhemm_T T;
+typedef yhemm_TC TC;
 
 /* nb is fixed at 32 (the original hemm_nb_pick clamps to [32, 32]). */
 ptrdiff_t yhemm_nb(void) { return 32; }
@@ -24,16 +24,16 @@ ptrdiff_t yhemm_nb(void) { return 32; }
 extern void ygemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const T *alpha,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta,
-    T *c, ptrdiff_t ldc);
+    const TC *alpha,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
+    const TC *beta,
+    TC *c, ptrdiff_t ldc);
 
-static inline T cconj(T z) { return ~z; }
+static inline TC cconj(TC z) { return ~z; }
 
-static const T ZERO = 0.0L + 0.0Li;
-static const T ONE  = 1.0L + 0.0Li;
+static const TC ZERO = 0.0L + 0.0Li;
+static const TC ONE  = 1.0L + 0.0Li;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
@@ -49,8 +49,8 @@ static const T ONE  = 1.0L + 0.0Li;
  * fetched twice per iter) that cost par ~7% vs gfortran's zhemm on LL. The
  * conj sign is folded into the products, dropping the per-element fchs.
  * Bit-identical to the _Complex form (same decomposition as yherk UC/LC). */
-static inline T hemm_L_conj_sweep(T *restrict cj, const T *restrict bj,
-                                  const T *restrict ai, T temp1,
+static inline TC hemm_L_conj_sweep(TC *restrict cj, const TC *restrict bj,
+                                  const TC *restrict ai, TC temp1,
                                   ptrdiff_t k_lo, ptrdiff_t k_hi)
 {
     long double *restrict cR = (long double *)cj;
@@ -71,26 +71,26 @@ static inline T hemm_L_conj_sweep(T *restrict cj, const T *restrict bj,
 
 /* Scalar Hermitian diagonal block, SIDE='L' (see original yhemm for the
  * Netlib stride-1 access rationale). */
-static void hemm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t jb, T alpha,
-                            const T *restrict a, ptrdiff_t lda,
-                            const T *restrict b, ptrdiff_t ldb,
-                            T *restrict c, ptrdiff_t ldc, char UPLO)
+static void hemm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t jb, TC alpha,
+                            const TC *restrict a, ptrdiff_t lda,
+                            const TC *restrict b, ptrdiff_t ldb,
+                            TC *restrict c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-        T *cj = c + (size_t)j * ldc;
-        const T *bj = b + (size_t)j * ldb;
+        TC *cj = c + (size_t)j * ldc;
+        const TC *bj = b + (size_t)j * ldb;
         if (UPLO == 'L') {
             for (ptrdiff_t i = ic + ib - 1; i >= ic; --i) {
-                const T temp1 = alpha * bj[i];
-                const T *ai = &A_(0, i);
-                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, i + 1, ic + ib);
+                const TC temp1 = alpha * bj[i];
+                const TC *ai = &A_(0, i);
+                const TC temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, i + 1, ic + ib);
                 cj[i] += temp1 * __real__ ai[i] + alpha * temp2;
             }
         } else {
             for (ptrdiff_t i = ic; i < ic + ib; ++i) {
-                const T temp1 = alpha * bj[i];
-                const T *ai = &A_(0, i);
-                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, ic, i);
+                const TC temp1 = alpha * bj[i];
+                const TC *ai = &A_(0, i);
+                const TC temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, ic, i);
                 cj[i] += temp1 * __real__ ai[i] + alpha * temp2;
             }
         }
@@ -98,72 +98,72 @@ static void hemm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t 
 }
 
 /* Scalar Hermitian diagonal block, SIDE='R'. */
-static void hemm_diag_add_R(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t ic, ptrdiff_t ib, T alpha,
-                            const T *restrict a, ptrdiff_t lda,
-                            const T *restrict b, ptrdiff_t ldb,
-                            T *restrict c, ptrdiff_t ldc, char UPLO)
+static void hemm_diag_add_R(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t ic, ptrdiff_t ib, TC alpha,
+                            const TC *restrict a, ptrdiff_t lda,
+                            const TC *restrict b, ptrdiff_t ldb,
+                            TC *restrict c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         {
-            const T t = alpha * (__real__ A_(j, j));
+            const TC t = alpha * (__real__ A_(j, j));
             for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, j);
         }
         if (UPLO == 'L') {
             for (ptrdiff_t k = jc; k < j; ++k) {
-                const T t = alpha * cconj(A_(j, k));
+                const TC t = alpha * cconj(A_(j, k));
                 if (t != ZERO) for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, k);
             }
             for (ptrdiff_t k = j + 1; k < jc + jb; ++k) {
-                const T t = alpha * A_(k, j);
+                const TC t = alpha * A_(k, j);
                 if (t != ZERO) for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, k);
             }
         } else {
             for (ptrdiff_t k = jc; k < j; ++k) {
-                const T t = alpha * A_(k, j);
+                const TC t = alpha * A_(k, j);
                 if (t != ZERO) for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, k);
             }
             for (ptrdiff_t k = j + 1; k < jc + jb; ++k) {
-                const T t = alpha * cconj(A_(j, k));
+                const TC t = alpha * cconj(A_(j, k));
                 if (t != ZERO) for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, k);
             }
         }
     }
 }
 
-void yhemm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T beta, T *c, ptrdiff_t ldc)
+void yhemm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC beta, TC *c, ptrdiff_t ldc)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         if (beta == ZERO) for (ptrdiff_t i = 0; i < m; ++i) cj[i] = ZERO;
         else              for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
 }
 
 void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m,
-                         T alpha, T beta,
-                         const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                         T *c, ptrdiff_t ldc, char UPLO)
+                         TC alpha, TC beta,
+                         const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                         TC *c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        T *cj = c + (size_t)j * ldc;
-        const T *bj = b + (size_t)j * ldb;
+        TC *cj = c + (size_t)j * ldc;
+        const TC *bj = b + (size_t)j * ldb;
         if (UPLO == 'L') {
             for (ptrdiff_t i = m - 1; i >= 0; --i) {
-                const T temp1 = alpha * bj[i];
-                const T *ai = &A_(0, i);
-                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, i + 1, m);
-                const T diag = temp1 * __real__ ai[i] + alpha * temp2;
+                const TC temp1 = alpha * bj[i];
+                const TC *ai = &A_(0, i);
+                const TC temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, i + 1, m);
+                const TC diag = temp1 * __real__ ai[i] + alpha * temp2;
                 if (beta == ZERO)     cj[i] = diag;
                 else if (beta == ONE) cj[i] += diag;
                 else                  cj[i] = beta * cj[i] + diag;
             }
         } else {
             for (ptrdiff_t i = 0; i < m; ++i) {
-                const T temp1 = alpha * bj[i];
-                const T *ai = &A_(0, i);
-                const T temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, 0, i);
-                const T diag = temp1 * __real__ ai[i] + alpha * temp2;
+                const TC temp1 = alpha * bj[i];
+                const TC *ai = &A_(0, i);
+                const TC temp2 = hemm_L_conj_sweep(cj, bj, ai, temp1, 0, i);
+                const TC diag = temp1 * __real__ ai[i] + alpha * temp2;
                 if (beta == ZERO)     cj[i] = diag;
                 else if (beta == ONE) cj[i] += diag;
                 else                  cj[i] = beta * cj[i] + diag;
@@ -172,12 +172,12 @@ void yhemm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m,
     }
 }
 
-void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, T alpha, T beta,
-                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
+void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, TC alpha, TC beta,
+                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                   TC *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = 0; i < m; ++i) cj[i]  = ZERO;
         else if (beta != ONE)  for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
@@ -211,12 +211,12 @@ void yhemm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, T alpha, T beta,
     }
 }
 
-void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, T alpha, T beta,
-                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
+void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, TC alpha, TC beta,
+                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                   TC *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
 {
     for (ptrdiff_t j = 0; j < n; ++j) {
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i]  = ZERO;
         else if (beta != ONE)  for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] *= beta;
     }
@@ -253,13 +253,13 @@ void yhemm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, T alpha, T beta,
 void yhemm_serial(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
 

@@ -20,10 +20,10 @@
  * Bit-exact (relerr 0). Uniform across the y* rank-update family. */
 #define YHER2_OMP_MIN 24
 
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double R;
-static const T ZERO = 0.0L + 0.0Li;
-static inline T cconj(T z) { return ~z; }
+static const TC ZERO = 0.0L + 0.0Li;
+static inline TC cconj(TC z) { return ~z; }
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -49,15 +49,15 @@ static inline T cconj(T z) { return ~z; }
  * endpoints), which keeps t1/t2 register-resident (fld=9/iter).  Diagonal and
  * off-diagonal entries are disjoint, so the order is bit-identical. */
 __attribute__((noinline))
-static void yher2_contig_U(ptrdiff_t j0, ptrdiff_t j1, T alpha,
-                           const T *restrict x, const T *restrict y,
-                           T *restrict a, ptrdiff_t lda)
+static void yher2_contig_U(ptrdiff_t j0, ptrdiff_t j1, TC alpha,
+                           const TC *restrict x, const TC *restrict y,
+                           TC *restrict a, ptrdiff_t lda)
 {
     for (ptrdiff_t j = j0; j < j1; ++j) {
-        T *aj = &A_(0, j);
+        TC *aj = &A_(0, j);
         if (x[j] != ZERO || y[j] != ZERO) {
-            const T t1 = alpha * cconj(y[j]);
-            const T t2 = cconj(alpha * x[j]);
+            const TC t1 = alpha * cconj(y[j]);
+            const TC t2 = cconj(alpha * x[j]);
             const R dadd = __real__ (x[j] * t1 + y[j] * t2);
             for (ptrdiff_t i = 0; i < j; ++i) aj[i] += x[i] * t1 + y[i] * t2;
             aj[j] = __real__ aj[j] + dadd;
@@ -66,15 +66,15 @@ static void yher2_contig_U(ptrdiff_t j0, ptrdiff_t j1, T alpha,
 }
 
 __attribute__((noinline))
-static void yher2_contig_L(ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, T alpha,
-                           const T *restrict x, const T *restrict y,
-                           T *restrict a, ptrdiff_t lda)
+static void yher2_contig_L(ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, TC alpha,
+                           const TC *restrict x, const TC *restrict y,
+                           TC *restrict a, ptrdiff_t lda)
 {
     for (ptrdiff_t j = j0; j < j1; ++j) {
-        T *aj = &A_(0, j);
+        TC *aj = &A_(0, j);
         if (x[j] != ZERO || y[j] != ZERO) {
-            const T t1 = alpha * cconj(y[j]);
-            const T t2 = cconj(alpha * x[j]);
+            const TC t1 = alpha * cconj(y[j]);
+            const TC t2 = cconj(alpha * x[j]);
             aj[j] = __real__ aj[j] + __real__ (x[j] * t1 + y[j] * t2);
             for (ptrdiff_t i = j + 1; i < n; ++i) aj[i] += x[i] * t1 + y[i] * t2;
         }
@@ -85,9 +85,9 @@ static void yher2_contig_L(ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, T alpha,
  * x/y walked by stride. Carved noinline so the complex-MAC loop keeps t1/t2
  * register-resident (see the strided-fallback comment below). */
 __attribute__((noinline))
-static void yher2_strided_run(ptrdiff_t cnt, T t1, T t2, T *restrict aj,
-                              const T *restrict x, ptrdiff_t incx, ptrdiff_t ix,
-                              const T *restrict y, ptrdiff_t incy, ptrdiff_t iy)
+static void yher2_strided_run(ptrdiff_t cnt, TC t1, TC t2, TC *restrict aj,
+                              const TC *restrict x, ptrdiff_t incx, ptrdiff_t ix,
+                              const TC *restrict y, ptrdiff_t incy, ptrdiff_t iy)
 {
     for (ptrdiff_t i = 0; i < cnt; ++i) {
         aj[i] += x[ix] * t1 + y[iy] * t2;
@@ -98,12 +98,12 @@ static void yher2_strided_run(ptrdiff_t cnt, T t1, T t2, T *restrict aj,
 static void yher2_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict a, ptrdiff_t lda)
+    const TC *alpha_,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *restrict y, ptrdiff_t incy,
+    TC *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == ZERO) return;
@@ -147,12 +147,12 @@ static void yher2_core(
         const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t jx = kx, jy = ky;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[jx];
-            const T yj = y[jy];
+            const TC xj = x[jx];
+            const TC yj = y[jy];
             if (xj != ZERO || yj != ZERO) {
-                const T temp1 = alpha * cconj(yj);
-                const T temp2 = cconj(alpha * xj);
-                T *aj = &A_(0, j);
+                const TC temp1 = alpha * cconj(yj);
+                const TC temp2 = cconj(alpha * xj);
+                TC *aj = &A_(0, j);
                 if (UPLO == 'L') {
                     yher2_strided_run(n - j - 1, temp1, temp2, aj + j + 1,
                                       x, incx, jx + incx, y, incy, jy + incy);
@@ -168,6 +168,6 @@ static void yher2_core(
     }
 }
 
-EPBLAS_FACADE_SYR2(yher2, T)
+EPBLAS_FACADE_SYR2(yher2, TC)
 
 #undef A_

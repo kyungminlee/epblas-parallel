@@ -27,7 +27,7 @@
 
 #include <stddef.h>
 
-typedef __float128 qgemmtr_T;
+typedef __float128 qgemmtr_TR;
 
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
 char qgemmtr_trans_code(const char *p);
@@ -37,8 +37,8 @@ char qgemmtr_trans_code(const char *p);
  * Only reached when beta != one. */
 void qgemmtr_beta_core(
     ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper,
-    qgemmtr_T beta,
-    qgemmtr_T *c, ptrdiff_t ldc);
+    qgemmtr_TR beta,
+    qgemmtr_TR *c, ptrdiff_t ldc);
 
 /* Full compute pass over columns [j0,j1):
  *
@@ -49,10 +49,10 @@ void qgemmtr_beta_core(
 void qgemmtr_compute_core(
     ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper, ptrdiff_t k,
     char ta, char tb,
-    qgemmtr_T alpha, qgemmtr_T beta,
-    const qgemmtr_T *a, ptrdiff_t lda,
-    const qgemmtr_T *b, ptrdiff_t ldb,
-    qgemmtr_T *c, ptrdiff_t ldc);
+    qgemmtr_TR alpha, qgemmtr_TR beta,
+    const qgemmtr_TR *a, ptrdiff_t lda,
+    const qgemmtr_TR *b, ptrdiff_t ldb,
+    qgemmtr_TR *c, ptrdiff_t ldc);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
  * invoke from inside another function's `#pragma omp parallel` region. Shares
@@ -60,10 +60,10 @@ void qgemmtr_compute_core(
 void qgemmtr_serial(
     char uplo, char transa, char transb,
     ptrdiff_t n, ptrdiff_t k,
-    const qgemmtr_T *alpha_,
-    const qgemmtr_T *a, ptrdiff_t lda,
-    const qgemmtr_T *b, ptrdiff_t ldb,
-    const qgemmtr_T *beta_,
-    qgemmtr_T *c, ptrdiff_t ldc);
+    const qgemmtr_TR *alpha_,
+    const qgemmtr_TR *a, ptrdiff_t lda,
+    const qgemmtr_TR *b, ptrdiff_t ldb,
+    const qgemmtr_TR *beta_,
+    qgemmtr_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QGEMMTR_KERNEL_H */

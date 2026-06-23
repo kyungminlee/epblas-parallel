@@ -32,7 +32,7 @@
 #endif
 
 typedef __float128 R;
-typedef xhemm_T T;
+typedef xhemm_TC TC;
 
 #define MR QBLAS_YGEMM_MR
 
@@ -41,11 +41,11 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 static void xhemm_core(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const xhemm_T *alpha_,
-    const xhemm_T *a, ptrdiff_t lda,
-    const xhemm_T *b, ptrdiff_t ldb,
-    const xhemm_T *beta_,
-    xhemm_T *c, ptrdiff_t ldc)
+    const xhemm_TC *alpha_,
+    const xhemm_TC *a, ptrdiff_t lda,
+    const xhemm_TC *b, ptrdiff_t ldb,
+    const xhemm_TC *beta_,
+    xhemm_TC *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
@@ -157,4 +157,4 @@ static void xhemm_core(
     free(Bp);
 }
 
-EPBLAS_FACADE_SYMM(xhemm, T)
+EPBLAS_FACADE_SYMM(xhemm, TC)

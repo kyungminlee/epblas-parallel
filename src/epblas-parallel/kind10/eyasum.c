@@ -6,11 +6,11 @@
 #include <stddef.h>
 #endif
 #include "../common/epblas_facade.h"
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double R;
 
 /* 3-accumulator unroll of |re|+|im| over a contiguous logical range. */
-static R eyasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static R eyasum_kernel(ptrdiff_t n, const TC *x, ptrdiff_t incx)
 {
     R s = 0.0L, s1 = 0.0L, s2 = 0.0L;
     if (incx == 1) {
@@ -34,7 +34,7 @@ static R eyasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
  * par mirrors so it doesn't trail ob ~2.2x at n≥16384. */
 #define EYASUM_OMP_MIN 10000
 #define EYASUM_MAX_CPUS 64
-__attribute__((noinline)) static ptrdiff_t eyasum_omp(ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static ptrdiff_t eyasum_omp(ptrdiff_t n, const TC *x, R *out)
 {
     if (n <= EYASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -56,7 +56,7 @@ __attribute__((noinline)) static ptrdiff_t eyasum_omp(ptrdiff_t n, const T *x, R
 }
 #endif
 
-static R eyasum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static R eyasum_core(ptrdiff_t n, const TC *x, ptrdiff_t incx)
 {
     if (n < 1 || incx < 1) return 0.0L;
 #ifdef _OPENMP
@@ -68,4 +68,4 @@ static R eyasum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
     return eyasum_kernel(n, x, incx);
 }
 
-EPBLAS_FACADE_ASUM(eyasum, R, T)
+EPBLAS_FACADE_ASUM(eyasum, R, TC)

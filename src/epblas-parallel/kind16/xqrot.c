@@ -6,15 +6,15 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 R;
 
 #ifdef _OPENMP
 /* Threaded complex Givens (real c, s) — quad is compute-bound, so it threads
  * (see qaxpy.c). Each iteration is independent; index-from-i covers all strides. */
 #define XQROT_OMP_MIN 128
-__attribute__((noinline)) static bool xqrot_omp(ptrdiff_t n, T *x, ptrdiff_t incx,
-                                               T *y, ptrdiff_t incy, R c, R s)
+__attribute__((noinline)) static bool xqrot_omp(ptrdiff_t n, TC *x, ptrdiff_t incx,
+                                               TC *y, ptrdiff_t incy, R c, R s)
 {
     if (n <= XQROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -24,7 +24,7 @@ __attribute__((noinline)) static bool xqrot_omp(ptrdiff_t n, T *x, ptrdiff_t inc
     #pragma omp parallel for schedule(static) num_threads(nthreads)
     for (ptrdiff_t i = 0; i < n; ++i) {
         ptrdiff_t ix = ix0 + i * incx, iy = iy0 + i * incy;
-        T tx;
+        TC tx;
         __real__ tx = c * __real__ x[ix] + s * __real__ y[iy];
         __imag__ tx = c * __imag__ x[ix] + s * __imag__ y[iy];
         __real__ y[iy] = c * __real__ y[iy] - s * __real__ x[ix];
@@ -35,7 +35,7 @@ __attribute__((noinline)) static bool xqrot_omp(ptrdiff_t n, T *x, ptrdiff_t inc
 }
 #endif
 
-static void xqrot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
+static void xqrot_core(ptrdiff_t n, TC *x, ptrdiff_t incx, TC *y, ptrdiff_t incy,
                        const R *c_, const R *s_)
 {
     const R c = *c_, s = *s_;
@@ -45,7 +45,7 @@ static void xqrot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
 #endif
     if (incx == 1 && incy == 1) {
         for (ptrdiff_t i = 0; i < n; ++i) {
-            T tx;
+            TC tx;
             __real__ tx = c * __real__ x[i] + s * __real__ y[i];
             __imag__ tx = c * __imag__ x[i] + s * __imag__ y[i];
             __real__ y[i] = c * __real__ y[i] - s * __real__ x[i];
@@ -56,7 +56,7 @@ static void xqrot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
         for (ptrdiff_t i = 0; i < n; ++i) {
-            T tx;
+            TC tx;
             __real__ tx = c * __real__ x[ix] + s * __real__ y[iy];
             __imag__ tx = c * __imag__ x[ix] + s * __imag__ y[iy];
             __real__ y[iy] = c * __real__ y[iy] - s * __real__ x[ix];
@@ -67,4 +67,4 @@ static void xqrot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
     }
 }
 
-EPBLAS_FACADE_ROT(xqrot, R, T)
+EPBLAS_FACADE_ROT(xqrot, R, TC)

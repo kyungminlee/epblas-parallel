@@ -6,15 +6,15 @@
 #include <stddef.h>
 #endif
 #include "../common/epblas_facade.h"
-typedef long double T;
+typedef long double TR;
 
 /* Σ|x| over a contiguous logical range. 6-accumulator unroll matches NETLIB
  * DASUM and masks the ~3-cycle x87 fadd latency. */
-static T easum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static TR easum_kernel(ptrdiff_t n, const TR *x, ptrdiff_t incx)
 {
-    T s0 = 0.0L, s1 = 0.0L;
+    TR s0 = 0.0L, s1 = 0.0L;
     if (incx == 1) {
-        T s2 = 0.0L, s3 = 0.0L, s4 = 0.0L, s5 = 0.0L;
+        TR s2 = 0.0L, s3 = 0.0L, s4 = 0.0L, s5 = 0.0L;
         ptrdiff_t i = 0;
         for (; i + 5 < n; i += 6) {
             s0 += fabsl(x[i    ]);
@@ -41,13 +41,13 @@ static T easum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
  * bit-identical, but within fuzz tolerance for a sum of magnitudes. */
 #define EASUM_OMP_MIN 10000
 #define EASUM_MAX_CPUS 64
-__attribute__((noinline)) static ptrdiff_t easum_omp(ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static ptrdiff_t easum_omp(ptrdiff_t n, const TR *x, TR *out)
 {
     if (n <= EASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EASUM_MAX_CPUS) nthreads = EASUM_MAX_CPUS;
-    T partial[EASUM_MAX_CPUS] = {0};
+    TR partial[EASUM_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -56,23 +56,23 @@ __attribute__((noinline)) static ptrdiff_t easum_omp(ptrdiff_t n, const T *x, T 
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) partial[tid] = easum_kernel(hi - lo, x + lo, 1);
     }
-    T s = 0.0L;
+    TR s = 0.0L;
     for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }
 #endif
 
-static T easum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static TR easum_core(ptrdiff_t n, const TR *x, ptrdiff_t incx)
 {
     if (n < 1 || incx < 1) return 0.0L;
 #ifdef _OPENMP
     if (incx == 1) {
-        T s;
+        TR s;
         if (easum_omp(n, x, &s)) return s;
     }
 #endif
     return easum_kernel(n, x, incx);
 }
 
-EPBLAS_FACADE_ASUM(easum, T, T)
+EPBLAS_FACADE_ASUM(easum, TR, TR)

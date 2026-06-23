@@ -24,7 +24,7 @@
 
 #define QSYMV_OMP_MIN 128
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -32,15 +32,15 @@ typedef __float128 T;
 void qsymv_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *beta_,
+    TR *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    const T zero = 0.0Q, one = 1.0Q;
+    const TR zero = 0.0Q, one = 1.0Q;
 
     if (n == 0) return;
 
@@ -61,19 +61,19 @@ void qsymv_core(
             /* Parallel two-pass with per-thread private y accumulator;
              * schedule(static,1) interleaves columns to balance the
              * triangular per-column work (linear in N-j for L, j for U). */
-            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
+            TR *y_priv_all = (TR *)calloc((size_t)nthreads * (size_t)n, sizeof(TR));
             if (y_priv_all) {
                 #pragma omp parallel num_threads(nthreads)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
+                    TR *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
                         for (ptrdiff_t j = 0; j < n; ++j) {
-                            const T temp1 = alpha * x[j];
-                            T temp2 = zero;
-                            const T *aj = &A_(0, j);
+                            const TR temp1 = alpha * x[j];
+                            TR temp2 = zero;
+                            const TR *aj = &A_(0, j);
                             y_priv[j] += temp1 * aj[j];
                             for (ptrdiff_t k = j + 1; k < n; ++k) {
                                 y_priv[k] += temp1 * aj[k];
@@ -84,9 +84,9 @@ void qsymv_core(
                     } else {
                         #pragma omp for schedule(static, 1)
                         for (ptrdiff_t j = 0; j < n; ++j) {
-                            const T temp1 = alpha * x[j];
-                            T temp2 = zero;
-                            const T *aj = &A_(0, j);
+                            const TR temp1 = alpha * x[j];
+                            TR temp2 = zero;
+                            const TR *aj = &A_(0, j);
                             for (ptrdiff_t k = 0; k < j; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += aj[k] * x[k];
@@ -98,7 +98,7 @@ void qsymv_core(
                      * before the reduction reads. */
                     #pragma omp for schedule(static)
                     for (ptrdiff_t i = 0; i < n; ++i) {
-                        T s = zero;
+                        TR s = zero;
                         for (ptrdiff_t t = 0; t < nthreads; ++t)
                             s += y_priv_all[(size_t)t * n + i];
                         y[i] += s;
@@ -112,9 +112,9 @@ void qsymv_core(
 #endif
         if (UPLO == 'L') {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[i];
-                T temp2 = zero;
-                const T *ai = &A_(0, i);
+                const TR temp1 = alpha * x[i];
+                TR temp2 = zero;
+                const TR *ai = &A_(0, i);
                 y[i] += temp1 * ai[i];
                 for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[k]  += temp1 * ai[k];
@@ -124,9 +124,9 @@ void qsymv_core(
             }
         } else {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[i];
-                T temp2 = zero;
-                const T *ai = &A_(0, i);
+                const TR temp1 = alpha * x[i];
+                TR temp2 = zero;
+                const TR *ai = &A_(0, i);
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += ai[k] * x[k];
@@ -142,8 +142,8 @@ void qsymv_core(
         if (UPLO == 'L') {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[jx];
-                T temp2 = zero;
+                const TR temp1 = alpha * x[jx];
+                TR temp2 = zero;
                 y[jy] += temp1 * A_(i, i);
                 ptrdiff_t ix = jx, iy = jy;
                 for (ptrdiff_t k = i + 1; k < n; ++k) {
@@ -157,8 +157,8 @@ void qsymv_core(
         } else {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[jx];
-                T temp2 = zero;
+                const TR temp1 = alpha * x[jx];
+                TR temp2 = zero;
                 ptrdiff_t ix = kx, iy = ky;
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     y[iy] += temp1 * A_(k, i);
@@ -173,6 +173,6 @@ void qsymv_core(
 }
 
 
-EPBLAS_FACADE_SYMV(qsymv, T)
+EPBLAS_FACADE_SYMV(qsymv, TR)
 
 #undef A_

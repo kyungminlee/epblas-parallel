@@ -6,7 +6,7 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef __float128 T;
+typedef __float128 TR;
 
 #ifdef _OPENMP
 /* Threaded elementwise AXPY. Unlike fp80 (memory-bound, kept serial), quad is
@@ -15,9 +15,9 @@ typedef __float128 T;
  * is handled by the one loop; the serial fast-paths below stay intact for the
  * sub-threshold / single-thread case. */
 #define QAXPY_OMP_MIN 128
-__attribute__((noinline)) static bool qaxpy_omp(ptrdiff_t n, T alpha,
-                                               const T *x, ptrdiff_t incx,
-                                               T *y, ptrdiff_t incy)
+__attribute__((noinline)) static bool qaxpy_omp(ptrdiff_t n, TR alpha,
+                                               const TR *x, ptrdiff_t incx,
+                                               TR *y, ptrdiff_t incy)
 {
     if (n <= QAXPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -30,11 +30,11 @@ __attribute__((noinline)) static bool qaxpy_omp(ptrdiff_t n, T alpha,
 }
 #endif
 
-static void qaxpy_core(ptrdiff_t n, const T *alpha_,
-                       const T *x, ptrdiff_t incx,
-                       T *y, ptrdiff_t incy)
+static void qaxpy_core(ptrdiff_t n, const TR *alpha_,
+                       const TR *x, ptrdiff_t incx,
+                       TR *y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     if (n <= 0 || alpha == 0.0Q) return;
 #ifdef _OPENMP
     if (qaxpy_omp(n, alpha, x, incx, y, incy)) return;
@@ -55,4 +55,4 @@ static void qaxpy_core(ptrdiff_t n, const T *alpha_,
     }
 }
 
-EPBLAS_FACADE_AXPY(qaxpy, T, T)
+EPBLAS_FACADE_AXPY(qaxpy, TR, TR)

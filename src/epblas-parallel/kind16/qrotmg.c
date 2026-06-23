@@ -3,27 +3,27 @@
 /* fabsq via __builtin_fabsf128 — single `pand` instead of a libquadmath function call. */
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
-typedef __float128 T;
+typedef __float128 TR;
 
-void qrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
+void qrotmg_(TR *d1_, TR *d2_, TR *x1_, const TR *y1_, TR *dparam)
 {
-    T d1 = *d1_, d2 = *d2_, x1 = *x1_;
-    const T y1 = *y1_;
-    const T gam = 4096.0Q, gamsq = 16777216.0Q, rgamsq = 5.9604645e-8Q;
-    T flag, h11 = 0, h12 = 0, h21 = 0, h22 = 0;
+    TR d1 = *d1_, d2 = *d2_, x1 = *x1_;
+    const TR y1 = *y1_;
+    const TR gam = 4096.0Q, gamsq = 16777216.0Q, rgamsq = 5.9604645e-8Q;
+    TR flag, h11 = 0, h12 = 0, h21 = 0, h22 = 0;
 
     if (d1 < 0.0Q) {
         flag = -1.0Q;
         d1 = d2 = x1 = 0.0Q;
     } else {
-        T p2 = d2 * y1;
+        TR p2 = d2 * y1;
         if (p2 == 0.0Q) { dparam[0] = -2.0Q; return; }
-        T p1 = d1 * x1;
-        T q1 = p1 * x1, q2 = p2 * y1;
+        TR p1 = d1 * x1;
+        TR q1 = p1 * x1, q2 = p2 * y1;
         if (fabsq(q1) > fabsq(q2)) {
             h21 = -y1 / x1;
             h12 = p2 / p1;
-            T u = 1.0Q - h12 * h21;
+            TR u = 1.0Q - h12 * h21;
             if (u > 0.0Q) { flag = 0.0Q; d1 /= u; d2 /= u; x1 *= u; }
             else          { flag = -1.0Q; h12 = h21 = 0.0Q; d1 = d2 = x1 = 0.0Q; }
         } else {
@@ -32,8 +32,8 @@ void qrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
                 flag = 1.0Q;
                 h11 = p1 / p2;
                 h22 = x1 / y1;
-                T u = 1.0Q + h11 * h22;
-                T t = d2 / u; d2 = d1 / u; d1 = t; x1 = y1 * u;
+                TR u = 1.0Q + h11 * h22;
+                TR t = d2 / u; d2 = d1 / u; d1 = t; x1 = y1 * u;
             }
         }
         while (d1 != 0.0Q && (fabsq(d1) <= rgamsq || fabsq(d1) >= gamsq)) {
@@ -56,6 +56,6 @@ void qrotmg_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam)
     *d1_ = d1; *d2_ = d2; *x1_ = x1;
 }
 /* ILP64 twin — no integer args, so the ABI is identical to LP64. */
-void qrotmg_64_(T *d1_, T *d2_, T *x1_, const T *y1_, T *dparam) {
+void qrotmg_64_(TR *d1_, TR *d2_, TR *x1_, const TR *y1_, TR *dparam) {
     qrotmg_(d1_, d2_, x1_, y1_, dparam);
 }

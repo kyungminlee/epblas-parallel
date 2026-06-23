@@ -117,11 +117,11 @@ void xgemm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xgemm_plan_t *p,
 void xgemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const xgemm_T *alpha_,
-    const xgemm_T *a, ptrdiff_t lda,
-    const xgemm_T *b, ptrdiff_t ldb,
-    const xgemm_T *beta_,
-    xgemm_T *c, ptrdiff_t ldc)
+    const xgemm_TC *alpha_,
+    const xgemm_TC *a, ptrdiff_t lda,
+    const xgemm_TC *b, ptrdiff_t ldb,
+    const xgemm_TC *beta_,
+    xgemm_TC *c, ptrdiff_t ldc)
 {
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;

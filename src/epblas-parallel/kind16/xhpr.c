@@ -15,7 +15,7 @@
 
 #define XHPR_OMP_MIN 64
 
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 TR;
 
 
@@ -23,12 +23,12 @@ void xhpr_core(
     char uplo,
     ptrdiff_t n,
     const TR *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    T *restrict ap)
+    const TC *restrict x, ptrdiff_t incx,
+    TC *restrict ap)
 {
     const TR alpha = *alpha_;
     const TR rzero = 0.0Q;
-    const T czero = 0.0Q + 0.0Qi;
+    const TC czero = 0.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == rzero) return;
@@ -42,7 +42,7 @@ void xhpr_core(
             for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = (j * (j + 1)) / 2;
                 if (x[j] != czero) {
-                    const T tmp = alpha * conjq(x[j]);
+                    const TC tmp = alpha * conjq(x[j]);
                     for (ptrdiff_t i = 0; i < j; ++i) ap[kk + i] += x[i] * tmp;
                     ap[kk + j] = (TR)crealq(ap[kk + j]) + (TR)crealq(x[j] * tmp);
                 } else {
@@ -57,7 +57,7 @@ void xhpr_core(
             for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
                 if (x[j] != czero) {
-                    const T tmp = alpha * conjq(x[j]);
+                    const TC tmp = alpha * conjq(x[j]);
                     ap[kk] = (TR)crealq(ap[kk]) + (TR)crealq(tmp * x[j]);
                     for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
                 } else {
@@ -72,7 +72,7 @@ void xhpr_core(
             ptrdiff_t jx = kx;
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != czero) {
-                    const T tmp = alpha * conjq(x[jx]);
+                    const TC tmp = alpha * conjq(x[jx]);
                     ptrdiff_t ix = kx;
                     for (ptrdiff_t k = kk; k < kk + j; ++k) {
                         ap[k] += x[ix] * tmp;
@@ -89,7 +89,7 @@ void xhpr_core(
             ptrdiff_t jx = kx;
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != czero) {
-                    const T tmp = alpha * conjq(x[jx]);
+                    const TC tmp = alpha * conjq(x[jx]);
                     ap[kk] = (TR)crealq(ap[kk]) + (TR)crealq(tmp * x[jx]);
                     ptrdiff_t ix = jx;
                     for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
@@ -106,4 +106,4 @@ void xhpr_core(
     }
 }
 
-EPBLAS_FACADE_SPR(xhpr, TR, T)
+EPBLAS_FACADE_SPR(xhpr, TR, TC)

@@ -15,7 +15,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 #ifdef MBLAS_SIMD_DD
 #include <immintrin.h>
@@ -37,7 +37,7 @@ using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
 
 /* Pass-1 unit kernel: max(|re.hi|, |im.hi|) over a contiguous (incx==1) slice.
  * Max is exact → the combined global scale is BIT-EXACT regardless of split. */
-static double mwnrm2_maxabs_unit(std::ptrdiff_t n, const T *x)
+static double mwnrm2_maxabs_unit(std::ptrdiff_t n, const TC *x)
 {
     double scale_hi = 0.0;
 #ifdef MBLAS_SIMD_DD
@@ -70,7 +70,7 @@ static double mwnrm2_maxabs_unit(std::ptrdiff_t n, const T *x)
 }
 
 /* Pass-2 unit kernel: Σ (re/scale)² + (im/scale)² over a contiguous slice. */
-static R mwnrm2_ssq_unit(std::ptrdiff_t n, const T *x, R scale)
+static R mwnrm2_ssq_unit(std::ptrdiff_t n, const TC *x, R scale)
 {
     R s{0.0, 0.0};
 #ifdef MBLAS_SIMD_DD
@@ -122,7 +122,7 @@ static R mwnrm2_ssq_unit(std::ptrdiff_t n, const T *x, R scale)
 /* Threaded two-pass nrm2 (incx==1): parallel max (exact → global scale
  * BIT-EXACT) then partial-reduce Σ(re²+im²)/scale² in tid order (reorders, so
  * matches serial within fuzz tol). Returns false below threshold. */
-__attribute__((noinline)) static bool mwnrm2_omp(std::ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static bool mwnrm2_omp(std::ptrdiff_t n, const TC *x, R *out)
 {
     if (n <= MWNRM2_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -157,7 +157,7 @@ __attribute__((noinline)) static bool mwnrm2_omp(std::ptrdiff_t n, const T *x, R
 }
 #endif
 
-static R mwnrm2_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
+static R mwnrm2_core(std::ptrdiff_t n, const TC *x, std::ptrdiff_t incx)
 {
     R zero{0.0, 0.0};
     if (n < 1 || incx < 1) return zero;
@@ -194,4 +194,4 @@ static R mwnrm2_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
     return scale * sqrtdd(s);
 }
 
-extern "C" { EPBLAS_FACADE_ASUM(mwnrm2, R, T) }
+extern "C" { EPBLAS_FACADE_ASUM(mwnrm2, R, TC) }

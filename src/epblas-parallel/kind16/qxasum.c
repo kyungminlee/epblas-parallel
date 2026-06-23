@@ -9,12 +9,12 @@
 /* fabsq via __builtin_fabsf128 — single `pand` instead of a libquadmath function call. */
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 R;
 
 /* Σ(|re|+|im|) over a logical range. Carved out so the OMP partial-reduction
  * can call it per chunk; serial behaviour is unchanged. */
-static R qxasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static R qxasum_kernel(ptrdiff_t n, const TC *x, ptrdiff_t incx)
 {
     R s = 0.0Q;
     if (incx == 1) {
@@ -30,7 +30,7 @@ static R qxasum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
 /* Threaded partial-reduction for large unit-stride X — see qasum.c. */
 #define QXASUM_OMP_MIN 128
 #define QXASUM_MAX_CPUS 64
-__attribute__((noinline)) static bool qxasum_omp(ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static bool qxasum_omp(ptrdiff_t n, const TC *x, R *out)
 {
     if (n <= QXASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -52,7 +52,7 @@ __attribute__((noinline)) static bool qxasum_omp(ptrdiff_t n, const T *x, R *out
 }
 #endif
 
-static R qxasum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static R qxasum_core(ptrdiff_t n, const TC *x, ptrdiff_t incx)
 {
     if (n < 1 || incx < 1) return 0.0Q;
 #ifdef _OPENMP
@@ -64,4 +64,4 @@ static R qxasum_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
     return qxasum_kernel(n, x, incx);
 }
 
-EPBLAS_FACADE_ASUM(qxasum, R, T)
+EPBLAS_FACADE_ASUM(qxasum, R, TC)

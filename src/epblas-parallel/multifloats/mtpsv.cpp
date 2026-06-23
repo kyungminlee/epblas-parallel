@@ -19,7 +19,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -27,7 +27,7 @@ using mf_pred::eq0;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-const T zero_dd{0.0, 0.0};
+const TR zero_dd{0.0, 0.0};
 
 /* Column base offsets into the packed array (column-major triangle).
  *   Lower: column j starts at its diagonal (row j); element (i,j) i>=j at base+(i-j).
@@ -49,13 +49,13 @@ inline std::size_t cbU(std::ptrdiff_t j) {
  * divide and cross-column recurrence stay scalar/exact. The strided entry
  * gathers into contiguous scratch and reuses this. */
 static void mtpsv_serial_contig(char UPLO, char TRANS, bool nounit,
-                                std::ptrdiff_t n, const T *ap, T *x)
+                                std::ptrdiff_t n, const TR *ap, TR *x)
 {
     if (TRANS == 'N') {
         if (UPLO == 'U') {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 if (!eq0(x[j])) {
-                    const T *aj = &ap[cbU(j)];
+                    const TR *aj = &ap[cbU(j)];
                     if (nounit) x[j] = x[j] / aj[j];
                     mf_kernels::axpy_sub(j, &x[0], &aj[0], x[j]);
                 }
@@ -63,7 +63,7 @@ static void mtpsv_serial_contig(char UPLO, char TRANS, bool nounit,
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 if (!eq0(x[j])) {
-                    const T *aj = &ap[cbL((std::ptrdiff_t)j, (std::ptrdiff_t)n)];
+                    const TR *aj = &ap[cbL((std::ptrdiff_t)j, (std::ptrdiff_t)n)];
                     if (nounit) x[j] = x[j] / aj[0];
                     mf_kernels::axpy_sub(n - 1 - j, &x[j + 1], &aj[1], x[j]);
                 }
@@ -72,15 +72,15 @@ static void mtpsv_serial_contig(char UPLO, char TRANS, bool nounit,
     } else {
         if (UPLO == 'U') {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T *aj = &ap[cbU(j)];
-                T tmp = x[j] - mf_kernels::dot(j, &aj[0], &x[0]);
+                const TR *aj = &ap[cbU(j)];
+                TR tmp = x[j] - mf_kernels::dot(j, &aj[0], &x[0]);
                 if (nounit) tmp = tmp / aj[j];
                 x[j] = tmp;
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const T *aj = &ap[cbL((std::ptrdiff_t)j, (std::ptrdiff_t)n)];
-                T tmp = x[j] - mf_kernels::dot(n - 1 - j, &aj[1], &x[j + 1]);
+                const TR *aj = &ap[cbL((std::ptrdiff_t)j, (std::ptrdiff_t)n)];
+                TR tmp = x[j] - mf_kernels::dot(n - 1 - j, &aj[1], &x[j + 1]);
                 if (nounit) tmp = tmp / aj[0];
                 x[j] = tmp;
             }
@@ -91,7 +91,7 @@ static void mtpsv_serial_contig(char UPLO, char TRANS, bool nounit,
 /* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
  * incx!=1 fallback. TRANS is already normalized ('C' folded to 'T' by the caller). */
 static void mtpsv_serial(char UPLO, char TRANS, bool nounit,
-                         std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t incx)
+                         std::ptrdiff_t n, const TR *ap, TR *x, std::ptrdiff_t incx)
 {
     if (incx == 1) {
         mtpsv_serial_contig(UPLO, TRANS, nounit, n, ap, x);
@@ -106,10 +106,10 @@ static void mtpsv_serial(char UPLO, char TRANS, bool nounit,
     {
         const std::ptrdiff_t sx = incx;
         const std::ptrdiff_t kx0 = (sx < 0) ? -(n - 1) * sx : 0;
-        T stackbuf[512];
-        T *heap = nullptr;
-        T *xc = (n <= 512) ? stackbuf
-                           : (heap = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T))));
+        TR stackbuf[512];
+        TR *heap = nullptr;
+        TR *xc = (n <= 512) ? stackbuf
+                           : (heap = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR))));
         if (xc) {
             std::ptrdiff_t ix = kx0;
             for (std::ptrdiff_t k = 0; k < n; ++k) { xc[k] = x[ix]; ix += sx; }
@@ -131,7 +131,7 @@ static void mtpsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (!eq0(x[jx])) {
                         if (nounit) x[jx] = x[jx] / ap[kk];
-                        const T tmp = x[jx];
+                        const TR tmp = x[jx];
                         std::ptrdiff_t ix = jx;
                         for (std::ptrdiff_t k = kk - 1; k >= kk - j; --k) {
                             ix -= incx;
@@ -147,7 +147,7 @@ static void mtpsv_serial(char UPLO, char TRANS, bool nounit,
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
                     if (!eq0(x[jx])) {
                         if (nounit) x[jx] = x[jx] / ap[kk];
-                        const T tmp = x[jx];
+                        const TR tmp = x[jx];
                         std::ptrdiff_t ix = jx;
                         for (std::ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                             ix += incx;
@@ -163,7 +163,7 @@ static void mtpsv_serial(char UPLO, char TRANS, bool nounit,
                 std::ptrdiff_t kk = 0;
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     std::ptrdiff_t ix = kx;
                     for (std::ptrdiff_t k = kk; k < kk + j; ++k) {
                         tmp = tmp - ap[k] * x[ix];
@@ -179,7 +179,7 @@ static void mtpsv_serial(char UPLO, char TRANS, bool nounit,
                 kx += (n - 1) * incx;
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     std::ptrdiff_t ix = kx;
                     for (std::ptrdiff_t k = kk; k > kk - (n - 1 - j); --k) {
                         tmp = tmp - ap[k] * x[ix];
@@ -200,7 +200,7 @@ static void mtpsv_serial(char UPLO, char TRANS, bool nounit,
  * coupling only). Used by the threaded path; need only match serial within DD
  * fuzz tol (the threaded result is regrouped anyway). */
 static void mtpsv_block(char UPLO, char TRANS, bool nounit,
-                        std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, const T *ap, T *x)
+                        std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, const TR *ap, TR *x)
 {
     const bool lower = (UPLO == 'L');
     if (TRANS == 'N') {
@@ -223,14 +223,14 @@ static void mtpsv_block(char UPLO, char TRANS, bool nounit,
         if (!lower) {                                   /* Upper^T: forward, k<j */
             for (std::ptrdiff_t j = j0; j < j1; ++j) {
                 const std::size_t b = cbU(j);
-                T tmp = x[j] - mf_kernels::dot(j - j0, &ap[b + j0], &x[j0]);
+                TR tmp = x[j] - mf_kernels::dot(j - j0, &ap[b + j0], &x[j0]);
                 if (nounit) tmp = tmp / ap[b + j];
                 x[j] = tmp;
             }
         } else {                                        /* Lower^T: backward, k>j */
             for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 const std::size_t b = cbL(j, n);
-                T tmp = x[j] - mf_kernels::dot(j1 - (j + 1), &ap[b + 1], &x[j + 1]);
+                TR tmp = x[j] - mf_kernels::dot(j1 - (j + 1), &ap[b + 1], &x[j + 1]);
                 if (nounit) tmp = tmp / ap[b];
                 x[j] = tmp;
             }
@@ -243,7 +243,7 @@ static void mtpsv_block(char UPLO, char TRANS, bool nounit,
  * off-diagonal coupling is threaded over disjoint output rows. Returns true if
  * it handled the call. */
 __attribute__((noinline)) static bool mtpsv_omp(
-    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const T *ap, T *x)
+    char UPLO, char TRANS, bool nounit, std::ptrdiff_t n, const TR *ap, TR *x)
 {
     if (n < MTPSV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -266,9 +266,9 @@ __attribute__((noinline)) static bool mtpsv_omp(
                     std::ptrdiff_t rlo = j1 + blas_part_bound((n - j1), tid, nthreads);
                     std::ptrdiff_t rhi = j1 + blas_part_bound((n - j1), tid + 1, nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
-                        const T xi = x[i];
+                        const TR xi = x[i];
                         if (eq0(xi)) continue;
-                        const T *col = &ap[cbL(i, n)];      /* col[k-i] = A(k,i) */
+                        const TR *col = &ap[cbL(i, n)];      /* col[k-i] = A(k,i) */
                         mf_kernels::axpy_sub(rhi - rlo, &x[rlo], &col[rlo - i], xi);
                     }
                 }
@@ -284,9 +284,9 @@ __attribute__((noinline)) static bool mtpsv_omp(
                     std::ptrdiff_t rlo = blas_part_bound(j0, tid, nthreads);
                     std::ptrdiff_t rhi = blas_part_bound(j0, tid + 1, nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
-                        const T xi = x[i];
+                        const TR xi = x[i];
                         if (eq0(xi)) continue;
-                        const T *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
+                        const TR *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
                         mf_kernels::axpy_sub(rhi - rlo, &x[rlo], &col[rlo], xi);
                     }
                 }
@@ -306,7 +306,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, nthreads);
                         std::ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *col = &ap[cbL(i, n)];
+                            const TR *col = &ap[cbL(i, n)];
                             x[i] = x[i] - mf_kernels::dot(n - j1, &col[j1 - i], &x[j1]);
                         }
                     }
@@ -323,7 +323,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, nthreads);
                         std::ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *col = &ap[cbU(i)];
+                            const TR *col = &ap[cbU(i)];
                             x[i] = x[i] - mf_kernels::dot(j0, &col[0], &x[0]);
                         }
                     }
@@ -339,8 +339,8 @@ __attribute__((noinline)) static bool mtpsv_omp(
 static void mtpsv_core(
     char uplo, char trans, char diag,
     std::ptrdiff_t n,
-    const T *ap,
-    T *x, std::ptrdiff_t incx)
+    const TR *ap,
+    TR *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
     char TRANS = up(&trans);
@@ -359,5 +359,5 @@ static void mtpsv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_TPMV(mtpsv, T)
+EPBLAS_FACADE_TPMV(mtpsv, TR)
 }

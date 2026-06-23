@@ -35,7 +35,7 @@
 
 #include <stddef.h>
 
-typedef __float128 qgemm_T;
+typedef __float128 qgemm_TR;
 
 /* Register-tile dims (compile-time constants; small so the four soft-float
  * accumulators stay register-resident across the K-loop). */
@@ -52,29 +52,29 @@ ptrdiff_t qgemm_round_up(ptrdiff_t v, ptrdiff_t m);
 void qgemm_choose_blocks(ptrdiff_t k, ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
 
 /* C := beta*C pre-pass over the full M×N tile (handles K==0 / alpha==0). */
-void qgemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, qgemm_T beta, qgemm_T *c, ptrdiff_t ldc);
+void qgemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, qgemm_TR beta, qgemm_TR *c, ptrdiff_t ldc);
 
 /* Packers (panel-packed, OpenBLAS-style). */
-void qgemm_pack_A(const qgemm_T *restrict A, ptrdiff_t lda,
+void qgemm_pack_A(const qgemm_TR *restrict A, ptrdiff_t lda,
                   ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb, ptrdiff_t ta,
-                  qgemm_T *restrict Ap);
-void qgemm_pack_B(const qgemm_T *restrict B, ptrdiff_t ldb,
+                  qgemm_TR *restrict Ap);
+void qgemm_pack_B(const qgemm_TR *restrict B, ptrdiff_t ldb,
                   ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, ptrdiff_t tb,
-                  qgemm_T *restrict Bp);
+                  qgemm_TR *restrict Bp);
 
 /* Drive one packed (ib,jb,pb) macro-tile via MR×NR sub-tiles. */
-void qgemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, qgemm_T alpha,
-                        const qgemm_T *restrict Ap, const qgemm_T *restrict Bp,
-                        qgemm_T *restrict C, ptrdiff_t ldc);
+void qgemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, qgemm_TR alpha,
+                        const qgemm_TR *restrict Ap, const qgemm_TR *restrict Bp,
+                        qgemm_TR *restrict C, ptrdiff_t ldc);
 
 /* TA='T',TB='N' path: one C-column j2 (stride-1 dot, no packing). For
  * __float128 this is the ONLY TN path — it beats the blocked packed kernel at
  * every K and size because packing buys nothing without SIMD and A^T already
  * streams both operands stride-1 along the contraction index. The C-column
  * loop is threaded over j2 in the qgemm_ parallel entry. */
-void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, qgemm_T alpha,
-                    const qgemm_T *a, ptrdiff_t lda, const qgemm_T *b, ptrdiff_t ldb,
-                    qgemm_T *c, ptrdiff_t ldc);
+void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, qgemm_TR alpha,
+                    const qgemm_TR *a, ptrdiff_t lda, const qgemm_TR *b, ptrdiff_t ldb,
+                    qgemm_TR *c, ptrdiff_t ldc);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
  * invoke from inside another function's `#pragma omp parallel` region. Shares
@@ -83,10 +83,10 @@ void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, qgemm_T alpha,
 void qgemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const qgemm_T *alpha_,
-    const qgemm_T *a, ptrdiff_t lda,
-    const qgemm_T *b, ptrdiff_t ldb,
-    const qgemm_T *beta_,
-    qgemm_T *c, ptrdiff_t ldc);
+    const qgemm_TR *alpha_,
+    const qgemm_TR *a, ptrdiff_t lda,
+    const qgemm_TR *b, ptrdiff_t ldb,
+    const qgemm_TR *beta_,
+    qgemm_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QGEMM_KERNEL_H */

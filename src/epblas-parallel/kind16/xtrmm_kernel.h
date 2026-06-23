@@ -29,33 +29,33 @@
 #include <stddef.h>
 #include <quadmath.h>  /* __complex128 */
 
-typedef __complex128 xtrmm_T;
+typedef __complex128 xtrmm_TC;
 
 /* Normalize a Fortran character to upper case (uplo / side / trans decode). */
 char xtrmm_uplo(char c);
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
-void xtrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_T alpha,
-                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_T alpha,
-                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrmm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_T alpha,
-                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
+void xtrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_TC alpha,
+                    const xtrmm_TC *a, ptrdiff_t lda, xtrmm_TC *b, ptrdiff_t ldb, bool nounit);
+void xtrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_TC alpha,
+                    const xtrmm_TC *a, ptrdiff_t lda, xtrmm_TC *b, ptrdiff_t ldb, bool nounit);
+void xtrmm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_TC alpha,
+                     const xtrmm_TC *a, ptrdiff_t lda, xtrmm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void xtrmm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_T alpha,
-                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
+void xtrmm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrmm_TC alpha,
+                     const xtrmm_TC *a, ptrdiff_t lda, xtrmm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
-void xtrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T alpha,
-                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T alpha,
-                    const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrmm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T alpha,
-                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
+void xtrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_TC alpha,
+                    const xtrmm_TC *a, ptrdiff_t lda, xtrmm_TC *b, ptrdiff_t ldb, bool nounit);
+void xtrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_TC alpha,
+                    const xtrmm_TC *a, ptrdiff_t lda, xtrmm_TC *b, ptrdiff_t ldb, bool nounit);
+void xtrmm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_TC alpha,
+                     const xtrmm_TC *a, ptrdiff_t lda, xtrmm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void xtrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T alpha,
-                     const xtrmm_T *a, ptrdiff_t lda, xtrmm_T *b, ptrdiff_t ldb,
+void xtrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_TC alpha,
+                     const xtrmm_TC *a, ptrdiff_t lda, xtrmm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
@@ -64,8 +64,8 @@ void xtrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrmm_T al
 void xtrmm_serial(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const xtrmm_T *alpha_,
-    const xtrmm_T *a, ptrdiff_t lda,
-    xtrmm_T *b, ptrdiff_t ldb);
+    const xtrmm_TC *alpha_,
+    const xtrmm_TC *a, ptrdiff_t lda,
+    xtrmm_TC *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XTRMM_KERNEL_H */

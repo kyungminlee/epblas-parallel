@@ -36,9 +36,9 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef _Complex long double T;
-static const T ZERO = 0.0L + 0.0Li;
-static inline T cconj(T z) { return ~z; }
+typedef _Complex long double TC;
+static const TC ZERO = 0.0L + 0.0Li;
+static inline TC cconj(TC z) { return ~z; }
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -52,22 +52,22 @@ static ptrdiff_t ytrsv_blocked_nb(void) {
 void ytrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TC *restrict a, const ptrdiff_t *lda_,
+    TC *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void ytrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TC *restrict a, const ptrdiff_t *lda_,
+    TC *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len);
 
 void ytrsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TC *restrict a, ptrdiff_t lda,
+    TC *restrict x, ptrdiff_t incx)
 {
     if (n == 0) return;
 
@@ -91,8 +91,8 @@ void ytrsv_core(
 void ytrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TC *restrict a, const ptrdiff_t *lda_,
+    TC *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     (void)uplo_len; (void)trans_len; (void)diag_len;
@@ -117,20 +117,20 @@ void ytrsv_serial_(
                 ptrdiff_t i = 0;
                 for (; i + 1 < n; i += 2) {
                     if (nounit) x[i] /= A_(i, i);
-                    const T xi = x[i];
+                    const TC xi = x[i];
                     x[i + 1] -= xi * A_(i + 1, i);
                     if (nounit) x[i + 1] /= A_(i + 1, i + 1);
-                    const T xi1 = x[i + 1];
-                    const T *a0 = &A_(0, i);
-                    const T *a1 = &A_(0, i + 1);
+                    const TC xi1 = x[i + 1];
+                    const TC *a0 = &A_(0, i);
+                    const TC *a1 = &A_(0, i + 1);
                     for (ptrdiff_t k = i + 2; k < n; ++k) {
                         x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
                     }
                 }
                 if (i < n) {
                     if (nounit) x[i] /= A_(i, i);
-                    const T xi = x[i];
-                    const T *ai = &A_(0, i);
+                    const TC xi = x[i];
+                    const TC *ai = &A_(0, i);
                     for (ptrdiff_t k = i + 1; k < n; ++k) x[k] -= xi * ai[k];
                 }
             } else {
@@ -138,20 +138,20 @@ void ytrsv_serial_(
                 ptrdiff_t i = n - 1;
                 for (; i - 1 >= 0; i -= 2) {
                     if (nounit) x[i] /= A_(i, i);
-                    const T xi = x[i];
+                    const TC xi = x[i];
                     x[i - 1] -= xi * A_(i - 1, i);
                     if (nounit) x[i - 1] /= A_(i - 1, i - 1);
-                    const T xi1 = x[i - 1];
-                    const T *a0 = &A_(0, i);
-                    const T *a1 = &A_(0, i - 1);
+                    const TC xi1 = x[i - 1];
+                    const TC *a0 = &A_(0, i);
+                    const TC *a1 = &A_(0, i - 1);
                     for (ptrdiff_t k = 0; k < i - 1; ++k) {
                         x[k] = (x[k] - xi * a0[k]) - xi1 * a1[k];
                     }
                 }
                 if (i >= 0) {
                     if (nounit) x[i] /= A_(i, i);
-                    const T xi = x[i];
-                    const T *ai = &A_(0, i);
+                    const TC xi = x[i];
+                    const TC *ai = &A_(0, i);
                     for (ptrdiff_t k = 0; k < i; ++k) x[k] -= xi * ai[k];
                 }
             }
@@ -163,8 +163,8 @@ void ytrsv_serial_(
                  * because x falls out of L1 between outer iters. See
                  * etrsv LTN / Addendum 18. */
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    T t = x[i];
-                    const T *ai = &A_(0, i);
+                    TC t = x[i];
+                    const TC *ai = &A_(0, i);
                     if (conj_a) {
                         for (ptrdiff_t k = n - 1; k > i; --k) t -= cconj(ai[k]) * x[k];
                         if (nounit) t /= cconj(ai[i]);
@@ -188,23 +188,23 @@ void ytrsv_serial_(
                  * to ~0.91× when unrolled. Keep it single-accumulator. */
                 if (conj_a) {
                     for (ptrdiff_t i = 0; i < n; ++i) {
-                        T t = x[i];
-                        const T *ai = &A_(0, i);
+                        TC t = x[i];
+                        const TC *ai = &A_(0, i);
                         for (ptrdiff_t k = 0; k < i; ++k) t -= cconj(ai[k]) * x[k];
                         if (nounit) t /= cconj(ai[i]);
                         x[i] = t;
                     }
                 } else {
                     for (ptrdiff_t i = 0; i < n; ++i) {
-                        T t0 = x[i], t1 = ZERO;
-                        const T *ai = &A_(0, i);
+                        TC t0 = x[i], t1 = ZERO;
+                        const TC *ai = &A_(0, i);
                         ptrdiff_t k = 0;
                         for (; k + 1 < i; k += 2) {
                             t0 -= ai[k]     * x[k];
                             t1 -= ai[k + 1] * x[k + 1];
                         }
                         if (k < i) t0 -= ai[k] * x[k];
-                        T t = t0 + t1;
+                        TC t = t0 + t1;
                         if (nounit) t /= ai[i];
                         x[i] = t;
                     }
@@ -219,10 +219,10 @@ void ytrsv_serial_(
             if (UPLO == 'L') {
                 ptrdiff_t ix = kx;
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    const T *ai = &A_(0, i);
+                    const TC *ai = &A_(0, i);
                     if (x[ix] != ZERO) {
                         if (nounit) x[ix] /= ai[i];
-                        const T xi = x[ix];
+                        const TC xi = x[ix];
                         ptrdiff_t kk = ix + incx;
                         for (ptrdiff_t k = i + 1; k < n; ++k) {
                             x[kk] -= xi * ai[k];
@@ -234,10 +234,10 @@ void ytrsv_serial_(
             } else {
                 ptrdiff_t ix = kx + (n - 1) * incx;
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    const T *ai = &A_(0, i);
+                    const TC *ai = &A_(0, i);
                     if (x[ix] != ZERO) {
                         if (nounit) x[ix] /= ai[i];
-                        const T xi = x[ix];
+                        const TC xi = x[ix];
                         ptrdiff_t kk = kx;
                         for (ptrdiff_t k = 0; k < i; ++k) {
                             x[kk] -= xi * ai[k];
@@ -255,11 +255,11 @@ void ytrsv_serial_(
                  * (Addendum 18 / Rule 21). */
                 ptrdiff_t ix = kx + (n - 1) * incx;
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
-                    const T *ai = &A_(0, i);
-                    T t = x[ix];
+                    const TC *ai = &A_(0, i);
+                    TC t = x[ix];
                     ptrdiff_t xk = kx + (n - 1) * incx;
                     for (ptrdiff_t k = n - 1; k > i; --k) {
-                        const T aki = conj_a ? cconj(ai[k]) : ai[k];
+                        const TC aki = conj_a ? cconj(ai[k]) : ai[k];
                         t -= aki * x[xk];
                         xk -= incx;
                     }
@@ -270,11 +270,11 @@ void ytrsv_serial_(
             } else {
                 ptrdiff_t ix = kx;
                 for (ptrdiff_t i = 0; i < n; ++i) {
-                    const T *ai = &A_(0, i);
-                    T t = x[ix];
+                    const TC *ai = &A_(0, i);
+                    TC t = x[ix];
                     ptrdiff_t xk = kx;
                     for (ptrdiff_t k = 0; k < i; ++k) {
-                        const T aki = conj_a ? cconj(ai[k]) : ai[k];
+                        const TC aki = conj_a ? cconj(ai[k]) : ai[k];
                         t -= aki * x[xk];
                         xk += incx;
                     }
@@ -298,17 +298,17 @@ void ytrsv_serial_(
 extern void ygemv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha,
-    const T *a, ptrdiff_t lda,
-    const T *x, ptrdiff_t incx,
-    const T *beta,
-    T *y, ptrdiff_t incy);
+    const TC *alpha,
+    const TC *a, ptrdiff_t lda,
+    const TC *x, ptrdiff_t incx,
+    const TC *beta,
+    TC *y, ptrdiff_t incy);
 
 void ytrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
-    const T *restrict a, const ptrdiff_t *lda_,
-    T *restrict x, const ptrdiff_t *incx_,
+    const TC *restrict a, const ptrdiff_t *lda_,
+    TC *restrict x, const ptrdiff_t *incx_,
     size_t uplo_len, size_t trans_len, size_t diag_len)
 {
     const ptrdiff_t n = *n_;
@@ -325,8 +325,8 @@ void ytrsv_blocked_(
         return;
     }
 
-    const T neg_one = -1.0L + 0.0Li;
-    const T one_v   =  1.0L + 0.0Li;
+    const TC neg_one = -1.0L + 0.0Li;
+    const TC one_v   =  1.0L + 0.0Li;
     const char NN[1] = {'N'};
     const char TT[1] = {'T'};
     const char CC[1] = {'C'};
@@ -465,6 +465,6 @@ void ytrsv_blocked_(
     }
 }
 
-EPBLAS_FACADE_TRMV(ytrsv, T)
+EPBLAS_FACADE_TRMV(ytrsv, TC)
 
 #undef A_

@@ -9,7 +9,7 @@
 #include <quadmath.h>
 #include "../common/epblas_facade.h"
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -17,10 +17,10 @@ typedef __float128 T;
 void qtbsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TR *restrict a, ptrdiff_t lda,
+    TR *restrict x, ptrdiff_t incx)
 {
-    const T zero = 0.0Q;
+    const TR zero = 0.0Q;
     const char UPLO = blas_up(uplo);
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
@@ -35,7 +35,7 @@ void qtbsv_core(
                     if (x[j] != zero) {
                         const ptrdiff_t L = k - j;
                         if (nounit) x[j] /= A_(k, j);
-                        const T tmp = x[j];
+                        const TR tmp = x[j];
                         const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = j - 1; i >= i_lo; --i) x[i] -= tmp * A_(L + i, j);
                     }
@@ -44,7 +44,7 @@ void qtbsv_core(
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
                         if (nounit) x[j] /= A_(0, j);
-                        const T tmp = x[j];
+                        const TR tmp = x[j];
                         const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = j + 1; i < i_hi; ++i) x[i] -= tmp * A_(i - j, j);
                     }
@@ -53,7 +53,7 @@ void qtbsv_core(
         } else {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[j];
+                    TR tmp = x[j];
                     const ptrdiff_t L = k - j;
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= A_(L + i, j) * x[i];
@@ -62,7 +62,7 @@ void qtbsv_core(
                 }
             } else {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[j];
+                    TR tmp = x[j];
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= A_(i - j, j) * x[i];
                     if (nounit) tmp /= A_(0, j);
@@ -82,7 +82,7 @@ void qtbsv_core(
                         ptrdiff_t ix = kx;
                         const ptrdiff_t L = k - j;
                         if (nounit) x[jx] /= A_(k, j);
-                        const T tmp = x[jx];
+                        const TR tmp = x[jx];
                         const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                             x[ix] -= tmp * A_(L + i, j);
@@ -98,7 +98,7 @@ void qtbsv_core(
                     if (x[jx] != zero) {
                         ptrdiff_t ix = kx;
                         if (nounit) x[jx] /= A_(0, j);
-                        const T tmp = x[jx];
+                        const TR tmp = x[jx];
                         const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                             x[ix] -= tmp * A_(i - j, j);
@@ -112,7 +112,7 @@ void qtbsv_core(
             if (UPLO == 'U') {
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     ptrdiff_t ix = kx;
                     const ptrdiff_t L = k - j;
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
@@ -129,7 +129,7 @@ void qtbsv_core(
                 kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     ptrdiff_t ix = kx;
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = i_hi - 1; i > j; --i) {
@@ -146,6 +146,6 @@ void qtbsv_core(
     }
 }
 
-EPBLAS_FACADE_TBMV(qtbsv, T)
+EPBLAS_FACADE_TBMV(qtbsv, TR)
 
 #undef A_

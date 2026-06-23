@@ -34,7 +34,6 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-typedef __float128 T;
 typedef xher2k_TC TC;
 typedef xher2k_TR TR;
 
@@ -53,12 +52,12 @@ void xher2k_serial(
     TC *c_c, ptrdiff_t ldc)
 {
     /* Reinterpret the complex ABI as interleaved (re,im) __float128 storage. */
-    const T *alpha_ = (const T *)alpha_c;
-    const T *a = (const T *)a_c;
-    const T *b = (const T *)b_c;
-    T *c = (T *)c_c;
-    const T alphar = alpha_[0], alphai = alpha_[1];
-    const T beta_r = beta_[0];
+    const TR *alpha_ = (const TR *)alpha_c;
+    const TR *a = (const TR *)a_c;
+    const TR *b = (const TR *)b_c;
+    TR *c = (TR *)c_c;
+    const TR alphar = alpha_[0], alphai = alpha_[1];
+    const TR beta_r = beta_[0];
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
@@ -77,7 +76,7 @@ void xher2k_serial(
      * per-element footprint), capped at 4×MC0 and rounded to MR. */
     if (k <= KC) {
         const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(T));
+        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(TR));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
             MC = round_up((ptrdiff_t)target_mc, MR);
@@ -90,12 +89,12 @@ void xher2k_serial(
     const bool conj_a_pack = (TRANS == 'C') ? 1 : 0;
     const bool conj_b_pack = (TRANS == 'N') ? 1 : 0;
 
-    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(T);
-    T *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(TR);
+    TR *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap_A && Ap_B && Bp_A && Bp_B) {
         for (ptrdiff_t js = 0; js < n; js += NC) {
             const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
@@ -127,7 +126,7 @@ void xher2k_serial(
                         qblas_ygemm_ncopy(pb, min_i, conj_a_pack, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
                     }
 
-                    T *cij = &c[((size_t)js * ldc + is) * 2];
+                    TR *cij = &c[((size_t)js * ldc + is) * 2];
                     const ptrdiff_t off = is - js;
 
                     /* Pass 1: alpha·A·Bᴴ + Hermitian diagonal merge. */

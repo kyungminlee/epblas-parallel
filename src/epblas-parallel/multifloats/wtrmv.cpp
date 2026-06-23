@@ -20,7 +20,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -43,24 +43,24 @@ using mf_kernels::cconj;
  * (diagonal first, then strictly descending column index) so the result is
  * byte-identical to the untiled path. */
 static void wtrmv_serial_N_lower(bool nounit, std::ptrdiff_t n,
-                                 const T *a, std::size_t lda, T *x) {
+                                 const TC *a, std::size_t lda, TC *x) {
     const std::ptrdiff_t RB = 32;
-    std::vector<T> ybuf(static_cast<std::size_t>(n));
-    T *y = ybuf.data();
+    std::vector<TC> ybuf(static_cast<std::size_t>(n));
+    TC *y = ybuf.data();
     for (std::ptrdiff_t ib = 0; ib < n; ib += RB) {
         const std::ptrdiff_t ie = ib + RB < n ? ib + RB : n;
         for (std::ptrdiff_t i = ib; i < ie; ++i)
             y[i] = nounit ? cmul(x[i], A_(i, i)) : x[i];
         for (std::ptrdiff_t j = ie - 1; j >= ib; --j) {            /* within-tile, descending j */
-            const T xj = x[j];
+            const TC xj = x[j];
             if (ceq0(xj)) continue;
-            const T *col = &A_(0, j);
+            const TC *col = &A_(0, j);
             mf_kernels::caxpy_add(ie - (j + 1), &y[j + 1], &col[j + 1], xj);
         }
         for (std::ptrdiff_t j = ib - 1; j >= 0; --j) {             /* below-tile columns, descending j */
-            const T xj = x[j];
+            const TC xj = x[j];
             if (ceq0(xj)) continue;
-            const T *col = &A_(0, j);
+            const TC *col = &A_(0, j);
             mf_kernels::caxpy_add(ie - ib, &y[ib], &col[ib], xj);
         }
     }
@@ -76,32 +76,32 @@ static void wtrmv_serial_N_lower(bool nounit, std::ptrdiff_t n,
  * vectorized like the serial one. */
 static void wtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
                            std::ptrdiff_t m_from, std::ptrdiff_t m_to,
-                           const T *a, std::size_t lda, const T *x, T *y)
+                           const TC *a, std::size_t lda, const TC *x, TC *y)
 {
     const std::ptrdiff_t TB = 32;
     for (std::ptrdiff_t is = m_from; is < m_to; is += TB) {
         std::ptrdiff_t min_i = (m_to - is < TB) ? m_to - is : TB;
         if (upper && is > 0) {
             for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
-                const T xj = x[j];
+                const TC xj = x[j];
                 if (!ceq0(xj)) mf_kernels::caxpy_add(is, &y[0], &A_(0, j), xj);
             }
         }
         for (std::ptrdiff_t i = is; i < is + min_i; ++i) {
             if (upper && i > is) {
-                const T xi = x[i];
+                const TC xi = x[i];
                 if (!ceq0(xi)) mf_kernels::caxpy_add(i - is, &y[is], &A_(is, i), xi);
             }
             y[i] = cadd(y[i], nounit ? cmul(A_(i, i), x[i]) : x[i]);
             if (!upper && i + 1 < is + min_i) {
-                const T xi = x[i];
+                const TC xi = x[i];
                 if (!ceq0(xi))
                     mf_kernels::caxpy_add(is + min_i - (i + 1), &y[i + 1], &A_(i + 1, i), xi);
             }
         }
         if (!upper && is + min_i < n) {
             for (std::ptrdiff_t j = is; j < is + min_i; ++j) {
-                const T xj = x[j];
+                const TC xj = x[j];
                 if (!ceq0(xj))
                     mf_kernels::caxpy_add(n - (is + min_i), &y[is + min_i], &A_(is + min_i, j), xj);
             }
@@ -120,19 +120,19 @@ static void wtrmv_kernel_N(bool upper, bool nounit, std::ptrdiff_t n,
  * DD addition reorders vs serial → within fuzz tol; serial stays bit-exact.
  * Returns true on success, false if a scratch alloc failed. */
 static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
-                             std::ptrdiff_t n, const T *a, std::size_t lda,
-                             T *x, std::ptrdiff_t nthreads)
+                             std::ptrdiff_t n, const TC *a, std::size_t lda,
+                             TC *x, std::ptrdiff_t nthreads)
 {
     if (trans) {
-        T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        TC *y_buf = static_cast<TC *>(std::malloc((std::size_t)n * sizeof(TC)));
         if (!y_buf) return false;
         #pragma omp parallel num_threads(nthreads)
         {
             #pragma omp for schedule(static, 1)
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                T diagc = A_(j, j); if (conj) diagc = cconj(diagc);
-                T s = nounit ? cmul(diagc, x[j]) : x[j];
-                const T *aj = &A_(0, j);
+                TC diagc = A_(j, j); if (conj) diagc = cconj(diagc);
+                TC s = nounit ? cmul(diagc, x[j]) : x[j];
+                const TC *aj = &A_(0, j);
                 if (upper) s = cadd(s, mf_kernels::cdot(j, &aj[0], &x[0], conj));
                 else       s = cadd(s, mf_kernels::cdot(n - j - 1, &aj[j + 1], &x[j + 1], conj));
                 y_buf[j] = s;
@@ -156,13 +156,13 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
          * carries the heavy top rows. mask 7/min 16 are this routine's tuning. */
         std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 7, 16, upper,
                                            WTRMV_MAX_CPUS, range);
-        T *buf_all = static_cast<T *>(
-            std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(T)));
+        TC *buf_all = static_cast<TC *>(
+            std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(TC)));
         if (!buf_all) { std::free(range); return false; }
         #pragma omp parallel num_threads(ncpu)
         {
             const std::ptrdiff_t tid = omp_get_thread_num();
-            T *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
+            TC *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
             std::ptrdiff_t m_from, m_to;
             if (upper) { m_from = range[ncpu - tid - 1]; m_to = range[ncpu - tid]; }
             else       { m_from = range[tid];            m_to = range[tid + 1]; }
@@ -173,14 +173,14 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
         if (upper) {
             for (std::ptrdiff_t t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_to_t = range[ncpu - t];
-                const T *slot = &buf_all[(std::size_t)t * n];
+                const TC *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = 0; i < m_to_t; ++i)
                     buf_all[i] = cadd(buf_all[i], slot[i]);
             }
         } else {
             for (std::ptrdiff_t t = 1; t < ncpu; ++t) {
                 std::ptrdiff_t m_from_t = range[t];
-                const T *slot = &buf_all[(std::size_t)t * n];
+                const TC *slot = &buf_all[(std::size_t)t * n];
                 for (std::ptrdiff_t i = m_from_t; i < n; ++i)
                     buf_all[i] = cadd(buf_all[i], slot[i]);
             }
@@ -195,7 +195,7 @@ static bool wtrmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
  * contiguous core directly; strided gathers/scatters around it. */
 __attribute__((noinline)) static bool wtrmv_omp(
     bool upper, bool trans, bool conj, bool nounit, std::ptrdiff_t n,
-    const T *a, std::size_t lda, T *x, std::ptrdiff_t incx)
+    const TC *a, std::size_t lda, TC *x, std::ptrdiff_t incx)
 {
     if (n < WTRMV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -205,8 +205,8 @@ __attribute__((noinline)) static bool wtrmv_omp(
     if (incx == 1)
         return wtrmv_omp_contig(upper, trans, conj, nounit, n, a, lda, x, nthreads);
 
-    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
-    T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    TC *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
+    TC *xbuf = static_cast<TC *>(std::malloc((std::size_t)n * sizeof(TC)));
     if (!xbuf) return false;
     for (std::ptrdiff_t i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
     bool ok = wtrmv_omp_contig(upper, trans, conj, nounit, n, a, lda, xbuf, nthreads);
@@ -221,20 +221,20 @@ __attribute__((noinline)) static bool wtrmv_omp(
  * AXPY (mf_kernels::caxpy_add, bit-exact); Trans/ConjTrans is a column dot (mf_kernels::cdot,
  * within DD fuzz tol). The strided entry gathers x to scratch and reuses this. */
 static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
-                                std::ptrdiff_t n, const T *a, std::size_t lda, T *x)
+                                std::ptrdiff_t n, const TC *a, std::size_t lda, TC *x)
 {
     if (!trans) {
         if (!upper) {
             if (n >= 128) { wtrmv_serial_N_lower(nounit, n, a, lda, x); return; }
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const T temp = x[j];
+                const TC temp = x[j];
                 if (!ceq0(temp))
                     mf_kernels::caxpy_add(n - 1 - j, &x[j + 1], &A_(j + 1, j), temp);
                 if (nounit) x[j] = cmul(x[j], A_(j, j));
             }
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T temp = x[j];
+                const TC temp = x[j];
                 if (!ceq0(temp))
                     mf_kernels::caxpy_add(j, &x[0], &A_(0, j), temp);
                 if (nounit) x[j] = cmul(x[j], A_(j, j));
@@ -243,14 +243,14 @@ static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
     } else {
         if (!upper) {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                T temp = x[j];
+                TC temp = x[j];
                 if (nounit) temp = cmul(temp, conj ? cconj(A_(j, j)) : A_(j, j));
                 temp = cadd(temp, mf_kernels::cdot(n - 1 - j, &A_(j + 1, j), &x[j + 1], conj));
                 x[j] = temp;
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                T temp = x[j];
+                TC temp = x[j];
                 if (nounit) temp = cmul(temp, conj ? cconj(A_(j, j)) : A_(j, j));
                 temp = cadd(temp, mf_kernels::cdot(j, &A_(0, j), &x[0], conj));
                 x[j] = temp;
@@ -262,8 +262,8 @@ static void wtrmv_serial_contig(bool upper, bool trans, bool conj, bool nounit,
 static void wtrmv_core(
     char uplo, char trans, char diag,
     std::ptrdiff_t n,
-    const T *a, std::ptrdiff_t lda,
-    T *x, std::ptrdiff_t incx)
+    const TC *a, std::ptrdiff_t lda,
+    TC *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
     const char TRANS   = up(&trans);
@@ -287,7 +287,7 @@ static void wtrmv_core(
      * scatter back. The in-place strided walk is the alloc-fail fallback. */
     {
         const std::ptrdiff_t base = (incx < 0) ? -(std::ptrdiff_t)(n - 1) * incx : 0;
-        T *xs = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        TC *xs = static_cast<TC *>(std::malloc((std::size_t)n * sizeof(TC)));
         if (xs) {
             for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = x[base + (std::ptrdiff_t)i * incx];
             wtrmv_serial_contig(UPLO == 'U', TRANS != 'N', TRANS == 'C', nounit, n, a, lda, xs);
@@ -302,14 +302,14 @@ static void wtrmv_core(
         if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                    const T temp = x[kx + j * incx];
+                    const TC temp = x[kx + j * incx];
                     if (!ceq0(temp))
                         for (std::ptrdiff_t i = j + 1; i < n; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
                     if (nounit) x[kx + j * incx] = cmul(x[kx + j * incx], A_(j, j));
                 }
             } else {
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    const T temp = x[kx + j * incx];
+                    const TC temp = x[kx + j * incx];
                     if (!ceq0(temp))
                         for (std::ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] = cadd(x[kx + i * incx], cmul(temp, A_(i, j)));
                     if (nounit) x[kx + j * incx] = cmul(x[kx + j * incx], A_(j, j));
@@ -319,20 +319,20 @@ static void wtrmv_core(
             const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    T temp = x[kx + j * incx];
+                    TC temp = x[kx + j * incx];
                     if (nounit) temp = cmul(temp, conj_a ? cconj(A_(j, j)) : A_(j, j));
                     for (std::ptrdiff_t i = j + 1; i < n; ++i) {
-                        const T aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
+                        const TC aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
                         temp = cadd(temp, cmul(aij, x[kx + i * incx]));
                     }
                     x[kx + j * incx] = temp;
                 }
             } else {
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T temp = x[kx + j * incx];
+                    TC temp = x[kx + j * incx];
                     if (nounit) temp = cmul(temp, conj_a ? cconj(A_(j, j)) : A_(j, j));
                     for (std::ptrdiff_t i = 0; i < j; ++i) {
-                        const T aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
+                        const TC aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
                         temp = cadd(temp, cmul(aij, x[kx + i * incx]));
                     }
                     x[kx + j * incx] = temp;
@@ -343,7 +343,7 @@ static void wtrmv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_TRMV(wtrmv, T)
+EPBLAS_FACADE_TRMV(wtrmv, TC)
 }
 
 #undef A_

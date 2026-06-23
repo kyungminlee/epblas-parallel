@@ -6,14 +6,14 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef __float128 T;
+typedef __float128 TR;
 
 #ifdef _OPENMP
 /* Threaded Givens rotation — quad is compute-bound, so it threads (see
  * qaxpy.c). Each iteration is independent; index-from-i covers every stride. */
 #define QROT_OMP_MIN 128
-__attribute__((noinline)) static bool qrot_omp(ptrdiff_t n, T *x, ptrdiff_t incx,
-                                              T *y, ptrdiff_t incy, T c, T s)
+__attribute__((noinline)) static bool qrot_omp(ptrdiff_t n, TR *x, ptrdiff_t incx,
+                                              TR *y, ptrdiff_t incy, TR c, TR s)
 {
     if (n <= QROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -23,7 +23,7 @@ __attribute__((noinline)) static bool qrot_omp(ptrdiff_t n, T *x, ptrdiff_t incx
     #pragma omp parallel for schedule(static) num_threads(nthreads)
     for (ptrdiff_t i = 0; i < n; ++i) {
         ptrdiff_t ix = ix0 + i * incx, iy = iy0 + i * incy;
-        T tx = c * x[ix] + s * y[iy];
+        TR tx = c * x[ix] + s * y[iy];
         y[iy] = c * y[iy] - s * x[ix];
         x[ix] = tx;
     }
@@ -31,17 +31,17 @@ __attribute__((noinline)) static bool qrot_omp(ptrdiff_t n, T *x, ptrdiff_t incx
 }
 #endif
 
-static void qrot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
-                      const T *c_, const T *s_)
+static void qrot_core(ptrdiff_t n, TR *x, ptrdiff_t incx, TR *y, ptrdiff_t incy,
+                      const TR *c_, const TR *s_)
 {
-    const T c = *c_, s = *s_;
+    const TR c = *c_, s = *s_;
     if (n <= 0) return;
 #ifdef _OPENMP
     if (qrot_omp(n, x, incx, y, incy, c, s)) return;
 #endif
     if (incx == 1 && incy == 1) {
         for (ptrdiff_t i = 0; i < n; ++i) {
-            T tx = c * x[i] + s * y[i];
+            TR tx = c * x[i] + s * y[i];
             y[i] = c * y[i] - s * x[i];
             x[i] = tx;
         }
@@ -49,7 +49,7 @@ static void qrot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
         for (ptrdiff_t i = 0; i < n; ++i) {
-            T tx = c * x[ix] + s * y[iy];
+            TR tx = c * x[ix] + s * y[iy];
             y[iy] = c * y[iy] - s * x[ix];
             x[ix] = tx;
             ix += incx; iy += incy;
@@ -57,4 +57,4 @@ static void qrot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
     }
 }
 
-EPBLAS_FACADE_ROT(qrot, T, T)
+EPBLAS_FACADE_ROT(qrot, TR, TR)

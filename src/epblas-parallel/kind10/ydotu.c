@@ -8,14 +8,14 @@
 #include <stddef.h>
 #endif
 #include "../common/epblas_facade.h"
-typedef _Complex long double T;
+typedef _Complex long double TC;
 
-static T ydotu_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdiff_t incy)
+static TC ydotu_kernel(ptrdiff_t n, const TC *x, ptrdiff_t incx, const TC *y, ptrdiff_t incy)
 {
-    T s = 0.0L;
+    TC s = 0.0L;
     if (incx == 1 && incy == 1) {
-        const T *xe = x + n;
-        for (const T *xp = x, *yp = y; xp < xe; ++xp, ++yp) s += *xp * *yp;
+        const TC *xe = x + n;
+        for (const TC *xp = x, *yp = y; xp < xe; ++xp, ++yp) s += *xp * *yp;
     } else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
@@ -33,13 +33,13 @@ static T ydotu_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdi
  * in [1024,10000) where ob is serial; par still threads >=10000 to match ob. */
 #define YDOTU_OMP_MIN 1024
 #define YDOTU_MAX_CPUS 64
-__attribute__((noinline)) static ptrdiff_t ydotu_omp(ptrdiff_t n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static ptrdiff_t ydotu_omp(ptrdiff_t n, const TC *x, const TC *y, TC *out)
 {
     if (n <= YDOTU_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > YDOTU_MAX_CPUS) nthreads = YDOTU_MAX_CPUS;
-    T partial[YDOTU_MAX_CPUS] = {0};
+    TC partial[YDOTU_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -48,24 +48,24 @@ __attribute__((noinline)) static ptrdiff_t ydotu_omp(ptrdiff_t n, const T *x, co
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) partial[tid] = ydotu_kernel(hi - lo, x + lo, 1, y + lo, 1);
     }
-    T s = 0.0L;
+    TC s = 0.0L;
     for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }
 #endif
 
-static T ydotu_core(ptrdiff_t n, const T *x, ptrdiff_t incx,
-                    const T *y, ptrdiff_t incy)
+static TC ydotu_core(ptrdiff_t n, const TC *x, ptrdiff_t incx,
+                    const TC *y, ptrdiff_t incy)
 {
-    if (n <= 0) return (T)0.0L;
+    if (n <= 0) return (TC)0.0L;
 #ifdef _OPENMP
     if (incx == 1 && incy == 1) {
-        T s;
+        TC s;
         if (ydotu_omp(n, x, y, &s)) return s;
     }
 #endif
     return ydotu_kernel(n, x, incx, y, incy);
 }
 
-EPBLAS_FACADE_DOT(ydotu, T, T)
+EPBLAS_FACADE_DOT(ydotu, TC, TC)

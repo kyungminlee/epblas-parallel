@@ -19,9 +19,9 @@
  * Bit-exact (relerr 0). Uniform across the y* rank-update family. */
 #define YHPR2_OMP_MIN 24
 
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double TR;
-static inline T cconj(T z) { return ~z; }
+static inline TC cconj(TC z) { return ~z; }
 
 
 /* Per-column rank-2 updates, carved out as their own functions so the inner
@@ -32,16 +32,16 @@ static inline T cconj(T z) { return ~z; }
  * threaded paths share one tight loop. The Hermitian diagonal is forced real
  * here: the off-diagonal run plus the single real diagonal write. */
 __attribute__((noinline))
-static void yhpr2_col_upper(ptrdiff_t j, T t1, T t2,
-                            const T *restrict x, const T *restrict y, T *restrict ap) {
-    T *restrict c = ap + (size_t)j * (j + 1) / 2;
+static void yhpr2_col_upper(ptrdiff_t j, TC t1, TC t2,
+                            const TC *restrict x, const TC *restrict y, TC *restrict ap) {
+    TC *restrict c = ap + (size_t)j * (j + 1) / 2;
     for (ptrdiff_t i = 0; i < j; ++i) c[i] += x[i] * t1 + y[i] * t2;
     c[j] = (TR)__real__ c[j] + (TR)__real__ (x[j] * t1 + y[j] * t2);
 }
 
 __attribute__((noinline))
-static void yhpr2_col_lower(ptrdiff_t j, ptrdiff_t n, T t1, T t2,
-                            const T *restrict x, const T *restrict y, T *restrict ap) {
+static void yhpr2_col_lower(ptrdiff_t j, ptrdiff_t n, TC t1, TC t2,
+                            const TC *restrict x, const TC *restrict y, TC *restrict ap) {
     /* Pre-advance the off-diagonal bases so the loop runs 0-based over a single
      * induction variable indexing three pointers — the exact tight form gcc
      * picks for the upper helper. A loop that starts at i=1 (or indexes the
@@ -49,9 +49,9 @@ static void yhpr2_col_lower(ptrdiff_t j, ptrdiff_t n, T t1, T t2,
      * separate pointers with an extra increment per iteration (~7% on the
      * lower triangle). Diagonal last so the loop compiles on a clean x87 stack. */
     const ptrdiff_t mo = n - j - 1;
-    T *restrict c0 = ap + ((size_t)j * n - (size_t)j * (j - 1) / 2);
-    T *restrict c = c0 + 1;
-    const T *restrict xc = x + j + 1, *restrict yc = y + j + 1;
+    TC *restrict c0 = ap + ((size_t)j * n - (size_t)j * (j - 1) / 2);
+    TC *restrict c = c0 + 1;
+    const TC *restrict xc = x + j + 1, *restrict yc = y + j + 1;
     for (ptrdiff_t i = 0; i < mo; ++i) c[i] += xc[i] * t1 + yc[i] * t2;
     c0[0] = (TR)__real__ c0[0] + (TR)__real__ (x[j] * t1 + y[j] * t2);
 }
@@ -59,13 +59,13 @@ static void yhpr2_col_lower(ptrdiff_t j, ptrdiff_t n, T t1, T t2,
 static void yhpr2_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict ap)
+    const TC *alpha_,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *restrict y, ptrdiff_t incy,
+    TC *restrict ap)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0L + 0.0Li;
+    const TC alpha = *alpha_;
+    const TC zero = 0.0L + 0.0Li;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -113,8 +113,8 @@ static void yhpr2_core(
         if (UPLO == 'U') {
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
-                    const T t1 = alpha * cconj(y[jy]);
-                    const T t2 = cconj(alpha * x[jx]);
+                    const TC t1 = alpha * cconj(y[jy]);
+                    const TC t2 = cconj(alpha * x[jx]);
                     ptrdiff_t ix = kx, iy = ky;
                     for (ptrdiff_t k = kk; k < kk + j; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
@@ -139,8 +139,8 @@ static void yhpr2_core(
              * fresh angle. project_ptrdiff_conversion_regressors (placement). */
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
-                    const T t1 = alpha * cconj(y[jy]);
-                    const T t2 = cconj(alpha * x[jx]);
+                    const TC t1 = alpha * cconj(y[jy]);
+                    const TC t2 = cconj(alpha * x[jx]);
                     ptrdiff_t ix = jx, iy = jy;
                     ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (x[jx] * t1 + y[jy] * t2);
                     for (ptrdiff_t k = kk + 1; k < kk + (n - j); ++k) {
@@ -157,4 +157,4 @@ static void yhpr2_core(
     }
 }
 
-EPBLAS_FACADE_SPR2(yhpr2, T)
+EPBLAS_FACADE_SPR2(yhpr2, TC)

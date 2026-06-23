@@ -12,7 +12,7 @@
 #include "../common/epblas_facade.h"
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 R;
 
 static R btsml, btbig, bssml, bsbig, maxN;
@@ -78,7 +78,7 @@ static R qxnrm2_finalize(R abig, R amed, R asml)
  * (abig, amed, asml). The notbig flag is chunk-local: asml is only consumed by
  * the finalize when the GLOBAL abig==0 (every chunk kept notbig==1), so this is
  * exact. */
-static void qxnrm2_bucket(ptrdiff_t n, const T *x, R *abig_, R *amed_, R *asml_)
+static void qxnrm2_bucket(ptrdiff_t n, const TC *x, R *abig_, R *amed_, R *asml_)
 {
     R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
     bool notbig = 1;
@@ -92,7 +92,7 @@ static void qxnrm2_bucket(ptrdiff_t n, const T *x, R *abig_, R *amed_, R *asml_)
 /* Threaded reduction for large unit-stride X (see qnrm2 for the rationale). */
 #define QXNRM2_OMP_MIN 128
 #define QXNRM2_MAX_CPUS 64
-__attribute__((noinline)) static bool qxnrm2_omp(ptrdiff_t n, const T *x, R *out)
+__attribute__((noinline)) static bool qxnrm2_omp(ptrdiff_t n, const TC *x, R *out)
 {
     if (n <= QXNRM2_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -114,7 +114,7 @@ __attribute__((noinline)) static bool qxnrm2_omp(ptrdiff_t n, const T *x, R *out
 }
 #endif
 
-static R qxnrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static R qxnrm2_core(ptrdiff_t n, const TC *x, ptrdiff_t incx)
 {
     if (n <= 0) return 0.0Q;
     if (!blue_inited) blue_init();
@@ -137,4 +137,4 @@ static R qxnrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
     return qxnrm2_finalize(abig, amed, asml);
 }
 
-EPBLAS_FACADE_ASUM(qxnrm2, R, T)
+EPBLAS_FACADE_ASUM(qxnrm2, R, TC)

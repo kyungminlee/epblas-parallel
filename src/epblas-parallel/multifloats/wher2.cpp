@@ -25,7 +25,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -41,15 +41,15 @@ using mf_kernels::cconj;
 
 /* Per-column rank-2 update. aj = &A(0,j); off-diagonal run is a SIMD rank-2
  * AXPY (two rank-1 passes); the Hermitian diagonal is forced real. */
-inline void wher2_col_upper(std::ptrdiff_t j, T t1, T t2, const T *x, const T *y, T *aj) {
+inline void wher2_col_upper(std::ptrdiff_t j, TC t1, TC t2, const TC *x, const TC *y, TC *aj) {
     mf_kernels::caxpy2_add(j, aj, x, t1, y, t2);
-    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
-    aj[j] = T{ aj[j].re + prod.re, rzero };
+    const TC prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
+    aj[j] = TC{ aj[j].re + prod.re, rzero };
 }
 
-inline void wher2_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, T t1, T t2, const T *x, const T *y, T *aj) {
-    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
-    aj[j] = T{ aj[j].re + prod.re, rzero };
+inline void wher2_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, TC t1, TC t2, const TC *x, const TC *y, TC *aj) {
+    const TC prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
+    aj[j] = TC{ aj[j].re + prod.re, rzero };
     mf_kernels::caxpy2_add(n - (j + 1), aj + j + 1, x + j + 1, t1, y + j + 1, t2);
 }
 }
@@ -59,12 +59,12 @@ inline void wher2_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, T t1, T t2, cons
 static void wher2_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    const T *y, std::ptrdiff_t incy,
-    T *a, std::ptrdiff_t lda)
+    const TC *alpha_,
+    const TC *x, std::ptrdiff_t incx,
+    const TC *y, std::ptrdiff_t incy,
+    TC *a, std::ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     const char UPLO = up(&uplo);
 
     if (n == 0 || ceq0(alpha)) return;
@@ -75,8 +75,8 @@ static void wher2_core(
      * contiguous one (the per-element kx+i*incx recompute otherwise left the
      * dense strided-LOWER path ~2-3% behind ob and unthreaded). A is always
      * contiguous-by-column, so only x,y need gathering. */
-    std::vector<T> xg, yg;
-    const T *xp = x, *yp = y;
+    std::vector<TC> xg, yg;
+    const TC *xp = x, *yp = y;
     if (incx != 1 || incy != 1) {
         xg.resize(n); yg.resize(n);
         std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(n - 1) * incx : 0;
@@ -100,8 +100,8 @@ static void wher2_core(
                 wher2_col_lower(j, n, cmul(alpha, cconj(yp[j])),
                                 cconj(cmul(alpha, xp[j])), xp, yp, &A_(0, j));
             else {
-                T *aj = &A_(0, j);
-                aj[j] = T{ aj[j].re, rzero };
+                TC *aj = &A_(0, j);
+                aj[j] = TC{ aj[j].re, rzero };
             }
         }
     } else {
@@ -113,15 +113,15 @@ static void wher2_core(
                 wher2_col_upper(j, cmul(alpha, cconj(yp[j])),
                                 cconj(cmul(alpha, xp[j])), xp, yp, &A_(0, j));
             else {
-                T *aj = &A_(0, j);
-                aj[j] = T{ aj[j].re, rzero };
+                TC *aj = &A_(0, j);
+                aj[j] = TC{ aj[j].re, rzero };
             }
         }
     }
 }
 
 extern "C" {
-EPBLAS_FACADE_SYR2(wher2, T)
+EPBLAS_FACADE_SYR2(wher2, TC)
 }
 
 #undef A_

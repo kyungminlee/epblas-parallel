@@ -18,7 +18,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -31,14 +31,14 @@ using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::csub;
 using mf_kernels::cconj;
-inline T cdiv(T const &a, T const &b) {
+inline TC cdiv(TC const &a, TC const &b) {
     /* a / b = a·conj(b) / |b|², direct DD divide (canonical form shared with
      * wtbsv/wtrsv/wtrsm_serial — see F2, simd_audit). */
     const R denom = b.re * b.re + b.im * b.im;
-    return T{ (a.re * b.re + a.im * b.im) / denom,
+    return TC{ (a.re * b.re + a.im * b.im) / denom,
               (a.im * b.re - a.re * b.im) / denom };
 }
-const T czero{rzero, rzero};
+const TC czero{rzero, rzero};
 
 #ifdef _OPENMP
 /* Column base offsets into the packed array (column-major triangle).
@@ -51,7 +51,7 @@ inline std::size_t cbL(std::ptrdiff_t j, std::ptrdiff_t n) {
 inline std::size_t cbU(std::ptrdiff_t j) {
     return static_cast<std::size_t>(j) * static_cast<std::size_t>(j + 1) / 2;
 }
-inline T melem(const T &a, bool noconj) { return noconj ? a : cconj(a); }
+inline TC melem(const TC &a, bool noconj) { return noconj ? a : cconj(a); }
 #endif
 }
 
@@ -60,7 +60,7 @@ inline T melem(const T &a, bool noconj) { return noconj ? a : cconj(a); }
  * (cdot, reorders -> within fuzz tol). The cross-column recurrence (divide by
  * the diagonal, feed the result forward) stays scalar here. */
 static void wtpsv_serial_contig(char UPLO, char TRANS, bool noconj, bool nounit,
-                                std::ptrdiff_t n, const T *ap, T *x)
+                                std::ptrdiff_t n, const TC *ap, TC *x)
 {
     if (TRANS == 'N') {
         if (UPLO == 'U') {
@@ -87,7 +87,7 @@ static void wtpsv_serial_contig(char UPLO, char TRANS, bool noconj, bool nounit,
         if (UPLO == 'U') {
             std::ptrdiff_t kk = 0;
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                T tmp = csub(x[j], mf_kernels::cdot(j, &ap[kk], &x[0], conj));
+                TC tmp = csub(x[j], mf_kernels::cdot(j, &ap[kk], &x[0], conj));
                 if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk + j] : cconj(ap[kk + j])));
                 x[j] = tmp;
                 kk += j + 1;
@@ -95,7 +95,7 @@ static void wtpsv_serial_contig(char UPLO, char TRANS, bool noconj, bool nounit,
         } else {
             std::ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                T tmp = csub(x[j], mf_kernels::cdot(n - 1 - j, &ap[kk - (n - 2 - j)], &x[j + 1], conj));
+                TC tmp = csub(x[j], mf_kernels::cdot(n - 1 - j, &ap[kk - (n - 2 - j)], &x[j + 1], conj));
                 if (nounit) tmp = cdiv(tmp, (noconj ? ap[kk - (n - 1 - j)] : cconj(ap[kk - (n - 1 - j)])));
                 x[j] = tmp;
                 kk -= (n - j);
@@ -107,14 +107,14 @@ static void wtpsv_serial_contig(char UPLO, char TRANS, bool noconj, bool nounit,
 /* Serial entry / <threshold / strided fallback. Strided gathers x to a
  * contiguous scratch, runs the SIMD core, and scatters back. */
 static void wtpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
-                         std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t incx)
+                         std::ptrdiff_t n, const TC *ap, TC *x, std::ptrdiff_t incx)
 {
     if (incx == 1) {
         wtpsv_serial_contig(UPLO, TRANS, noconj, nounit, n, ap, x);
         return;
     }
-    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
-    std::vector<T> xs(static_cast<std::size_t>(n));
+    TC *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
+    std::vector<TC> xs(static_cast<std::size_t>(n));
     for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[(std::ptrdiff_t)i * incx];
     wtpsv_serial_contig(UPLO, TRANS, noconj, nounit, n, ap, xs.data());
     for (std::ptrdiff_t i = 0; i < n; ++i) xbase[(std::ptrdiff_t)i * incx] = xs[i];
@@ -124,7 +124,7 @@ static void wtpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
 /* Solve a single diagonal block [j0,j1) in packed storage (within-block coupling
  * only). Threaded path need only match serial within DD fuzz tol. */
 static void wtpsv_block(char UPLO, char TRANS, bool noconj, bool nounit,
-                        std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, const T *ap, T *x)
+                        std::ptrdiff_t j0, std::ptrdiff_t j1, std::ptrdiff_t n, const TC *ap, TC *x)
 {
     const bool lower = (UPLO == 'L');
     const bool conj = (noconj == 0);
@@ -148,14 +148,14 @@ static void wtpsv_block(char UPLO, char TRANS, bool noconj, bool nounit,
         if (!lower) {                                   /* Upper^(T/C): forward, k<j */
             for (std::ptrdiff_t j = j0; j < j1; ++j) {
                 const std::size_t b = cbU(j);
-                T tmp = csub(x[j], mf_kernels::cdot(j - j0, &ap[b + j0], &x[j0], conj));
+                TC tmp = csub(x[j], mf_kernels::cdot(j - j0, &ap[b + j0], &x[j0], conj));
                 if (nounit) tmp = cdiv(tmp, melem(ap[b + j], noconj));
                 x[j] = tmp;
             }
         } else {                                        /* Lower^(T/C): backward, k>j */
             for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 const std::size_t b = cbL(j, n);
-                T tmp = csub(x[j], mf_kernels::cdot(j1 - (j + 1), &ap[b + 1], &x[j + 1], conj));
+                TC tmp = csub(x[j], mf_kernels::cdot(j1 - (j + 1), &ap[b + 1], &x[j + 1], conj));
                 if (nounit) tmp = cdiv(tmp, melem(ap[b], noconj));
                 x[j] = tmp;
             }
@@ -167,7 +167,7 @@ static void wtpsv_block(char UPLO, char TRANS, bool noconj, bool nounit,
  * to small WTPSV_BLK diagonal blocks; bulk O(N^2) off-diagonal coupling threaded
  * over disjoint output rows. Returns true if it handled the call. */
 __attribute__((noinline)) static bool wtpsv_omp(
-    char UPLO, char TRANS, bool noconj, bool nounit, std::ptrdiff_t n, const T *ap, T *x)
+    char UPLO, char TRANS, bool noconj, bool nounit, std::ptrdiff_t n, const TC *ap, TC *x)
 {
     if (n < WTPSV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -189,9 +189,9 @@ __attribute__((noinline)) static bool wtpsv_omp(
                     std::ptrdiff_t rlo = j1 + blas_part_bound(n - j1, tid, nthreads);
                     std::ptrdiff_t rhi = j1 + blas_part_bound(n - j1, tid + 1, nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
-                        const T xi = x[i];
+                        const TC xi = x[i];
                         if (ceq0(xi)) continue;
-                        const T *col = &ap[cbL(i, n)];      /* col[k-i] = A(k,i) */
+                        const TC *col = &ap[cbL(i, n)];      /* col[k-i] = A(k,i) */
                         mf_kernels::caxpy_sub(rhi - rlo, &x[rlo], &col[rlo - i], xi);
                     }
                 }
@@ -207,9 +207,9 @@ __attribute__((noinline)) static bool wtpsv_omp(
                     std::ptrdiff_t rlo = blas_part_bound(j0, tid, nthreads);
                     std::ptrdiff_t rhi = blas_part_bound(j0, tid + 1, nthreads);
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
-                        const T xi = x[i];
+                        const TC xi = x[i];
                         if (ceq0(xi)) continue;
-                        const T *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
+                        const TC *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
                         mf_kernels::caxpy_sub(rhi - rlo, &x[rlo], &col[rlo], xi);
                     }
                 }
@@ -226,7 +226,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, nthreads);
                         std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *col = &ap[cbL(i, n)];
+                            const TC *col = &ap[cbL(i, n)];
                             x[i] = csub(x[i], mf_kernels::cdot(n - j1, &col[j1 - i], &x[j1], conj));
                         }
                     }
@@ -243,7 +243,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, nthreads);
                         std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, nthreads);
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const T *col = &ap[cbU(i)];
+                            const TC *col = &ap[cbU(i)];
                             x[i] = csub(x[i], mf_kernels::cdot(j0, &col[0], &x[0], conj));
                         }
                     }
@@ -259,8 +259,8 @@ __attribute__((noinline)) static bool wtpsv_omp(
 static void wtpsv_core(
     char uplo, char trans, char diag,
     std::ptrdiff_t n,
-    const T *ap,
-    T *x, std::ptrdiff_t incx)
+    const TC *ap,
+    TC *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
     const char TRANS = up(&trans);
@@ -279,5 +279,5 @@ static void wtpsv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_TPMV(wtpsv, T)
+EPBLAS_FACADE_TPMV(wtpsv, TC)
 }

@@ -6,16 +6,16 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef __complex128 T;
+typedef __complex128 TC;
 
 /* Σ conj(x)·y over a logical range; 2-accumulator unroll on the unit-stride
  * path. Carved out so the OMP partial-reduction can call it per chunk; serial
  * behaviour is unchanged. */
-static T xdotc_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdiff_t incy)
+static TC xdotc_kernel(ptrdiff_t n, const TC *x, ptrdiff_t incx, const TC *y, ptrdiff_t incy)
 {
-    T s = 0;
+    TC s = 0;
     if (incx == 1 && incy == 1) {
-        T s0 = (T)0.0Q, s1 = (T)0.0Q;
+        TC s0 = (TC)0.0Q, s1 = (TC)0.0Q;
         ptrdiff_t i = 0;
         for (; i + 1 < n; i += 2) {
             s0 += ~x[i    ] * y[i    ];
@@ -37,13 +37,13 @@ static T xdotc_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdi
  * `__complex128`. See qasum.c for the threshold/noinline rationale. */
 #define XDOTC_OMP_MIN 128
 #define XDOTC_MAX_CPUS 64
-__attribute__((noinline)) static bool xdotc_omp(ptrdiff_t n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static bool xdotc_omp(ptrdiff_t n, const TC *x, const TC *y, TC *out)
 {
     if (n <= XDOTC_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > XDOTC_MAX_CPUS) nthreads = XDOTC_MAX_CPUS;
-    T partial[XDOTC_MAX_CPUS] = {0};
+    TC partial[XDOTC_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -52,17 +52,17 @@ __attribute__((noinline)) static bool xdotc_omp(ptrdiff_t n, const T *x, const T
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) partial[tid] = xdotc_kernel(hi - lo, x + lo, 1, y + lo, 1);
     }
-    T s = 0;
+    TC s = 0;
     for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }
 #endif
 
-static T xdotc_core(ptrdiff_t n, const T *x, ptrdiff_t incx,
-                    const T *y, ptrdiff_t incy)
+static TC xdotc_core(ptrdiff_t n, const TC *x, ptrdiff_t incx,
+                    const TC *y, ptrdiff_t incy)
 {
-    T s = 0;
+    TC s = 0;
     if (n <= 0) return s;
 #ifdef _OPENMP
     if (incx == 1 && incy == 1) {
@@ -72,4 +72,4 @@ static T xdotc_core(ptrdiff_t n, const T *x, ptrdiff_t incx,
     return xdotc_kernel(n, x, incx, y, incy);
 }
 
-EPBLAS_FACADE_DOT(xdotc, T, T)
+EPBLAS_FACADE_DOT(xdotc, TC, TC)

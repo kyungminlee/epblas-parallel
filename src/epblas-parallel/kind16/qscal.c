@@ -6,13 +6,13 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef __float128 T;
+typedef __float128 TR;
 
 #ifdef _OPENMP
 /* Threaded elementwise SCAL — quad is compute-bound, so it threads (see
  * qaxpy.c). Index-from-i covers every stride; serial fast-paths preserved. */
 #define QSCAL_OMP_MIN 128
-__attribute__((noinline)) static bool qscal_omp(ptrdiff_t n, T alpha, T *x, ptrdiff_t incx)
+__attribute__((noinline)) static bool qscal_omp(ptrdiff_t n, TR alpha, TR *x, ptrdiff_t incx)
 {
     if (n <= QSCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -24,9 +24,9 @@ __attribute__((noinline)) static bool qscal_omp(ptrdiff_t n, T alpha, T *x, ptrd
 }
 #endif
 
-static void qscal_core(ptrdiff_t n, const T *alpha_, T *x, ptrdiff_t incx)
+static void qscal_core(ptrdiff_t n, const TR *alpha_, TR *x, ptrdiff_t incx)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     if (n <= 0 || alpha == 1.0Q) return;
 #ifdef _OPENMP
     if (qscal_omp(n, alpha, x, incx)) return;
@@ -48,4 +48,4 @@ static void qscal_core(ptrdiff_t n, const T *alpha_, T *x, ptrdiff_t incx)
     }
 }
 
-EPBLAS_FACADE_SCAL(qscal, T, T)
+EPBLAS_FACADE_SCAL(qscal, TR, TR)

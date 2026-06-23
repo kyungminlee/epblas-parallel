@@ -24,7 +24,7 @@
 
 #include <stddef.h>
 
-typedef long double esymm_T;
+typedef long double esymm_TR;
 
 /* ── SYMM-aware packers (real) ───────────────────────────────────────
  *
@@ -43,21 +43,21 @@ typedef long double esymm_T;
  *
  * `uplo` is 'U' or 'L' (already upper-cased by the caller).
  */
-void esymm_pack_a_sym(const esymm_T *a, ptrdiff_t lda,
+void esymm_pack_a_sym(const esymm_TR *a, ptrdiff_t lda,
                       ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb,
-                      char uplo, esymm_T *Ap);
-void esymm_pack_b_sym(const esymm_T *a, ptrdiff_t lda,
+                      char uplo, esymm_TR *Ap);
+void esymm_pack_b_sym(const esymm_TR *a, ptrdiff_t lda,
                       ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
-                      char uplo, esymm_T *Bp);
+                      char uplo, esymm_TR *Bp);
 
 /* Pure-serial by-value core (no OpenMP). Same math as esymm_. */
 void esymm_serial(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const esymm_T *alpha_,
-    const esymm_T *a, ptrdiff_t lda,
-    const esymm_T *b, ptrdiff_t ldb,
-    const esymm_T *beta_,
-    esymm_T *c, ptrdiff_t ldc);
+    const esymm_TR *alpha_,
+    const esymm_TR *a, ptrdiff_t lda,
+    const esymm_TR *b, ptrdiff_t ldb,
+    const esymm_TR *beta_,
+    esymm_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ESYMM_KERNEL_H */

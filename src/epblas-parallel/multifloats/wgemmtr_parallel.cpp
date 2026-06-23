@@ -25,7 +25,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -39,11 +39,11 @@ namespace {
 static void wgemmtr_core(
     char uplo, char transa, char transb,
     std::ptrdiff_t n, std::ptrdiff_t k,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const T *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TC *b, std::ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
@@ -52,7 +52,7 @@ static void wgemmtr_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const bool upper = (up(&uplo) == 'U');
     const char ta = up(&transa);
     const char tb = up(&transb);
@@ -84,5 +84,5 @@ static void wgemmtr_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_GEMMTR(wgemmtr, T)
+EPBLAS_FACADE_GEMMTR(wgemmtr, TC)
 }

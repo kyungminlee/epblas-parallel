@@ -5,7 +5,7 @@
 #endif
 #include "../common/epblas_facade.h"
 /* eaxpy — kind10 real: Y := α·X + Y. */
-typedef long double T;
+typedef long double TR;
 
 /* Unit-stride kernel, shared by the serial entry and the per-thread slices of
  * the OMP path. 8-way unroll: per-element x87 op counts are identical at any
@@ -20,7 +20,7 @@ typedef long double T;
  * every call — and started the aligned main loop at the unaligned offset m,
  * leaving ~2% on the table at the L2-band size (N~64k) vs ob. Each += is
  * independent, so the head→tail remainder move is bit-identical. */
-static void eaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
+static void eaxpy_unit(ptrdiff_t n, TR alpha, const TR *x, TR *y)
 {
     ptrdiff_t i, n1 = n & -8;
     for (i = 0; i < n1; i += 8) {
@@ -50,7 +50,7 @@ static void eaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
  * 1.57@1024, 1.19@2048, 1.05@3072, then 0.99@4096 and 0.85@6144 — break-even
  * ~4096, so stay serial through 3072. Strided cases stay serial (rare). */
 #define EAXPY_OMP_MIN 3072
-static bool eaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
+static bool eaxpy_omp(ptrdiff_t n, TR alpha, const TR *x, TR *y)
 {
     if (n <= EAXPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -66,11 +66,11 @@ static bool eaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
 }
 #endif
 
-static void eaxpy_core(ptrdiff_t n, const T *alpha_,
-                       const T *x, ptrdiff_t incx,
-                       T *y, ptrdiff_t incy)
+static void eaxpy_core(ptrdiff_t n, const TR *alpha_,
+                       const TR *x, ptrdiff_t incx,
+                       TR *y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     if (n <= 0 || alpha == 0.0L) return;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
@@ -84,4 +84,4 @@ static void eaxpy_core(ptrdiff_t n, const T *alpha_,
     }
 }
 
-EPBLAS_FACADE_AXPY(eaxpy, T, T)
+EPBLAS_FACADE_AXPY(eaxpy, TR, TR)

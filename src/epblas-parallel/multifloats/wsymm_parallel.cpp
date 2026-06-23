@@ -26,7 +26,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -40,11 +40,11 @@ namespace {
 static void wsymm_core(
     char side, char uplo,
     std::ptrdiff_t m, std::ptrdiff_t n,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *b, std::ptrdiff_t ldb,
-    const T *beta_,
-    T *c, std::ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TC *b, std::ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, std::ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     if (omp_in_parallel()) {
@@ -53,7 +53,7 @@ static void wsymm_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char SIDE = up(&side);
     const char UPLO = up(&uplo);
     (void)lda; (void)ldb;
@@ -104,5 +104,5 @@ static void wsymm_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SYMM(wsymm, T)
+EPBLAS_FACADE_SYMM(wsymm, TC)
 }

@@ -31,7 +31,7 @@
 
 #define QTRMM_OMP_MIN 32
 
-typedef qtrmm_T T;
+typedef qtrmm_TR TR;
 
 
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
@@ -40,8 +40,8 @@ typedef qtrmm_T T;
 
 #ifdef _OPENMP
 #define QTRMM_OMP_WRAP_L(name, core)                                       \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
+    static void name(ptrdiff_t m, ptrdiff_t n, TR alpha,                                \
+                     const TR *a, ptrdiff_t lda, TR *b, ptrdiff_t ldb, bool nounit) {     \
         if (n >= QTRMM_OMP_MIN && blas_omp_should_thread()) {             \
             _Pragma("omp parallel") {                                      \
                 ptrdiff_t tid = omp_get_thread_num();                            \
@@ -53,8 +53,8 @@ typedef qtrmm_T T;
         } else { core(0, n, m, alpha, a, lda, b, ldb, nounit); }           \
     }
 #define QTRMM_OMP_WRAP_R(name, core)                                       \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
+    static void name(ptrdiff_t m, ptrdiff_t n, TR alpha,                                \
+                     const TR *a, ptrdiff_t lda, TR *b, ptrdiff_t ldb, bool nounit) {     \
         if (m >= QTRMM_OMP_MIN && blas_omp_should_thread()) {             \
             _Pragma("omp parallel") {                                      \
                 ptrdiff_t tid = omp_get_thread_num();                            \
@@ -67,13 +67,13 @@ typedef qtrmm_T T;
     }
 #else
 #define QTRMM_OMP_WRAP_L(name, core)                                       \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
+    static void name(ptrdiff_t m, ptrdiff_t n, TR alpha,                                \
+                     const TR *a, ptrdiff_t lda, TR *b, ptrdiff_t ldb, bool nounit) {     \
         core(0, n, m, alpha, a, lda, b, ldb, nounit);                      \
     }
 #define QTRMM_OMP_WRAP_R(name, core)                                       \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                                \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) {     \
+    static void name(ptrdiff_t m, ptrdiff_t n, TR alpha,                                \
+                     const TR *a, ptrdiff_t lda, TR *b, ptrdiff_t ldb, bool nounit) {     \
         core(0, m, n, alpha, a, lda, b, ldb, nounit);                      \
     }
 #endif
@@ -90,11 +90,11 @@ QTRMM_OMP_WRAP_R(trmm_rut, trmm_rut_core)
 static void qtrmm_core(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    TR *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     const char SIDE   = blas_up(side);
     const char UPLO   = blas_up(uplo);
     char TRANS           = blas_up(transa);
@@ -128,6 +128,6 @@ static void qtrmm_core(
     }
 }
 
-EPBLAS_FACADE_TRMM(qtrmm, T)
+EPBLAS_FACADE_TRMM(qtrmm, TR)
 
 #undef B_

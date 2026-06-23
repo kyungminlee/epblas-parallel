@@ -22,7 +22,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -38,11 +38,11 @@ namespace {
 static void msyr_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    T *a, std::ptrdiff_t lda)
+    const TR *alpha_,
+    const TR *x, std::ptrdiff_t incx,
+    TR *a, std::ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     const char UPLO = up(&uplo);
 
     if (n == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
@@ -75,7 +75,7 @@ static void msyr_core(
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
-            const T t = alpha * T{xhp[j], xlp[j]};
+            const TR t = alpha * TR{xhp[j], xlp[j]};
             mf_kernels::dd_axpy(n - j, xhp + j, xlp + j, t.limbs[0], t.limbs[1], &A_(j, j));
         }
     } else {
@@ -84,14 +84,14 @@ static void msyr_core(
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
-            const T t = alpha * T{xhp[j], xlp[j]};
+            const TR t = alpha * TR{xhp[j], xlp[j]};
             mf_kernels::dd_axpy(j + 1, xhp, xlp, t.limbs[0], t.limbs[1], &A_(0, j));
         }
     }
 }
 
 extern "C" {
-EPBLAS_FACADE_SYR(msyr, T, T)
+EPBLAS_FACADE_SYR(msyr, TR, TR)
 }
 
 #undef A_

@@ -5,12 +5,12 @@
  * hypotq cost — was the 0.77× speedup ceiling vs migrated.
  */
 #include <quadmath.h>
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 R;
 
-void xrotg_(T *a_, const T *b_, R *c, T *s)
+void xrotg_(TC *a_, const TC *b_, R *c, TC *s)
 {
-    const T a = *a_, b = *b_;
+    const TC a = *a_, b = *b_;
     const R ar = __real__ a, ai = __imag__ a;
     const R br = __real__ b, bi = __imag__ b;
     const R g2 = br * br + bi * bi;
@@ -24,7 +24,7 @@ void xrotg_(T *a_, const T *b_, R *c, T *s)
     if (f2 == 0.0Q) {
         *c = 0.0Q;
         const R d = sqrtq(g2);
-        T conjb; __real__ conjb = br; __imag__ conjb = -bi;
+        TC conjb; __real__ conjb = br; __imag__ conjb = -bi;
         *s = conjb / d;
         __real__ *a_ = d;
         __imag__ *a_ = 0;
@@ -34,8 +34,8 @@ void xrotg_(T *a_, const T *b_, R *c, T *s)
     *c = sqrtq(f2 / h2);
     *a_ = a / *c;
     const R d = sqrtq(f2 * h2);
-    T conjb; __real__ conjb = br; __imag__ conjb = -bi;
+    TC conjb; __real__ conjb = br; __imag__ conjb = -bi;
     *s = conjb * (a / d);
 }
 /* ILP64 twin — no integer args, so the ABI is identical to LP64. */
-void xrotg_64_(T *a_, const T *b_, R *c, T *s) { xrotg_(a_, b_, c, s); }
+void xrotg_64_(TC *a_, const TC *b_, R *c, TC *s) { xrotg_(a_, b_, c, s); }

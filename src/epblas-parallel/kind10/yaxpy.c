@@ -5,15 +5,15 @@
 #endif
 #include "../common/epblas_facade.h"
 /* yaxpy — kind10 complex: Y := α·X + Y. */
-typedef _Complex long double T;
+typedef _Complex long double TC;
 
 /* Unit-stride kernel, shared by the serial entry and the per-thread OMP slices.
  * Pointer-walking form (the gfortran ZAXPY shape) keeps the loop tight. */
-static void yaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
+static void yaxpy_unit(ptrdiff_t n, TC alpha, const TC *x, TC *y)
 {
-    const T *xe = x + n;
-    T *yp = y;
-    for (const T *xp = x; xp < xe; ++xp, ++yp) *yp += alpha * (*xp);
+    const TC *xe = x + n;
+    TC *yp = y;
+    for (const TC *xp = x; xp < xe; ++xp, ++yp) *yp += alpha * (*xp);
 }
 
 #ifdef _OPENMP
@@ -23,7 +23,7 @@ static void yaxpy_unit(ptrdiff_t n, T alpha, const T *x, T *y)
  * proto4/par1 ~0.92 at N=192, ~0.76 at 256, and <1.0 out to 4M (~0.65), so no
  * upper bound. Break-even ~N=180; 256 keeps margin. */
 #define YAXPY_OMP_MIN 256
-static bool yaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
+static bool yaxpy_omp(ptrdiff_t n, TC alpha, const TC *x, TC *y)
 {
     if (n <= YAXPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -39,13 +39,13 @@ static bool yaxpy_omp(ptrdiff_t n, T alpha, const T *x, T *y)
 }
 #endif
 
-static void yaxpy_core(ptrdiff_t n, const T *alpha_,
-                       const T *x, ptrdiff_t incx,
-                       T *y, ptrdiff_t incy)
+static void yaxpy_core(ptrdiff_t n, const TC *alpha_,
+                       const TC *x, ptrdiff_t incx,
+                       TC *y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     if (n <= 0) return;
-    if (alpha == (T)0.0L) return;
+    if (alpha == (TC)0.0L) return;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if (yaxpy_omp(n, alpha, x, y)) return;
@@ -58,4 +58,4 @@ static void yaxpy_core(ptrdiff_t n, const T *alpha_,
     }
 }
 
-EPBLAS_FACADE_AXPY(yaxpy, T, T)
+EPBLAS_FACADE_AXPY(yaxpy, TC, TC)

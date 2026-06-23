@@ -34,7 +34,7 @@
 #include <stddef.h>
 #include <quadmath.h>
 
-typedef __complex128 xgemm_T;
+typedef __complex128 xgemm_TC;
 
 /* Normalize a Fortran trans char to its uppercase code ('N'/'T'/'C'/'R'). */
 char xgemm_trans_code(char c);
@@ -72,10 +72,10 @@ void xgemm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xgemm_plan_t *p,
 void xgemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const xgemm_T *alpha_,
-    const xgemm_T *a, ptrdiff_t lda,
-    const xgemm_T *b, ptrdiff_t ldb,
-    const xgemm_T *beta_,
-    xgemm_T *c, ptrdiff_t ldc);
+    const xgemm_TC *alpha_,
+    const xgemm_TC *a, ptrdiff_t lda,
+    const xgemm_TC *b, ptrdiff_t ldb,
+    const xgemm_TC *beta_,
+    xgemm_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XGEMM_KERNEL_H */

@@ -27,7 +27,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef long double T;
+typedef long double TR;
 
 
 #ifdef _OPENMP
@@ -82,19 +82,19 @@ static void tpmv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_
 
 static void tpmv_kernel_N(bool upper, bool nounit, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
-                          const T *ap, const T *x, T *y)
+                          const TR *ap, const TR *x, TR *y)
 {
     if (upper) {
         for (ptrdiff_t j = m_from; j < m_to; ++j) {
             size_t cs = col_start_U(j);
-            T xj = x[j];
+            TR xj = x[j];
             for (ptrdiff_t i = 0; i < j; ++i) y[i] += ap[cs + (size_t)i] * xj;
             y[j] += nounit ? ap[cs + (size_t)j] * xj : xj;
         }
     } else {
         for (ptrdiff_t j = m_from; j < m_to; ++j) {
             size_t cs = col_start_L(j, n);
-            T xj = x[j];
+            TR xj = x[j];
             y[j] += nounit ? ap[cs] * xj : xj;
             for (ptrdiff_t i = j + 1; i < n; ++i) y[i] += ap[cs + (size_t)(i - j)] * xj;
         }
@@ -103,7 +103,7 @@ static void tpmv_kernel_N(bool upper, bool nounit, ptrdiff_t n,
 
 static void tpmv_kernel_T(bool upper, bool nounit, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
-                          const T *ap, const T *x, T *y)
+                          const TR *ap, const TR *x, TR *y)
 {
     if (upper) {
         /* Diagonal (ap[cs+j]) sits at the END of the column, so accumulate the
@@ -111,7 +111,7 @@ static void tpmv_kernel_T(bool upper, bool nounit, ptrdiff_t n,
          * packed read stream sequential (diag-first jumped back ~5-8%). */
         for (ptrdiff_t j = m_from; j < m_to; ++j) {
             size_t cs = col_start_U(j);
-            T s = 0.0L;
+            TR s = 0.0L;
             for (ptrdiff_t i = 0; i < j; ++i) s += ap[cs + (size_t)i] * x[i];
             s += nounit ? ap[cs + (size_t)j] * x[j] : x[j];
             y[j] += s;
@@ -120,7 +120,7 @@ static void tpmv_kernel_T(bool upper, bool nounit, ptrdiff_t n,
         /* Diagonal (ap[cs]) is at the column start, so diag-first stays sequential. */
         for (ptrdiff_t j = m_from; j < m_to; ++j) {
             size_t cs = col_start_L(j, n);
-            T s = nounit ? ap[cs] * x[j] : x[j];
+            TR s = nounit ? ap[cs] * x[j] : x[j];
             for (ptrdiff_t i = j + 1; i < n; ++i) s += ap[cs + (size_t)(i - j)] * x[i];
             y[j] += s;
         }
@@ -134,7 +134,7 @@ static void tpmv_kernel_T(bool upper, bool nounit, ptrdiff_t n,
  * ~14%). */
 __attribute__((noinline))
 static ptrdiff_t etpmv_omp(bool upper, bool is_t, bool nounit, ptrdiff_t n, ptrdiff_t incx,
-                     const T *restrict ap, T *restrict x)
+                     const TR *restrict ap, TR *restrict x)
 {
     ptrdiff_t nthreads = 1;
     if (n >= 50 && !omp_in_parallel()) {
@@ -144,12 +144,12 @@ static ptrdiff_t etpmv_omp(bool upper, bool is_t, bool nounit, ptrdiff_t n, ptrd
     if (nthreads <= 1) return 0;
 
     const ptrdiff_t kx = (incx < 0) ? -(n - 1) * (ptrdiff_t)incx : 0;
-    T *buf_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
+    TR *buf_all = (TR *)calloc((size_t)nthreads * (size_t)n, sizeof(TR));
     ptrdiff_t *range_m = (ptrdiff_t *)malloc((size_t)(nthreads + 1) * sizeof(ptrdiff_t));
-    T *xbuf = NULL;
-    const T *xptr = x;
+    TR *xbuf = NULL;
+    const TR *xptr = x;
     if (incx != 1 && buf_all && range_m) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TR *)malloc((size_t)n * sizeof(TR));
         if (xbuf) {
             for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[kx + i * incx];
             xptr = xbuf;
@@ -164,7 +164,7 @@ static ptrdiff_t etpmv_omp(bool upper, bool is_t, bool nounit, ptrdiff_t n, ptrd
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
-        T *y = is_t ? buf_all : &buf_all[(size_t)tid * (size_t)n];
+        TR *y = is_t ? buf_all : &buf_all[(size_t)tid * (size_t)n];
         ptrdiff_t m_from, m_to;
         if (upper) { m_from = range_m[nthreads - tid - 1]; m_to = range_m[nthreads - tid]; }
         else       { m_from = range_m[tid];               m_to = range_m[tid + 1]; }
@@ -177,13 +177,13 @@ static ptrdiff_t etpmv_omp(bool upper, bool is_t, bool nounit, ptrdiff_t n, ptrd
         if (upper) {
             for (ptrdiff_t t = 1; t < nthreads; ++t) {
                 ptrdiff_t m_to_t = range_m[nthreads - t];
-                const T *slot = &buf_all[(size_t)t * (size_t)n];
+                const TR *slot = &buf_all[(size_t)t * (size_t)n];
                 for (ptrdiff_t i = 0; i < m_to_t; ++i) buf_all[i] += slot[i];
             }
         } else {
             for (ptrdiff_t t = 1; t < nthreads; ++t) {
                 ptrdiff_t m_from_t = range_m[t];
-                const T *slot = &buf_all[(size_t)t * (size_t)n];
+                const TR *slot = &buf_all[(size_t)t * (size_t)n];
                 for (ptrdiff_t i = m_from_t; i < n; ++i) buf_all[i] += slot[i];
             }
         }
@@ -198,10 +198,10 @@ static ptrdiff_t etpmv_omp(bool upper, bool is_t, bool nounit, ptrdiff_t n, ptrd
 static void etpmv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict ap,
-    T *restrict x, ptrdiff_t incx)
+    const TR *restrict ap,
+    TR *restrict x, ptrdiff_t incx)
 {
-    const T zero = 0.0L;
+    const TR zero = 0.0L;
     const char UPLO = blas_up(uplo);
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
@@ -219,7 +219,7 @@ static void etpmv_core(
                 ptrdiff_t kk = 0;
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
-                        const T tmp = x[j];
+                        const TR tmp = x[j];
                         ptrdiff_t k = kk;
                         for (ptrdiff_t i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
                         if (nounit) x[j] *= ap[kk + j];
@@ -230,7 +230,7 @@ static void etpmv_core(
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
-                        const T tmp = x[j];
+                        const TR tmp = x[j];
                         ptrdiff_t k = kk;
                         for (ptrdiff_t i = n - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
                         if (nounit) x[j] *= ap[kk - (n - 1 - j)];
@@ -242,7 +242,7 @@ static void etpmv_core(
             if (UPLO == 'U') {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[j];
+                    TR tmp = x[j];
                     if (nounit) tmp *= ap[kk];
                     ptrdiff_t k = kk - 1;
                     for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
@@ -252,7 +252,7 @@ static void etpmv_core(
             } else {
                 ptrdiff_t kk = 0;
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[j];
+                    TR tmp = x[j];
                     if (nounit) tmp *= ap[kk];
                     ptrdiff_t k = kk + 1;
                     for (ptrdiff_t i = j + 1; i < n; ++i) { tmp += ap[k] * x[i]; ++k; }
@@ -269,7 +269,7 @@ static void etpmv_core(
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[jx] != zero) {
-                        const T tmp = x[jx];
+                        const TR tmp = x[jx];
                         ptrdiff_t ix = kx;
                         for (ptrdiff_t k = kk; k < kk + j; ++k) {
                             x[ix] += tmp * ap[k];
@@ -286,7 +286,7 @@ static void etpmv_core(
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[jx] != zero) {
-                        const T tmp = x[jx];
+                        const TR tmp = x[jx];
                         ptrdiff_t ix = kx;
                         for (ptrdiff_t k = kk; k > kk - (n - 1 - j); --k) {
                             x[ix] += tmp * ap[k];
@@ -303,7 +303,7 @@ static void etpmv_core(
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 ptrdiff_t jx = kx + (n - 1) * incx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     ptrdiff_t ix = jx;
                     if (nounit) tmp *= ap[kk];
                     for (ptrdiff_t k = kk - 1; k >= kk - j; --k) {
@@ -318,7 +318,7 @@ static void etpmv_core(
                 ptrdiff_t kk = 0;
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     ptrdiff_t ix = jx;
                     if (nounit) tmp *= ap[kk];
                     for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
@@ -334,4 +334,4 @@ static void etpmv_core(
     }
 }
 
-EPBLAS_FACADE_TPMV(etpmv, T)
+EPBLAS_FACADE_TPMV(etpmv, TR)

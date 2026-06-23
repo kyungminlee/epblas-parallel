@@ -27,7 +27,7 @@
 #include "etri_kernel.h"    /* etri_ncopy / etri_tcopy / etri_kernel_store */
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
 
-typedef etrmm_T T;
+typedef etrmm_TR TR;
 
 /* Register-tile dims — must match the packed layout (etrmm_kernel.c). */
 #define MR 2
@@ -35,9 +35,9 @@ typedef etrmm_T T;
 
 static inline void pack_trmm_a(bool side_l, bool uplo_upper, bool trans, bool unit,
                                ptrdiff_t m, ptrdiff_t n,
-                               const T *a, ptrdiff_t lda,
+                               const TR *a, ptrdiff_t lda,
                                ptrdiff_t posX, ptrdiff_t posY,
-                               T *bp)
+                               TR *bp)
 {
     if (side_l) {
         if (uplo_upper && !trans)       etrmm_iutcopy(m, n, a, lda, posX, posY, bp, unit);
@@ -64,11 +64,11 @@ static inline void pack_trmm_a(bool side_l, bool uplo_upper, bool trans, bool un
 void etrmm_L_band(bool upper, bool trans, bool unit,
                         ptrdiff_t m, ptrdiff_t js0, ptrdiff_t js1,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
-                        const T *a, ptrdiff_t lda,
-                        T *b, ptrdiff_t ldb,
-                        T *Ap, T *Bp)
+                        const TR *a, ptrdiff_t lda,
+                        TR *b, ptrdiff_t ldb,
+                        TR *Ap, TR *Bp)
 {
-    const T dp1 = 1.0L;
+    const TR dp1 = 1.0L;
 
     /* Outer js-loop walks the thread's N-band in steps of NC = GEMM_R. */
     for (ptrdiff_t js = js0; js < js1; js += NC) {
@@ -320,12 +320,12 @@ void etrmm_L_band(bool upper, bool trans, bool unit,
 void etrmm_R_band(bool upper, bool trans, bool unit,
                         ptrdiff_t n, ptrdiff_t m_lo, ptrdiff_t m_hi,
                         ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
-                        const T *a, ptrdiff_t lda,
-                        T *b, ptrdiff_t ldb,
-                        T *Ap, T *Bp)
+                        const TR *a, ptrdiff_t lda,
+                        TR *b, ptrdiff_t ldb,
+                        TR *Ap, TR *Bp)
 {
     (void)MC;
-    const T dp1 = 1.0L;
+    const TR dp1 = 1.0L;
     ptrdiff_t m_band = m_hi - m_lo;
     if (m_band <= 0) return;
 
@@ -334,8 +334,8 @@ void etrmm_R_band(bool upper, bool trans, bool unit,
      * confusing — Ap holds sa (a K-strip of B), Bp holds sb (the A
      * panels). The kernel sees `ba=sa, bb=sb` with bb being the
      * triangular A. */
-    T *sa = Ap;   /* MC × KC slab for B's OCOPY */
-    T *sb = Bp;   /* KC × NC slab for A's pack (incl. TRMM and GEMM) */
+    TR *sa = Ap;   /* MC × KC slab for B's OCOPY */
+    TR *sb = Bp;   /* KC × NC slab for A's pack (incl. TRMM and GEMM) */
 
     if ((!upper && !trans) || (upper && trans)) {
         /* trmm_R.c lines 109-241. Uses TRMM_KERNEL_T = TRMM_KERNEL_RT
@@ -590,11 +590,11 @@ void etrmm_R_band(bool upper, bool trans, bool unit,
 void etrmm_serial(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    TR *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
 
     const bool lside = (blas_up(side)   == 'L');
     const bool upper = (blas_up(uplo)   == 'U');
@@ -613,10 +613,10 @@ void etrmm_serial(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
-    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
+    TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
         if (lside) etrmm_L_band(upper, trans, unit, m, 0, n,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);

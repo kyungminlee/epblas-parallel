@@ -6,14 +6,14 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 R;
 
 #ifdef _OPENMP
 /* Threaded elementwise real-scale of complex X — quad is compute-bound, so it
  * threads (see qaxpy.c). Index-from-i covers every stride; serial preserved. */
 #define XQSCAL_OMP_MIN 128
-__attribute__((noinline)) static bool xqscal_omp(ptrdiff_t n, R alpha, T *x, ptrdiff_t incx)
+__attribute__((noinline)) static bool xqscal_omp(ptrdiff_t n, R alpha, TC *x, ptrdiff_t incx)
 {
     if (n <= XQSCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -29,7 +29,7 @@ __attribute__((noinline)) static bool xqscal_omp(ptrdiff_t n, R alpha, T *x, ptr
 }
 #endif
 
-static void xqscal_core(ptrdiff_t n, const R *alpha_, T *x, ptrdiff_t incx)
+static void xqscal_core(ptrdiff_t n, const R *alpha_, TC *x, ptrdiff_t incx)
 {
     const R alpha = *alpha_;
     if (n <= 0 || alpha == 1.0Q) return;
@@ -37,8 +37,8 @@ static void xqscal_core(ptrdiff_t n, const R *alpha_, T *x, ptrdiff_t incx)
     if (xqscal_omp(n, alpha, x, incx)) return;
 #endif
     if (incx == 1) {
-        T *end = x + n;
-        for (T *p = x; p < end; ++p) {
+        TC *end = x + n;
+        for (TC *p = x; p < end; ++p) {
             __real__ *p *= alpha;
             __imag__ *p *= alpha;
         }
@@ -52,4 +52,4 @@ static void xqscal_core(ptrdiff_t n, const R *alpha_, T *x, ptrdiff_t incx)
     }
 }
 
-EPBLAS_FACADE_SCAL(xqscal, R, T)
+EPBLAS_FACADE_SCAL(xqscal, R, TC)

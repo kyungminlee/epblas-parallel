@@ -24,17 +24,17 @@
 #include "ygemmtr_kernel.h"
 #include "../common/epblas_facade.h"
 
-typedef ygemmtr_T T;
+typedef ygemmtr_TC TC;
 
 #define YGEMMTR_OMP_MIN 32
 
 static void ygemmtr_core(char uplo, char transa, char transb,
               ptrdiff_t n, ptrdiff_t k,
-              const T *alpha_,
-              const T *a, ptrdiff_t lda,
-              const T *b, ptrdiff_t ldb,
-              const T *beta_,
-              T *c, ptrdiff_t ldc)
+              const TC *alpha_,
+              const TC *a, ptrdiff_t lda,
+              const TC *b, ptrdiff_t ldb,
+              const TC *beta_,
+              TC *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -44,14 +44,14 @@ static void ygemmtr_core(char uplo, char transa, char transb,
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
     const char ta = blas_up(transa);
     const char tb = blas_up(transb);
 
     if (n <= 0) return;
-    const T zero = 0.0L + 0.0iL;
-    const T one  = 1.0L + 0.0iL;
+    const TC zero = 0.0L + 0.0iL;
+    const TC one  = 1.0L + 0.0iL;
 
     const bool conj_a = (ta == 'C');
     const bool conj_b = (tb == 'C');
@@ -78,4 +78,4 @@ static void ygemmtr_core(char uplo, char transa, char transb,
                     trans_a, conj_a, trans_b, conj_b);
 }
 
-EPBLAS_FACADE_GEMMTR(ygemmtr, T)
+EPBLAS_FACADE_GEMMTR(ygemmtr, TC)

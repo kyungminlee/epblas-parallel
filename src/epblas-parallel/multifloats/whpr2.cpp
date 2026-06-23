@@ -25,7 +25,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -41,30 +41,30 @@ using mf_kernels::cconj;
 
 /* Per-column rank-2 update; off-diagonal packed run is a SIMD rank-2 AXPY (two
  * rank-1 passes). The Hermitian diagonal is forced real. */
-inline void whpr2_col_upper(std::ptrdiff_t j, T t1, T t2, const T *x, const T *y, T *ap) {
-    T *c = ap + static_cast<std::size_t>(j) * (j + 1) / 2;
+inline void whpr2_col_upper(std::ptrdiff_t j, TC t1, TC t2, const TC *x, const TC *y, TC *ap) {
+    TC *c = ap + static_cast<std::size_t>(j) * (j + 1) / 2;
     mf_kernels::caxpy2_add(j, c, x, t1, y, t2);
-    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
-    c[j] = T{ c[j].re + prod.re, rzero };
+    const TC prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
+    c[j] = TC{ c[j].re + prod.re, rzero };
 }
 
-inline void whpr2_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, T t1, T t2, const T *x, const T *y, T *ap) {
-    T *c0 = ap + (static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2);
+inline void whpr2_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, TC t1, TC t2, const TC *x, const TC *y, TC *ap) {
+    TC *c0 = ap + (static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2);
     mf_kernels::caxpy2_add(n - j - 1, c0 + 1, x + j + 1, t1, y + j + 1, t2);
-    const T prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
-    c0[0] = T{ c0[0].re + prod.re, rzero };
+    const TC prod = cadd(cmul(x[j], t1), cmul(y[j], t2));
+    c0[0] = TC{ c0[0].re + prod.re, rzero };
 }
 }
 
 static void whpr2_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    const T *y, std::ptrdiff_t incy,
-    T *ap)
+    const TC *alpha_,
+    const TC *x, std::ptrdiff_t incx,
+    const TC *y, std::ptrdiff_t incy,
+    TC *ap)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     const char UPLO = up(&uplo);
 
     if (n == 0 || ceq0(alpha)) return;
@@ -74,8 +74,8 @@ static void whpr2_core(
      * packed-contiguous, so only x,y need gathering. This unifies the strided
      * and contiguous paths and lets the strided case thread like the
      * contiguous one (mirrors the wher2 twin). */
-    std::vector<T> xg, yg;
-    const T *xp = x, *yp = y;
+    std::vector<TC> xg, yg;
+    const TC *xp = x, *yp = y;
     if (incx != 1 || incy != 1) {
         xg.resize(n); yg.resize(n);
         std::ptrdiff_t ix = (incx < 0) ? -(std::ptrdiff_t)(n - 1) * incx : 0;
@@ -100,7 +100,7 @@ static void whpr2_core(
                                 cconj(cmul(alpha, xp[j])), xp, yp, ap);
             else {
                 const std::size_t kk = static_cast<std::size_t>(j) * (j + 1) / 2;
-                ap[kk + j] = T{ ap[kk + j].re, rzero };
+                ap[kk + j] = TC{ ap[kk + j].re, rzero };
             }
         }
     } else {
@@ -114,12 +114,12 @@ static void whpr2_core(
             else {
                 const std::size_t kk = static_cast<std::size_t>(j) * n
                                      - static_cast<std::size_t>(j) * (j - 1) / 2;
-                ap[kk] = T{ ap[kk].re, rzero };
+                ap[kk] = TC{ ap[kk].re, rzero };
             }
         }
     }
 }
 
 extern "C" {
-EPBLAS_FACADE_SPR2(whpr2, T)
+EPBLAS_FACADE_SPR2(whpr2, TC)
 }

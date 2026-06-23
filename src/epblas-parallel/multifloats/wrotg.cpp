@@ -11,22 +11,22 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 namespace {
 using mf_pred::eq0;
 using mf_kernels::cconj;
 using mf_kernels::cmul;
-inline T cdiv_real(T const &a, R const &r) { return T{ a.re / r, a.im / r }; }
+inline TC cdiv_real(TC const &a, R const &r) { return TC{ a.re / r, a.im / r }; }
 }
 
 /* Direct Re²+Im² algebra — avoids two cabsdd() calls (each is an
  * overflow-safe hypot, expensive in DD arithmetic). Same fix as
  * kind10/yrotg and kind16/xrotg. */
-extern "C" void wrotg_(T *a_, const T *b_, R *c, T *s)
+extern "C" void wrotg_(TC *a_, const TC *b_, R *c, TC *s)
 {
-    const T a = *a_, b = *b_;
-    const T czero{R{0.0, 0.0}, R{0.0, 0.0}};
+    const TC a = *a_, b = *b_;
+    const TC czero{R{0.0, 0.0}, R{0.0, 0.0}};
     const R g2 = b.re * b.re + b.im * b.im;     /* |b|² */
     if (eq0(g2)) {
         *c = R{1.0, 0.0};
@@ -49,4 +49,4 @@ extern "C" void wrotg_(T *a_, const T *b_, R *c, T *s)
     *s = cdiv_real(cmul(cconj(b), a), d);       /* conj(b)·a/sqrt(|a|²·(|a|²+|b|²)) */
 }
 /* ILP64 twin — no integer args, so the ABI is identical to LP64. */
-extern "C" void wrotg_64_(T *a_, const T *b_, R *c, T *s) { wrotg_(a_, b_, c, s); }
+extern "C" void wrotg_64_(TC *a_, const TC *b_, R *c, TC *s) { wrotg_(a_, b_, c, s); }

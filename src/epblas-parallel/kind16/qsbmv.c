@@ -14,7 +14,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -31,22 +31,22 @@ typedef __float128 T;
 
 #ifdef _OPENMP
 static ptrdiff_t qsbmv_omp(bool upper, ptrdiff_t n, ptrdiff_t k,
-                     const T *restrict a, ptrdiff_t lda,
-                     const T *restrict x, ptrdiff_t incx,
-                     T alpha, T *restrict y, ptrdiff_t incy);
+                     const TR *restrict a, ptrdiff_t lda,
+                     const TR *restrict x, ptrdiff_t incx,
+                     TR alpha, TR *restrict y, ptrdiff_t incy);
 #endif
 
 void qsbmv_core(
     char uplo,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *beta_,
+    TR *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
-    const T zero = 0.0Q, one = 1.0Q;
+    const TR alpha = *alpha_, beta = *beta_;
+    const TR zero = 0.0Q, one = 1.0Q;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || (alpha == zero && beta == one)) return;
@@ -72,8 +72,8 @@ void qsbmv_core(
         if (UPLO == 'U') {
             const ptrdiff_t KP1 = k + 1;
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero;
+                const TR t1 = alpha * x[j];
+                TR t2 = zero;
                 const ptrdiff_t L = KP1 - 1 - j; /* row index of (i=0, j) is L+i; here L = K - j (0-based) */
                 const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                 for (ptrdiff_t i = i_lo; i < j; ++i) {
@@ -84,8 +84,8 @@ void qsbmv_core(
             }
         } else {
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[j];
-                T t2 = zero;
+                const TR t1 = alpha * x[j];
+                TR t2 = zero;
                 y[j] += t1 * A_(0, j);
                 const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                 for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
@@ -101,8 +101,8 @@ void qsbmv_core(
         if (UPLO == 'U') {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[jx];
-                T t2 = zero;
+                const TR t1 = alpha * x[jx];
+                TR t2 = zero;
                 ptrdiff_t ix = kx, iy = ky;
                 const ptrdiff_t L = k - j;
                 const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
@@ -118,8 +118,8 @@ void qsbmv_core(
         } else {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t1 = alpha * x[jx];
-                T t2 = zero;
+                const TR t1 = alpha * x[jx];
+                TR t2 = zero;
                 y[jy] += t1 * A_(0, j);
                 ptrdiff_t ix = jx, iy = jy;
                 const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
@@ -143,15 +143,15 @@ void qsbmv_core(
  * cross-thread write dependence (x,y distinct) -> no scratch/barrier. */
 static void qsbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
                             ptrdiff_t lo, ptrdiff_t hi,
-                            const T *restrict a, ptrdiff_t lda,
-                            const T *restrict x, T alpha,
-                            T *restrict y, ptrdiff_t incy)
+                            const TR *restrict a, ptrdiff_t lda,
+                            const TR *restrict x, TR alpha,
+                            TR *restrict y, ptrdiff_t incy)
 {
     const ptrdiff_t s1 = lda - 1;
     if (upper) {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = base[k] * x[i];
+            const TR *base = &A_(0, i);
+            TR s = base[k] * x[i];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
             for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[k + d * s1] * x[i + d];
             ptrdiff_t llen = (i < k) ? i : k;
@@ -160,8 +160,8 @@ static void qsbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
         }
     } else {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = base[0] * x[i];
+            const TR *base = &A_(0, i);
+            TR s = base[0] * x[i];
             ptrdiff_t llen = (i < k) ? i : k;
             for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-d * s1] * x[i - d];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
@@ -177,9 +177,9 @@ static void qsbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
  * fall back. noinline so its bookkeeping does not pressure the serial path. */
 __attribute__((noinline)) static ptrdiff_t qsbmv_omp(
     bool upper, ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy)
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    TR alpha, TR *restrict y, ptrdiff_t incy)
 {
     if (n < QSBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -189,10 +189,10 @@ __attribute__((noinline)) static ptrdiff_t qsbmv_omp(
     if (incx < 0) x -= (n - 1) * incx;
     if (incy < 0) y -= (n - 1) * incy;
 
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TR *xptr = x;
+    TR *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TR *)malloc((size_t)n * sizeof(TR));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[i * incx];
         xptr = xbuf;
@@ -212,6 +212,6 @@ __attribute__((noinline)) static ptrdiff_t qsbmv_omp(
 #endif /* _OPENMP */
 
 
-EPBLAS_FACADE_SBMV(qsbmv, T)
+EPBLAS_FACADE_SBMV(qsbmv, TR)
 
 #undef A_

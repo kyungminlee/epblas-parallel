@@ -19,7 +19,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -35,7 +35,7 @@ using simd_exact::cstore4;
 }  // namespace
 
 /* Y := α·X + Y over a contiguous unit-stride range — serial kernel, unchanged. */
-static void waxpy_unit(std::ptrdiff_t n, T alpha, const T *x, T *y)
+static void waxpy_unit(std::ptrdiff_t n, TC alpha, const TC *x, TC *y)
 {
 #ifdef MBLAS_SIMD_DD
     const __m256d arh = _mm256_set1_pd(alpha.re.limbs[0]);
@@ -63,7 +63,7 @@ static void waxpy_unit(std::ptrdiff_t n, T alpha, const T *x, T *y)
 
 #ifdef _OPENMP
 #define WAXPY_OMP_MIN 2048
-__attribute__((noinline)) static std::ptrdiff_t waxpy_omp(std::ptrdiff_t n, T alpha, const T *x, T *y)
+__attribute__((noinline)) static std::ptrdiff_t waxpy_omp(std::ptrdiff_t n, TC alpha, const TC *x, TC *y)
 {
     if (n <= WAXPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -79,11 +79,11 @@ __attribute__((noinline)) static std::ptrdiff_t waxpy_omp(std::ptrdiff_t n, T al
 }
 #endif
 
-static void waxpy_core(std::ptrdiff_t n, const T *alpha_,
-                       const T *x, std::ptrdiff_t incx,
-                       T *y, std::ptrdiff_t incy)
+static void waxpy_core(std::ptrdiff_t n, const TC *alpha_,
+                       const TC *x, std::ptrdiff_t incx,
+                       TC *y, std::ptrdiff_t incy)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     if (n <= 0 || ceq0(alpha)) return;
 
     if (incx == 1 && incy == 1) {
@@ -99,5 +99,5 @@ static void waxpy_core(std::ptrdiff_t n, const T *alpha_,
 }
 
 extern "C" {
-EPBLAS_FACADE_AXPY(waxpy, T, T)
+EPBLAS_FACADE_AXPY(waxpy, TC, TC)
 }

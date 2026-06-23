@@ -32,13 +32,13 @@
  * the shared floor is set to 32 where all three win solidly. Bit-exact (relerr 0). */
 #define YGEMV_OMP_MIN 32
 
-typedef _Complex long double T;
+typedef _Complex long double TC;
 
 
-static inline T cconj(T z) { return ~z; }
+static inline TC cconj(TC z) { return ~z; }
 
-static const T ZERO = 0.0L + 0.0Li;
-static const T ONE  = 1.0L + 0.0Li;
+static const TC ZERO = 0.0L + 0.0Li;
+static const TC ONE  = 1.0L + 0.0Li;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -47,13 +47,13 @@ static const T ONE  = 1.0L + 0.0Li;
 void ygemv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *beta_,
+    TC *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char TRANS = blas_up(trans);
 
     if (m == 0 || n == 0) return;
@@ -105,25 +105,25 @@ void ygemv_core(
                     const ptrdiff_t i_hi = blas_part_bound(m, tid + 1, nth);
                     ptrdiff_t j = 0;
                     for (; j + 1 < n; j += 2) {
-                        const T t0 = alpha * x[j];
-                        const T t1 = alpha * x[j + 1];
-                        const T *a0 = &A_(0, j);
-                        const T *a1 = &A_(0, j + 1);
+                        const TC t0 = alpha * x[j];
+                        const TC t1 = alpha * x[j + 1];
+                        const TC *a0 = &A_(0, j);
+                        const TC *a1 = &A_(0, j + 1);
                         for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
                             y[i] = (y[i] + t0 * a0[i]) + t1 * a1[i];
                         }
                     }
                     for (; j < n; ++j) {
-                        const T t = alpha * x[j];
-                        const T *aj = &A_(0, j);
+                        const TC t = alpha * x[j];
+                        const TC *aj = &A_(0, j);
                         for (ptrdiff_t i = i_lo; i < i_hi; ++i) y[i] += t * aj[i];
                     }
                 }
 #endif
             } else {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    const T t = alpha * x[j];
-                    const T *aj = &A_(0, j);
+                    const TC t = alpha * x[j];
+                    const TC *aj = &A_(0, j);
                     for (ptrdiff_t i = 0; i < m; ++i) y[i] += t * aj[i];
                 }
             }
@@ -133,8 +133,8 @@ void ygemv_core(
              * x87 stack; single-column matches migrated. */
             ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;
             for (ptrdiff_t j = 0; j < n; ++j) {
-                const T t = alpha * x[jx];
-                const T *aj = &A_(0, j);
+                const TC t = alpha * x[jx];
+                const TC *aj = &A_(0, j);
                 for (ptrdiff_t i = 0; i < m; ++i) y[i] += t * aj[i];
                 jx += incx;
             }
@@ -150,8 +150,8 @@ void ygemv_core(
             ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;                 \
             ptrdiff_t j = 0;                                                 \
             for (; j + 1 < n; j += 2) {                                      \
-                const T t0 = alpha * x[jx];                                  \
-                const T t1 = alpha * x[jx + incx];                          \
+                const TC t0 = alpha * x[jx];                                  \
+                const TC t1 = alpha * x[jx + incx];                          \
                 /* Decompose the loop-invariant scalars into real/imag      \
                  * long-double locals and stride the complex A/y columns    \
                  * as 2n reals. _Complex t0/t1 otherwise force gfortran's    \
@@ -178,9 +178,9 @@ void ygemv_core(
                 jx += 2 * incx;                                             \
             }                                                               \
             for (; j < n; ++j) {                                            \
-                const T xj = x[jx];                                         \
+                const TC xj = x[jx];                                         \
                 if (xj != ZERO) {                                          \
-                    const T t = alpha * xj;                                 \
+                    const TC t = alpha * xj;                                 \
                     ptrdiff_t iy = iy0 + (i_lo) * incy;                     \
                     for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) {           \
                         y[iy] += t * A_(i, j);                              \
@@ -218,8 +218,8 @@ void ygemv_core(
              * still outlines (see Addendum 16). */
 #define YGEMV_T_BODY                                                         \
             for (ptrdiff_t j = 0; j < n; ++j) {                                    \
-                const T *aj = &A_(0, j);                                     \
-                T s = ZERO;                                                  \
+                const TC *aj = &A_(0, j);                                     \
+                TC s = ZERO;                                                  \
                 if (conj_a) {                                                \
                     for (ptrdiff_t i = 0; i < m; ++i) s += cconj(aj[i]) * x[i];    \
                 } else {                                                     \
@@ -244,7 +244,7 @@ void ygemv_core(
             const bool use_omp = (n >= YGEMV_OMP_MIN && blas_omp_should_thread());
 #define YGEMV_T_STRIDED_BODY                                                  \
             for (ptrdiff_t j = 0; j < n; ++j) {                              \
-                T s = ZERO;                                                  \
+                TC s = ZERO;                                                  \
                 ptrdiff_t ix = ix0;                                          \
                 for (ptrdiff_t i = 0; i < m; ++i) {                          \
                     s += (conj_a ? cconj(A_(i, j)) : A_(i, j)) * x[ix];      \
@@ -265,6 +265,6 @@ void ygemv_core(
     }
 }
 
-EPBLAS_FACADE_GEMV(ygemv, T)
+EPBLAS_FACADE_GEMV(ygemv, TC)
 
 #undef A_

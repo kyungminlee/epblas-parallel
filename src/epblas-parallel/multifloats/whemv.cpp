@@ -28,7 +28,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -38,7 +38,7 @@ using mf_pred::ceq1;
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
 const R rzero{0.0, 0.0};
-const T zero_cdd{ rzero, rzero };
+const TC zero_cdd{ rzero, rzero };
 
 using mf_kernels::cmul;
 using mf_kernels::cadd;
@@ -60,14 +60,14 @@ namespace {
  * temp2 = sum conj(A[k,i])*x[k]. Every yacc write is additive, so the same
  * instructions serve the serial path (yacc = shared y, in column order) and the
  * threaded path (yacc = private zero buffer, disjoint columns). */
-static inline __attribute__((always_inline)) T
-whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const T *a, std::size_t lda, T alpha,
+static inline __attribute__((always_inline)) TC
+whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const TC *a, std::size_t lda, TC alpha,
             const double *x_rh, const double *x_rl,
             const double *x_ih, const double *x_il,
             double *yacc_rh, double *yacc_rl,
             double *yacc_ih, double *yacc_il)
 {
-    const T t1 = cmul(alpha, T{ R{x_rh[i], x_rl[i]}, R{x_ih[i], x_il[i]} });
+    const TC t1 = cmul(alpha, TC{ R{x_rh[i], x_rl[i]}, R{x_ih[i], x_il[i]} });
     const __m256d t1rh = _mm256_set1_pd(t1.re.limbs[0]);
     const __m256d t1rl = _mm256_set1_pd(t1.re.limbs[1]);
     const __m256d t1ih = _mm256_set1_pd(t1.im.limbs[0]);
@@ -76,15 +76,15 @@ whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const T 
     const __m256d zerov = _mm256_setzero_pd();
     __m256d s_rh = zerov, s_rl = zerov, s_ih = zerov, s_il = zerov;
     std::ptrdiff_t k = k_lo;
-    T temp2_sc = zero_cdd;
+    TC temp2_sc = zero_cdd;
     /* Align to 4-boundary for unit-aligned SIMD. */
     for (; k < k_hi && (k & 3) != 0; ++k) {
-        T aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
-        T yk{ R{yacc_rh[k], yacc_rl[k]}, R{yacc_ih[k], yacc_il[k]} };
+        TC aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
+        TC yk{ R{yacc_rh[k], yacc_rl[k]}, R{yacc_ih[k], yacc_il[k]} };
         yk = cadd(yk, cmul(t1, aki));
         yacc_rh[k] = yk.re.limbs[0]; yacc_rl[k] = yk.re.limbs[1];
         yacc_ih[k] = yk.im.limbs[0]; yacc_il[k] = yk.im.limbs[1];
-        T xk{ R{x_rh[k], x_rl[k]}, R{x_ih[k], x_il[k]} };
+        TC xk{ R{x_rh[k], x_rl[k]}, R{x_ih[k], x_il[k]} };
         temp2_sc = cadd(temp2_sc, cmul(cconj(aki), xk));
     }
     for (; k + 3 < k_hi; k += 4) {
@@ -119,15 +119,15 @@ whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const T 
                          nsrh, nsrl, nsih, nsil);
         s_rh = nsrh; s_rl = nsrl; s_ih = nsih; s_il = nsil;
     }
-    T temp2 = chreduce(s_rh, s_rl, s_ih, s_il);
+    TC temp2 = chreduce(s_rh, s_rl, s_ih, s_il);
     temp2 = cadd(temp2, temp2_sc);
     for (; k < k_hi; ++k) {
-        T aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
-        T yk{ R{yacc_rh[k], yacc_rl[k]}, R{yacc_ih[k], yacc_il[k]} };
+        TC aki{ R{aip[4*k], aip[4*k+1]}, R{aip[4*k+2], aip[4*k+3]} };
+        TC yk{ R{yacc_rh[k], yacc_rl[k]}, R{yacc_ih[k], yacc_il[k]} };
         yk = cadd(yk, cmul(t1, aki));
         yacc_rh[k] = yk.re.limbs[0]; yacc_rl[k] = yk.re.limbs[1];
         yacc_ih[k] = yk.im.limbs[0]; yacc_il[k] = yk.im.limbs[1];
-        T xk{ R{x_rh[k], x_rl[k]}, R{x_ih[k], x_il[k]} };
+        TC xk{ R{x_rh[k], x_rl[k]}, R{x_ih[k], x_il[k]} };
         temp2 = cadd(temp2, cmul(cconj(aki), xk));
     }
     return temp2;
@@ -139,30 +139,30 @@ whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const T 
  * (column order, bit-identical to the prior inline body) and threaded
  * (private zero buffer, disjoint columns → within DD fuzz tol). */
 static inline __attribute__((always_inline)) void
-whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const T *a, std::size_t lda, T alpha,
+whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const TC *a, std::size_t lda, TC alpha,
           const double *x_rh, const double *x_rl,
           const double *x_ih, const double *x_il,
           double *y_rh, double *y_rl, double *y_ih, double *y_il)
 {
-    const T temp1 = cmul(alpha, T{ R{x_rh[i], x_rl[i]}, R{x_ih[i], x_il[i]} });
+    const TC temp1 = cmul(alpha, TC{ R{x_rh[i], x_rl[i]}, R{x_ih[i], x_il[i]} });
     if (lower) {
         /* Diagonal contribution (A[i,i] real). */
-        T aii_re{ A_(i, i).re, rzero };
-        T yi{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
+        TC aii_re{ A_(i, i).re, rzero };
+        TC yi{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
         yi = cadd(yi, cmul(temp1, aii_re));
         y_rh[i] = yi.re.limbs[0]; y_rl[i] = yi.re.limbs[1];
         y_ih[i] = yi.im.limbs[0]; y_il[i] = yi.im.limbs[1];
-        T temp2 = whemv_inner(i, i + 1, n, a, lda, alpha,
+        TC temp2 = whemv_inner(i, i + 1, n, a, lda, alpha,
                               x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
-        T yi2{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
+        TC yi2{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
         yi2 = cadd(yi2, cmul(alpha, temp2));
         y_rh[i] = yi2.re.limbs[0]; y_rl[i] = yi2.re.limbs[1];
         y_ih[i] = yi2.im.limbs[0]; y_il[i] = yi2.im.limbs[1];
     } else {
-        T temp2 = whemv_inner(i, 0, i, a, lda, alpha,
+        TC temp2 = whemv_inner(i, 0, i, a, lda, alpha,
                               x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
-        T aii_re{ A_(i, i).re, rzero };
-        T yi{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
+        TC aii_re{ A_(i, i).re, rzero };
+        TC yi{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
         yi = cadd(yi, cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
         y_rh[i] = yi.re.limbs[0]; y_rl[i] = yi.re.limbs[1];
         y_ih[i] = yi.im.limbs[0]; y_il[i] = yi.im.limbs[1];
@@ -182,7 +182,7 @@ whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const T *a, std::size_
  * fold. Reorders the per-row sum vs serial -> within DD fuzz tol. Returns true
  * if handled. */
 __attribute__((noinline)) static bool whemv_omp(
-    bool lower, std::ptrdiff_t n, const T *a, std::size_t lda, T alpha,
+    bool lower, std::ptrdiff_t n, const TC *a, std::size_t lda, TC alpha,
     const double *x_rh, const double *x_rl, const double *x_ih, const double *x_il,
     double *y_rh, double *y_rl, double *y_ih, double *y_il)
 {
@@ -219,8 +219,8 @@ __attribute__((noinline)) static bool whemv_omp(
         std::ptrdiff_t k_from, k_to;
         mf_omp::tri_row_window(t, !lower, range, n, k_from, k_to);
         for (std::ptrdiff_t k = k_from; k < k_to; ++k) {
-            T yk{ R{y_rh[k], y_rl[k]}, R{y_ih[k], y_il[k]} };
-            yk = cadd(yk, T{ R{yp_rh[k], yp_rl[k]}, R{yp_ih[k], yp_il[k]} });
+            TC yk{ R{y_rh[k], y_rl[k]}, R{y_ih[k], y_il[k]} };
+            yk = cadd(yk, TC{ R{yp_rh[k], yp_rl[k]}, R{yp_ih[k], yp_il[k]} });
             y_rh[k] = yk.re.limbs[0]; y_rl[k] = yk.re.limbs[1];
             y_ih[k] = yk.im.limbs[0]; y_il[k] = yk.im.limbs[1];
         }
@@ -234,8 +234,8 @@ __attribute__((noinline)) static bool whemv_omp(
  * already beta-applied. SIMD SoA path (+ threaded private-accumulator) when
  * built with MBLAS_SIMD_DD; faithful scalar column sweep otherwise. Strided
  * callers gather x,y to unit stride around this. */
-static void whemv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t lda, T alpha,
-                         const T *x, T *y)
+static void whemv_contig(bool lower, std::ptrdiff_t n, const TC *a, std::size_t lda, TC alpha,
+                         const TC *x, TC *y)
 {
 #ifdef MBLAS_SIMD_DD
     const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
@@ -278,10 +278,10 @@ static void whemv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t l
 #else
     if (lower) {
         for (std::ptrdiff_t i = 0; i < n; ++i) {
-            const T temp1 = cmul(alpha, x[i]);
-            T temp2 = zero_cdd;
-            const T *ai = &A_(0, i);
-            const T aii_re{ ai[i].re, rzero };
+            const TC temp1 = cmul(alpha, x[i]);
+            TC temp2 = zero_cdd;
+            const TC *ai = &A_(0, i);
+            const TC aii_re{ ai[i].re, rzero };
             y[i] = cadd(y[i], cmul(temp1, aii_re));
             for (std::ptrdiff_t k = i + 1; k < n; ++k) {
                 y[k]  = cadd(y[k], cmul(temp1, ai[k]));
@@ -291,14 +291,14 @@ static void whemv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t l
         }
     } else {
         for (std::ptrdiff_t i = 0; i < n; ++i) {
-            const T temp1 = cmul(alpha, x[i]);
-            T temp2 = zero_cdd;
-            const T *ai = &A_(0, i);
+            const TC temp1 = cmul(alpha, x[i]);
+            TC temp2 = zero_cdd;
+            const TC *ai = &A_(0, i);
             for (std::ptrdiff_t k = 0; k < i; ++k) {
                 y[k]  = cadd(y[k], cmul(temp1, ai[k]));
                 temp2 = cadd(temp2, cmul(cconj(ai[k]), x[k]));
             }
-            const T aii_re{ ai[i].re, rzero };
+            const TC aii_re{ ai[i].re, rzero };
             y[i] = cadd(y[i], cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
         }
     }
@@ -308,13 +308,13 @@ static void whemv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t l
 static void whemv_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda,
-    const T *x, std::ptrdiff_t incx,
-    const T *beta_,
-    T *y, std::ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *a, std::ptrdiff_t lda,
+    const TC *x, std::ptrdiff_t incx,
+    const TC *beta_,
+    TC *y, std::ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = up(&uplo);
 
     if (n == 0) return;
@@ -329,7 +329,7 @@ static void whemv_core(
     /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
      * core, scatter y back. Handles negative increments; O(N) gather vs the old
      * O(N^2) strided sweep, and lets the strided case thread like contiguous. */
-    std::vector<T> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
+    std::vector<TC> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
     mf_kernels::gather_strided(n, x, incx, xs.data());
     mf_kernels::gather_strided(n, y, incy, ys.data());
     whemv_contig(UPLO == 'L', n, a, lda, alpha, xs.data(), ys.data());
@@ -337,7 +337,7 @@ static void whemv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SYMV(whemv, T)
+EPBLAS_FACADE_SYMV(whemv, TC)
 }
 
 #undef A_

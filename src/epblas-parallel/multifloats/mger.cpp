@@ -18,7 +18,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -41,7 +41,7 @@ namespace {
  * to SoA once) and the y read differ between the contiguous and strided drivers,
  * so this one SIMD core serves both. */
 static inline __attribute__((always_inline)) void
-mger_col(std::ptrdiff_t m, const double *x_hi, const double *x_lo, T t, T *ajT)
+mger_col(std::ptrdiff_t m, const double *x_hi, const double *x_lo, TR t, TR *ajT)
 {
     const __m256d thi = _mm256_set1_pd(t.limbs[0]);
     const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
@@ -75,19 +75,19 @@ mger_col(std::ptrdiff_t m, const double *x_hi, const double *x_lo, T t, T *ajT)
         simd_fast::add(a_h, a_l, p_h, p_l, nh, nl);
         store_dd4(aj + 2 * i, nh, nl);
     }
-    for (; i < m; ++i) ajT[i] = ajT[i] + t * T{x_hi[i], x_lo[i]};
+    for (; i < m; ++i) ajT[i] = ajT[i] + t * TR{x_hi[i], x_lo[i]};
 }
 }
 #endif
 
 static void mger_core(
     std::ptrdiff_t m, std::ptrdiff_t n,
-    const T *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    const T *y, std::ptrdiff_t incy,
-    T *a, std::ptrdiff_t lda)
+    const TR *alpha_,
+    const TR *x, std::ptrdiff_t incx,
+    const TR *y, std::ptrdiff_t incy,
+    TR *a, std::ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
 
     if (m == 0 || n == 0 || eq0(alpha)) return;
 
@@ -110,7 +110,7 @@ static void mger_core(
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const T yj = y[jy0 + j * incy];
+        const TR yj = y[jy0 + j * incy];
         if (eq0(yj)) continue;
         mger_col(m, x_hi, x_lo, alpha * yj, &A_(0, j));
     }
@@ -118,10 +118,10 @@ static void mger_core(
 #else
     /* Scalar fallback: gather strided x to unit stride once, then a plain column
      * AXPY per j (O(M) pack vs O(M*N) repeated gathers). */
-    const T *xp = x;
-    T *x_buf = NULL;
+    const TR *xp = x;
+    TR *x_buf = NULL;
     if (incx != 1) {
-        x_buf = static_cast<T *>(std::malloc(static_cast<size_t>(m) * sizeof(T)));
+        x_buf = static_cast<TR *>(std::malloc(static_cast<size_t>(m) * sizeof(TR)));
         if (x_buf) { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < m; ++i) { x_buf[i] = x[ix]; ix += incx; } xp = x_buf; }
     }
     const std::ptrdiff_t x_unit = (incx == 1) || (x_buf != NULL);
@@ -129,10 +129,10 @@ static void mger_core(
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const T yj = y[jy0 + j * incy];
+        const TR yj = y[jy0 + j * incy];
         if (!eq0(yj)) {
-            const T t = alpha * yj;
-            T *aj = &A_(0, j);
+            const TR t = alpha * yj;
+            TR *aj = &A_(0, j);
             if (x_unit) { for (std::ptrdiff_t i = 0; i < m; ++i) aj[i] = aj[i] + t * xp[i]; }
             else { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < m; ++i) { aj[i] = aj[i] + t * x[ix]; ix += incx; } }
         }
@@ -142,7 +142,7 @@ static void mger_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_GER(mger, T)
+EPBLAS_FACADE_GER(mger, TR)
 }
 
 #undef A_

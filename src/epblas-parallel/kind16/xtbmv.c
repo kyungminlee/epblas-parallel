@@ -13,7 +13,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef __complex128 T;
+typedef __complex128 TC;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -34,16 +34,16 @@ typedef __complex128 T;
 #ifdef _OPENMP
 static ptrdiff_t xtbmv_omp(bool upper, ptrdiff_t trans, bool conj, bool nounit,
                      ptrdiff_t n, ptrdiff_t k,
-                     const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx);
+                     const TC *restrict a, ptrdiff_t lda, TC *restrict x, ptrdiff_t incx);
 #endif
 
 void xtbmv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TC *restrict a, ptrdiff_t lda,
+    TC *restrict x, ptrdiff_t incx)
 {
-    const T zero = 0.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
     const char TRANS = blas_up(trans);
     const bool noconj = (TRANS == 'T');
@@ -62,7 +62,7 @@ void xtbmv_core(
             if (UPLO == 'U') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
-                        const T tmp = x[j];
+                        const TC tmp = x[j];
                         const ptrdiff_t L = k - j;
                         const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = i_lo; i < j; ++i) x[i] += tmp * A_(L + i, j);
@@ -72,7 +72,7 @@ void xtbmv_core(
             } else {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
-                        const T tmp = x[j];
+                        const TC tmp = x[j];
                         const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = i_hi - 1; i > j; --i) x[i] += tmp * A_(i - j, j);
                         if (nounit) x[j] *= A_(0, j);
@@ -82,7 +82,7 @@ void xtbmv_core(
         } else {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[j];
+                    TC tmp = x[j];
                     const ptrdiff_t L = k - j;
                     if (nounit) tmp *= (noconj ? A_(k, j) : conjq(A_(k, j)));
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
@@ -92,7 +92,7 @@ void xtbmv_core(
                 }
             } else {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[j];
+                    TC tmp = x[j];
                     if (nounit) tmp *= (noconj ? A_(0, j) : conjq(A_(0, j)));
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     if (noconj) for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += A_(i - j, j) * x[i];
@@ -108,7 +108,7 @@ void xtbmv_core(
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[jx] != zero) {
-                        const T tmp = x[jx];
+                        const TC tmp = x[jx];
                         ptrdiff_t ix = kx;
                         const ptrdiff_t L = k - j;
                         const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
@@ -126,7 +126,7 @@ void xtbmv_core(
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[jx] != zero) {
-                        const T tmp = x[jx];
+                        const TC tmp = x[jx];
                         ptrdiff_t ix = kx;
                         const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = i_hi - 1; i > j; --i) {
@@ -144,14 +144,14 @@ void xtbmv_core(
                 kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[jx];
+                    TC tmp = x[jx];
                     kx -= incx;
                     ptrdiff_t ix = kx;
                     const ptrdiff_t L = k - j;
                     if (nounit) tmp *= (noconj ? A_(k, j) : conjq(A_(k, j)));
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
-                        const T aij = noconj ? A_(L + i, j) : conjq(A_(L + i, j));
+                        const TC aij = noconj ? A_(L + i, j) : conjq(A_(L + i, j));
                         tmp += aij * x[ix];
                         ix -= incx;
                     }
@@ -161,13 +161,13 @@ void xtbmv_core(
             } else {
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[jx];
+                    TC tmp = x[jx];
                     kx += incx;
                     ptrdiff_t ix = kx;
                     if (nounit) tmp *= (noconj ? A_(0, j) : conjq(A_(0, j)));
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
-                        const T aij = noconj ? A_(i - j, j) : conjq(A_(i - j, j));
+                        const TC aij = noconj ? A_(i - j, j) : conjq(A_(i - j, j));
                         tmp += aij * x[ix];
                         ix += incx;
                     }
@@ -187,24 +187,24 @@ void xtbmv_core(
  * conjugates the band and diagonal entries. */
 static void xtbmv_rowgather(bool upper, ptrdiff_t trans, bool conj, bool nounit,
                             ptrdiff_t n, ptrdiff_t k, ptrdiff_t lo, ptrdiff_t hi,
-                            const T *restrict a, ptrdiff_t lda,
-                            const T *restrict x, T *restrict y)
+                            const TC *restrict a, ptrdiff_t lda,
+                            const TC *restrict x, TC *restrict y)
 {
     const ptrdiff_t s1 = lda - 1;
     if (!trans) {
         if (upper) {
             for (ptrdiff_t i = lo; i < hi; ++i) {
-                const T *base = &A_(0, i);
+                const TC *base = &A_(0, i);
                 ptrdiff_t len = (n - 1 - i < k) ? n - 1 - i : k;
-                T s = nounit ? base[k] * x[i] : x[i];
+                TC s = nounit ? base[k] * x[i] : x[i];
                 for (ptrdiff_t d = 1; d <= len; ++d) s += base[k + d * s1] * x[i + d];
                 y[i] = s;
             }
         } else {
             for (ptrdiff_t i = lo; i < hi; ++i) {
-                const T *base = &A_(0, i);
+                const TC *base = &A_(0, i);
                 ptrdiff_t len = (i < k) ? i : k;
-                T s = nounit ? base[0] * x[i] : x[i];
+                TC s = nounit ? base[0] * x[i] : x[i];
                 for (ptrdiff_t d = 1; d <= len; ++d) s += base[-d * s1] * x[i - d];
                 y[i] = s;
             }
@@ -212,18 +212,18 @@ static void xtbmv_rowgather(bool upper, ptrdiff_t trans, bool conj, bool nounit,
     } else {
         if (upper) {
             for (ptrdiff_t i = lo; i < hi; ++i) {
-                const T *base = &A_(0, i);
+                const TC *base = &A_(0, i);
                 ptrdiff_t len = (i < k) ? i : k;
-                T s = nounit ? (conj ? conjq(base[k]) : base[k]) * x[i] : x[i];
+                TC s = nounit ? (conj ? conjq(base[k]) : base[k]) * x[i] : x[i];
                 if (!conj) for (ptrdiff_t d = 1; d <= len; ++d) s += base[k - d] * x[i - d];
                 else       for (ptrdiff_t d = 1; d <= len; ++d) s += conjq(base[k - d]) * x[i - d];
                 y[i] = s;
             }
         } else {
             for (ptrdiff_t i = lo; i < hi; ++i) {
-                const T *base = &A_(0, i);
+                const TC *base = &A_(0, i);
                 ptrdiff_t len = (n - 1 - i < k) ? n - 1 - i : k;
-                T s = nounit ? (conj ? conjq(base[0]) : base[0]) * x[i] : x[i];
+                TC s = nounit ? (conj ? conjq(base[0]) : base[0]) * x[i] : x[i];
                 if (!conj) for (ptrdiff_t d = 1; d <= len; ++d) s += base[d] * x[i + d];
                 else       for (ptrdiff_t d = 1; d <= len; ++d) s += conjq(base[d]) * x[i + d];
                 y[i] = s;
@@ -239,7 +239,7 @@ static void xtbmv_rowgather(bool upper, ptrdiff_t trans, bool conj, bool nounit,
  * serial path. */
 __attribute__((noinline)) static ptrdiff_t xtbmv_omp(
     bool upper, ptrdiff_t trans, bool conj, bool nounit, ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda, T *restrict x, ptrdiff_t incx)
+    const TC *restrict a, ptrdiff_t lda, TC *restrict x, ptrdiff_t incx)
 {
     if (n < XTBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -248,15 +248,15 @@ __attribute__((noinline)) static ptrdiff_t xtbmv_omp(
 
     if (incx < 0) x -= (n - 1) * incx;
 
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TC *xptr = x;
+    TC *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TC *)malloc((size_t)n * sizeof(TC));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[i * incx];
         xptr = xbuf;
     }
-    T *y = (T *)malloc((size_t)n * sizeof(T));
+    TC *y = (TC *)malloc((size_t)n * sizeof(TC));
     if (!y) { free(xbuf); return 0; }
 
     #pragma omp parallel num_threads(nthreads)
@@ -275,6 +275,6 @@ __attribute__((noinline)) static ptrdiff_t xtbmv_omp(
 }
 #endif /* _OPENMP */
 
-EPBLAS_FACADE_TBMV(xtbmv, T)
+EPBLAS_FACADE_TBMV(xtbmv, TC)
 
 #undef A_

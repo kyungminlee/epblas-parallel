@@ -25,20 +25,20 @@
 #include "ysyrk_kernel.h"
 #include "../common/epblas_facade.h"
 
-typedef ysyrk_T T;
+typedef ysyrk_TC TC;
 
 #define YSYRK_OMP_MIN 32
 
-static const T ZERO = 0.0L + 0.0Li;
-static const T ONE  = 1.0L + 0.0Li;
+static const TC ZERO = 0.0L + 0.0Li;
+static const TC ONE  = 1.0L + 0.0Li;
 
 static void ysyrk_core(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *beta_,
-    T *restrict c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *beta_,
+    TC *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -48,7 +48,7 @@ static void ysyrk_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
     const char TRANS   = blas_up(trans);
 
@@ -83,4 +83,4 @@ static void ysyrk_core(
     }
 }
 
-EPBLAS_FACADE_SYRK(ysyrk, T, T)
+EPBLAS_FACADE_SYRK(ysyrk, TC, TC)

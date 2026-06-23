@@ -24,10 +24,10 @@
  * floor; the Hermitian two-sided fold reorders at ULP level, within tolerance). */
 #define YHEMV_OMP_MIN 32
 
-typedef _Complex long double T;
-static const T ZERO = 0.0L + 0.0Li;
-static const T ONE  = 1.0L + 0.0Li;
-static inline T cconj(T z) { return ~z; }
+typedef _Complex long double TC;
+static const TC ZERO = 0.0L + 0.0Li;
+static const TC ONE  = 1.0L + 0.0Li;
+static inline TC cconj(TC z) { return ~z; }
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -35,13 +35,13 @@ static inline T cconj(T z) { return ~z; }
 static void yhemv_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *beta_,
+    TC *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
 
     if (n == 0) return;
@@ -69,20 +69,20 @@ static void yhemv_core(
             /* Parallel column-walk with per-thread private y, then reduce.
              * Same pattern as esymv (Addendum 36). Hermitian conjugation
              * stays inside the column loop unchanged. */
-            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
+            TC *y_priv_all = (TC *)calloc((size_t)nthreads * (size_t)n, sizeof(TC));
             if (y_priv_all) {
 #ifdef _OPENMP
                 #pragma omp parallel num_threads(nthreads)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
+                    TC *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
                         for (ptrdiff_t j = 0; j < n; ++j) {
-                            const T temp1 = alpha * x[j];
-                            T temp2 = ZERO;
-                            const T *aj = &A_(0, j);
+                            const TC temp1 = alpha * x[j];
+                            TC temp2 = ZERO;
+                            const TC *aj = &A_(0, j);
                             y_priv[j] += temp1 * __real__ aj[j];
                             for (ptrdiff_t k = j + 1; k < n; ++k) {
                                 y_priv[k] += temp1 * aj[k];
@@ -93,9 +93,9 @@ static void yhemv_core(
                     } else {
                         #pragma omp for schedule(static, 1)
                         for (ptrdiff_t j = 0; j < n; ++j) {
-                            const T temp1 = alpha * x[j];
-                            T temp2 = ZERO;
-                            const T *aj = &A_(0, j);
+                            const TC temp1 = alpha * x[j];
+                            TC temp2 = ZERO;
+                            const TC *aj = &A_(0, j);
                             for (ptrdiff_t k = 0; k < j; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += cconj(aj[k]) * x[k];
@@ -106,7 +106,7 @@ static void yhemv_core(
 
                     #pragma omp for schedule(static)
                     for (ptrdiff_t i = 0; i < n; ++i) {
-                        T s = ZERO;
+                        TC s = ZERO;
                         for (ptrdiff_t t = 0; t < nthreads; ++t)
                             s += y_priv_all[(size_t)t * n + i];
                         y[i] += s;
@@ -119,9 +119,9 @@ static void yhemv_core(
         }
         if (UPLO == 'L') {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[i];
-                T temp2 = ZERO;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * x[i];
+                TC temp2 = ZERO;
+                const TC *ai = &A_(0, i);
                 y[i] += temp1 * __real__ ai[i];
                 for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[k]  += temp1 * ai[k];
@@ -131,9 +131,9 @@ static void yhemv_core(
             }
         } else {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[i];
-                T temp2 = ZERO;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * x[i];
+                TC temp2 = ZERO;
+                const TC *ai = &A_(0, i);
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += cconj(ai[k]) * x[k];
@@ -149,9 +149,9 @@ static void yhemv_core(
         if (UPLO == 'L') {
             ptrdiff_t ix = kx, iy = ky;
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[ix];
-                T temp2 = ZERO;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * x[ix];
+                TC temp2 = ZERO;
+                const TC *ai = &A_(0, i);
                 y[iy] += temp1 * __real__ ai[i];
                 ptrdiff_t jx = ix + incx, jy = iy + incy;
                 for (ptrdiff_t k = i + 1; k < n; ++k) {
@@ -165,9 +165,9 @@ static void yhemv_core(
         } else {
             ptrdiff_t ix = kx, iy = ky;
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[ix];
-                T temp2 = ZERO;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * x[ix];
+                TC temp2 = ZERO;
+                const TC *ai = &A_(0, i);
                 ptrdiff_t jx = kx, jy = ky;
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     y[jy] += temp1 * ai[k];
@@ -181,6 +181,6 @@ static void yhemv_core(
     }
 }
 
-EPBLAS_FACADE_SYMV(yhemv, T)
+EPBLAS_FACADE_SYMV(yhemv, TC)
 
 #undef A_

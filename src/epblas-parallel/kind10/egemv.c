@@ -26,7 +26,7 @@
 
 #define EGEMV_OMP_MIN 64
 
-typedef long double T;
+typedef long double TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -36,19 +36,19 @@ typedef long double T;
 void egemv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *beta_,
+    TR *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
 
     if (m == 0 || n == 0) return;
 
-    const T zero = 0.0L, one = 1.0L;
+    const TR zero = 0.0L, one = 1.0L;
 
     /* Output length: M for TRANS='N', N for TRANS='T'. */
     const ptrdiff_t leny = (TRANS == 'N') ? m : n;
@@ -93,22 +93,22 @@ void egemv_core(
                 const ptrdiff_t span = (i_hi) - (i_lo);                           \
                 ptrdiff_t j = 0;                                                  \
                 for (; j + 1 < n; j += 2) {                                 \
-                    const T t0 = alpha * x[j];                              \
-                    const T t1 = alpha * x[j + 1];                          \
+                    const TR t0 = alpha * x[j];                              \
+                    const TR t1 = alpha * x[j + 1];                          \
                     char *restrict yp = (char *)(y + (i_lo));               \
                     const char *restrict a0 = (const char *)&A_((i_lo), j); \
                     const char *restrict a1 = (const char *)&A_((i_lo), j + 1);\
-                    const size_t end = (size_t)span * sizeof(T);            \
-                    for (size_t k = 0; k < end; k += sizeof(T)) {           \
-                        T *yk        = (T *)(yp + k);                       \
-                        const T *a0k = (const T *)(a0 + k);                 \
-                        const T *a1k = (const T *)(a1 + k);                 \
+                    const size_t end = (size_t)span * sizeof(TR);            \
+                    for (size_t k = 0; k < end; k += sizeof(TR)) {           \
+                        TR *yk        = (TR *)(yp + k);                       \
+                        const TR *a0k = (const TR *)(a0 + k);                 \
+                        const TR *a1k = (const TR *)(a1 + k);                 \
                         *yk = (*yk + t0 * *a0k) + t1 * *a1k;                \
                     }                                                       \
                 }                                                           \
                 for (; j < n; ++j) {                                        \
-                    const T t = alpha * x[j];                               \
-                    const T *aj = &A_(0, j);                                \
+                    const TR t = alpha * x[j];                               \
+                    const TR *aj = &A_(0, j);                                \
                     for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) y[i] += t * aj[i];\
                 }                                                           \
             } while (0)
@@ -141,17 +141,17 @@ void egemv_core(
                 ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;            \
                 ptrdiff_t j = 0;                                            \
                 for (; j + 1 < n; j += 2) {                                 \
-                    const T t0 = alpha * x[jx];                             \
-                    const T t1 = alpha * x[jx + incx];                      \
-                    const T *a0 = &A_(0, j);                                \
-                    const T *a1 = &A_(0, j + 1);                            \
+                    const TR t0 = alpha * x[jx];                             \
+                    const TR t1 = alpha * x[jx + incx];                      \
+                    const TR *a0 = &A_(0, j);                                \
+                    const TR *a1 = &A_(0, j + 1);                            \
                     for (ptrdiff_t i = (i_lo); i < (i_hi); ++i)             \
                         y[i] = (y[i] + t0 * a0[i]) + t1 * a1[i];            \
                     jx += 2 * incx;                                         \
                 }                                                           \
                 for (; j < n; ++j) {                                        \
-                    const T t = alpha * x[jx];                              \
-                    const T *aj = &A_(0, j);                                \
+                    const TR t = alpha * x[jx];                              \
+                    const TR *aj = &A_(0, j);                                \
                     for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) y[i] += t * aj[i]; \
                     jx += incx;                                             \
                 }                                                           \
@@ -185,10 +185,10 @@ void egemv_core(
                 ptrdiff_t jx = (incx < 0) ? -(n - 1) * incx : 0;            \
                 ptrdiff_t j = 0;                                            \
                 for (; j + 1 < n; j += 2) {                                 \
-                    const T t0 = alpha * x[jx];                             \
-                    const T t1 = alpha * x[jx + incx];                      \
-                    const T *a0 = &A_(0, j);                                \
-                    const T *a1 = &A_(0, j + 1);                            \
+                    const TR t0 = alpha * x[jx];                             \
+                    const TR t1 = alpha * x[jx + incx];                      \
+                    const TR *a0 = &A_(0, j);                                \
+                    const TR *a1 = &A_(0, j + 1);                            \
                     ptrdiff_t iy = iy0 + (i_lo) * incy;                     \
                     for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) {           \
                         y[iy] = (y[iy] + t0 * a0[i]) + t1 * a1[i];          \
@@ -197,9 +197,9 @@ void egemv_core(
                     jx += 2 * incx;                                         \
                 }                                                           \
                 for (; j < n; ++j) {                                        \
-                    const T xj = x[jx];                                     \
+                    const TR xj = x[jx];                                     \
                     if (xj != zero) {                                       \
-                        const T t = alpha * xj;                             \
+                        const TR t = alpha * xj;                             \
                         ptrdiff_t iy = iy0 + (i_lo) * incy;                 \
                         for (ptrdiff_t i = (i_lo); i < (i_hi); ++i) {       \
                             y[iy] += t * A_(i, j);                          \
@@ -233,14 +233,14 @@ void egemv_core(
              * parallel and serial paths. */
 #define EGEMV_T_BODY do {                                                   \
                 for (ptrdiff_t j = 0; j < n; ++j) {                               \
-                    const T *aj = &A_(0, j);                                \
-                    T s0 = zero, s1 = zero;                                 \
+                    const TR *aj = &A_(0, j);                                \
+                    TR s0 = zero, s1 = zero;                                 \
                     ptrdiff_t i = 0;                                              \
                     for (; i + 1 < m; i += 2) {                             \
                         s0 += aj[i]     * x[i];                             \
                         s1 += aj[i + 1] * x[i + 1];                         \
                     }                                                       \
-                    T s = s0 + s1;                                          \
+                    TR s = s0 + s1;                                          \
                     for (; i < m; ++i) s += aj[i] * x[i];                   \
                     y[j] += alpha * s;                                      \
                 }                                                           \
@@ -250,14 +250,14 @@ void egemv_core(
 #ifdef _OPENMP
                 #pragma omp parallel for schedule(static)
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    const T *aj = &A_(0, j);
-                    T s0 = zero, s1 = zero;
+                    const TR *aj = &A_(0, j);
+                    TR s0 = zero, s1 = zero;
                     ptrdiff_t i = 0;
                     for (; i + 1 < m; i += 2) {
                         s0 += aj[i]     * x[i];
                         s1 += aj[i + 1] * x[i + 1];
                     }
-                    T s = s0 + s1;
+                    TR s = s0 + s1;
                     for (; i < m; ++i) s += aj[i] * x[i];
                     y[j] += alpha * s;
                 }
@@ -274,7 +274,7 @@ void egemv_core(
             const bool use_omp = (n >= EGEMV_OMP_MIN && blas_omp_should_thread());
 #define EGEMV_T_STRIDED_BODY                                                 \
             for (ptrdiff_t j = 0; j < n; ++j) {                              \
-                T s = zero;                                                  \
+                TR s = zero;                                                  \
                 ptrdiff_t ix = ix0;                                          \
                 for (ptrdiff_t i = 0; i < m; ++i) {                          \
                     s += A_(i, j) * x[ix];                                   \
@@ -295,6 +295,6 @@ void egemv_core(
     }
 }
 
-EPBLAS_FACADE_GEMV(egemv, T)
+EPBLAS_FACADE_GEMV(egemv, TR)
 
 #undef A_

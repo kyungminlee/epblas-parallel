@@ -21,24 +21,24 @@
 
 #include <stddef.h>
 
-typedef __float128 qtri_T;
+typedef __float128 qtri_TR;
 
 /* C += alpha·Ap·Bp over one packed (bm,bn,bk) tile (accumulate). */
-void qtri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, qtri_T alpha,
-                      const qtri_T *Ap, const qtri_T *Bp,
-                      qtri_T *C, ptrdiff_t ldc);
+void qtri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, qtri_TR alpha,
+                      const qtri_TR *Ap, const qtri_TR *Bp,
+                      qtri_TR *C, ptrdiff_t ldc);
 
 /* C := alpha·Ap·Bp over one packed tile (overwrite): zero C then accumulate.
  * Mirrors OpenBLAS's GEMM_KERNEL(beta=0) call inside the TRMM driver. */
-void qtri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, qtri_T alpha,
-                       const qtri_T *Ap, const qtri_T *Bp,
-                       qtri_T *C, ptrdiff_t ldc);
+void qtri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, qtri_TR alpha,
+                       const qtri_TR *Ap, const qtri_TR *Bp,
+                       qtri_TR *C, ptrdiff_t ldc);
 
 /* Pack a plain (non-triangular) A/B slab into the packed layout. */
-void qtri_ncopy(ptrdiff_t m, ptrdiff_t n, const qtri_T *a, ptrdiff_t lda,
-                qtri_T *b);
-void qtri_tcopy(ptrdiff_t m, ptrdiff_t n, const qtri_T *a, ptrdiff_t lda,
-                qtri_T *b);
+void qtri_ncopy(ptrdiff_t m, ptrdiff_t n, const qtri_TR *a, ptrdiff_t lda,
+                qtri_TR *b);
+void qtri_tcopy(ptrdiff_t m, ptrdiff_t n, const qtri_TR *a, ptrdiff_t lda,
+                qtri_TR *b);
 
 /* Area-balanced M-row partition for a triangular (SYRK/SYR2K) output.
  * Returns thread `tid`'s contiguous row range [*m_lo, *m_hi) of [0, N) such

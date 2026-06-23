@@ -27,23 +27,23 @@
 
 #include <stddef.h>
 
-typedef long double etri_T;
+typedef long double etri_TR;
 
 /* C += alpha·Ap·Bp over one packed (bm,bn,bk) tile (accumulate). */
-void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etri_T alpha,
-                      const etri_T *Ap, const etri_T *Bp,
-                      etri_T *C, ptrdiff_t ldc);
+void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etri_TR alpha,
+                      const etri_TR *Ap, const etri_TR *Bp,
+                      etri_TR *C, ptrdiff_t ldc);
 
 /* C := alpha·Ap·Bp over one packed tile (overwrite): zero C then accumulate.
  * Mirrors OpenBLAS's GEMM_KERNEL(beta=0) call inside the TRMM driver. */
-void etri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etri_T alpha,
-                       const etri_T *Ap, const etri_T *Bp,
-                       etri_T *C, ptrdiff_t ldc);
+void etri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etri_TR alpha,
+                       const etri_TR *Ap, const etri_TR *Bp,
+                       etri_TR *C, ptrdiff_t ldc);
 
 /* Pack a plain (non-triangular) A/B slab into the packed layout. */
-void etri_ncopy(ptrdiff_t m, ptrdiff_t n, const etri_T *a, ptrdiff_t lda,
-                etri_T *b);
-void etri_tcopy(ptrdiff_t m, ptrdiff_t n, const etri_T *a, ptrdiff_t lda,
-                etri_T *b);
+void etri_ncopy(ptrdiff_t m, ptrdiff_t n, const etri_TR *a, ptrdiff_t lda,
+                etri_TR *b);
+void etri_tcopy(ptrdiff_t m, ptrdiff_t n, const etri_TR *a, ptrdiff_t lda,
+                etri_TR *b);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ETRI_KERNEL_H */

@@ -28,7 +28,7 @@
 #include <stddef.h>
 #endif
 
-typedef egemmtr_T T;
+typedef egemmtr_TR TR;
 
 #define MR EGEMMTR_MR
 #define NR EGEMMTR_NR
@@ -40,11 +40,11 @@ static inline ptrdiff_t imin(ptrdiff_t a, ptrdiff_t b) { return a < b ? a : b; }
 
 static void egemmtr_core(char uplo, char transa, char transb,
                          ptrdiff_t n, ptrdiff_t k,
-                         const T *alpha_,
-                         const T *restrict a, ptrdiff_t lda,
-                         const T *restrict b, ptrdiff_t ldb,
-                         const T *beta_,
-                         T *restrict c, ptrdiff_t ldc)
+                         const TR *alpha_,
+                         const TR *restrict a, ptrdiff_t lda,
+                         const TR *restrict b, ptrdiff_t ldb,
+                         const TR *beta_,
+                         TR *restrict c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Already inside a team → run serially in this thread, no nested
@@ -55,13 +55,13 @@ static void egemmtr_core(char uplo, char transa, char transb,
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
     const char ta = egemmtr_trans_code(&transa);
     const char tb = egemmtr_trans_code(&transb);
 
     if (n <= 0) return;
-    const T zero = 0.0L, one = 1.0L;
+    const TR zero = 0.0L, one = 1.0L;
 
     if (alpha == zero || k == 0) {
         if (beta == one) return;
@@ -112,10 +112,10 @@ static void egemmtr_core(char uplo, char transa, char transb,
 
     const ptrdiff_t sa_rows = egemmtr_round_up(MC, MR);
     const ptrdiff_t sb_cols = egemmtr_round_up(NC, NR);
-    const size_t ap_bytes = (size_t)sa_rows * KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * sb_cols * sizeof(T);
+    const size_t ap_bytes = (size_t)sa_rows * KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * sb_cols * sizeof(TR);
 
-    T *Bp = (T *)aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR *Bp = (TR *)aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (!Bp) {
         egemmtr_scalar_fallback(n, k, UPLO, ta, tb, alpha, a, lda, b, ldb, c, ldc);
         return;
@@ -126,7 +126,7 @@ static void egemmtr_core(char uplo, char transa, char transb,
     #pragma omp parallel if(use_omp)
 #endif
     {
-        T *Ap = (T *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        TR *Ap = (TR *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (Ap) {
             for (ptrdiff_t jc = 0; jc < n; jc += NC) {
                 const ptrdiff_t jb = imin(NC, n - jc);
@@ -177,6 +177,6 @@ static void egemmtr_core(char uplo, char transa, char transb,
     free(Bp);
 }
 
-EPBLAS_FACADE_GEMMTR(egemmtr, T)
+EPBLAS_FACADE_GEMMTR(egemmtr, TR)
 
 #undef C_

@@ -35,7 +35,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-typedef qsyrk_T T;
+typedef qsyrk_TR TR;
 
 #define MR QSYRK_MR
 #define NR QSYRK_NR
@@ -43,31 +43,31 @@ typedef qsyrk_T T;
 /* ── Triangular β pre-pass ─────────────────────────────────────────────
  * Port of OpenBLAS driver/level3/syrk_k.c's `syrk_beta`. Scales only the
  * UPLO triangle of C; the off-UPLO triangle is left untouched. */
-void qsyrk_beta_u(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+void qsyrk_beta_u(ptrdiff_t n, TR beta, TR *c, ptrdiff_t ldc) {
     if (beta == 1.0Q) return;
     if (beta == 0.0Q) {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc;
+            TR *cj = c + j * ldc;
             for (ptrdiff_t i = 0; i <= j; ++i) cj[i] = 0.0Q;
         }
     } else {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc;
+            TR *cj = c + j * ldc;
             for (ptrdiff_t i = 0; i <= j; ++i) cj[i] *= beta;
         }
     }
 }
 
-void qsyrk_beta_l(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+void qsyrk_beta_l(ptrdiff_t n, TR beta, TR *c, ptrdiff_t ldc) {
     if (beta == 1.0Q) return;
     if (beta == 0.0Q) {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc;
+            TR *cj = c + j * ldc;
             for (ptrdiff_t i = j; i < n; ++i) cj[i] = 0.0Q;
         }
     } else {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T *cj = c + j * ldc;
+            TR *cj = c + j * ldc;
             for (ptrdiff_t i = j; i < n; ++i) cj[i] *= beta;
         }
     }
@@ -80,11 +80,11 @@ void qsyrk_beta_l(ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
  * into a zeroed subbuffer (qtri_gemm_kernel accumulates), then only its UPLO
  * triangle is merged into C. Subbuffer sized NR*(NR+1) to match OpenBLAS's
  * safety pad. */
-void qsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
-                    const T *a, const T *b,
-                    T *c, ptrdiff_t ldc, ptrdiff_t offset)
+void qsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                    const TR *a, const TR *b,
+                    TR *c, ptrdiff_t ldc, ptrdiff_t offset)
 {
-    T subbuf[NR * (NR + 1)];
+    TR subbuf[NR * (NR + 1)];
 
     if (m + offset < 0) {
         qtri_gemm_kernel(m, n, k, alpha, a, b, c, ldc);
@@ -131,8 +131,8 @@ void qsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
         qtri_gemm_kernel(nn, nn, k, alpha,
                          a + loop * k, b + loop * k, subbuf, nn);
 
-        T *cc = c + loop + loop * ldc;
-        const T *ss = subbuf;
+        TR *cc = c + loop + loop * ldc;
+        const TR *ss = subbuf;
         for (ptrdiff_t j = 0; j < nn; ++j) {
             for (ptrdiff_t i = 0; i <= j; ++i) cc[i] += ss[i];
             ss += nn;
@@ -141,11 +141,11 @@ void qsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
     }
 }
 
-void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
-                    const T *a, const T *b,
-                    T *c, ptrdiff_t ldc, ptrdiff_t offset)
+void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                    const TR *a, const TR *b,
+                    TR *c, ptrdiff_t ldc, ptrdiff_t offset)
 {
-    T subbuf[NR * (NR + 1)];
+    TR subbuf[NR * (NR + 1)];
 
     if (m + offset < 0) {
         return;
@@ -191,8 +191,8 @@ void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
         qtri_gemm_kernel(nn, nn, k, alpha,
                          a + loop * k, b + loop * k, subbuf, nn);
 
-        T *cc = c + loop + loop * ldc;
-        const T *ss = subbuf;
+        TR *cc = c + loop + loop * ldc;
+        const TR *ss = subbuf;
         for (ptrdiff_t j = 0; j < nn; ++j) {
             for (ptrdiff_t i = j; i < nn; ++i) cc[i] += ss[i];
             ss += nn;
@@ -215,20 +215,20 @@ void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, T alpha,
  * each C(i,j) is accumulated in a register and written once — packing has
  * nothing to save here, so the clean unpacked loop matches the reference. */
 void qsyrk_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
-                     T alpha, const T *a, ptrdiff_t lda, T *c, ptrdiff_t ldc)
+                     TR alpha, const TR *a, ptrdiff_t lda, TR *c, ptrdiff_t ldc)
 {
     const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
     const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
-    const T *Aj = a + j * lda;
-    T *cj = c + j * ldc;
+    const TR *Aj = a + j * lda;
+    TR *cj = c + j * ldc;
     for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
-        const T *Ai = a + i * lda;
+        const TR *Ai = a + i * lda;
         /* Single accumulator: SYRK's dot is one product per l, so the two
          * libquadmath soft-float calls (__multf3 then __addtf3) already serialize
          * on each other — an even/odd accumulator split adds tail logic without
          * any independent chain to overlap, and measured slower (unlike syr2k,
          * whose two distinct products genuinely overlap). */
-        T s = 0.0Q;
+        TR s = 0.0Q;
         for (ptrdiff_t l = 0; l < k; ++l) s += Ai[l] * Aj[l];
         cj[i] += alpha * s;
     }
@@ -241,12 +241,12 @@ void qsyrk_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
 void qsyrk_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
@@ -267,10 +267,10 @@ void qsyrk_serial(
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(T);
-    T *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(TR);
+    TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {
         for (ptrdiff_t js = 0; js < n; js += NC) {
             const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;

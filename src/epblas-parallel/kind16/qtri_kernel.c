@@ -22,38 +22,38 @@
 
 #include "qtri_kernel.h"
 
-typedef qtri_T T;
+typedef qtri_TR TR;
 
 /* Register-tile dims — must match the syrk/syr2k diagonal kernels' layout. */
 #define MR 2
 #define NR 2
 
 void qtri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
-                        T alpha,
-                        const T *Ap,
-                        const T *Bp,
-                        T *C, ptrdiff_t ldc)
+                        TR alpha,
+                        const TR *Ap,
+                        const TR *Bp,
+                        TR *C, ptrdiff_t ldc)
 {
     /* Walk B in NR=2-col panels. */
-    const T *ptrba_base = Ap;
-    const T *ptrbb = Bp;
-    T *Cj = C;
+    const TR *ptrba_base = Ap;
+    const TR *ptrbb = Bp;
+    TR *Cj = C;
 
     for (ptrdiff_t j = 0; j < bn / NR; ++j) {
-        T *C0 = Cj;
-        T *C1 = C0 + ldc;
-        const T *ptrba = ptrba_base;
+        TR *C0 = Cj;
+        TR *C1 = C0 + ldc;
+        const TR *ptrba = ptrba_base;
 
         /* MR=2 row panels (full 2x2 tiles). */
         for (ptrdiff_t i = 0; i < bm / MR; ++i) {
-            const T *ptrbb_loc = ptrbb;
-            T r0 = 0, r1 = 0, r2 = 0, r3 = 0;
+            const TR *ptrbb_loc = ptrbb;
+            TR r0 = 0, r1 = 0, r2 = 0, r3 = 0;
 
             /* K-loop unrolled by 4 (same shape as OpenBLAS gen kernel). */
             ptrdiff_t k4 = bk / 4;
             for (ptrdiff_t k = 0; k < k4; ++k) {
-                T a0 = ptrba[0], a1 = ptrba[1];
-                T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                TR a0 = ptrba[0], a1 = ptrba[1];
+                TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
                 r0 += a0 * b0; r1 += a1 * b0;
                 r2 += a0 * b1; r3 += a1 * b1;
                 a0 = ptrba[2]; a1 = ptrba[3];
@@ -72,8 +72,8 @@ void qtri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                 ptrbb_loc += 8;
             }
             for (ptrdiff_t k = 0; k < (bk & 3); ++k) {
-                T a0 = ptrba[0], a1 = ptrba[1];
-                T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                TR a0 = ptrba[0], a1 = ptrba[1];
+                TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
                 r0 += a0 * b0; r1 += a1 * b0;
                 r2 += a0 * b1; r3 += a1 * b1;
                 ptrba += 2;
@@ -90,11 +90,11 @@ void qtri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
 
         /* bm & 1 — single-row tail (mr=1). */
         for (ptrdiff_t i = 0; i < (bm & 1); ++i) {
-            const T *ptrbb_loc = ptrbb;
-            T r0 = 0, r1 = 0;
+            const TR *ptrbb_loc = ptrbb;
+            TR r0 = 0, r1 = 0;
             for (ptrdiff_t k = 0; k < bk; ++k) {
-                T a0 = ptrba[0];
-                T b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                TR a0 = ptrba[0];
+                TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
                 r0 += a0 * b0;
                 r1 += a0 * b1;
                 ptrba += 1;
@@ -112,15 +112,15 @@ void qtri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
 
     /* bn & 1 — single-col tail (nr=1). */
     for (ptrdiff_t j = 0; j < (bn & 1); ++j) {
-        T *C0 = Cj;
-        const T *ptrba = ptrba_base;
+        TR *C0 = Cj;
+        const TR *ptrba = ptrba_base;
 
         for (ptrdiff_t i = 0; i < bm / MR; ++i) {
-            const T *ptrbb_loc = ptrbb;
-            T r0 = 0, r1 = 0;
+            const TR *ptrbb_loc = ptrbb;
+            TR r0 = 0, r1 = 0;
             for (ptrdiff_t k = 0; k < bk; ++k) {
-                T a0 = ptrba[0], a1 = ptrba[1];
-                T b0 = ptrbb_loc[0];
+                TR a0 = ptrba[0], a1 = ptrba[1];
+                TR b0 = ptrbb_loc[0];
                 r0 += a0 * b0;
                 r1 += a1 * b0;
                 ptrba += 2;
@@ -131,8 +131,8 @@ void qtri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
             C0 += 2;
         }
         for (ptrdiff_t i = 0; i < (bm & 1); ++i) {
-            const T *ptrbb_loc = ptrbb;
-            T r0 = 0;
+            const TR *ptrbb_loc = ptrbb;
+            TR r0 = 0;
             for (ptrdiff_t k = 0; k < bk; ++k) {
                 r0 += ptrba[0] * ptrbb_loc[0];
                 ptrba += 1;
@@ -147,16 +147,16 @@ void qtri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
 }
 
 void qtri_ncopy(ptrdiff_t m, ptrdiff_t n,
-                       const T *a, ptrdiff_t lda,
-                       T *b)
+                       const TR *a, ptrdiff_t lda,
+                       TR *b)
 {
-    const T *a_off = a;
-    T *b_off = b;
+    const TR *a_off = a;
+    TR *b_off = b;
     ptrdiff_t j = n >> 1;
 
     while (j > 0) {
-        const T *a_off1 = a_off;
-        const T *a_off2 = a_off + lda;
+        const TR *a_off1 = a_off;
+        const TR *a_off2 = a_off + lda;
         a_off += 2 * lda;
 
         ptrdiff_t i = m >> 2;
@@ -198,20 +198,20 @@ void qtri_ncopy(ptrdiff_t m, ptrdiff_t n,
 }
 
 void qtri_tcopy(ptrdiff_t m, ptrdiff_t n,
-                       const T *a, ptrdiff_t lda,
-                       T *b)
+                       const TR *a, ptrdiff_t lda,
+                       TR *b)
 {
-    const T *a_off = a;
-    T *b_off = b;
-    T *b_off2 = b + m * (n & ~(ptrdiff_t)1);
+    const TR *a_off = a;
+    TR *b_off = b;
+    TR *b_off2 = b + m * (n & ~(ptrdiff_t)1);
 
     ptrdiff_t i = m >> 1;
     while (i > 0) {
-        const T *a_off1 = a_off;
-        const T *a_off2 = a_off + lda;
+        const TR *a_off1 = a_off;
+        const TR *a_off2 = a_off + lda;
         a_off += 2 * lda;
 
-        T *b_off1 = b_off;
+        TR *b_off1 = b_off;
         b_off += 4;
 
         ptrdiff_t j = n >> 1;
@@ -251,11 +251,11 @@ void qtri_tcopy(ptrdiff_t m, ptrdiff_t n,
 /* C := alpha·Ap·Bp (overwrite): zero the tile, then accumulate via the
  * shared kernel. OpenBLAS uses GEMM_KERNEL with beta=0 for off-diagonal
  * sub-tiles inside the TRMM driver; qtri_gemm_kernel only accumulates. */
-void qtri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, T alpha,
-                       const T *Ap, const T *Bp, T *C, ptrdiff_t ldc)
+void qtri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, TR alpha,
+                       const TR *Ap, const TR *Bp, TR *C, ptrdiff_t ldc)
 {
     for (ptrdiff_t j = 0; j < bn; ++j) {
-        T *cj = C + j * ldc;
+        TR *cj = C + j * ldc;
         for (ptrdiff_t i = 0; i < bm; ++i) cj[i] = 0;
     }
     qtri_gemm_kernel(bm, bn, bk, alpha, Ap, Bp, C, ldc);

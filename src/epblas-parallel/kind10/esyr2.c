@@ -14,7 +14,7 @@
 
 #define ESYR2_OMP_MIN 64
 
-typedef long double T;
+typedef long double TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -22,13 +22,13 @@ typedef long double T;
 static void esyr2_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict a, ptrdiff_t lda)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *restrict y, ptrdiff_t incy,
+    TR *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0L;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0L;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -41,11 +41,11 @@ static void esyr2_core(
          * for this small kernel. See Addendum 16. */
 #define ESYR2_BODY                                                              \
         for (ptrdiff_t j = 0; j < n; ++j) {                                           \
-            const T xj = x[j], yj = y[j];                                       \
+            const TR xj = x[j], yj = y[j];                                       \
             if (xj != zero || yj != zero) {                                     \
-                const T tx = alpha * yj;                                        \
-                const T ty = alpha * xj;                                        \
-                T *aj = &A_(0, j);                                              \
+                const TR tx = alpha * yj;                                        \
+                const TR ty = alpha * xj;                                        \
+                TR *aj = &A_(0, j);                                              \
                 if (UPLO == 'L') {                                              \
                     for (ptrdiff_t i = j; i < n; ++i) aj[i] += x[i] * tx + y[i] * ty; \
                 } else {                                                        \
@@ -73,12 +73,12 @@ static void esyr2_core(
         const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t jx = kx, jy = ky;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[jx];
-            const T yj = y[jy];
+            const TR xj = x[jx];
+            const TR yj = y[jy];
             if (xj != zero || yj != zero) {
-                const T tx = alpha * yj;
-                const T ty = alpha * xj;
-                T *aj = &A_(0, j);
+                const TR tx = alpha * yj;
+                const TR ty = alpha * xj;
+                TR *aj = &A_(0, j);
                 if (UPLO == 'L') {
                     ptrdiff_t ix = jx, iy = jy;
                     for (ptrdiff_t i = j; i < n; ++i) {
@@ -98,6 +98,6 @@ static void esyr2_core(
     }
 }
 
-EPBLAS_FACADE_SYR2(esyr2, T)
+EPBLAS_FACADE_SYR2(esyr2, TR)
 
 #undef A_

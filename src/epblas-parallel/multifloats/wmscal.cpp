@@ -19,7 +19,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -33,7 +33,7 @@ using simd_exact::cstore4;
 }  // namespace
 
 /* X := α·X (α real, X complex) over a unit-stride range — serial, unchanged. */
-static void wmscal_unit(std::ptrdiff_t n, R alpha, T *x)
+static void wmscal_unit(std::ptrdiff_t n, R alpha, TC *x)
 {
 #ifdef MBLAS_SIMD_DD
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
@@ -56,7 +56,7 @@ static void wmscal_unit(std::ptrdiff_t n, R alpha, T *x)
 
 #ifdef _OPENMP
 #define WMSCAL_OMP_MIN 2048
-__attribute__((noinline)) static std::ptrdiff_t wmscal_omp(std::ptrdiff_t n, R alpha, T *x)
+__attribute__((noinline)) static std::ptrdiff_t wmscal_omp(std::ptrdiff_t n, R alpha, TC *x)
 {
     if (n <= WMSCAL_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -72,7 +72,7 @@ __attribute__((noinline)) static std::ptrdiff_t wmscal_omp(std::ptrdiff_t n, R a
 }
 #endif
 
-static void wmscal_core(std::ptrdiff_t n, const R *alpha_, T *x, std::ptrdiff_t incx)
+static void wmscal_core(std::ptrdiff_t n, const R *alpha_, TC *x, std::ptrdiff_t incx)
 {
     const R alpha = *alpha_;
     if (n <= 0 || eq1(alpha)) return;
@@ -92,5 +92,5 @@ static void wmscal_core(std::ptrdiff_t n, const R *alpha_, T *x, std::ptrdiff_t 
 }
 
 extern "C" {
-EPBLAS_FACADE_SCAL(wmscal, R, T)
+EPBLAS_FACADE_SCAL(wmscal, R, TC)
 }

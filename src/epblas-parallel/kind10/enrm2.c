@@ -18,9 +18,9 @@
 #define ENRM2_MAX_CPUS 64
 #endif
 #include "../common/epblas_facade.h"
-typedef long double T;
+typedef long double TR;
 
-static T btsml, btbig, bssml, bsbig, maxN;
+static TR btsml, btbig, bssml, bsbig, maxN;
 static ptrdiff_t blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
@@ -39,12 +39,12 @@ static __attribute__((cold)) void blue_init(void)
     blue_inited = 1;
 }
 
-static inline T sq(T x) { return x * x; }
+static inline TR sq(TR x) { return x * x; }
 
 /* Combine the three magnitude buckets into the final norm (Anderson 2017). */
-static T enrm2_finalize(T abig, T amed, T asml)
+static TR enrm2_finalize(TR abig, TR amed, TR asml)
 {
-    T scl, sumsq;
+    TR scl, sumsq;
     if (abig > 0.0L) {
         if (amed > 0.0L || amed > maxN || amed != amed) {
             abig += (amed * bsbig) * bsbig;
@@ -53,9 +53,9 @@ static T enrm2_finalize(T abig, T amed, T asml)
         sumsq = abig;
     } else if (asml > 0.0L) {
         if (amed > 0.0L || amed > maxN || amed != amed) {
-            T sa = sqrtl(amed);
-            T ss = sqrtl(asml) / bssml;
-            T ymin, ymax;
+            TR sa = sqrtl(amed);
+            TR ss = sqrtl(asml) / bssml;
+            TR ymin, ymax;
             if (ss > sa) { ymin = sa; ymax = ss; }
             else         { ymin = ss; ymax = sa; }
             scl   = 1.0L;
@@ -76,12 +76,12 @@ static T enrm2_finalize(T abig, T amed, T asml)
  * flag is chunk-local: asml is only consumed by enrm2_finalize when the GLOBAL
  * abig==0 (no big element anywhere → every chunk kept notbig==1), so a
  * per-chunk notbig is exact. */
-static void enrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
+static void enrm2_bucket(ptrdiff_t n, const TR *x, TR *abig_, TR *amed_, TR *asml_)
 {
-    T abig = 0.0L, amed = 0.0L, asml = 0.0L;
+    TR abig = 0.0L, amed = 0.0L, asml = 0.0L;
     bool notbig = 1;
     for (ptrdiff_t i = 0; i < n; ++i) {
-        T ax = fabsl(x[i]);
+        TR ax = fabsl(x[i]);
         if (ax > btbig) { abig += sq(ax * bsbig); notbig = 0; }
         else if (ax < btsml) { if (notbig) asml += sq(ax * bssml); }
         else amed += sq(ax);
@@ -92,13 +92,13 @@ static void enrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
 /* Threaded reduction for large unit-stride X. Each thread buckets its own chunk;
  * the three partial sums combine exactly as analysed above. Reduction order
  * differs from serial (not bit-identical), but within fuzz tolerance. */
-__attribute__((noinline)) static bool enrm2_omp(ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static bool enrm2_omp(ptrdiff_t n, const TR *x, TR *out)
 {
     if (n <= ENRM2_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > ENRM2_MAX_CPUS) nthreads = ENRM2_MAX_CPUS;
-    T pbig[ENRM2_MAX_CPUS] = {0}, pmed[ENRM2_MAX_CPUS] = {0}, psml[ENRM2_MAX_CPUS] = {0};
+    TR pbig[ENRM2_MAX_CPUS] = {0}, pmed[ENRM2_MAX_CPUS] = {0}, psml[ENRM2_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -107,30 +107,30 @@ __attribute__((noinline)) static bool enrm2_omp(ptrdiff_t n, const T *x, T *out)
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) enrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
     }
-    T abig = 0.0L, amed = 0.0L, asml = 0.0L;
+    TR abig = 0.0L, amed = 0.0L, asml = 0.0L;
     for (ptrdiff_t i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
     *out = enrm2_finalize(abig, amed, asml);
     return 1;
 }
 #endif
 
-static T enrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static TR enrm2_core(ptrdiff_t n, const TR *x, ptrdiff_t incx)
 {
     if (n <= 0) return 0.0L;
     if (!blue_inited) blue_init();
 
 #ifdef _OPENMP
     if (incx == 1) {
-        T r;
+        TR r;
         if (enrm2_omp(n, x, &r)) return r;
     }
 #endif
 
-    T abig = 0.0L, amed = 0.0L, asml = 0.0L;
+    TR abig = 0.0L, amed = 0.0L, asml = 0.0L;
     bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
     for (ptrdiff_t i = 0; i < n; ++i) {
-        T ax = fabsl(x[ix]);
+        TR ax = fabsl(x[ix]);
         if (ax > btbig) {
             abig += sq(ax * bsbig);
             notbig = 0;
@@ -145,4 +145,4 @@ static T enrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
     return enrm2_finalize(abig, amed, asml);
 }
 
-EPBLAS_FACADE_ASUM(enrm2, T, T)
+EPBLAS_FACADE_ASUM(enrm2, TR, TR)

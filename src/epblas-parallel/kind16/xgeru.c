@@ -13,19 +13,19 @@
 
 #define XGERU_OMP_MIN 64
 
-typedef __complex128 T;
+typedef __complex128 TC;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 void xgeru_core(
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict a, ptrdiff_t lda)
+    const TC *alpha_,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *restrict y, ptrdiff_t incy,
+    TC *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0Q + 0.0Qi;
+    const TC alpha = *alpha_;
+    const TC zero = 0.0Q + 0.0Qi;
 
     if (m == 0 || n == 0 || alpha == zero) return;
 
@@ -35,10 +35,10 @@ void xgeru_core(
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T yj = y[j];
+            const TC yj = y[j];
             if (yj != zero) {
-                const T t = alpha * yj;
-                T *aj = &A_(0, j);
+                const TC t = alpha * yj;
+                TC *aj = &A_(0, j);
                 for (ptrdiff_t i = 0; i < m; ++i) aj[i] += t * x[i];
             }
         }
@@ -52,11 +52,11 @@ void xgeru_core(
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const T yj = y[jy0 + (ptrdiff_t)j * incy];
+            const TC yj = y[jy0 + (ptrdiff_t)j * incy];
             if (yj != zero) {
-                const T t = alpha * yj;
+                const TC t = alpha * yj;
                 ptrdiff_t ix = ix0;
-                T *aj = &A_(0, j);
+                TC *aj = &A_(0, j);
                 for (ptrdiff_t i = 0; i < m; ++i) {
                     aj[i] += t * x[ix];
                     ix += incx;
@@ -68,4 +68,4 @@ void xgeru_core(
 
 #undef A_
 
-EPBLAS_FACADE_GER(xgeru, T)
+EPBLAS_FACADE_GER(xgeru, TC)

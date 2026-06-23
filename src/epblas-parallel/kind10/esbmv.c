@@ -46,7 +46,7 @@
 #include "../common/blas_omp.h"
 #endif
 
-typedef long double T;
+typedef long double TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
@@ -72,22 +72,22 @@ typedef long double T;
 
 #ifdef _OPENMP
 static ptrdiff_t esbmv_omp(bool upper, ptrdiff_t n, ptrdiff_t k,
-                     const T *restrict a, ptrdiff_t lda,
-                     const T *restrict x, ptrdiff_t incx,
-                     T alpha, T *restrict y, ptrdiff_t incy);
+                     const TR *restrict a, ptrdiff_t lda,
+                     const TR *restrict x, ptrdiff_t incx,
+                     TR alpha, TR *restrict y, ptrdiff_t incy);
 #endif
 
 static void esbmv_core(
     char uplo,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *beta_,
+    TR *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
-    const T zero = 0.0L, one = 1.0L;
+    const TR alpha = *alpha_, beta = *beta_;
+    const TR zero = 0.0L, one = 1.0L;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || (alpha == zero && beta == one)) return;
@@ -119,8 +119,8 @@ static void esbmv_core(
     if (incx == 1 && incy == 1) {
         if (UPLO == 'U') {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T *base = &A_(0, i);
-                T s = base[k] * x[i];
+                const TR *base = &A_(0, i);
+                TR s = base[k] * x[i];
                 const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
                 for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[k + (ptrdiff_t)d * s1] * x[i + d];
                 const ptrdiff_t llen = (i < k) ? i : k;
@@ -129,8 +129,8 @@ static void esbmv_core(
             }
         } else {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T *base = &A_(0, i);
-                T s = base[0] * x[i];
+                const TR *base = &A_(0, i);
+                TR s = base[0] * x[i];
                 const ptrdiff_t llen = (i < k) ? i : k;
                 for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-(ptrdiff_t)d * s1] * x[i - d];
                 const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
@@ -143,9 +143,9 @@ static void esbmv_core(
         const ptrdiff_t iy0 = (incy < 0) ? -(ptrdiff_t)(n - 1) * incy : 0;
         if (UPLO == 'U') {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T *base = &A_(0, i);
+                const TR *base = &A_(0, i);
                 const ptrdiff_t xi = ix0 + (ptrdiff_t)i * incx;
-                T s = base[k] * x[xi];
+                TR s = base[k] * x[xi];
                 const ptrdiff_t rlen = (n - 1 - i < k) ? (n - 1 - i) : k;
                 ptrdiff_t xx = xi + incx;
                 for (ptrdiff_t d = 1; d <= rlen; ++d) { s += base[k + (ptrdiff_t)d * s1] * x[xx]; xx += incx; }
@@ -156,9 +156,9 @@ static void esbmv_core(
             }
         } else {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T *base = &A_(0, i);
+                const TR *base = &A_(0, i);
                 const ptrdiff_t xi = ix0 + (ptrdiff_t)i * incx;
-                T s = base[0] * x[xi];
+                TR s = base[0] * x[xi];
                 const ptrdiff_t llen = (i < k) ? i : k;
                 ptrdiff_t xx = xi - incx;
                 for (ptrdiff_t d = 1; d <= llen; ++d) { s += base[-(ptrdiff_t)d * s1] * x[xx]; xx -= incx; }
@@ -181,15 +181,15 @@ static void esbmv_core(
  * contiguous for the reflected ones. */
 static void sbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
                            ptrdiff_t lo, ptrdiff_t hi,
-                           const T *restrict a, ptrdiff_t lda,
-                           const T *restrict x, T alpha,
-                           T *restrict y, ptrdiff_t incy)
+                           const TR *restrict a, ptrdiff_t lda,
+                           const TR *restrict x, TR alpha,
+                           TR *restrict y, ptrdiff_t incy)
 {
     const ptrdiff_t s1 = lda - 1;
     if (upper) {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = base[k] * x[i];
+            const TR *base = &A_(0, i);
+            TR s = base[k] * x[i];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
             for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[k + d * s1] * x[i + d];
             ptrdiff_t llen = (i < k) ? i : k;
@@ -198,8 +198,8 @@ static void sbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
         }
     } else {
         for (ptrdiff_t i = lo; i < hi; ++i) {
-            const T *base = &A_(0, i);
-            T s = base[0] * x[i];
+            const TR *base = &A_(0, i);
+            TR s = base[0] * x[i];
             ptrdiff_t llen = (i < k) ? i : k;
             for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-d * s1] * x[i - d];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
@@ -216,9 +216,9 @@ static void sbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
  * does not pressure the serial gather's x87 allocation. */
 __attribute__((noinline)) static ptrdiff_t esbmv_omp(
     bool upper, ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy)
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    TR alpha, TR *restrict y, ptrdiff_t incy)
 {
     if (n < ESBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -231,10 +231,10 @@ __attribute__((noinline)) static ptrdiff_t esbmv_omp(
 
     /* Gather strided x to contiguous (logical order) so the inner dot is unit
      * stride; y is written disjointly per thread in place. */
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TR *xptr = x;
+    TR *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TR *)malloc((size_t)n * sizeof(TR));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[i * incx];
         xptr = xbuf;
@@ -253,6 +253,6 @@ __attribute__((noinline)) static ptrdiff_t esbmv_omp(
 }
 #endif /* _OPENMP */
 
-EPBLAS_FACADE_SBMV(esbmv, T)
+EPBLAS_FACADE_SBMV(esbmv, TR)
 
 #undef A_

@@ -15,18 +15,18 @@
 
 #define QSPR_OMP_MIN 64
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 void qspr_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    T *restrict ap)
+    const TR *alpha_,
+    const TR *restrict x, ptrdiff_t incx,
+    TR *restrict ap)
 {
-    const T alpha = *alpha_;
-    const T zero = 0.0Q;
+    const TR alpha = *alpha_;
+    const TR zero = 0.0Q;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
@@ -40,7 +40,7 @@ void qspr_core(
 #endif
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != zero) {
-                    const T tmp = alpha * x[j];
+                    const TR tmp = alpha * x[j];
                     const ptrdiff_t kk = (j * (j + 1)) / 2;
                     for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * tmp;
                 }
@@ -52,7 +52,7 @@ void qspr_core(
 #endif
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != zero) {
-                    const T tmp = alpha * x[j];
+                    const TR tmp = alpha * x[j];
                     /* kk0 = sum_{l=0}^{j-1}(N-l) = j*N - j*(j-1)/2 */
                     const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
                     for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
@@ -66,7 +66,7 @@ void qspr_core(
             ptrdiff_t jx = kx;
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero) {
-                    const T tmp = alpha * x[jx];
+                    const TR tmp = alpha * x[jx];
                     ptrdiff_t ix = kx;
                     for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
                         ap[k] += x[ix] * tmp;
@@ -80,7 +80,7 @@ void qspr_core(
             ptrdiff_t jx = kx;
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero) {
-                    const T tmp = alpha * x[jx];
+                    const TR tmp = alpha * x[jx];
                     ptrdiff_t ix = jx;
                     for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
                         ap[k] += x[ix] * tmp;
@@ -94,4 +94,4 @@ void qspr_core(
     }
 }
 
-EPBLAS_FACADE_SPR(qspr, T, T)
+EPBLAS_FACADE_SPR(qspr, TR, TR)

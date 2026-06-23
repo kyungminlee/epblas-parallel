@@ -34,7 +34,7 @@
 #include <omp.h>
 #endif
 
-typedef esyrk_T T;
+typedef esyrk_TR TR;
 
 #define MR ESYRK_MR
 #define NR ESYRK_NR
@@ -42,10 +42,10 @@ typedef esyrk_T T;
 static void esyrk_core(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
@@ -54,7 +54,7 @@ static void esyrk_core(
         return;
     }
 #endif
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
@@ -69,8 +69,8 @@ static void esyrk_core(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -86,8 +86,8 @@ static void esyrk_core(
     /* Shared Bp, one private Ap per thread, allocated BEFORE the region: a
      * thread that skipped the loop on a failed in-region alloc would deadlock
      * the others at the Bp barrier. */
-    T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
     ptrdiff_t alloc_ok = (Bp && Ap_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -104,7 +104,7 @@ static void esyrk_core(
 #else
             const ptrdiff_t tid = 0, nth = 1;
 #endif
-            T *Ap = Ap_arr[tid];
+            TR *Ap = Ap_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks. */
             const ptrdiff_t m_chunk = egemm_round_up((n + nth - 1) / nth, MR);
@@ -164,4 +164,4 @@ static void esyrk_core(
     free(Bp);
 }
 
-EPBLAS_FACADE_SYRK(esyrk, T, T)
+EPBLAS_FACADE_SYRK(esyrk, TR, TR)

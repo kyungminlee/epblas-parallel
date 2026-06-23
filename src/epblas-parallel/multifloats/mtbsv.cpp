@@ -27,7 +27,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
@@ -41,16 +41,16 @@ namespace {
 /* Contiguous (unit-stride) triangular band solve, x[0..n-1] in logical order. */
 void mtbsv_contig(bool upper, std::ptrdiff_t trans_, bool nounit,
                   std::ptrdiff_t n, std::ptrdiff_t k,
-                  const T *a, std::ptrdiff_t lda, T *x)
+                  const TR *a, std::ptrdiff_t lda, TR *x)
 {
     if (!trans_) {
         if (upper) {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 if (x[j] != 0.0) {
-                    const T *col = &a[static_cast<std::size_t>(j) * lda];
+                    const TR *col = &a[static_cast<std::size_t>(j) * lda];
                     const std::ptrdiff_t off = k - j;
                     if (nounit) x[j] /= col[k];
-                    const T temp = x[j];
+                    const TR temp = x[j];
                     const std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
                     mf_kernels::axpy_sub(j - i_lo, &x[i_lo], &col[off + i_lo], temp);
                 }
@@ -58,10 +58,10 @@ void mtbsv_contig(bool upper, std::ptrdiff_t trans_, bool nounit,
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 if (x[j] != 0.0) {
-                    const T *col = &a[static_cast<std::size_t>(j) * lda];
+                    const TR *col = &a[static_cast<std::size_t>(j) * lda];
                     const std::ptrdiff_t off = -j;
                     if (nounit) x[j] /= col[0];
-                    const T temp = x[j];
+                    const TR temp = x[j];
                     const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
                     mf_kernels::axpy_sub(i_hi - j, &x[j + 1], &col[off + j + 1], temp);
                 }
@@ -70,19 +70,19 @@ void mtbsv_contig(bool upper, std::ptrdiff_t trans_, bool nounit,
     } else {
         if (upper) {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T *col = &a[static_cast<std::size_t>(j) * lda];
+                const TR *col = &a[static_cast<std::size_t>(j) * lda];
                 const std::ptrdiff_t off = k - j;
                 const std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
-                T temp = x[j] - mf_kernels::dot(j - i_lo, &col[off + i_lo], &x[i_lo]);
+                TR temp = x[j] - mf_kernels::dot(j - i_lo, &col[off + i_lo], &x[i_lo]);
                 if (nounit) temp /= col[k];
                 x[j] = temp;
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const T *col = &a[static_cast<std::size_t>(j) * lda];
+                const TR *col = &a[static_cast<std::size_t>(j) * lda];
                 const std::ptrdiff_t off = -j;
                 const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
-                T temp = x[j] - mf_kernels::dot(i_hi - j, &col[off + j + 1], &x[j + 1]);
+                TR temp = x[j] - mf_kernels::dot(i_hi - j, &col[off + j + 1], &x[j + 1]);
                 if (nounit) temp /= col[0];
                 x[j] = temp;
             }
@@ -94,7 +94,7 @@ void mtbsv_contig(bool upper, std::ptrdiff_t trans_, bool nounit,
  * gather scratch cannot be allocated. */
 void mtbsv_strided(bool upper, std::ptrdiff_t trans_, bool nounit,
                    std::ptrdiff_t n, std::ptrdiff_t k,
-                   const T *a, std::ptrdiff_t lda, T *x, std::ptrdiff_t incx)
+                   const TR *a, std::ptrdiff_t lda, TR *x, std::ptrdiff_t incx)
 {
     std::ptrdiff_t kx = (incx <= 0) ? -(n - 1) * incx : 0;
 
@@ -106,10 +106,10 @@ void mtbsv_strided(bool upper, std::ptrdiff_t trans_, bool nounit,
                 kx -= incx;
                 if (x[jx] != 0.0) {
                     std::ptrdiff_t ix = kx;
-                    const T *col = &a[static_cast<std::size_t>(j) * lda];
+                    const TR *col = &a[static_cast<std::size_t>(j) * lda];
                     const std::ptrdiff_t off = k - j;
                     if (nounit) x[jx] /= col[k];
-                    const T temp = x[jx];
+                    const TR temp = x[jx];
                     const std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
                     for (std::ptrdiff_t i = j - 1; i >= i_lo; --i) {
                         x[ix] -= temp * col[off + i];
@@ -124,10 +124,10 @@ void mtbsv_strided(bool upper, std::ptrdiff_t trans_, bool nounit,
                 kx += incx;
                 if (x[jx] != 0.0) {
                     std::ptrdiff_t ix = kx;
-                    const T *col = &a[static_cast<std::size_t>(j) * lda];
+                    const TR *col = &a[static_cast<std::size_t>(j) * lda];
                     const std::ptrdiff_t off = -j;
                     if (nounit) x[jx] /= col[0];
-                    const T temp = x[jx];
+                    const TR temp = x[jx];
                     const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
                     for (std::ptrdiff_t i = j + 1; i <= i_hi; ++i) {
                         x[ix] -= temp * col[off + i];
@@ -141,9 +141,9 @@ void mtbsv_strided(bool upper, std::ptrdiff_t trans_, bool nounit,
         if (upper) {
             std::ptrdiff_t jx = kx;
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                T temp = x[jx];
+                TR temp = x[jx];
                 std::ptrdiff_t ix = kx;
-                const T *col = &a[static_cast<std::size_t>(j) * lda];
+                const TR *col = &a[static_cast<std::size_t>(j) * lda];
                 const std::ptrdiff_t off = k - j;
                 const std::ptrdiff_t i_lo = (j > k) ? j - k : 0;
                 for (std::ptrdiff_t i = i_lo; i < j; ++i) {
@@ -159,9 +159,9 @@ void mtbsv_strided(bool upper, std::ptrdiff_t trans_, bool nounit,
             kx += (n - 1) * incx;
             std::ptrdiff_t jx = kx;
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                T temp = x[jx];
+                TR temp = x[jx];
                 std::ptrdiff_t ix = kx;
-                const T *col = &a[static_cast<std::size_t>(j) * lda];
+                const TR *col = &a[static_cast<std::size_t>(j) * lda];
                 const std::ptrdiff_t off = -j;
                 const std::ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
                 for (std::ptrdiff_t i = i_hi; i > j; --i) {
@@ -181,8 +181,8 @@ void mtbsv_strided(bool upper, std::ptrdiff_t trans_, bool nounit,
 static void mtbsv_core(
     char uplo, char trans, char diag,
     std::ptrdiff_t n, std::ptrdiff_t k,
-    const T *a, std::ptrdiff_t lda,
-    T *x, std::ptrdiff_t incx)
+    const TR *a, std::ptrdiff_t lda,
+    TR *x, std::ptrdiff_t incx)
 {
 
     if (n == 0) return;
@@ -200,7 +200,7 @@ static void mtbsv_core(
     /* Strided x: linearize to a contiguous scratch in logical order, solve on
      * the parity-winning contiguous core, scatter back. */
     const std::ptrdiff_t base = (incx <= 0) ? -(n - 1) * incx : 0;
-    T *xs = static_cast<T *>(std::malloc(static_cast<std::size_t>(n) * sizeof(T)));
+    TR *xs = static_cast<TR *>(std::malloc(static_cast<std::size_t>(n) * sizeof(TR)));
     if (xs) {
         for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = x[base + i * incx];
         mtbsv_contig(upper, trans_, nounit, n, k, a, lda, xs);
@@ -213,5 +213,5 @@ static void mtbsv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_TBMV(mtbsv, T)
+EPBLAS_FACADE_TBMV(mtbsv, TR)
 }

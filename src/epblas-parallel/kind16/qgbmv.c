@@ -34,34 +34,34 @@
 #endif
 #define QGBMV_MAX_CPUS 256
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 #ifdef _OPENMP
 static ptrdiff_t qgbmv_n_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
-                       const T *restrict a, ptrdiff_t lda,
-                       const T *restrict x, ptrdiff_t incx,
-                       T alpha, T *restrict y, ptrdiff_t incy);
+                       const TR *restrict a, ptrdiff_t lda,
+                       const TR *restrict x, ptrdiff_t incx,
+                       TR alpha, TR *restrict y, ptrdiff_t incy);
 static ptrdiff_t qgbmv_t_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
-                       const T *restrict a, ptrdiff_t lda,
-                       const T *restrict x, ptrdiff_t incx,
-                       T alpha, T *restrict y, ptrdiff_t incy);
+                       const TR *restrict a, ptrdiff_t lda,
+                       const TR *restrict x, ptrdiff_t incx,
+                       TR alpha, TR *restrict y, ptrdiff_t incy);
 #endif
 
 void qgbmv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
     ptrdiff_t KL, ptrdiff_t KU,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *beta_,
+    TR *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
-    const T zero = 0.0Q, one = 1.0Q;
+    const TR alpha = *alpha_, beta = *beta_;
+    const TR zero = 0.0Q, one = 1.0Q;
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
 
@@ -93,8 +93,8 @@ void qgbmv_core(
             for (ptrdiff_t i = 0; i < m; ++i) {
                 const ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
                 const ptrdiff_t j_hi = (i + KU + 1 < n) ? (i + KU + 1) : n;
-                const T *base = a + (KU + i);
-                T s = zero;
+                const TR *base = a + (KU + i);
+                TR s = zero;
                 for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += base[(ptrdiff_t)j * s1] * x[j];
                 y[i] += alpha * s;
             }
@@ -104,8 +104,8 @@ void qgbmv_core(
             for (ptrdiff_t i = 0; i < m; ++i) {
                 const ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
                 const ptrdiff_t j_hi = (i + KU + 1 < n) ? (i + KU + 1) : n;
-                const T *base = a + (KU + i);
-                T s = zero;
+                const TR *base = a + (KU + i);
+                TR s = zero;
                 ptrdiff_t xx = ix0 + (ptrdiff_t)j_lo * incx;
                 for (ptrdiff_t j = j_lo; j < j_hi; ++j) { s += base[(ptrdiff_t)j * s1] * x[xx]; xx += incx; }
                 y[iy0 + (ptrdiff_t)i * incy] += alpha * s;
@@ -115,7 +115,7 @@ void qgbmv_core(
         const bool use_omp = (n >= QGBMV_OMP_MIN && blas_omp_max_threads() > 1);
 #define QGBMV_T_BODY                                                         \
         for (ptrdiff_t j = 0; j < n; ++j) {                                        \
-            T s = zero;                                                      \
+            TR s = zero;                                                      \
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;                    \
             const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;            \
             const ptrdiff_t k = KU - j;                                            \
@@ -142,12 +142,12 @@ void qgbmv_core(
         ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
         ptrdiff_t jy = ky;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T s = zero;
+            TR s = zero;
             ptrdiff_t ix = kx;
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
             const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;
             const ptrdiff_t k = KU - j;
-            const T *col = &A_(k + i_lo, j);
+            const TR *col = &A_(k + i_lo, j);
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
                 s += *col++ * x[ix];
                 ix += incx;
@@ -163,16 +163,16 @@ void qgbmv_core(
 /* Row-partitioned NoTrans gather kernel: y[i] for i in [lo,hi). */
 static void qgbmv_n_rowgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
                              ptrdiff_t lo, ptrdiff_t hi,
-                             const T *restrict a, ptrdiff_t lda,
-                             const T *restrict x, T alpha,
-                             T *restrict y, ptrdiff_t incy)
+                             const TR *restrict a, ptrdiff_t lda,
+                             const TR *restrict x, TR alpha,
+                             TR *restrict y, ptrdiff_t incy)
 {
     const ptrdiff_t s1 = lda - 1;
     for (ptrdiff_t i = lo; i < hi; ++i) {
         ptrdiff_t j_lo = (i - kl > 0) ? (i - kl) : 0;
         ptrdiff_t j_hi = (i + ku + 1 < n) ? (i + ku + 1) : n;
-        const T *base = a + (ku + i);
-        T s = 0.0Q;
+        const TR *base = a + (ku + i);
+        TR s = 0.0Q;
         for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += base[j * s1] * x[j];
         y[i * incy] += alpha * s;
     }
@@ -180,9 +180,9 @@ static void qgbmv_n_rowgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t 
 
 __attribute__((noinline)) static ptrdiff_t qgbmv_n_omp(
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy)
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    TR alpha, TR *restrict y, ptrdiff_t incy)
 {
     if (m < QGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -192,10 +192,10 @@ __attribute__((noinline)) static ptrdiff_t qgbmv_n_omp(
     if (incx < 0) x -= (ptrdiff_t)(n - 1) * incx;
     if (incy < 0) y -= (ptrdiff_t)(m - 1) * incy;
 
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TR *xptr = x;
+    TR *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TR *)malloc((size_t)n * sizeof(TR));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
         xptr = xbuf;
@@ -216,16 +216,16 @@ __attribute__((noinline)) static ptrdiff_t qgbmv_n_omp(
 /* Column-partitioned Trans gather kernel: y[j] = alpha * Σ_i A(i,j)*x[i]. */
 static void qgbmv_t_colgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
                              ptrdiff_t lo, ptrdiff_t hi,
-                             const T *restrict a, ptrdiff_t lda,
-                             const T *restrict x, T alpha,
-                             T *restrict y, ptrdiff_t incy)
+                             const TR *restrict a, ptrdiff_t lda,
+                             const TR *restrict x, TR alpha,
+                             TR *restrict y, ptrdiff_t incy)
 {
     for (ptrdiff_t j = lo; j < hi; ++j) {
         const ptrdiff_t i_lo = (j - ku > 0) ? (j - ku) : 0;
         const ptrdiff_t i_hi = (j + kl + 1 < m) ? (j + kl + 1) : m;
         const ptrdiff_t k = ku - j;
-        const T *col = &A_(k + i_lo, j);
-        T s = 0.0Q;
+        const TR *col = &A_(k + i_lo, j);
+        TR s = 0.0Q;
         for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += *col++ * x[i];
         y[j * incy] += alpha * s;
     }
@@ -233,9 +233,9 @@ static void qgbmv_t_colgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t 
 
 __attribute__((noinline)) static ptrdiff_t qgbmv_t_omp(
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy)
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    TR alpha, TR *restrict y, ptrdiff_t incy)
 {
     if (n < QGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -245,10 +245,10 @@ __attribute__((noinline)) static ptrdiff_t qgbmv_t_omp(
     if (incx < 0) x -= (ptrdiff_t)(m - 1) * incx;
     if (incy < 0) y -= (ptrdiff_t)(n - 1) * incy;
 
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TR *xptr = x;
+    TR *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)m * sizeof(T));
+        xbuf = (TR *)malloc((size_t)m * sizeof(TR));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < m; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
         xptr = xbuf;
@@ -267,6 +267,6 @@ __attribute__((noinline)) static ptrdiff_t qgbmv_t_omp(
 }
 #endif /* _OPENMP */
 
-EPBLAS_FACADE_GBMV(qgbmv, T)
+EPBLAS_FACADE_GBMV(qgbmv, TR)
 
 #undef A_

@@ -15,7 +15,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -38,7 +38,7 @@ using mf_kernels::rcmul;
  * updating one triangle. The off-diagonal column run is a SIMD column-AXPY
  * (caxpy_add, bit-exact); the diagonal stays real. Columns disjoint -> OMP-over-j
  * race-free. Strided callers gather x to unit stride around this. */
-static void wher_contig(char UPLO, std::ptrdiff_t n, R alpha, T *a, std::size_t lda, const T *x)
+static void wher_contig(char UPLO, std::ptrdiff_t n, R alpha, TC *a, std::size_t lda, const TC *x)
 {
 #ifdef _OPENMP
     const bool use_omp = (n >= WHER_OMP_MIN && blas_omp_available());
@@ -47,18 +47,18 @@ static void wher_contig(char UPLO, std::ptrdiff_t n, R alpha, T *a, std::size_t 
     #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const T xj = x[j];
+        const TC xj = x[j];
         if (!ceq0(xj)) {
-            const T t = rcmul(alpha, cconj(xj));
-            T *aj = &A_(0, j);
+            const TC t = rcmul(alpha, cconj(xj));
+            TC *aj = &A_(0, j);
             if (UPLO == 'L') {
                 mf_kernels::caxpy_add(n - (j + 1), &aj[j + 1], &x[j + 1], t);
             } else {
                 mf_kernels::caxpy_add(j, &aj[0], &x[0], t);
             }
             /* Diagonal stays real. */
-            T prod = cmul(t, x[j]);
-            aj[j] = T{ aj[j].re + prod.re, rzero };
+            TC prod = cmul(t, x[j]);
+            aj[j] = TC{ aj[j].re + prod.re, rzero };
         }
     }
 }
@@ -67,8 +67,8 @@ static void wher_core(
     char uplo,
     std::ptrdiff_t n,
     const R *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    T *a, std::ptrdiff_t lda)
+    const TC *x, std::ptrdiff_t incx,
+    TC *a, std::ptrdiff_t lda)
 {
     const R alpha = *alpha_;
     const char UPLO = up(&uplo);
@@ -81,14 +81,14 @@ static void wher_core(
     }
     /* Strided x: gather to unit-stride scratch, run the SIMD core (A is
      * column-major/lda regardless of x's stride). */
-    const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
-    std::vector<T> xs(static_cast<std::size_t>(n));
+    const TC *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(n - 1) * incx : x;
+    std::vector<TC> xs(static_cast<std::size_t>(n));
     for (std::ptrdiff_t i = 0; i < n; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
     wher_contig(UPLO, n, alpha, a, lda, xs.data());
 }
 
 extern "C" {
-EPBLAS_FACADE_SYR(wher, R, T)
+EPBLAS_FACADE_SYR(wher, R, TC)
 }
 
 #undef A_

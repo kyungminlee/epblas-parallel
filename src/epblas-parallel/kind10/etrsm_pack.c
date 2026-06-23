@@ -29,16 +29,16 @@
 
 #include "etrsm_kernel.h"
 
-typedef etrsm_T T;
+typedef etrsm_TR TR;
 
 /* ── !UPPER, !TRANS (forward) / OLNCOPY ─────────────────────────────── */
 void etrsm_ilncopy(ptrdiff_t m, ptrdiff_t n,
-                   const T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, T *b, bool unit)
+                   const TR *a, ptrdiff_t lda,
+                   ptrdiff_t offset, TR *b, bool unit)
 {
     ptrdiff_t i, ii, j, jj;
-    T data01 = 0.0L, data02, data03 = 0.0L, data04 = 0.0L;
-    const T *a1, *a2;
+    TR data01 = 0.0L, data02, data03 = 0.0L, data04 = 0.0L;
+    const TR *a1, *a2;
 
     jj = offset;
 
@@ -121,12 +121,12 @@ void etrsm_ilncopy(ptrdiff_t m, ptrdiff_t n,
 
 /* ── !UPPER, TRANS (forward) / OLTCOPY ──────────────────────────────── */
 void etrsm_iltcopy(ptrdiff_t m, ptrdiff_t n,
-                   const T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, T *b, bool unit)
+                   const TR *a, ptrdiff_t lda,
+                   ptrdiff_t offset, TR *b, bool unit)
 {
     ptrdiff_t i, ii, j, jj;
-    T data01 = 0.0L, data02 = 0.0L, data03 = 0.0L, data04 = 0.0L;
-    const T *a1, *a2;
+    TR data01 = 0.0L, data02 = 0.0L, data03 = 0.0L, data04 = 0.0L;
+    const TR *a1, *a2;
 
     jj = offset;
 
@@ -207,12 +207,12 @@ void etrsm_iltcopy(ptrdiff_t m, ptrdiff_t n,
 
 /* ── UPPER, TRANS (backward) / IUNCOPY ──────────────────────────────── */
 void etrsm_iuncopy(ptrdiff_t m, ptrdiff_t n,
-                   const T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, T *b, bool unit)
+                   const TR *a, ptrdiff_t lda,
+                   ptrdiff_t offset, TR *b, bool unit)
 {
     ptrdiff_t i, ii, j, jj;
-    T data01 = 0.0L, data02, data03 = 0.0L, data04 = 0.0L;
-    const T *a1, *a2;
+    TR data01 = 0.0L, data02, data03 = 0.0L, data04 = 0.0L;
+    const TR *a1, *a2;
 
     jj = offset;
 
@@ -293,12 +293,12 @@ void etrsm_iuncopy(ptrdiff_t m, ptrdiff_t n,
 
 /* ── UPPER, !TRANS (backward) / IUTCOPY ─────────────────────────────── */
 void etrsm_iutcopy(ptrdiff_t m, ptrdiff_t n,
-                   const T *a, ptrdiff_t lda,
-                   ptrdiff_t offset, T *b, bool unit)
+                   const TR *a, ptrdiff_t lda,
+                   ptrdiff_t offset, TR *b, bool unit)
 {
     ptrdiff_t i, ii, j, jj;
-    T data01 = 0.0L, data02 = 0.0L, data03 = 0.0L, data04 = 0.0L;
-    const T *a1, *a2;
+    TR data01 = 0.0L, data02 = 0.0L, data03 = 0.0L, data04 = 0.0L;
+    const TR *a1, *a2;
 
     jj = offset;
 

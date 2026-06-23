@@ -53,34 +53,34 @@
 #endif
 #define EGBMV_MAX_CPUS 256
 
-typedef long double T;
+typedef long double TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 #ifdef _OPENMP
 static ptrdiff_t egbmv_n_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
-                       const T *restrict a, ptrdiff_t lda,
-                       const T *restrict x, ptrdiff_t incx,
-                       T alpha, T *restrict y, ptrdiff_t incy);
+                       const TR *restrict a, ptrdiff_t lda,
+                       const TR *restrict x, ptrdiff_t incx,
+                       TR alpha, TR *restrict y, ptrdiff_t incy);
 static ptrdiff_t egbmv_t_omp(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
-                       const T *restrict a, ptrdiff_t lda,
-                       const T *restrict x, ptrdiff_t incx,
-                       T alpha, T *restrict y, ptrdiff_t incy);
+                       const TR *restrict a, ptrdiff_t lda,
+                       const TR *restrict x, ptrdiff_t incx,
+                       TR alpha, TR *restrict y, ptrdiff_t incy);
 #endif
 
 static void egbmv_core(
     char trans,
     ptrdiff_t m, ptrdiff_t n,
     ptrdiff_t KL, ptrdiff_t KU,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    const TR *beta_,
+    TR *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
-    const T zero = 0.0L, one = 1.0L;
+    const TR alpha = *alpha_, beta = *beta_;
+    const TR zero = 0.0L, one = 1.0L;
     char TRANS = blas_up(trans);
     if (TRANS == 'C') TRANS = 'T';
 
@@ -116,8 +116,8 @@ static void egbmv_core(
             for (ptrdiff_t i = 0; i < m; ++i) {
                 const ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
                 const ptrdiff_t j_hi = (i + KU + 1 < n) ? (i + KU + 1) : n;
-                const T *base = a + (KU + i);
-                T s = zero;
+                const TR *base = a + (KU + i);
+                TR s = zero;
                 for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += base[(ptrdiff_t)j * s1] * x[j];
                 y[i] += alpha * s;
             }
@@ -127,8 +127,8 @@ static void egbmv_core(
             for (ptrdiff_t i = 0; i < m; ++i) {
                 const ptrdiff_t j_lo = (i - KL > 0) ? (i - KL) : 0;
                 const ptrdiff_t j_hi = (i + KU + 1 < n) ? (i + KU + 1) : n;
-                const T *base = a + (KU + i);
-                T s = zero;
+                const TR *base = a + (KU + i);
+                TR s = zero;
                 ptrdiff_t xx = ix0 + (ptrdiff_t)j_lo * incx;
                 for (ptrdiff_t j = j_lo; j < j_hi; ++j) { s += base[(ptrdiff_t)j * s1] * x[xx]; xx += incx; }
                 y[iy0 + (ptrdiff_t)i * incy] += alpha * s;
@@ -140,7 +140,7 @@ static void egbmv_core(
          * still outlines (see Addendum 16). */
 #define EGBMV_T_BODY                                                         \
         for (ptrdiff_t j = 0; j < n; ++j) {                                        \
-            T s = zero;                                                      \
+            TR s = zero;                                                      \
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;                    \
             const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;            \
             const ptrdiff_t k = KU - j;                                            \
@@ -170,7 +170,7 @@ static void egbmv_core(
         ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
         ptrdiff_t jy = ky;
         for (ptrdiff_t j = 0; j < n; ++j) {
-            T s = zero;
+            TR s = zero;
             ptrdiff_t ix = kx;
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
             const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;
@@ -179,7 +179,7 @@ static void egbmv_core(
              * `*col++` (single IV) instead of recomputing A_(k+i,j) each row,
              * which ptrdiff_t indexing strength-reduces into a redundant IV
              * (project_ptrdiff_conversion_regressors, Class-B). */
-            const T *col = &A_(k + i_lo, j);
+            const TR *col = &A_(k + i_lo, j);
             for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
                 s += *col++ * x[ix];
                 ix += incx;
@@ -199,16 +199,16 @@ static void egbmv_core(
  * no scratch, no zero-fill, no reduction, no barrier (x and y distinct). */
 static void gbmv_n_rowgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
                              ptrdiff_t lo, ptrdiff_t hi,
-                             const T *restrict a, ptrdiff_t lda,
-                             const T *restrict x, T alpha,
-                             T *restrict y, ptrdiff_t incy)
+                             const TR *restrict a, ptrdiff_t lda,
+                             const TR *restrict x, TR alpha,
+                             TR *restrict y, ptrdiff_t incy)
 {
     const ptrdiff_t s1 = lda - 1;
     for (ptrdiff_t i = lo; i < hi; ++i) {
         ptrdiff_t j_lo = (i - kl > 0) ? (i - kl) : 0;
         ptrdiff_t j_hi = (i + ku + 1 < n) ? (i + ku + 1) : n;
-        const T *base = a + (ku + i);
-        T s = 0.0L;
+        const TR *base = a + (ku + i);
+        TR s = 0.0L;
         for (ptrdiff_t j = j_lo; j < j_hi; ++j) s += base[j * s1] * x[j];
         y[i * incy] += alpha * s;
     }
@@ -221,9 +221,9 @@ static void gbmv_n_rowgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t k
  * bookkeeping does not pressure the serial gather's x87 allocation. */
 __attribute__((noinline)) static ptrdiff_t egbmv_n_omp(
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy)
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    TR alpha, TR *restrict y, ptrdiff_t incy)
 {
     if (m < EGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -237,10 +237,10 @@ __attribute__((noinline)) static ptrdiff_t egbmv_n_omp(
 
     /* Gather strided x to contiguous (logical order) so the inner dot is unit
      * stride; y is written disjointly per thread in place. */
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TR *xptr = x;
+    TR *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)n * sizeof(T));
+        xbuf = (TR *)malloc((size_t)n * sizeof(TR));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < n; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
         xptr = xbuf;
@@ -263,16 +263,16 @@ __attribute__((noinline)) static ptrdiff_t egbmv_n_omp(
  * across threads with no cross-thread write dependence (x and y distinct). */
 static void gbmv_t_colgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
                              ptrdiff_t lo, ptrdiff_t hi,
-                             const T *restrict a, ptrdiff_t lda,
-                             const T *restrict x, T alpha,
-                             T *restrict y, ptrdiff_t incy)
+                             const TR *restrict a, ptrdiff_t lda,
+                             const TR *restrict x, TR alpha,
+                             TR *restrict y, ptrdiff_t incy)
 {
     for (ptrdiff_t j = lo; j < hi; ++j) {
         const ptrdiff_t i_lo = (j - ku > 0) ? (j - ku) : 0;
         const ptrdiff_t i_hi = (j + kl + 1 < m) ? (j + kl + 1) : m;
         const ptrdiff_t k = ku - j;
-        const T *col = &A_(k + i_lo, j);
-        T s = 0.0L;
+        const TR *col = &A_(k + i_lo, j);
+        TR s = 0.0L;
         for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += *col++ * x[i];
         y[j * incy] += alpha * s;
     }
@@ -285,9 +285,9 @@ static void gbmv_t_colgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t k
  * M elements of x and writes N of y. */
 __attribute__((noinline)) static ptrdiff_t egbmv_t_omp(
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t ku,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    T alpha, T *restrict y, ptrdiff_t incy)
+    const TR *restrict a, ptrdiff_t lda,
+    const TR *restrict x, ptrdiff_t incx,
+    TR alpha, TR *restrict y, ptrdiff_t incy)
 {
     if (n < EGBMV_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -297,10 +297,10 @@ __attribute__((noinline)) static ptrdiff_t egbmv_t_omp(
     if (incx < 0) x -= (ptrdiff_t)(m - 1) * incx;
     if (incy < 0) y -= (ptrdiff_t)(n - 1) * incy;
 
-    const T *xptr = x;
-    T *xbuf = NULL;
+    const TR *xptr = x;
+    TR *xbuf = NULL;
     if (incx != 1) {
-        xbuf = (T *)malloc((size_t)m * sizeof(T));
+        xbuf = (TR *)malloc((size_t)m * sizeof(TR));
         if (!xbuf) return 0;
         for (ptrdiff_t i = 0; i < m; ++i) xbuf[i] = x[(ptrdiff_t)i * incx];
         xptr = xbuf;
@@ -319,6 +319,6 @@ __attribute__((noinline)) static ptrdiff_t egbmv_t_omp(
 }
 #endif /* _OPENMP */
 
-EPBLAS_FACADE_GBMV(egbmv, T)
+EPBLAS_FACADE_GBMV(egbmv, TR)
 
 #undef A_

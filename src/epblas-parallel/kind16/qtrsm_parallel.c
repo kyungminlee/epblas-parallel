@@ -53,22 +53,22 @@
 #define QTRSM_QTRSV_LOOP_M_MIN       128
 #define QTRSM_QTRSV_LOOP_NB_HINT     64
 
-typedef qtrsm_T T;
+typedef qtrsm_TR TR;
 
 extern void qtrsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx);
+    const TR *restrict a, ptrdiff_t lda,
+    TR *restrict x, ptrdiff_t incx);
 
 extern void qgemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc);
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    const TR *b, ptrdiff_t ldb,
+    const TR *beta_,
+    TR *c, ptrdiff_t ldc);
 
 /* Maximum nrhs at which the qtrsv-loop fast path beats column-parallel
  * qtrsm. Derived from qtrsv_blocked's effective scaling:
@@ -96,8 +96,8 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t m) {
 
 #ifdef _OPENMP
 #define QTRSM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TR alpha,                     \
+                     const TR *a, ptrdiff_t lda, TR *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         if (n >= QTRSM_OMP_MIN && blas_omp_max_threads() > 1                \
                               && !omp_in_parallel()) {                      \
@@ -111,8 +111,8 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t m) {
         } else { core(0, n, m, alpha, a, lda, b, ldb, nounit); }           \
     }
 #define QTRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TR alpha,                     \
+                     const TR *a, ptrdiff_t lda, TR *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         if (m >= QTRSM_OMP_MIN && blas_omp_max_threads() > 1                \
                               && !omp_in_parallel()) {                      \
@@ -127,14 +127,14 @@ static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t m) {
     }
 #else
 #define QTRSM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TR alpha,                     \
+                     const TR *a, ptrdiff_t lda, TR *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         core(0, n, m, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define QTRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TR alpha,                     \
+                     const TR *a, ptrdiff_t lda, TR *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         core(0, m, n, alpha, a, lda, b, ldb, nounit);                       \
     }
@@ -154,11 +154,11 @@ QTRSM_OMP_WRAP_R(qtrsm_rut, qtrsm_rut_core)
 static void qtrsm_core(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    TR *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     const char SIDE   = qtrsm_uplo(side);
     const char UPLO   = qtrsm_uplo(uplo);
     char TRANS           = qtrsm_uplo(transa);
@@ -215,7 +215,7 @@ static void qtrsm_core(
     }
 }
 
-EPBLAS_FACADE_TRMM(qtrsm, T)
+EPBLAS_FACADE_TRMM(qtrsm, TR)
 
 /* ── Block-parallel SIDE='L' variant ─────────────────────────────────
  *
@@ -239,11 +239,11 @@ static ptrdiff_t qtrsm_blocked_nb(void) {
 static void qtrsm_blocked_core(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    TR *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     const ptrdiff_t nb = qtrsm_blocked_nb();
     const char SIDE = qtrsm_uplo(side);
     const char UPLO = qtrsm_uplo(uplo);
@@ -263,8 +263,8 @@ static void qtrsm_blocked_core(
         return;
     }
 
-    const T neg_one = -1.0Q;
-    const T one_v = 1.0Q;
+    const TR neg_one = -1.0Q;
+    const TR one_v = 1.0Q;
 
     const bool use_omp = (n >= 2 && blas_omp_should_thread());
 
@@ -351,7 +351,7 @@ static void qtrsm_blocked_core(
     }
 }
 
-EPBLAS_FACADE_TRMM(qtrsm_blocked, T)
+EPBLAS_FACADE_TRMM(qtrsm_blocked, TR)
 
 #undef A_
 #undef B_

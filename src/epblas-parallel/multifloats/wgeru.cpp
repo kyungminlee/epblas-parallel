@@ -21,7 +21,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -42,8 +42,8 @@ using simd_exact::cstore4;
 /* Contiguous (unit-stride) core: A += alpha * x * y^T, x length M, y length N.
  * SIMD column-AXPY (cmul/cadd) when MBLAS_SIMD_DD; columns of A disjoint
  * so OMP-over-j is race-free and bit-exact. Strided callers gather x/y around it. */
-static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, T *a, std::size_t lda,
-                         const T *x, const T *y)
+static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, TC *a, std::size_t lda,
+                         const TC *x, const TC *y)
 {
 #ifdef MBLAS_SIMD_DD
         const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
@@ -63,9 +63,9 @@ static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, T *a, std:
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
-            const T yj = y[j];
+            const TC yj = y[j];
             if (ceq0(yj)) continue;
-            const T t = cmul(alpha, yj);
+            const TC t = cmul(alpha, yj);
             const __m256d trh = _mm256_set1_pd(t.re.limbs[0]);
             const __m256d trl = _mm256_set1_pd(t.re.limbs[1]);
             const __m256d tih = _mm256_set1_pd(t.im.limbs[0]);
@@ -87,7 +87,7 @@ static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, T *a, std:
                                  nrh, nrl, nih, nil);
                 cstore4(aj + 4 * i, nrh, nrl, nih, nil);
             }
-            T *ajs = &A_(0, j);
+            TC *ajs = &A_(0, j);
             for (; i < m; ++i) ajs[i] = cadd(ajs[i], cmul(t, x[i]));
         }
         std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
@@ -97,10 +97,10 @@ static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, T *a, std:
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
-            const T yj = y[j];
+            const TC yj = y[j];
             if (!ceq0(yj)) {
-                const T t = cmul(alpha, yj);
-                T *aj = &A_(0, j);
+                const TC t = cmul(alpha, yj);
+                TC *aj = &A_(0, j);
                 for (std::ptrdiff_t i = 0; i < m; ++i) aj[i] = cadd(aj[i], cmul(t, x[i]));
             }
         }
@@ -109,12 +109,12 @@ static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, T *a, std:
 
 static void wgeru_core(
     std::ptrdiff_t m, std::ptrdiff_t n,
-    const T *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    const T *y, std::ptrdiff_t incy,
-    T *a, std::ptrdiff_t lda)
+    const TC *alpha_,
+    const TC *x, std::ptrdiff_t incx,
+    const TC *y, std::ptrdiff_t incy,
+    TC *a, std::ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
 
     if (m == 0 || n == 0 || ceq0(alpha)) return;
 
@@ -124,16 +124,16 @@ static void wgeru_core(
     }
     /* Strided: gather x (len M) and y (len N) to unit-stride scratch, run the
      * SIMD core (A is column-major/lda regardless of vector strides). */
-    const T *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(m - 1) * incx : x;
-    const T *ybase = (incy < 0) ? y - static_cast<std::ptrdiff_t>(n - 1) * incy : y;
-    std::vector<T> xs(static_cast<std::size_t>(m)), ys(static_cast<std::size_t>(n));
+    const TC *xbase = (incx < 0) ? x - static_cast<std::ptrdiff_t>(m - 1) * incx : x;
+    const TC *ybase = (incy < 0) ? y - static_cast<std::ptrdiff_t>(n - 1) * incy : y;
+    std::vector<TC> xs(static_cast<std::size_t>(m)), ys(static_cast<std::size_t>(n));
     for (std::ptrdiff_t i = 0; i < m; ++i) xs[i] = xbase[static_cast<std::ptrdiff_t>(i) * incx];
     for (std::ptrdiff_t j = 0; j < n; ++j) ys[j] = ybase[static_cast<std::ptrdiff_t>(j) * incy];
     wgeru_contig(m, n, alpha, a, lda, xs.data(), ys.data());
 }
 
 extern "C" {
-EPBLAS_FACADE_GER(wgeru, T)
+EPBLAS_FACADE_GER(wgeru, TC)
 }
 
 #undef A_

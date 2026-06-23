@@ -35,20 +35,20 @@
 
 #include <stddef.h>
 
-typedef long double etrmm_T;
+typedef long double etrmm_TR;
 
 /* ── TRMM A-packers (etrmm_pack.c) ───────────────────────────────────
  * Pack the relevant triangle of A (plus the diagonal) into the packed
  * buffer `b` in the ob contiguous-odd-tail convention. `posX`/`posY`
  * position the diagonal; `unit` selects unit-diagonal. */
-void etrmm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
-                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, bool unit);
-void etrmm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
-                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, bool unit);
-void etrmm_iltcopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
-                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, bool unit);
-void etrmm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
-                   ptrdiff_t posX, ptrdiff_t posY, etrmm_T *b, bool unit);
+void etrmm_iutcopy(ptrdiff_t m, ptrdiff_t n, const etrmm_TR *a, ptrdiff_t lda,
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_TR *b, bool unit);
+void etrmm_iuncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_TR *a, ptrdiff_t lda,
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_TR *b, bool unit);
+void etrmm_iltcopy(ptrdiff_t m, ptrdiff_t n, const etrmm_TR *a, ptrdiff_t lda,
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_TR *b, bool unit);
+void etrmm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_TR *a, ptrdiff_t lda,
+                   ptrdiff_t posX, ptrdiff_t posY, etrmm_TR *b, bool unit);
 
 /* ── Diagonal-aware TRMM micro-kernel (etrmm_kernel.c) ───────────────
  * C := alpha · ba · bb (overwrite) over one packed (bm,bn,bk) tile; the
@@ -56,9 +56,9 @@ void etrmm_ilncopy(ptrdiff_t m, ptrdiff_t n, const etrmm_T *a, ptrdiff_t lda,
  * the diagonal within the tile. Self-consistent with the etrmm_i*copy
  * packers and the etri_kernel.c substrate (contiguous-odd-tail). */
 void etrmm_kernel(bool left, bool trans,
-                  ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etrmm_T alpha,
-                  const etrmm_T *ba, const etrmm_T *bb,
-                  etrmm_T *C, ptrdiff_t ldc, ptrdiff_t offset);
+                  ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etrmm_TR alpha,
+                  const etrmm_TR *ba, const etrmm_TR *bb,
+                  etrmm_TR *C, ptrdiff_t ldc, ptrdiff_t offset);
 
 /* ── Band drivers (etrmm_serial.c) ───────────────────────────────────
  * Run the full L3 nest for one slice of the partition axis: a column band
@@ -67,20 +67,20 @@ void etrmm_kernel(bool left, bool trans,
 void etrmm_L_band(bool upper, bool trans, bool unit,
                   ptrdiff_t m, ptrdiff_t js0, ptrdiff_t js1,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
-                  const etrmm_T *a, ptrdiff_t lda, etrmm_T *b, ptrdiff_t ldb,
-                  etrmm_T *Ap, etrmm_T *Bp);
+                  const etrmm_TR *a, ptrdiff_t lda, etrmm_TR *b, ptrdiff_t ldb,
+                  etrmm_TR *Ap, etrmm_TR *Bp);
 void etrmm_R_band(bool upper, bool trans, bool unit,
                   ptrdiff_t n, ptrdiff_t m_lo, ptrdiff_t m_hi,
                   ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
-                  const etrmm_T *a, ptrdiff_t lda, etrmm_T *b, ptrdiff_t ldb,
-                  etrmm_T *Ap, etrmm_T *Bp);
+                  const etrmm_TR *a, ptrdiff_t lda, etrmm_TR *b, ptrdiff_t ldb,
+                  etrmm_TR *Ap, etrmm_TR *Bp);
 
 /* Pure-serial by-value core (no OpenMP). Same shape as etrmm_core. */
 void etrmm_serial(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const etrmm_T *alpha_,
-    const etrmm_T *a, ptrdiff_t lda,
-    etrmm_T *b, ptrdiff_t ldb);
+    const etrmm_TR *alpha_,
+    const etrmm_TR *a, ptrdiff_t lda,
+    etrmm_TR *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND10_ETRMM_KERNEL_H */

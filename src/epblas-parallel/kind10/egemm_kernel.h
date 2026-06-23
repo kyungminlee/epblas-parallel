@@ -26,7 +26,7 @@
 
 #include <stddef.h>
 
-typedef long double egemm_T;
+typedef long double egemm_TR;
 
 /* Register-tile dims (compile-time constants; deliberately small so the
  * four fp80 accumulators fit the 8-deep x87 register stack). */
@@ -43,25 +43,25 @@ ptrdiff_t egemm_round_up(ptrdiff_t v, ptrdiff_t m);
 void egemm_choose_blocks(ptrdiff_t k, ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
 
 /* C := beta*C pre-pass over the full M×N tile (handles K==0 / alpha==0). */
-void egemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, egemm_T beta, egemm_T *c, ptrdiff_t ldc);
+void egemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, egemm_TR beta, egemm_TR *c, ptrdiff_t ldc);
 
 /* Packers (panel-packed, OpenBLAS-style). */
-void egemm_pack_A(const egemm_T *restrict A, ptrdiff_t lda,
+void egemm_pack_A(const egemm_TR *restrict A, ptrdiff_t lda,
                   ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb, char ta,
-                  egemm_T *restrict Ap);
-void egemm_pack_B(const egemm_T *restrict B, ptrdiff_t ldb,
+                  egemm_TR *restrict Ap);
+void egemm_pack_B(const egemm_TR *restrict B, ptrdiff_t ldb,
                   ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, char tb,
-                  egemm_T *restrict Bp);
+                  egemm_TR *restrict Bp);
 
 /* Drive one packed (ib,jb,pb) macro-tile via MR×NR sub-tiles. */
-void egemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemm_T alpha,
-                        const egemm_T *restrict Ap, const egemm_T *restrict Bp,
-                        egemm_T *restrict C, ptrdiff_t ldc);
+void egemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemm_TR alpha,
+                        const egemm_TR *restrict Ap, const egemm_TR *restrict Bp,
+                        egemm_TR *restrict C, ptrdiff_t ldc);
 
 /* Fast path TA='T',TB='N': one C-column j2 (stride-1 dot, no packing). */
-void egemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, egemm_T alpha,
-                    const egemm_T *a, ptrdiff_t lda, const egemm_T *b, ptrdiff_t ldb,
-                    egemm_T *c, ptrdiff_t ldc);
+void egemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, egemm_TR alpha,
+                    const egemm_TR *a, ptrdiff_t lda, const egemm_TR *b, ptrdiff_t ldb,
+                    egemm_TR *c, ptrdiff_t ldc);
 
 /*
  * Gate for the TN (ta='T', tb='N') no-pack fast_col path. fast_col runs the
@@ -87,10 +87,10 @@ static inline ptrdiff_t egemm_tn_use_fast(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k)
 void egemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const egemm_T *alpha_,
-    const egemm_T *a, ptrdiff_t lda,
-    const egemm_T *b, ptrdiff_t ldb,
-    const egemm_T *beta_,
-    egemm_T *c, ptrdiff_t ldc);
+    const egemm_TR *alpha_,
+    const egemm_TR *a, ptrdiff_t lda,
+    const egemm_TR *b, ptrdiff_t ldb,
+    const egemm_TR *beta_,
+    egemm_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_EGEMM_KERNEL_H */

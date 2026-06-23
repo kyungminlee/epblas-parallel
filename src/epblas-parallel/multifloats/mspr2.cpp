@@ -21,7 +21,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -35,12 +35,12 @@ namespace {
 static void mspr2_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    const T *y, std::ptrdiff_t incy,
-    T *ap)
+    const TR *alpha_,
+    const TR *x, std::ptrdiff_t incx,
+    const TR *y, std::ptrdiff_t incy,
+    TR *ap)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     const char UPLO = up(&uplo);
 
     if (n == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
@@ -70,8 +70,8 @@ static void mspr2_core(
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j]) && eq0(yhp[j], ylp[j])) continue;
-            const T t1 = alpha * T{yhp[j], ylp[j]};
-            const T t2 = alpha * T{xhp[j], xlp[j]};
+            const TR t1 = alpha * TR{yhp[j], ylp[j]};
+            const TR t2 = alpha * TR{xhp[j], xlp[j]};
             const std::ptrdiff_t kk = (j * (j + 1)) / 2;
             mf_kernels::dd_axpy2(j + 1, xhp, xlp, t1.limbs[0], t1.limbs[1],
                                yhp, ylp, t2.limbs[0], t2.limbs[1], &ap[kk]);
@@ -82,8 +82,8 @@ static void mspr2_core(
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j]) && eq0(yhp[j], ylp[j])) continue;
-            const T t1 = alpha * T{yhp[j], ylp[j]};
-            const T t2 = alpha * T{xhp[j], xlp[j]};
+            const TR t1 = alpha * TR{yhp[j], ylp[j]};
+            const TR t2 = alpha * TR{xhp[j], xlp[j]};
             const std::ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
             mf_kernels::dd_axpy2(n - j, xhp + j, xlp + j, t1.limbs[0], t1.limbs[1],
                                yhp + j, ylp + j, t2.limbs[0], t2.limbs[1], &ap[kk]);
@@ -92,5 +92,5 @@ static void mspr2_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SPR2(mspr2, T)
+EPBLAS_FACADE_SPR2(mspr2, TR)
 }

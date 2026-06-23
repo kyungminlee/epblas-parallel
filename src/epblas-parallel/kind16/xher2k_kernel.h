@@ -51,13 +51,12 @@
  * Internally the math is a faithful OpenBLAS port that indexes operands as the
  * interleaved (re,im) __float128 storage the ob driver expects (×2 per complex
  * element; ld* in COMPLEX elements). Each entry reinterpret-casts its TC
- * pointers to xher2k_T (= __float128) at the top — a complex value is exactly
+ * pointers to xher2k_TR (= __float128) at the top — a complex value is exactly
  * two contiguous reals — and runs the interleaved kernel unchanged. So TC is
- * always complex and TR always real; xher2k_T is just the internal storage
- * element, never spelled in the public ABI. */
-typedef __float128   xher2k_T;    /* internal interleaved (re,im) storage */
+ * always complex and TR always real; xher2k_TR doubles as the real beta operand
+ * and the internal interleaved storage element. */
 typedef __complex128 xher2k_TC;   /* complex operands: A, B, C, alpha */
-typedef __float128   xher2k_TR;   /* real operand: beta */
+typedef __float128   xher2k_TR;   /* real beta + internal interleaved storage */
 
 /* Pure-serial by-value entry (no OpenMP). Shares the ptrdiff_t core ABI of
  * xher2k_core so callers already inside a parallel region can swap the symbol

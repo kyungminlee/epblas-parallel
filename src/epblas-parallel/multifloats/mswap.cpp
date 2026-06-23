@@ -16,30 +16,30 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
-static void mswap_kernel(std::ptrdiff_t n, T *x, std::ptrdiff_t incx,
-                                            T *y, std::ptrdiff_t incy)
+static void mswap_kernel(std::ptrdiff_t n, TR *x, std::ptrdiff_t incx,
+                                            TR *y, std::ptrdiff_t incy)
 {
     if (incx == 1 && incy == 1) {
         std::ptrdiff_t i, n1 = n & -4;
         for (i = 0; i < n1; i += 4) {
-            T t0 = x[i+0], t1 = x[i+1], t2 = x[i+2], t3 = x[i+3];
+            TR t0 = x[i+0], t1 = x[i+1], t2 = x[i+2], t3 = x[i+3];
             x[i+0] = y[i+0]; x[i+1] = y[i+1];
             x[i+2] = y[i+2]; x[i+3] = y[i+3];
             y[i+0] = t0; y[i+1] = t1; y[i+2] = t2; y[i+3] = t3;
         }
-        for (; i < n; ++i) { T t = x[i]; x[i] = y[i]; y[i] = t; }
+        for (; i < n; ++i) { TR t = x[i]; x[i] = y[i]; y[i] = t; }
         return;
     }
     for (std::ptrdiff_t i = 0; i < n; ++i) {
-        T t = x[i*incx]; x[i*incx] = y[i*incy]; y[i*incy] = t;
+        TR t = x[i*incx]; x[i*incx] = y[i*incy]; y[i*incy] = t;
     }
 }
 
 static void mswap_core(std::ptrdiff_t n,
-                       T *x, std::ptrdiff_t incx,
-                       T *y, std::ptrdiff_t incy)
+                       TR *x, std::ptrdiff_t incx,
+                       TR *y, std::ptrdiff_t incy)
 {
     if (n <= 0) return;
     if (incx < 0) x -= (n - 1) * incx;
@@ -67,4 +67,4 @@ static void mswap_core(std::ptrdiff_t n,
     mswap_kernel(n, x, incx, y, incy);
 }
 
-extern "C" { EPBLAS_FACADE_SWAP(mswap, T) }
+extern "C" { EPBLAS_FACADE_SWAP(mswap, TR) }

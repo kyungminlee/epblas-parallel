@@ -23,7 +23,7 @@
 
 #include <stddef.h>
 
-typedef long double egemmtr_T;
+typedef long double egemmtr_TR;
 
 /* Register-tile dims. */
 #define EGEMMTR_MR 2
@@ -39,43 +39,43 @@ void egemmtr_block_sizes(ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
 
 /* C := beta*C over the UPLO triangle of columns [j_start, j_end). */
 void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, char UPLO,
-                        egemmtr_T beta, egemmtr_T *c, ptrdiff_t ldc);
+                        egemmtr_TR beta, egemmtr_TR *c, ptrdiff_t ldc);
 
 /* Packers (egemm-style, take separate A and B). */
-void egemmtr_pack_A(const egemmtr_T *restrict A, ptrdiff_t lda,
+void egemmtr_pack_A(const egemmtr_TR *restrict A, ptrdiff_t lda,
                     ptrdiff_t ic, ptrdiff_t pc, ptrdiff_t ib, ptrdiff_t pb, char ta,
-                    egemmtr_T *restrict Ap);
-void egemmtr_pack_B(const egemmtr_T *restrict B, ptrdiff_t ldb,
+                    egemmtr_TR *restrict Ap);
+void egemmtr_pack_B(const egemmtr_TR *restrict B, ptrdiff_t ldb,
                     ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, char tb,
-                    egemmtr_T *restrict Bp);
+                    egemmtr_TR *restrict Bp);
 
 /* Rectangular macro-tile (entirely inside the stored triangle). */
-void egemmtr_macro_kernel_rect(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_T alpha,
-                               const egemmtr_T *restrict Ap,
-                               const egemmtr_T *restrict Bp,
-                               egemmtr_T *restrict C, ptrdiff_t ldc);
+void egemmtr_macro_kernel_rect(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_TR alpha,
+                               const egemmtr_TR *restrict Ap,
+                               const egemmtr_TR *restrict Bp,
+                               egemmtr_TR *restrict C, ptrdiff_t ldc);
 
 /* Triangle-aware macro-tile (crosses the diagonal). */
-void egemmtr_macro_kernel_tri(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_T alpha,
-                              const egemmtr_T *restrict Ap,
-                              const egemmtr_T *restrict Bp,
-                              egemmtr_T *restrict C, ptrdiff_t ldc,
+void egemmtr_macro_kernel_tri(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_TR alpha,
+                              const egemmtr_TR *restrict Ap,
+                              const egemmtr_TR *restrict Bp,
+                              egemmtr_TR *restrict C, ptrdiff_t ldc,
                               ptrdiff_t row_base, ptrdiff_t col_base, char UPLO);
 
 /* O(N²·K) scalar fallback (alloc failure path). */
 void egemmtr_scalar_fallback(ptrdiff_t n, ptrdiff_t k, char UPLO, char ta, char tb,
-                             egemmtr_T alpha,
-                             const egemmtr_T *a, ptrdiff_t lda,
-                             const egemmtr_T *b, ptrdiff_t ldb,
-                             egemmtr_T *c, ptrdiff_t ldc);
+                             egemmtr_TR alpha,
+                             const egemmtr_TR *a, ptrdiff_t lda,
+                             const egemmtr_TR *b, ptrdiff_t ldb,
+                             egemmtr_TR *c, ptrdiff_t ldc);
 
 /* Pure single-thread entry (by-value core). No OpenMP. */
 void egemmtr_serial(char uplo, char transa, char transb,
                     ptrdiff_t n, ptrdiff_t k,
-                    const egemmtr_T *alpha_,
-                    const egemmtr_T *restrict a, ptrdiff_t lda,
-                    const egemmtr_T *restrict b, ptrdiff_t ldb,
-                    const egemmtr_T *beta_,
-                    egemmtr_T *restrict c, ptrdiff_t ldc);
+                    const egemmtr_TR *alpha_,
+                    const egemmtr_TR *restrict a, ptrdiff_t lda,
+                    const egemmtr_TR *restrict b, ptrdiff_t ldb,
+                    const egemmtr_TR *beta_,
+                    egemmtr_TR *restrict c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_EGEMMTR_KERNEL_H */

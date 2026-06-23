@@ -11,7 +11,7 @@
  * real and imag scales explicitly produces a tight 2-fmul-per-element
  * inner loop. */
 #include "../common/epblas_facade.h"
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double R;
 
 /* Unit-stride kernel over the (re,im)-pair view, shared by serial + OMP slices. */
@@ -47,7 +47,7 @@ static bool yescal_omp(ptrdiff_t n, R alpha, long double *base)
 }
 #endif
 
-static void yescal_core(ptrdiff_t n, const R *alpha_, T *x, ptrdiff_t incx)
+static void yescal_core(ptrdiff_t n, const R *alpha_, TC *x, ptrdiff_t incx)
 {
     const R alpha = *alpha_;
     if (n <= 0 || alpha == 1.0L) return;
@@ -67,4 +67,4 @@ static void yescal_core(ptrdiff_t n, const R *alpha_, T *x, ptrdiff_t incx)
     }
 }
 
-EPBLAS_FACADE_SCAL(yescal, R, T)
+EPBLAS_FACADE_SCAL(yescal, R, TC)

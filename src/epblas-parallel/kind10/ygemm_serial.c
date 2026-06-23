@@ -29,10 +29,10 @@
 #include <ctype.h>
 #include <stddef.h>
 
-typedef ygemm_T T;
+typedef ygemm_TC TC;
 
-static const T zero = 0.0L + 0.0iL;
-static const T one  = 1.0L + 0.0iL;
+static const TC zero = 0.0L + 0.0iL;
+static const TC one  = 1.0L + 0.0iL;
 
 static ptrdiff_t trans_code(char c) {
     return blas_up(c);
@@ -40,9 +40,9 @@ static ptrdiff_t trans_code(char c) {
 
 /* ── beta pre-pass ────────────────────────────────────────────── */
 
-void ygemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
+void ygemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, TC beta, TC *c, ptrdiff_t ldc) {
     for (ptrdiff_t j = 0; j < n; ++j) {
-        T *cj = &c[(size_t)j * ldc];
+        TC *cj = &c[(size_t)j * ldc];
         if (beta == zero)      for (ptrdiff_t i = 0; i < m; ++i) cj[i]  = zero;
         else if (beta != one)  for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
@@ -61,24 +61,24 @@ void ygemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, T beta, T *c, ptrdiff_t ldc) {
  */
 
 /* TA='N', TB='N': C[i,j] += sum_l (alpha*B[l,j]) * A[i,l]. */
-void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, T alpha,
-                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc)
+void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, TC alpha,
+                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                   TC *c, ptrdiff_t ldc)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
-        T *cj = &c[(size_t)j2 * ldc];
+        TC *cj = &c[(size_t)j2 * ldc];
         ptrdiff_t l = 0;
         for (; l + 1 < k; l += 2) {
-            const T t0 = alpha * b[(size_t)j2 * ldb + l];
-            const T t1 = alpha * b[(size_t)j2 * ldb + l + 1];
-            const T *al0 = &a[(size_t)l       * lda];
-            const T *al1 = &a[(size_t)(l + 1) * lda];
+            const TC t0 = alpha * b[(size_t)j2 * ldb + l];
+            const TC t1 = alpha * b[(size_t)j2 * ldb + l + 1];
+            const TC *al0 = &a[(size_t)l       * lda];
+            const TC *al1 = &a[(size_t)(l + 1) * lda];
             for (ptrdiff_t i2 = 0; i2 < m; ++i2)
                 cj[i2] += t0 * al0[i2] + t1 * al1[i2];
         }
         for (; l < k; ++l) {
-            const T t = alpha * b[(size_t)j2 * ldb + l];
-            const T *al = &a[(size_t)l * lda];
+            const TC t = alpha * b[(size_t)j2 * ldb + l];
+            const TC *al = &a[(size_t)l * lda];
             for (ptrdiff_t i2 = 0; i2 < m; ++i2) cj[i2] += t * al[i2];
         }
     }
@@ -99,12 +99,12 @@ void ygemm_nn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k,
  * trailing update through; parity on the plain transpose path ygemm uses.
  * (K-unrolling with a single complex acc instead REGRESSES ~16% and is
  * NOT bit-exact — it reorders the dot.) See `ygemm_tn_core` disasm. */
-void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, T alpha,
-                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, bool conj_a)
+void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, TC alpha,
+                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                   TC *c, ptrdiff_t ldc, bool conj_a)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
-        T *cj = &c[(size_t)j2 * ldc];
+        TC *cj = &c[(size_t)j2 * ldc];
         const long double *bj = (const long double *)&b[(size_t)j2 * ldb];
         for (ptrdiff_t i2 = 0; i2 < m; ++i2) {
             const long double *ai = (const long double *)&a[(size_t)i2 * lda];
@@ -131,27 +131,27 @@ void ygemm_tn_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k,
 
 /* TA='N', TB in {'T','C'}: B^op[l,j] = B[j,l] (or conj). Rank-1 update
  * over l, K-unrolled. */
-void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, T alpha,
-                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, bool conj_b)
+void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, TC alpha,
+                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                   TC *c, ptrdiff_t ldc, bool conj_b)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
-        T *cj = &c[(size_t)j2 * ldc];
+        TC *cj = &c[(size_t)j2 * ldc];
         ptrdiff_t l = 0;
         for (; l + 1 < k; l += 2) {
-            const T b0 = b[(size_t)l       * ldb + j2];
-            const T b1 = b[(size_t)(l + 1) * ldb + j2];
-            const T t0 = alpha * (conj_b ? ~b0 : b0);
-            const T t1 = alpha * (conj_b ? ~b1 : b1);
-            const T *al0 = &a[(size_t)l       * lda];
-            const T *al1 = &a[(size_t)(l + 1) * lda];
+            const TC b0 = b[(size_t)l       * ldb + j2];
+            const TC b1 = b[(size_t)(l + 1) * ldb + j2];
+            const TC t0 = alpha * (conj_b ? ~b0 : b0);
+            const TC t1 = alpha * (conj_b ? ~b1 : b1);
+            const TC *al0 = &a[(size_t)l       * lda];
+            const TC *al1 = &a[(size_t)(l + 1) * lda];
             for (ptrdiff_t i2 = 0; i2 < m; ++i2)
                 cj[i2] += t0 * al0[i2] + t1 * al1[i2];
         }
         for (; l < k; ++l) {
-            const T blj = b[(size_t)l * ldb + j2];
-            const T t   = alpha * (conj_b ? ~blj : blj);
-            const T *al = &a[(size_t)l * lda];
+            const TC blj = b[(size_t)l * ldb + j2];
+            const TC t   = alpha * (conj_b ? ~blj : blj);
+            const TC *al = &a[(size_t)l * lda];
             for (ptrdiff_t i2 = 0; i2 < m; ++i2) cj[i2] += t * al[i2];
         }
     }
@@ -160,18 +160,18 @@ void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k,
 /* Both transposed: A col i × B row j. Dot-product form — single
  * accumulator (same reason as the T*N path; the conditional on
  * conj_a/conj_b inside an unrolled hot loop wrecks codegen). */
-void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, T alpha,
-                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
+void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, TC alpha,
+                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                   TC *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
 {
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
-        T *cj = &c[(size_t)j2 * ldc];
+        TC *cj = &c[(size_t)j2 * ldc];
         for (ptrdiff_t i2 = 0; i2 < m; ++i2) {
-            const T *ai = &a[(size_t)i2 * lda];
-            T acc = zero;
+            const TC *ai = &a[(size_t)i2 * lda];
+            TC acc = zero;
             for (ptrdiff_t l = 0; l < k; ++l) {
-                const T av = conj_a ? ~ai[l] : ai[l];
-                const T bv = b[(size_t)l * ldb + j2];
+                const TC av = conj_a ? ~ai[l] : ai[l];
+                const TC bv = b[(size_t)l * ldb + j2];
                 acc += av * (conj_b ? ~bv : bv);
             }
             cj[i2] += alpha * acc;
@@ -184,13 +184,13 @@ void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k,
 void ygemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char ta = trans_code(transa);
     const char tb = trans_code(transb);
 

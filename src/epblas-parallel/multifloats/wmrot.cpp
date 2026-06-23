@@ -20,7 +20,7 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 namespace {
 #ifdef MBLAS_SIMD_DD
@@ -31,7 +31,7 @@ using simd_exact::cstore4;
 
 /* Complex Givens rotation (real c,s) over a unit-stride range — serial kernel,
  * unchanged. X and Y slices are disjoint per thread → safe to partition. */
-static void wmrot_unit(std::ptrdiff_t n, const R c, const R s, T *x, T *y)
+static void wmrot_unit(std::ptrdiff_t n, const R c, const R s, TC *x, TC *y)
 {
 #ifdef MBLAS_SIMD_DD
         const __m256d ch = _mm256_set1_pd(c.limbs[0]);
@@ -84,7 +84,7 @@ static void wmrot_unit(std::ptrdiff_t n, const R c, const R s, T *x, T *y)
 
 #ifdef _OPENMP
 #define WMROT_OMP_MIN 2048
-__attribute__((noinline)) static std::ptrdiff_t wmrot_omp(std::ptrdiff_t n, R c, R s, T *x, T *y)
+__attribute__((noinline)) static std::ptrdiff_t wmrot_omp(std::ptrdiff_t n, R c, R s, TC *x, TC *y)
 {
     if (n <= WMROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -101,8 +101,8 @@ __attribute__((noinline)) static std::ptrdiff_t wmrot_omp(std::ptrdiff_t n, R c,
 #endif
 
 static void wmrot_core(std::ptrdiff_t n,
-                       T *x, std::ptrdiff_t incx,
-                       T *y, std::ptrdiff_t incy,
+                       TC *x, std::ptrdiff_t incx,
+                       TC *y, std::ptrdiff_t incy,
                        const R *c_, const R *s_)
 {
     const R c = *c_, s = *s_;
@@ -129,5 +129,5 @@ static void wmrot_core(std::ptrdiff_t n,
 }
 
 extern "C" {
-EPBLAS_FACADE_ROT(wmrot, R, T)
+EPBLAS_FACADE_ROT(wmrot, R, TC)
 }

@@ -34,7 +34,8 @@
 #include <omp.h>
 #endif
 
-typedef __float128 T;
+typedef xsyr2k_TC TC;
+typedef xsyr2k_TR TR;
 
 #define MR QBLAS_YGEMM_MR
 #define NR QBLAS_YGEMM_NR
@@ -44,22 +45,28 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 static void xsyr2k_core(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_c,
+    const TC *a_c, ptrdiff_t lda,
+    const TC *b_c, ptrdiff_t ldb,
+    const TC *beta_c,
+    TC *c_c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
     /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        xsyr2k_serial(uplo, trans, n, k, alpha_, a, lda, b, ldb,
-                      beta_, c, ldc);
+        xsyr2k_serial(uplo, trans, n, k, alpha_c, a_c, lda, b_c, ldb,
+                      beta_c, c_c, ldc);
         return;
     }
 #endif
-    const T alphar = alpha_[0], alphai = alpha_[1];
-    const T beta_r = beta_[0],  beta_i = beta_[1];
+    /* Reinterpret the complex ABI as interleaved (re,im) __float128 storage. */
+    const TR *alpha_ = (const TR *)alpha_c;
+    const TR *a = (const TR *)a_c;
+    const TR *b = (const TR *)b_c;
+    const TR *beta_ = (const TR *)beta_c;
+    TR *c = (TR *)c_c;
+    const TR alphar = alpha_[0], alphai = alpha_[1];
+    const TR beta_r = beta_[0],  beta_i = beta_[1];
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
@@ -76,7 +83,7 @@ static void xsyr2k_core(
 
     if (k <= KC) {
         const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(T));
+        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(TR));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
             MC = round_up((ptrdiff_t)target_mc, MR);
@@ -84,8 +91,8 @@ static void xsyr2k_core(
         }
     }
 
-    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(T);
+    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -100,10 +107,10 @@ static void xsyr2k_core(
     /* Two shared B-packs, two private A-packs per thread, all allocated BEFORE
      * the region: a thread that skipped the loop on a failed in-region alloc
      * would deadlock the others at the Bp barrier. */
-    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
-    T **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(T *)) : NULL;
+    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
+    TR **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
     bool alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
         Ap_A_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -121,8 +128,8 @@ static void xsyr2k_core(
 #else
             const ptrdiff_t tid = 0, nth = 1;
 #endif
-            T *Ap_A = Ap_A_arr[tid];
-            T *Ap_B = Ap_B_arr[tid];
+            TR *Ap_A = Ap_A_arr[tid];
+            TR *Ap_B = Ap_B_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks. */
             const ptrdiff_t m_chunk = round_up((n + nth - 1) / nth, MR);
@@ -167,7 +174,7 @@ static void xsyr2k_core(
                             qblas_ygemm_ncopy(pb, min_i, 0, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
                         }
 
-                        T *cij = &c[((size_t)js * ldc + is) * 2];
+                        TR *cij = &c[((size_t)js * ldc + is) * 2];
                         const ptrdiff_t off = is - js;
 
                         /* Pass 1: alpha·A·Bᵀ + symmetric diagonal merge. */
@@ -195,4 +202,8 @@ static void xsyr2k_core(
     free(Bp_B);
 }
 
-EPBLAS_FACADE_SYR2K(xsyr2k, T, T, T)
+/* Emit xsyr2k_ (LP64) + xsyr2k_64_ (ILP64) around the shared ptrdiff_t core.
+ * alpha/beta/matrices are all complex (TC=__complex128) — SYR2K is symmetric,
+ * so both scalars are complex; mirrors kind10 ysyr2k's
+ * EPBLAS_FACADE_SYR2K(ysyr2k, TC, TC, TC). */
+EPBLAS_FACADE_SYR2K(xsyr2k, TC, TC, TC)

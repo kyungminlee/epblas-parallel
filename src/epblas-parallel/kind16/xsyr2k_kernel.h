@@ -39,22 +39,36 @@
 #define EPBLAS_PARALLEL_KIND16_XSYR2K_KERNEL_H
 
 #include <stddef.h>
+#include <quadmath.h>
 
-/* Arrays are interleaved (re,im) pairs of __float128, indexed as the ob
- * driver does (×2 per complex element); ld* are in COMPLEX elements. */
-typedef __float128 xsyr2k_T;
+/* Public ABI is the genuine complex type, mirroring kind10 ysyr2k's
+ * EPBLAS_FACADE_SYR2K(ysyr2k, TC, TC, TC): the complex matrices A/B/C and the
+ * complex scalars alpha/beta are all __complex128 (TC). SYR2K is the symmetric
+ * (not Hermitian) variant, so BOTH scalars are complex — there is no real
+ * operand.
+ *
+ * Internally the math is a faithful OpenBLAS port that indexes operands as the
+ * interleaved (re,im) __float128 storage the ob driver expects (×2 per complex
+ * element; ld* in COMPLEX elements). Each entry reinterpret-casts its TC
+ * pointers to xsyr2k_TR (= __float128) at the top — a complex value is exactly
+ * two contiguous reals — and runs the interleaved kernel unchanged. So TC is
+ * always complex; xsyr2k_TR is just the internal real storage element, never
+ * spelled in the public ABI. */
+typedef __complex128 xsyr2k_TC;   /* complex operands: A, B, C, alpha, beta */
+typedef __float128   xsyr2k_TR;   /* internal interleaved (re,im) storage */
 
 /* Pure-serial by-value entry (no OpenMP). Shares the ptrdiff_t core ABI of
  * xsyr2k_core so callers already inside a parallel region can swap the symbol
- * name only; mirrors the kind10 ysyr2k_serial by-value shape. The a/b/c/alpha/
- * beta pointers are interleaved (re,im) __float128; alpha_/beta_ stay pointers. */
+ * name only; mirrors the kind10 ysyr2k_serial by-value shape. alpha_/beta_
+ * stay pointers; the core reinterprets the complex pointers to interleaved
+ * (re,im) __float128 storage. */
 void xsyr2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const xsyr2k_T *alpha_,
-    const xsyr2k_T *a, ptrdiff_t lda,
-    const xsyr2k_T *b, ptrdiff_t ldb,
-    const xsyr2k_T *beta_,
-    xsyr2k_T *c, ptrdiff_t ldc);
+    const xsyr2k_TC *alpha_,
+    const xsyr2k_TC *a, ptrdiff_t lda,
+    const xsyr2k_TC *b, ptrdiff_t ldb,
+    const xsyr2k_TC *beta_,
+    xsyr2k_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XSYR2K_KERNEL_H */

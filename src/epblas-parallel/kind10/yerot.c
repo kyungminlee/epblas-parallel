@@ -5,7 +5,7 @@
 #endif
 #include "../common/epblas_facade.h"
 /* yerot — kind10: complex Givens with real c, s. */
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double R;
 
 /* Real coefficients on complex data: treat each complex element as two
@@ -64,7 +64,7 @@ static bool yerot_omp(ptrdiff_t n, R c, R s, R *px, R *py)
 }
 #endif
 
-static void yerot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
+static void yerot_core(ptrdiff_t n, TC *x, ptrdiff_t incx, TC *y, ptrdiff_t incy,
                        const R *c_, const R *s_)
 {
     const R c = *c_, s = *s_;
@@ -88,4 +88,4 @@ static void yerot_core(ptrdiff_t n, T *x, ptrdiff_t incx, T *y, ptrdiff_t incy,
     }
 }
 
-EPBLAS_FACADE_ROT(yerot, R, T)
+EPBLAS_FACADE_ROT(yerot, R, TC)

@@ -23,7 +23,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -43,20 +43,20 @@ using mf_packed::kk_lower;
  * after the axpy for NoTrans, folded into the dot seed for Trans. The strided
  * entry gathers into contiguous scratch and reuses this. */
 void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
-                         std::ptrdiff_t n, const T *ap, T *x)
+                         std::ptrdiff_t n, const TR *ap, TR *x)
 {
     if (!trans) {
         if (upper) {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T *aj = &ap[kk_upper(j)];
-                const T tmp = x[j];
+                const TR *aj = &ap[kk_upper(j)];
+                const TR tmp = x[j];
                 if (!eq0(tmp)) mf_kernels::axpy_add(j, &x[0], &aj[0], tmp);
                 if (nounit) x[j] = x[j] * aj[j];
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const T *aj = &ap[kk_lower(j, n)];
-                const T tmp = x[j];
+                const TR *aj = &ap[kk_lower(j, n)];
+                const TR tmp = x[j];
                 if (!eq0(tmp)) mf_kernels::axpy_add(n - 1 - j, &x[j + 1], &aj[1], tmp);
                 if (nounit) x[j] = x[j] * aj[0];
             }
@@ -64,14 +64,14 @@ void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
     } else {
         if (upper) {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const T *aj = &ap[kk_upper(j)];
-                T tmp = nounit ? (aj[j] * x[j]) : x[j];
+                const TR *aj = &ap[kk_upper(j)];
+                TR tmp = nounit ? (aj[j] * x[j]) : x[j];
                 x[j] = tmp + mf_kernels::dot(j, &aj[0], &x[0]);
             }
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T *aj = &ap[kk_lower(j, n)];
-                T tmp = nounit ? (aj[0] * x[j]) : x[j];
+                const TR *aj = &ap[kk_lower(j, n)];
+                TR tmp = nounit ? (aj[0] * x[j]) : x[j];
                 x[j] = tmp + mf_kernels::dot(n - 1 - j, &aj[1], &x[j + 1]);
             }
         }
@@ -93,21 +93,21 @@ void mtpmv_serial_contig(bool upper, bool trans, bool nounit,
  * DD addition reorders vs serial → within fuzz tol; serial stays bit-exact.
  * Returns true on success, false if a scratch alloc failed. */
 static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
-                             std::ptrdiff_t n, const T *ap, T *x, std::ptrdiff_t nthreads)
+                             std::ptrdiff_t n, const TR *ap, TR *x, std::ptrdiff_t nthreads)
 {
     if (trans) {
-        T *y_buf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+        TR *y_buf = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR)));
         if (!y_buf) return false;
         #pragma omp parallel num_threads(nthreads)
         {
             #pragma omp for schedule(static, 1)
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const T *aj = upper ? &ap[kk_upper(j)] : &ap[kk_lower(j, n)];
+                const TR *aj = upper ? &ap[kk_upper(j)] : &ap[kk_lower(j, n)];
                 if (upper) {
-                    T temp = nounit ? (aj[j] * x[j]) : x[j];
+                    TR temp = nounit ? (aj[j] * x[j]) : x[j];
                     y_buf[j] = temp + mf_kernels::dot(j, &aj[0], &x[0]);
                 } else {
-                    T temp = nounit ? (aj[0] * x[j]) : x[j];
+                    TR temp = nounit ? (aj[0] * x[j]) : x[j];
                     y_buf[j] = temp + mf_kernels::dot(n - 1 - j, &aj[1], &x[j + 1]);
                 }
             }
@@ -117,13 +117,13 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
         std::free(y_buf);
         return true;
     } else {
-        const T one_dd{1.0, 0.0};
+        const TR one_dd{1.0, 0.0};
         std::ptrdiff_t range[MTPMV_MAX_CPUS + 1];
         /* per-column work ~j (upper) / ~(n-j) (lower) -> heavy_high=upper. */
         std::ptrdiff_t ncpu = mf_omp::tri_area_bounds(n, nthreads, 3, 4, upper,
                                            MTPMV_MAX_CPUS, range);
         if (ncpu <= 1) return false;
-        T *buf = static_cast<T *>(std::calloc((std::size_t)ncpu * n, sizeof(T)));
+        TR *buf = static_cast<TR *>(std::calloc((std::size_t)ncpu * n, sizeof(TR)));
         if (!buf) return false;
         /* Each thread folds its disjoint column range's AXPY into a private slot,
          * reading the ORIGINAL x (x is overwritten only in the reduction). */
@@ -131,18 +131,18 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
         {
             std::ptrdiff_t t = omp_get_thread_num();
             std::ptrdiff_t c_from = range[t], c_to = range[t + 1];
-            T *slot = buf + (std::size_t)t * n;
+            TR *slot = buf + (std::size_t)t * n;
             if (upper) {
                 for (std::ptrdiff_t j = c_from; j < c_to; ++j) {
-                    const T xj = x[j];
-                    const T *aj = &ap[kk_upper(j)];
+                    const TR xj = x[j];
+                    const TR *aj = &ap[kk_upper(j)];
                     if (!eq0(xj)) mf_kernels::axpy_add(j, &slot[0], &aj[0], xj);
                     slot[j] = slot[j] + xj * (nounit ? aj[j] : one_dd);
                 }
             } else {
                 for (std::ptrdiff_t j = c_from; j < c_to; ++j) {
-                    const T xj = x[j];
-                    const T *aj = &ap[kk_lower(j, n)];
+                    const TR xj = x[j];
+                    const TR *aj = &ap[kk_lower(j, n)];
                     slot[j] = slot[j] + xj * (nounit ? aj[0] : one_dd);
                     if (!eq0(xj)) mf_kernels::axpy_add(n - 1 - j, &slot[j + 1], &aj[1], xj);
                 }
@@ -151,9 +151,9 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
         /* Bounded reduction: x aliases the input, so sum the other slots' row
          * windows into the widest slot (last for upper / first for lower, which
          * spans all of [0,n)) and then overwrite x in one pass. */
-        T *target = buf + (std::size_t)(upper ? ncpu - 1 : 0) * n;
+        TR *target = buf + (std::size_t)(upper ? ncpu - 1 : 0) * n;
         for (std::ptrdiff_t i = upper ? 0 : 1; i < (upper ? ncpu - 1 : ncpu); ++i) {
-            const T *src = buf + (std::size_t)i * n;
+            const TR *src = buf + (std::size_t)i * n;
             std::ptrdiff_t from, to;
             mf_omp::tri_row_window(i, upper, range, n, from, to);
             for (std::ptrdiff_t k = from; k < to; ++k) target[k] = target[k] + src[k];
@@ -168,7 +168,7 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
  * core directly; strided gathers/scatters around it. Returns true if handled. */
 __attribute__((noinline)) static bool mtpmv_omp(
     bool upper, bool trans, bool nounit, std::ptrdiff_t n,
-    const T *ap, T *x, std::ptrdiff_t incx)
+    const TR *ap, TR *x, std::ptrdiff_t incx)
 {
     if (n < MTPMV_OMP_MIN || !blas_omp_should_thread())
         return false;
@@ -178,8 +178,8 @@ __attribute__((noinline)) static bool mtpmv_omp(
     if (incx == 1)
         return mtpmv_omp_contig(upper, trans, nounit, n, ap, x, nthreads);
 
-    T *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
-    T *xbuf = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T)));
+    TR *xbase = (incx < 0) ? x - (std::ptrdiff_t)(n - 1) * incx : x;
+    TR *xbuf = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR)));
     if (!xbuf) return false;
     for (std::ptrdiff_t i = 0; i < n; ++i) xbuf[i] = xbase[(std::ptrdiff_t)i * incx];
     bool ok = mtpmv_omp_contig(upper, trans, nounit, n, ap, xbuf, nthreads);
@@ -193,8 +193,8 @@ __attribute__((noinline)) static bool mtpmv_omp(
 static void mtpmv_core(
     char uplo, char trans, char diag,
     std::ptrdiff_t n,
-    const T *ap,
-    T *x, std::ptrdiff_t incx)
+    const TR *ap,
+    TR *x, std::ptrdiff_t incx)
 {
     const char UPLO = up(&uplo);
     char TRANS = up(&trans);
@@ -226,10 +226,10 @@ static void mtpmv_core(
     {
         const std::ptrdiff_t sx = incx;
         const std::ptrdiff_t kx = (sx < 0) ? -(n - 1) * sx : 0;
-        T stackbuf[512];
-        T *heap = NULL;
-        T *xc = (n <= 512) ? stackbuf
-                           : (heap = static_cast<T *>(std::malloc((std::size_t)n * sizeof(T))));
+        TR stackbuf[512];
+        TR *heap = NULL;
+        TR *xc = (n <= 512) ? stackbuf
+                           : (heap = static_cast<TR *>(std::malloc((std::size_t)n * sizeof(TR))));
         if (xc) {
             std::ptrdiff_t ix = kx;
             for (std::ptrdiff_t k = 0; k < n; ++k) { xc[k] = x[ix]; ix += sx; }
@@ -254,7 +254,7 @@ static void mtpmv_core(
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
                     if (!eq0(x[jx])) {
-                        const T tmp = x[jx];
+                        const TR tmp = x[jx];
                         std::ptrdiff_t ix = kx;
                         for (std::ptrdiff_t k = kk; k < kk + j; ++k) {
                             x[ix] = x[ix] + tmp * ap[k];
@@ -271,7 +271,7 @@ static void mtpmv_core(
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (!eq0(x[jx])) {
-                        const T tmp = x[jx];
+                        const TR tmp = x[jx];
                         std::ptrdiff_t ix = kx;
                         for (std::ptrdiff_t k = kk; k > kk - (n - 1 - j); --k) {
                             x[ix] = x[ix] + tmp * ap[k];
@@ -288,7 +288,7 @@ static void mtpmv_core(
                 std::ptrdiff_t kk = n * (n + 1) / 2 - 1;
                 std::ptrdiff_t jx = kx + (n - 1) * sx;
                 for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     std::ptrdiff_t ix = jx;
                     if (nounit) tmp = tmp * ap[kk];
                     for (std::ptrdiff_t k = kk - 1; k >= kk - j; --k) {
@@ -303,7 +303,7 @@ static void mtpmv_core(
                 std::ptrdiff_t kk = 0;
                 std::ptrdiff_t jx = kx;
                 for (std::ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[jx];
+                    TR tmp = x[jx];
                     std::ptrdiff_t ix = jx;
                     if (nounit) tmp = tmp * ap[kk];
                     for (std::ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
@@ -320,5 +320,5 @@ static void mtpmv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_TPMV(mtpmv, T)
+EPBLAS_FACADE_TPMV(mtpmv, TR)
 }

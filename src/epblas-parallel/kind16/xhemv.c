@@ -17,7 +17,7 @@
 
 #define XHEMV_OMP_MIN 128
 
-typedef __complex128 T;
+typedef __complex128 TC;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -25,15 +25,15 @@ typedef __complex128 T;
 void xhemv_core(
     char uplo,
     ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict a, ptrdiff_t lda,
-    const T *restrict x, ptrdiff_t incx,
-    const T *beta_,
-    T *restrict y, ptrdiff_t incy)
+    const TC *alpha_,
+    const TC *restrict a, ptrdiff_t lda,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *beta_,
+    TC *restrict y, ptrdiff_t incy)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    const T zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi, one = 1.0Q + 0.0Qi;
 
     if (n == 0) return;
 
@@ -54,19 +54,19 @@ void xhemv_core(
             /* Parallel column-walk with per-thread private y, then reduce
              * (same pattern as qsymv; Hermitian conjugation stays inside the
              * column loop unchanged). Faithful port of kind10 yhemv. */
-            T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
+            TC *y_priv_all = (TC *)calloc((size_t)nthreads * (size_t)n, sizeof(TC));
             if (y_priv_all) {
                 #pragma omp parallel num_threads(nthreads)
                 {
                     const ptrdiff_t tid = omp_get_thread_num();
-                    T *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
+                    TC *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
 
                     if (UPLO == 'L') {
                         #pragma omp for schedule(static, 1)
                         for (ptrdiff_t j = 0; j < n; ++j) {
-                            const T temp1 = alpha * x[j];
-                            T temp2 = zero;
-                            const T *aj = &A_(0, j);
+                            const TC temp1 = alpha * x[j];
+                            TC temp2 = zero;
+                            const TC *aj = &A_(0, j);
                             y_priv[j] += temp1 * crealq(aj[j]);
                             for (ptrdiff_t k = j + 1; k < n; ++k) {
                                 y_priv[k] += temp1 * aj[k];
@@ -77,9 +77,9 @@ void xhemv_core(
                     } else {
                         #pragma omp for schedule(static, 1)
                         for (ptrdiff_t j = 0; j < n; ++j) {
-                            const T temp1 = alpha * x[j];
-                            T temp2 = zero;
-                            const T *aj = &A_(0, j);
+                            const TC temp1 = alpha * x[j];
+                            TC temp2 = zero;
+                            const TC *aj = &A_(0, j);
                             for (ptrdiff_t k = 0; k < j; ++k) {
                                 y_priv[k] += temp1 * aj[k];
                                 temp2 += conjq(aj[k]) * x[k];
@@ -89,7 +89,7 @@ void xhemv_core(
                     }
                     #pragma omp for schedule(static)
                     for (ptrdiff_t i = 0; i < n; ++i) {
-                        T s = zero;
+                        TC s = zero;
                         for (ptrdiff_t t = 0; t < nthreads; ++t)
                             s += y_priv_all[(size_t)t * n + i];
                         y[i] += s;
@@ -102,9 +102,9 @@ void xhemv_core(
 #endif
         if (UPLO == 'L') {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[i];
-                T temp2 = zero;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * x[i];
+                TC temp2 = zero;
+                const TC *ai = &A_(0, i);
                 y[i] += temp1 * crealq(ai[i]);
                 for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[k]  += temp1 * ai[k];
@@ -114,9 +114,9 @@ void xhemv_core(
             }
         } else {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[i];
-                T temp2 = zero;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * x[i];
+                TC temp2 = zero;
+                const TC *ai = &A_(0, i);
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     y[k]  += temp1 * ai[k];
                     temp2 += conjq(ai[k]) * x[k];
@@ -129,8 +129,8 @@ void xhemv_core(
         ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         if (UPLO == 'L') {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[kx + (ptrdiff_t)i * incx];
-                T temp2 = zero;
+                const TC temp1 = alpha * x[kx + (ptrdiff_t)i * incx];
+                TC temp2 = zero;
                 y[ky + (ptrdiff_t)i * incy] += temp1 * crealq(A_(i, i));
                 for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[ky + (ptrdiff_t)k * incy] += temp1 * A_(k, i);
@@ -140,8 +140,8 @@ void xhemv_core(
             }
         } else {
             for (ptrdiff_t i = 0; i < n; ++i) {
-                const T temp1 = alpha * x[kx + (ptrdiff_t)i * incx];
-                T temp2 = zero;
+                const TC temp1 = alpha * x[kx + (ptrdiff_t)i * incx];
+                TC temp2 = zero;
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     y[ky + (ptrdiff_t)k * incy] += temp1 * A_(k, i);
                     temp2 += conjq(A_(k, i)) * x[kx + (ptrdiff_t)k * incx];
@@ -154,4 +154,4 @@ void xhemv_core(
 
 #undef A_
 
-EPBLAS_FACADE_SYMV(xhemv, T)
+EPBLAS_FACADE_SYMV(xhemv, TC)

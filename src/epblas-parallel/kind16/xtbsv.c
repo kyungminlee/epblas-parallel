@@ -8,7 +8,7 @@
 #include <quadmath.h>
 #include "../common/epblas_facade.h"
 
-typedef __complex128 T;
+typedef __complex128 TC;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -16,10 +16,10 @@ typedef __complex128 T;
 void xtbsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n, ptrdiff_t k,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TC *restrict a, ptrdiff_t lda,
+    TC *restrict x, ptrdiff_t incx)
 {
-    const T zero = 0.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
     const char UPLO = blas_up(uplo);
     const char TRANS = blas_up(trans);
     const bool noconj = (TRANS == 'T');
@@ -34,7 +34,7 @@ void xtbsv_core(
                     if (x[j] != zero) {
                         const ptrdiff_t L = k - j;
                         if (nounit) x[j] /= A_(k, j);
-                        const T tmp = x[j];
+                        const TC tmp = x[j];
                         const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = j - 1; i >= i_lo; --i) x[i] -= tmp * A_(L + i, j);
                     }
@@ -43,7 +43,7 @@ void xtbsv_core(
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
                         if (nounit) x[j] /= A_(0, j);
-                        const T tmp = x[j];
+                        const TC tmp = x[j];
                         const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = j + 1; i < i_hi; ++i) x[i] -= tmp * A_(i - j, j);
                     }
@@ -52,7 +52,7 @@ void xtbsv_core(
         } else {
             if (UPLO == 'U') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[j];
+                    TC tmp = x[j];
                     const ptrdiff_t L = k - j;
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     if (noconj) for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= A_(L + i, j) * x[i];
@@ -62,7 +62,7 @@ void xtbsv_core(
                 }
             } else {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[j];
+                    TC tmp = x[j];
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     if (noconj) for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= A_(i - j, j) * x[i];
                     else        for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= conjq(A_(i - j, j)) * x[i];
@@ -83,7 +83,7 @@ void xtbsv_core(
                         ptrdiff_t ix = kx;
                         const ptrdiff_t L = k - j;
                         if (nounit) x[jx] /= A_(k, j);
-                        const T tmp = x[jx];
+                        const TC tmp = x[jx];
                         const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                         for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
                             x[ix] -= tmp * A_(L + i, j);
@@ -99,7 +99,7 @@ void xtbsv_core(
                     if (x[jx] != zero) {
                         ptrdiff_t ix = kx;
                         if (nounit) x[jx] /= A_(0, j);
-                        const T tmp = x[jx];
+                        const TC tmp = x[jx];
                         const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                         for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                             x[ix] -= tmp * A_(i - j, j);
@@ -113,12 +113,12 @@ void xtbsv_core(
             if (UPLO == 'U') {
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T tmp = x[jx];
+                    TC tmp = x[jx];
                     ptrdiff_t ix = kx;
                     const ptrdiff_t L = k - j;
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = i_lo; i < j; ++i) {
-                        const T aij = noconj ? A_(L + i, j) : conjq(A_(L + i, j));
+                        const TC aij = noconj ? A_(L + i, j) : conjq(A_(L + i, j));
                         tmp -= aij * x[ix];
                         ix += incx;
                     }
@@ -131,11 +131,11 @@ void xtbsv_core(
                 kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T tmp = x[jx];
+                    TC tmp = x[jx];
                     ptrdiff_t ix = kx;
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = i_hi - 1; i > j; --i) {
-                        const T aij = noconj ? A_(i - j, j) : conjq(A_(i - j, j));
+                        const TC aij = noconj ? A_(i - j, j) : conjq(A_(i - j, j));
                         tmp -= aij * x[ix];
                         ix -= incx;
                     }
@@ -149,6 +149,6 @@ void xtbsv_core(
     }
 }
 
-EPBLAS_FACADE_TBMV(xtbsv, T)
+EPBLAS_FACADE_TBMV(xtbsv, TC)
 
 #undef A_

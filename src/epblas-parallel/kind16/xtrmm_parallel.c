@@ -33,10 +33,10 @@
 
 #define XTRMM_OMP_MIN 32
 
-typedef xtrmm_T T;
+typedef xtrmm_TC TC;
 
 
-static const T ZERO = 0.0Q + 0.0Qi;
+static const TC ZERO = 0.0Q + 0.0Qi;
 
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
@@ -44,8 +44,8 @@ static const T ZERO = 0.0Q + 0.0Qi;
 
 #ifdef _OPENMP
 #define XTRMM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit) { \
         if (n >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -57,8 +57,8 @@ static const T ZERO = 0.0Q + 0.0Qi;
         } else { core(0, n, m, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define XTRMM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit) { \
         if (n >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -70,8 +70,8 @@ static const T ZERO = 0.0Q + 0.0Qi;
         } else { core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag); }     \
     }
 #define XTRMM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit) { \
         if (m >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -83,8 +83,8 @@ static const T ZERO = 0.0Q + 0.0Qi;
         } else { core(0, m, n, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define XTRMM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit) { \
         if (m >= XTRMM_OMP_MIN && blas_omp_should_thread()) {              \
             _Pragma("omp parallel") {                                       \
                 ptrdiff_t tid = omp_get_thread_num();                             \
@@ -97,23 +97,23 @@ static const T ZERO = 0.0Q + 0.0Qi;
     }
 #else
 #define XTRMM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit) { \
         core(0, n, m, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRMM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit) { \
         core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #define XTRMM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit) { \
         core(0, m, n, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRMM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit) { \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit) { \
         core(0, m, n, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #endif
@@ -134,11 +134,11 @@ XTRMM_OMP_WRAP_R_TC(xtrmm_ruc, xtrmm_rutc_core, 1)
 static void xtrmm_core(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    TC *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
     const char TRANS = blas_up(transa);
@@ -177,6 +177,6 @@ static void xtrmm_core(
     }
 }
 
-EPBLAS_FACADE_TRMM(xtrmm, T)
+EPBLAS_FACADE_TRMM(xtrmm, TC)
 
 #undef B_

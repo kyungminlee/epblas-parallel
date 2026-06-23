@@ -19,21 +19,21 @@
  * the robust floor. Bit-exact (relerr 0). Uniform across the y* rank family. */
 #define YHPR_OMP_MIN 24
 
-typedef _Complex long double T;
+typedef _Complex long double TC;
 typedef long double TR;
-static inline T cconj(T z) { return ~z; }
+static inline TC cconj(TC z) { return ~z; }
 
 
 static void yhpr_core(
     char uplo,
     ptrdiff_t n,
     const TR *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    T *restrict ap)
+    const TC *restrict x, ptrdiff_t incx,
+    TC *restrict ap)
 {
     const TR alpha = *alpha_;
     const TR rzero = 0.0L;
-    const T czero = 0.0L + 0.0Li;
+    const TC czero = 0.0L + 0.0Li;
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == rzero) return;
@@ -57,7 +57,7 @@ static void yhpr_core(
             for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = (j * (j + 1)) / 2;
                 if (x[j] != czero) {
-                    const T tmp = alpha * cconj(x[j]);
+                    const TC tmp = alpha * cconj(x[j]);
                     for (ptrdiff_t i = 0; i < j; ++i) ap[kk + i] += x[i] * tmp;
                     ap[kk + j] = (TR)__real__ ap[kk + j] + (TR)__real__ (x[j] * tmp);
                 } else {
@@ -72,7 +72,7 @@ static void yhpr_core(
             for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
                 if (x[j] != czero) {
-                    const T tmp = alpha * cconj(x[j]);
+                    const TC tmp = alpha * cconj(x[j]);
                     ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (tmp * x[j]);
                     for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
                 } else {
@@ -87,7 +87,7 @@ static void yhpr_core(
             ptrdiff_t jx = kx;
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != czero) {
-                    const T tmp = alpha * cconj(x[jx]);
+                    const TC tmp = alpha * cconj(x[jx]);
                     ptrdiff_t ix = kx;
                     for (ptrdiff_t k = kk; k < kk + j; ++k) {
                         ap[k] += x[ix] * tmp;
@@ -104,7 +104,7 @@ static void yhpr_core(
             ptrdiff_t jx = kx;
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != czero) {
-                    const T tmp = alpha * cconj(x[jx]);
+                    const TC tmp = alpha * cconj(x[jx]);
                     ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (tmp * x[jx]);
                     ptrdiff_t ix = jx;
                     for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
@@ -121,4 +121,4 @@ static void yhpr_core(
     }
 }
 
-EPBLAS_FACADE_SPR(yhpr, TR, T)
+EPBLAS_FACADE_SPR(yhpr, TR, TC)

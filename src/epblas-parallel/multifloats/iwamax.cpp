@@ -16,14 +16,14 @@
 
 namespace mf = multifloats;
 using R = mf::float64x2;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 namespace {
 /* Inline magnitude/compare from mf_pred — mf_pred::mag stays header-inline (the
  * public fabsdd() is out-of-line; cabs1 would emit two PLT calls per element). */
 using mf_pred::mag;
 using mf_pred::gt;
-inline R cabs1(T const &z) { return mag(z.re) + mag(z.im); }
+inline R cabs1(TC const &z) { return mag(z.re) + mag(z.im); }
 
 #ifdef WBLAS_SIMD_DD
 /* SoA argmax over a contiguous complex-DD range, 4 lanes/iter, so par beats the
@@ -39,7 +39,7 @@ inline R cabs1(T const &z) { return mag(z.re) + mag(z.im); }
  * irrelevant to the comparison). */
 /* Deinterleave 4 complex-DD elements (re.hi,re.lo,im.hi,im.lo each) via a 4x4
  * transpose into SoA limb vectors. */
-inline void deint4c(const T *p, __m256d &reh, __m256d &rel,
+inline void deint4c(const TC *p, __m256d &reh, __m256d &rel,
                     __m256d &imh, __m256d &iml) {
     const double *d = reinterpret_cast<const double *>(p);
     __m256d r0 = _mm256_loadu_pd(d);
@@ -57,7 +57,7 @@ inline void deint4c(const T *p, __m256d &reh, __m256d &rel,
 }
 /* |re|+|im| for 4 lanes: abs(x) = (|hi|, sign(hi)*lo) branchlessly, summed
  * with the exact EFT add. */
-inline void cabs1_4(const T *p, __m256d &mh, __m256d &ml) {
+inline void cabs1_4(const TC *p, __m256d &mh, __m256d &ml) {
     const __m256d sgn = _mm256_set1_pd(-0.0);
     __m256d reh, rel, imh, iml;
     deint4c(p, reh, rel, imh, iml);
@@ -68,7 +68,7 @@ inline void cabs1_4(const T *p, __m256d &mh, __m256d &ml) {
     simd_exact::add(arh, arl, aih, ail, mh, ml);
 }
 
-inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
+inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
 {
     if (n < 8) {
         ptrdiff_t best = 0;
@@ -125,7 +125,7 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
 }
 #else
 /* Contiguous unit-stride scan: 0-based index of first max-|re|+|im| element. */
-inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
+inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
 {
     ptrdiff_t best = 0;
     R bv = cabs1(x[0]);
@@ -146,7 +146,7 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const T *x, R *bv_out)
  * wins any tie, bit-identical to the serial left-to-right scan. */
 #define IWAMAX_OMP_MIN 8192
 #define IWAMAX_MAX_CPUS 64
-__attribute__((noinline)) static std::ptrdiff_t iwamax_omp(std::ptrdiff_t n, const T *x, std::ptrdiff_t *out)
+__attribute__((noinline)) static std::ptrdiff_t iwamax_omp(std::ptrdiff_t n, const TC *x, std::ptrdiff_t *out)
 {
     if (n <= IWAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -180,7 +180,7 @@ __attribute__((noinline)) static std::ptrdiff_t iwamax_omp(std::ptrdiff_t n, con
 }
 #endif
 
-static std::ptrdiff_t iwamax_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
+static std::ptrdiff_t iwamax_core(std::ptrdiff_t n, const TC *x, std::ptrdiff_t incx)
 {
     if (n < 1 || incx <= 0) return 0;
     if (n == 1) return 1;
@@ -206,5 +206,5 @@ static std::ptrdiff_t iwamax_core(std::ptrdiff_t n, const T *x, std::ptrdiff_t i
 }
 
 extern "C" {
-EPBLAS_FACADE_IAMAX(iwamax, T)
+EPBLAS_FACADE_IAMAX(iwamax, TC)
 }

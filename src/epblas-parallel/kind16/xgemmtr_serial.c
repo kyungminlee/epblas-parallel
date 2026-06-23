@@ -18,7 +18,7 @@
 #include <stddef.h>
 #include <quadmath.h>
 
-typedef xgemmtr_T T;
+typedef xgemmtr_TC TC;
 
 char xgemmtr_trans_code(char c) {
     return blas_up(c);
@@ -30,14 +30,14 @@ char xgemmtr_trans_code(char c) {
 
 void xgemmtr_beta_core(
     ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper,
-    T beta,
-    T *c, ptrdiff_t ldc)
+    TC beta,
+    TC *c, ptrdiff_t ldc)
 {
-    const T zero = 0.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
     for (ptrdiff_t j = j0; j < j1; ++j) {
         const ptrdiff_t is = upper ? 0 : j;
         const ptrdiff_t ie = upper ? (j + 1) : n;
-        T *cj = &C_(0, j);
+        TC *cj = &C_(0, j);
         if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
         else                   for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
     }
@@ -46,38 +46,38 @@ void xgemmtr_beta_core(
 void xgemmtr_compute_core(
     ptrdiff_t j0, ptrdiff_t j1, ptrdiff_t n, bool upper, ptrdiff_t k,
     bool trans_a, bool trans_b, bool conj_a, bool conj_b,
-    T alpha, T beta,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    T *c, ptrdiff_t ldc)
+    TC alpha, TC beta,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
+    TC *c, ptrdiff_t ldc)
 {
-    const T zero = 0.0Q + 0.0Qi;
-    const T one  = 1.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
+    const TC one  = 1.0Q + 0.0Qi;
 
     for (ptrdiff_t j = j0; j < j1; ++j) {
         const ptrdiff_t is = upper ? 0 : j;
         const ptrdiff_t ie = upper ? (j + 1) : n;
-        T *cj = &C_(0, j);
+        TC *cj = &C_(0, j);
 
         if (!trans_a) {
             /* axpy form */
             if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
             else if (beta != one)  for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
             for (ptrdiff_t l = 0; l < k; ++l) {
-                T bl;
+                TC bl;
                 if (!trans_b)      bl = B_(l, j);
                 else if (!conj_b)  bl = B_(j, l);
                 else               bl = conjq(B_(j, l));
                 if (bl != zero) {
-                    const T t = alpha * bl;
-                    const T *al = &A_(0, l);
+                    const TC t = alpha * bl;
+                    const TC *al = &A_(0, l);
                     for (ptrdiff_t i = is; i < ie; ++i) cj[i] += t * al[i];
                 }
             }
         } else {
             /* inner-product form */
             for (ptrdiff_t i = is; i < ie; ++i) {
-                T s = zero;
+                TC s = zero;
                 if (!trans_b) {
                     if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i)        * B_(l, j);
                     else         for (ptrdiff_t l = 0; l < k; ++l) s += conjq(A_(l, i)) * B_(l, j);
@@ -96,20 +96,20 @@ void xgemmtr_compute_core(
 
 void xgemmtr_serial(char uplo, char transa, char transb,
                     ptrdiff_t n, ptrdiff_t k,
-                    const T *alpha_,
-                    const T *a, ptrdiff_t lda,
-                    const T *b, ptrdiff_t ldb,
-                    const T *beta_,
-                    T *c, ptrdiff_t ldc)
+                    const TC *alpha_,
+                    const TC *a, ptrdiff_t lda,
+                    const TC *b, ptrdiff_t ldb,
+                    const TC *beta_,
+                    TC *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
     const char ta = xgemmtr_trans_code(transa);
     const char tb = xgemmtr_trans_code(transb);
 
     if (n <= 0) return;
-    const T zero = 0.0Q + 0.0Qi;
-    const T one  = 1.0Q + 0.0Qi;
+    const TC zero = 0.0Q + 0.0Qi;
+    const TC one  = 1.0Q + 0.0Qi;
 
     const bool conj_a = (ta == 'C');
     const bool conj_b = (tb == 'C');

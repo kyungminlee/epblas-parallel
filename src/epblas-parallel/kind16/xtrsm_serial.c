@@ -28,13 +28,13 @@
 #define XTRSM_XTRSV_LOOP_M_MIN       128
 #define XTRSM_XTRSV_LOOP_NB_HINT     64
 
-typedef xtrsm_T T;
+typedef xtrsm_TC TC;
 
 extern void xtrsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx);
+    const TC *restrict a, ptrdiff_t lda,
+    TC *restrict x, ptrdiff_t incx);
 
 /* Maximum nrhs at which the xtrsv-loop fast path beats column-parallel
  * xtrsm. In the serial entry no team is available, so the heuristic floors
@@ -51,29 +51,29 @@ char xtrsm_uplo(char c) {
     return blas_up(c);
 }
 
-static const T ZERO = 0.0Q + 0.0Qi;
-static const T ONE  = 1.0Q + 0.0Qi;
+static const TC ZERO = 0.0Q + 0.0Qi;
+static const TC ONE  = 1.0Q + 0.0Qi;
 
-static inline T cconj(T a) { return conjq(a); }
+static inline TC cconj(TC a) { return conjq(a); }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 
-static inline T A_op(const T *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, bool conj_flag) {
+static inline TC A_op(const TC *a, ptrdiff_t lda, ptrdiff_t row, ptrdiff_t col, bool conj_flag) {
     return conj_flag ? cconj(A_(row, col)) : A_(row, col);
 }
 
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
 
-void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
+                    const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;
         for (ptrdiff_t k = 0; k < m; ++k) {
             if (B_(k, j) != ZERO) {
                 if (nounit) B_(k, j) /= A_(k, k);
-                const T bk = B_(k, j);
+                const TC bk = B_(k, j);
                 for (ptrdiff_t i = k + 1; i < m; ++i)
                     B_(i, j) -= bk * A_(i, k);
             }
@@ -81,15 +81,15 @@ void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
     }
 }
 
-void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
+                    const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;
         for (ptrdiff_t k = m - 1; k >= 0; --k) {
             if (B_(k, j) != ZERO) {
                 if (nounit) B_(k, j) /= A_(k, k);
-                const T bk = B_(k, j);
+                const TC bk = B_(k, j);
                 for (ptrdiff_t i = 0; i < k; ++i)
                     B_(i, j) -= bk * A_(i, k);
             }
@@ -97,13 +97,13 @@ void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
     }
 }
 
-void xtrsm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+void xtrsm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = m - 1; i >= 0; --i) {
-            T t = alpha * B_(i, j);
+            TC t = alpha * B_(i, j);
             for (ptrdiff_t k = i + 1; k < m; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
             if (nounit) t /= A_op(a, lda, i, i, conj_flag);
             B_(i, j) = t;
@@ -111,13 +111,13 @@ void xtrsm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
     }
 }
 
-void xtrsm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+void xtrsm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
         for (ptrdiff_t i = 0; i < m; ++i) {
-            T t = alpha * B_(i, j);
+            TC t = alpha * B_(i, j);
             for (ptrdiff_t k = 0; k < i; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
             if (nounit) t /= A_op(a, lda, i, i, conj_flag);
             B_(i, j) = t;
@@ -127,53 +127,53 @@ void xtrsm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T alpha,
 
 /* ── SIDE = 'R' row-range cores ─────────────────────────────────── */
 
-void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, TC alpha,
+                    const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = n - 1; j >= 0; --j) {
         if (alpha != ONE) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
         for (ptrdiff_t k = j + 1; k < n; ++k) {
             if (A_(k, j) != ZERO) {
-                const T akj = A_(k, j);
+                const TC akj = A_(k, j);
                 for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
             }
         }
         if (nounit) {
-            const T inv = ONE / A_(j, j);
+            const TC inv = ONE / A_(j, j);
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= inv;
         }
     }
 }
 
-void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
-                    const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb, bool nounit)
+void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, TC alpha,
+                    const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
     for (ptrdiff_t j = 0; j < n; ++j) {
         if (alpha != ONE) for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= alpha;
         for (ptrdiff_t k = 0; k < j; ++k) {
             if (A_(k, j) != ZERO) {
-                const T akj = A_(k, j);
+                const TC akj = A_(k, j);
                 for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= akj * B_(i, k);
             }
         }
         if (nounit) {
-            const T inv = ONE / A_(j, j);
+            const TC inv = ONE / A_(j, j);
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) *= inv;
         }
     }
 }
 
-void xtrsm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+void xtrsm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, TC alpha,
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t k = 0; k < n; ++k) {
         if (nounit) {
-            const T inv = ONE / A_op(a, lda, k, k, conj_flag);
+            const TC inv = ONE / A_op(a, lda, k, k, conj_flag);
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= inv;
         }
         for (ptrdiff_t j = k + 1; j < n; ++j) {
-            const T ajk = A_op(a, lda, j, k, conj_flag);
+            const TC ajk = A_op(a, lda, j, k, conj_flag);
             if (ajk != ZERO) {
                 for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
             }
@@ -182,17 +182,17 @@ void xtrsm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
     }
 }
 
-void xtrsm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,
+void xtrsm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, TC alpha,
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
     for (ptrdiff_t k = n - 1; k >= 0; --k) {
         if (nounit) {
-            const T inv = ONE / A_op(a, lda, k, k, conj_flag);
+            const TC inv = ONE / A_op(a, lda, k, k, conj_flag);
             for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, k) *= inv;
         }
         for (ptrdiff_t j = 0; j < k; ++j) {
-            const T ajk = A_op(a, lda, j, k, conj_flag);
+            const TC ajk = A_op(a, lda, j, k, conj_flag);
             if (ajk != ZERO) {
                 for (ptrdiff_t i = i_start; i < i_end; ++i) B_(i, j) -= ajk * B_(i, k);
             }
@@ -212,11 +212,11 @@ void xtrsm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, T alpha,
 void xtrsm_serial(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    TC *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
     const char TRANS = xtrsm_uplo(transa);

@@ -40,7 +40,7 @@
 
 #include <stddef.h>
 
-typedef __float128 qsyr2k_T;
+typedef __float128 qsyr2k_TR;
 
 #define QSYR2K_MR 2
 #define QSYR2K_NR 2
@@ -52,12 +52,12 @@ typedef __float128 qsyr2k_T;
  * its UPLO triangle merged symmetrically (subbuf + subbuf^T) into C — this is
  * pass 1, which folds both A·B^T and B·A^T on the diagonal. flag == 0 (pass 2)
  * skips the diagonal block; the off-diagonal B·A^T strips land in C directly. */
-void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_T alpha,
-                     const qsyr2k_T *a, const qsyr2k_T *b,
-                     qsyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag);
-void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_T alpha,
-                     const qsyr2k_T *a, const qsyr2k_T *b,
-                     qsyr2k_T *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag);
+void qsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_TR alpha,
+                     const qsyr2k_TR *a, const qsyr2k_TR *b,
+                     qsyr2k_TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag);
+void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_TR alpha,
+                     const qsyr2k_TR *a, const qsyr2k_TR *b,
+                     qsyr2k_TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag);
 
 /* Transpose path (trans='T'): accumulate the UPLO triangle of output column j
  * of C := alpha·(A^T·B + B^T·A) + C via the netlib-style stride-1 register
@@ -67,9 +67,9 @@ void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_T alpha,
  * qsyrk_beta_{u,l}). Per-column so the parallel entry can `omp for` over j
  * (cyclic) for balanced triangular load with no shared packs or barrier. */
 void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
-                      qsyr2k_T alpha, const qsyr2k_T *a, ptrdiff_t lda,
-                      const qsyr2k_T *b, ptrdiff_t ldb,
-                      qsyr2k_T *c, ptrdiff_t ldc);
+                      qsyr2k_TR alpha, const qsyr2k_TR *a, ptrdiff_t lda,
+                      const qsyr2k_TR *b, ptrdiff_t ldb,
+                      qsyr2k_TR *c, ptrdiff_t ldc);
 
 /* Pure-serial by-value entry (no OpenMP); the single-thread packed driver.
  * Shares the ptrdiff_t core ABI so callers already inside a parallel region can
@@ -78,10 +78,10 @@ void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
 void qsyr2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const qsyr2k_T *alpha_,
-    const qsyr2k_T *a, ptrdiff_t lda,
-    const qsyr2k_T *b, ptrdiff_t ldb,
-    const qsyr2k_T *beta_,
-    qsyr2k_T *c, ptrdiff_t ldc);
+    const qsyr2k_TR *alpha_,
+    const qsyr2k_TR *a, ptrdiff_t lda,
+    const qsyr2k_TR *b, ptrdiff_t ldb,
+    const qsyr2k_TR *beta_,
+    qsyr2k_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QSYR2K_KERNEL_H */

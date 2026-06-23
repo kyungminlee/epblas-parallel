@@ -27,14 +27,14 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 namespace {
 using mf_pred::lt0;
 using mf_pred::eq0;
 
 #ifdef MBLAS_SIMD_DD
-inline void load4(const T *p, __m256d &h, __m256d &l) {
+inline void load4(const TR *p, __m256d &h, __m256d &l) {
     __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double *>(p));
     __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double *>(p + 2));
     __m256d lo = _mm256_unpacklo_pd(v0, v1);
@@ -42,7 +42,7 @@ inline void load4(const T *p, __m256d &h, __m256d &l) {
     h = _mm256_permute4x64_pd(lo, 0xD8);
     l = _mm256_permute4x64_pd(hi, 0xD8);
 }
-inline void store4(T *p, __m256d h, __m256d l) {
+inline void store4(TR *p, __m256d h, __m256d l) {
     __m256d lo = _mm256_unpacklo_pd(h, l);
     __m256d hi = _mm256_unpackhi_pd(h, l);
     __m256d v0 = _mm256_permute2f128_pd(lo, hi, 0x20);
@@ -51,11 +51,11 @@ inline void store4(T *p, __m256d h, __m256d l) {
     _mm256_storeu_pd(reinterpret_cast<double *>(p + 2), v1);
 }
 struct Bcast { __m256d h, l; };
-inline Bcast bcast(T v) { return Bcast{_mm256_set1_pd(v.limbs[0]), _mm256_set1_pd(v.limbs[1])}; }
+inline Bcast bcast(TR v) { return Bcast{_mm256_set1_pd(v.limbs[0]), _mm256_set1_pd(v.limbs[1])}; }
 #endif
 
-void rotm_neg(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y,
-              T h11, T h12, T h21, T h22) {
+void rotm_neg(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y,
+              TR h11, TR h12, TR h21, TR h22) {
     std::ptrdiff_t i = lo;
 #ifdef MBLAS_SIMD_DD
     const Bcast b11 = bcast(h11), b12 = bcast(h12), b21 = bcast(h21), b22 = bcast(h22);
@@ -74,12 +74,12 @@ void rotm_neg(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y,
     }
 #endif
     for (; i < hi; ++i) {
-        T w = x[i], z = y[i];
+        TR w = x[i], z = y[i];
         x[i] = w * h11 + z * h12;
         y[i] = w * h21 + z * h22;
     }
 }
-void rotm_zero(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y, T h12, T h21) {
+void rotm_zero(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y, TR h12, TR h21) {
     std::ptrdiff_t i = lo;
 #ifdef MBLAS_SIMD_DD
     const Bcast b12 = bcast(h12), b21 = bcast(h21);
@@ -96,12 +96,12 @@ void rotm_zero(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y, T h12, T h21) {
     }
 #endif
     for (; i < hi; ++i) {
-        T w = x[i], z = y[i];
+        TR w = x[i], z = y[i];
         x[i] = w + z * h12;
         y[i] = w * h21 + z;
     }
 }
-void rotm_pos(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y, T h11, T h22) {
+void rotm_pos(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y, TR h11, TR h22) {
     std::ptrdiff_t i = lo;
 #ifdef MBLAS_SIMD_DD
     const Bcast b11 = bcast(h11), b22 = bcast(h22);
@@ -119,16 +119,16 @@ void rotm_pos(std::ptrdiff_t lo, std::ptrdiff_t hi, T *x, T *y, T h11, T h22) {
     }
 #endif
     for (; i < hi; ++i) {
-        T w = x[i], z = y[i];
+        TR w = x[i], z = y[i];
         x[i] = w * h11 + z;
-        y[i] = T{-w.limbs[0], -w.limbs[1]} + h22 * z;
+        y[i] = TR{-w.limbs[0], -w.limbs[1]} + h22 * z;
     }
 }
 
 /* Dispatch the flag-selected kernel over a contiguous [0,n) range, threaded over
  * disjoint slices when large enough (each slice runs the same SIMD kernel). */
-void rotm_contig(bool neg, bool zero, std::ptrdiff_t n, T *x, T *y,
-                 T h11, T h12, T h21, T h22) {
+void rotm_contig(bool neg, bool zero, std::ptrdiff_t n, TR *x, TR *y,
+                 TR h11, TR h12, TR h21, TR h22) {
 #ifdef _OPENMP
     if (n > MROTM_OMP_MIN && blas_omp_should_thread()) {
         std::ptrdiff_t nthreads = blas_omp_max_threads();
@@ -156,16 +156,16 @@ void rotm_contig(bool neg, bool zero, std::ptrdiff_t n, T *x, T *y,
 }
 
 static void mrotm_core(std::ptrdiff_t n,
-                       T *x, std::ptrdiff_t incx,
-                       T *y, std::ptrdiff_t incy,
-                       const T *dparam)
+                       TR *x, std::ptrdiff_t incx,
+                       TR *y, std::ptrdiff_t incy,
+                       const TR *dparam)
 {
-    const T flag = dparam[0];
+    const TR flag = dparam[0];
     /* flag == -2: identity, do nothing */
-    if (n <= 0 || eq0(flag + T{2.0, 0.0})) return;
+    if (n <= 0 || eq0(flag + TR{2.0, 0.0})) return;
 
     const bool neg = lt0(flag), zero = eq0(flag);
-    const T h11 = dparam[1], h21 = dparam[2], h12 = dparam[3], h22 = dparam[4];
+    const TR h11 = dparam[1], h21 = dparam[2], h12 = dparam[3], h22 = dparam[4];
 
     if (incx == 1 && incy == 1) {
         rotm_contig(neg, zero, n, x, y, h11, h12, h21, h22);
@@ -174,12 +174,12 @@ static void mrotm_core(std::ptrdiff_t n,
 
     /* Strided: gather x,y to unit stride, run the SIMD kernel, scatter back
      * (O(n) gather; bit-exact element-wise — no cross-element dependency). */
-    T *xbase = (incx < 0) ? x - (n - 1) * incx : x;
-    T *ybase = (incy < 0) ? y - (n - 1) * incy : y;
-    std::vector<T> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
+    TR *xbase = (incx < 0) ? x - (n - 1) * incx : x;
+    TR *ybase = (incy < 0) ? y - (n - 1) * incy : y;
+    std::vector<TR> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
     for (std::ptrdiff_t i = 0; i < n; ++i) { xs[i] = xbase[i * incx]; ys[i] = ybase[i * incy]; }
     rotm_contig(neg, zero, n, xs.data(), ys.data(), h11, h12, h21, h22);
     for (std::ptrdiff_t i = 0; i < n; ++i) { xbase[i * incx] = xs[i]; ybase[i * incy] = ys[i]; }
 }
 
-extern "C" { EPBLAS_FACADE_ROTM(mrotm, T) }
+extern "C" { EPBLAS_FACADE_ROTM(mrotm, TR) }

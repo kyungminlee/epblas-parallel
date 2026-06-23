@@ -15,7 +15,7 @@
 #include <ctype.h>
 #include <stddef.h>
 
-typedef ysymm_T T;
+typedef ysymm_TC TC;
 
 /* nb is fixed at 32 (the original symm_nb_pick clamps to [32, 32]). */
 ptrdiff_t ysymm_nb(void) { return 32; }
@@ -23,14 +23,14 @@ ptrdiff_t ysymm_nb(void) { return 32; }
 extern void ygemm_serial(
     char transa, char transb,
     ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
-    const T *alpha,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta,
-    T *c, ptrdiff_t ldc);
+    const TC *alpha,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
+    const TC *beta,
+    TC *c, ptrdiff_t ldc);
 
-static const T ZERO = 0.0L + 0.0Li;
-static const T ONE  = 1.0L + 0.0Li;
+static const TC ZERO = 0.0L + 0.0Li;
+static const TC ONE  = 1.0L + 0.0Li;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
@@ -38,19 +38,19 @@ static const T ONE  = 1.0L + 0.0Li;
 
 /* Scalar diagonal-block symm for SIDE='L' (see original ysymm for the
  * Netlib stride-1 access rationale). */
-static void symm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t jb, T alpha,
-                            const T *restrict a, ptrdiff_t lda,
-                            const T *restrict b, ptrdiff_t ldb,
-                            T *restrict c, ptrdiff_t ldc, char UPLO)
+static void symm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t jb, TC alpha,
+                            const TC *restrict a, ptrdiff_t lda,
+                            const TC *restrict b, ptrdiff_t ldb,
+                            TC *restrict c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-        T *cj = c + (size_t)j * ldc;
-        const T *bj = b + (size_t)j * ldb;
+        TC *cj = c + (size_t)j * ldc;
+        const TC *bj = b + (size_t)j * ldb;
         if (UPLO == 'L') {
             for (ptrdiff_t i = ic + ib - 1; i >= ic; --i) {
-                const T temp1 = alpha * bj[i];
-                T temp2 = ZERO;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * bj[i];
+                TC temp2 = ZERO;
+                const TC *ai = &A_(0, i);
                 for (ptrdiff_t k = i + 1; k < ic + ib; ++k) {
                     cj[k]  += temp1 * ai[k];
                     temp2  += bj[k] * ai[k];
@@ -59,9 +59,9 @@ static void symm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t 
             }
         } else {
             for (ptrdiff_t i = ic; i < ic + ib; ++i) {
-                const T temp1 = alpha * bj[i];
-                T temp2 = ZERO;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * bj[i];
+                TC temp2 = ZERO;
+                const TC *ai = &A_(0, i);
                 for (ptrdiff_t k = ic; k < i; ++k) {
                     cj[k]  += temp1 * ai[k];
                     temp2  += bj[k] * ai[k];
@@ -73,80 +73,80 @@ static void symm_diag_add_L(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t jc, ptrdiff_t 
 }
 
 /* Scalar diagonal-block symm for SIDE='R'. */
-static void symm_diag_add_R(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t ic, ptrdiff_t ib, T alpha,
-                            const T *restrict a, ptrdiff_t lda,
-                            const T *restrict b, ptrdiff_t ldb,
-                            T *restrict c, ptrdiff_t ldc, char UPLO)
+static void symm_diag_add_R(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t ic, ptrdiff_t ib, TC alpha,
+                            const TC *restrict a, ptrdiff_t lda,
+                            const TC *restrict b, ptrdiff_t ldb,
+                            TC *restrict c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         {
-            const T t = alpha * A_(j, j);
+            const TC t = alpha * A_(j, j);
             for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, j);
         }
         if (UPLO == 'L') {
             for (ptrdiff_t k = jc; k < j; ++k) {
-                const T t = alpha * A_(j, k);
+                const TC t = alpha * A_(j, k);
                 if (t != ZERO) for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, k);
             }
             for (ptrdiff_t k = j + 1; k < jc + jb; ++k) {
-                const T t = alpha * A_(k, j);
+                const TC t = alpha * A_(k, j);
                 if (t != ZERO) for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, k);
             }
         } else {
             for (ptrdiff_t k = jc; k < j; ++k) {
-                const T t = alpha * A_(k, j);
+                const TC t = alpha * A_(k, j);
                 if (t != ZERO) for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, k);
             }
             for (ptrdiff_t k = j + 1; k < jc + jb; ++k) {
-                const T t = alpha * A_(j, k);
+                const TC t = alpha * A_(j, k);
                 if (t != ZERO) for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] += t * B_(i, k);
             }
         }
     }
 }
 
-void ysymm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, T beta, T *c, ptrdiff_t ldc)
+void ysymm_beta_only(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC beta, TC *c, ptrdiff_t ldc)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         if (beta == ZERO) for (ptrdiff_t i = 0; i < m; ++i) cj[i] = ZERO;
         else              for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
 }
 
 void ysymm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m,
-                         T alpha, T beta,
-                         const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                         T *c, ptrdiff_t ldc, char UPLO)
+                         TC alpha, TC beta,
+                         const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                         TC *c, ptrdiff_t ldc, char UPLO)
 {
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        T *cj = c + (size_t)j * ldc;
-        const T *bj = b + (size_t)j * ldb;
+        TC *cj = c + (size_t)j * ldc;
+        const TC *bj = b + (size_t)j * ldb;
         if (UPLO == 'L') {
             for (ptrdiff_t i = m - 1; i >= 0; --i) {
-                const T temp1 = alpha * bj[i];
-                T temp2 = ZERO;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * bj[i];
+                TC temp2 = ZERO;
+                const TC *ai = &A_(0, i);
                 for (ptrdiff_t k = i + 1; k < m; ++k) {
                     cj[k]  += temp1 * ai[k];
                     temp2  += bj[k] * ai[k];
                 }
-                const T diag = temp1 * ai[i] + alpha * temp2;
+                const TC diag = temp1 * ai[i] + alpha * temp2;
                 if (beta == ZERO)     cj[i] = diag;
                 else if (beta == ONE) cj[i] += diag;
                 else                  cj[i] = beta * cj[i] + diag;
             }
         } else {
             for (ptrdiff_t i = 0; i < m; ++i) {
-                const T temp1 = alpha * bj[i];
-                T temp2 = ZERO;
-                const T *ai = &A_(0, i);
+                const TC temp1 = alpha * bj[i];
+                TC temp2 = ZERO;
+                const TC *ai = &A_(0, i);
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     cj[k]  += temp1 * ai[k];
                     temp2  += bj[k] * ai[k];
                 }
-                const T diag = temp1 * ai[i] + alpha * temp2;
+                const TC diag = temp1 * ai[i] + alpha * temp2;
                 if (beta == ZERO)     cj[i] = diag;
                 else if (beta == ONE) cj[i] += diag;
                 else                  cj[i] = beta * cj[i] + diag;
@@ -155,12 +155,12 @@ void ysymm_L_singleblock(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m,
     }
 }
 
-void ysymm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, T alpha, T beta,
-                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
+void ysymm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, TC alpha, TC beta,
+                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                   TC *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
 {
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = 0; i < m; ++i) cj[i]  = ZERO;
         else if (beta != ONE)  for (ptrdiff_t i = 0; i < m; ++i) cj[i] *= beta;
     }
@@ -194,12 +194,12 @@ void ysymm_L_panel(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t m, T alpha, T beta,
     }
 }
 
-void ysymm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, T alpha, T beta,
-                   const T *a, ptrdiff_t lda, const T *b, ptrdiff_t ldb,
-                   T *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
+void ysymm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, TC alpha, TC beta,
+                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                   TC *c, ptrdiff_t ldc, char UPLO, ptrdiff_t nb)
 {
     for (ptrdiff_t j = 0; j < n; ++j) {
-        T *cj = c + (size_t)j * ldc;
+        TC *cj = c + (size_t)j * ldc;
         if (beta == ZERO)      for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i]  = ZERO;
         else if (beta != ONE)  for (ptrdiff_t i = ic; i < ic + ib; ++i) cj[i] *= beta;
     }
@@ -236,13 +236,13 @@ void ysymm_R_panel(ptrdiff_t ic, ptrdiff_t ib, ptrdiff_t n, T alpha, T beta,
 void ysymm_serial(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    const TC *b, ptrdiff_t ldb,
+    const TC *beta_,
+    TC *c, ptrdiff_t ldc)
 {
-    const T alpha = *alpha_, beta = *beta_;
+    const TC alpha = *alpha_, beta = *beta_;
     const char SIDE = blas_up(side);
     const char UPLO = blas_up(uplo);
 

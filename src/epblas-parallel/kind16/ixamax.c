@@ -9,13 +9,13 @@
 /* fabsq via __builtin_fabsf128 — single `pand` instead of a libquadmath function call. */
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
-typedef __complex128 T;
+typedef __complex128 TC;
 typedef __float128 R;
 
 /* Scan a contiguous unit-stride range [0,n); return the 0-based index of the
  * first element with maximal |re|+|im| and store that magnitude in *bv_out.
  * Strictly-greater update keeps the lowest index on ties. */
-static ptrdiff_t ixamax_kernel(ptrdiff_t n, const T *x, R *bv_out)
+static ptrdiff_t ixamax_kernel(ptrdiff_t n, const TC *x, R *bv_out)
 {
     ptrdiff_t best = 0;
     R bv = fabsq(__real__ x[0]) + fabsq(__imag__ x[0]);
@@ -33,7 +33,7 @@ static ptrdiff_t ixamax_kernel(ptrdiff_t n, const T *x, R *bv_out)
  * scan. See qasum.c for threshold/noinline rationale. */
 #define IXAMAX_OMP_MIN 128
 #define IXAMAX_MAX_CPUS 64
-__attribute__((noinline)) static bool ixamax_omp(ptrdiff_t n, const T *x, ptrdiff_t *out)
+__attribute__((noinline)) static bool ixamax_omp(ptrdiff_t n, const TC *x, ptrdiff_t *out)
 {
     if (n <= IXAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -65,7 +65,7 @@ __attribute__((noinline)) static bool ixamax_omp(ptrdiff_t n, const T *x, ptrdif
 }
 #endif
 
-static ptrdiff_t ixamax_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static ptrdiff_t ixamax_core(ptrdiff_t n, const TC *x, ptrdiff_t incx)
 {
     if (n < 1 || incx <= 0) return 0;
     if (n == 1) return 1;
@@ -86,4 +86,4 @@ static ptrdiff_t ixamax_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
     return best;
 }
 
-EPBLAS_FACADE_IAMAX(ixamax, T)
+EPBLAS_FACADE_IAMAX(ixamax, TC)

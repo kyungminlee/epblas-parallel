@@ -29,7 +29,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -38,7 +38,7 @@ using mf_pred::eq1;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
 namespace {
-const T zero_dd{0.0, 0.0};
+const TR zero_dd{0.0, 0.0};
 
 #ifdef MBLAS_SIMD_DD
 using simd_exact::load_dd4;
@@ -60,34 +60,34 @@ namespace {
  * the prior inline body) and the threaded path (yacc = a private zero buffer,
  * a disjoint column subset; partials reduced afterwards → within DD fuzz tol). */
 static inline __attribute__((always_inline)) void
-msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const T *a, std::size_t lda,
-          const T *x, const double *x_hi, const double *x_lo,
-          double *yacc_hi, double *yacc_lo, T alpha)
+msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const TR *a, std::size_t lda,
+          const TR *x, const double *x_hi, const double *x_lo,
+          double *yacc_hi, double *yacc_lo, TR alpha)
 {
-    const T temp1 = alpha * x[i];
+    const TR temp1 = alpha * x[i];
     const __m256d t1h = _mm256_set1_pd(temp1.limbs[0]);
     const __m256d t1l = _mm256_set1_pd(temp1.limbs[1]);
-    const T *ai = &A_(0, i);
+    const TR *ai = &A_(0, i);
     const double *aip = reinterpret_cast<const double *>(ai);
     const __m256d zerov = _mm256_setzero_pd();
     __m256d s_h = zerov, s_l = zerov;
     if (lower) {
         /* Scalar diagonal first. */
-        T yi{yacc_hi[i], yacc_lo[i]};
+        TR yi{yacc_hi[i], yacc_lo[i]};
         yi = yi + temp1 * ai[i];
         yacc_hi[i] = yi.limbs[0]; yacc_lo[i] = yi.limbs[1];
         std::ptrdiff_t k = i + 1;
         /* Align to 4-element boundary at start. */
         for (; k < n && (k & 3) != 0; ++k) {
-            T yk{yacc_hi[k], yacc_lo[k]};
-            T aki = ai[k];
+            TR yk{yacc_hi[k], yacc_lo[k]};
+            TR aki = ai[k];
             yk = yk + temp1 * aki;
             yacc_hi[k] = yk.limbs[0]; yacc_lo[k] = yk.limbs[1];
-            T xk{x_hi[k], x_lo[k]};
-            T t2 = aki * xk;
+            TR xk{x_hi[k], x_lo[k]};
+            TR t2 = aki * xk;
             double red_h[4], red_l[4];
             _mm256_storeu_pd(red_h, s_h); _mm256_storeu_pd(red_l, s_l);
-            T s{red_h[0], red_l[0]};
+            TR s{red_h[0], red_l[0]};
             s = s + t2;
             red_h[0] = s.limbs[0]; red_l[0] = s.limbs[1];
             s_h = _mm256_loadu_pd(red_h); s_l = _mm256_loadu_pd(red_l);
@@ -111,15 +111,15 @@ msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const T *a, std::size_
             simd_fast::add(s_h, s_l, p2h, p2l, nsh, nsl);
             s_h = nsh; s_l = nsl;
         }
-        T temp2 = hreduce(s_h, s_l);
+        TR temp2 = hreduce(s_h, s_l);
         for (; k < n; ++k) {
-            T yk{yacc_hi[k], yacc_lo[k]};
-            T aki = ai[k];
+            TR yk{yacc_hi[k], yacc_lo[k]};
+            TR aki = ai[k];
             yk = yk + temp1 * aki;
             yacc_hi[k] = yk.limbs[0]; yacc_lo[k] = yk.limbs[1];
-            temp2 = temp2 + aki * T{x_hi[k], x_lo[k]};
+            temp2 = temp2 + aki * TR{x_hi[k], x_lo[k]};
         }
-        T yi2{yacc_hi[i], yacc_lo[i]};
+        TR yi2{yacc_hi[i], yacc_lo[i]};
         yi2 = yi2 + alpha * temp2;
         yacc_hi[i] = yi2.limbs[0]; yacc_lo[i] = yi2.limbs[1];
     } else {  /* UPLO == 'U', inner k = 0..i-1 (already 4-aligned at k=0) */
@@ -143,15 +143,15 @@ msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const T *a, std::size_
             simd_fast::add(s_h, s_l, p2h, p2l, nsh, nsl);
             s_h = nsh; s_l = nsl;
         }
-        T temp2 = hreduce(s_h, s_l);
+        TR temp2 = hreduce(s_h, s_l);
         for (; k < i; ++k) {
-            T yk{yacc_hi[k], yacc_lo[k]};
-            T aki = ai[k];
+            TR yk{yacc_hi[k], yacc_lo[k]};
+            TR aki = ai[k];
             yk = yk + temp1 * aki;
             yacc_hi[k] = yk.limbs[0]; yacc_lo[k] = yk.limbs[1];
-            temp2 = temp2 + aki * T{x_hi[k], x_lo[k]};
+            temp2 = temp2 + aki * TR{x_hi[k], x_lo[k]};
         }
-        T yi{yacc_hi[i], yacc_lo[i]};
+        TR yi{yacc_hi[i], yacc_lo[i]};
         yi = yi + temp1 * ai[i] + alpha * temp2;
         yacc_hi[i] = yi.limbs[0]; yacc_lo[i] = yi.limbs[1];
     }
@@ -170,9 +170,9 @@ msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const T *a, std::size_
  * fold. Reorders the per-row sum vs serial -> within DD fuzz tol. Returns true
  * if handled. */
 __attribute__((noinline)) static bool msymv_omp(
-    bool lower, std::ptrdiff_t n, const T *a, std::size_t lda, const T *x,
+    bool lower, std::ptrdiff_t n, const TR *a, std::size_t lda, const TR *x,
     const double *x_hi, const double *x_lo,
-    double *y_hi, double *y_lo, T alpha)
+    double *y_hi, double *y_lo, TR alpha)
 {
     std::ptrdiff_t nthreads = blas_omp_max_threads();
     if (!blas_omp_should_thread()) return false;
@@ -206,8 +206,8 @@ __attribute__((noinline)) static bool msymv_omp(
         std::ptrdiff_t k_from, k_to;
         mf_omp::tri_row_window(t, !lower, range, n, k_from, k_to);
         for (std::ptrdiff_t k = k_from; k < k_to; ++k) {
-            T yk{y_hi[k], y_lo[k]};
-            yk = yk + T{yp_hi[k], yp_lo[k]};
+            TR yk{y_hi[k], y_lo[k]};
+            yk = yk + TR{yp_hi[k], yp_lo[k]};
             y_hi[k] = yk.limbs[0]; y_lo[k] = yk.limbs[1];
         }
     }
@@ -220,8 +220,8 @@ __attribute__((noinline)) static bool msymv_omp(
  * SIMD build packs x/y to SoA and runs the threaded/serial msymv_col; the scalar
  * fallback build runs the reference column loops. Strided callers gather x/y to
  * contiguous scratch and scatter y back, so this single core serves every case. */
-static void msymv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t lda,
-                         const T *x, T *y, T alpha)
+static void msymv_contig(bool lower, std::ptrdiff_t n, const TR *a, std::size_t lda,
+                         const TR *x, TR *y, TR alpha)
 {
 #ifdef MBLAS_SIMD_DD
     const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
@@ -251,9 +251,9 @@ static void msymv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t l
 #else
     if (lower) {
         for (std::ptrdiff_t i = 0; i < n; ++i) {
-            const T temp1 = alpha * x[i];
-            T temp2 = zero_dd;
-            const T *ai = &A_(0, i);
+            const TR temp1 = alpha * x[i];
+            TR temp2 = zero_dd;
+            const TR *ai = &A_(0, i);
             y[i] = y[i] + temp1 * ai[i];
             for (std::ptrdiff_t k = i + 1; k < n; ++k) {
                 y[k]  = y[k] + temp1 * ai[k];
@@ -263,9 +263,9 @@ static void msymv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t l
         }
     } else {
         for (std::ptrdiff_t i = 0; i < n; ++i) {
-            const T temp1 = alpha * x[i];
-            T temp2 = zero_dd;
-            const T *ai = &A_(0, i);
+            const TR temp1 = alpha * x[i];
+            TR temp2 = zero_dd;
+            const TR *ai = &A_(0, i);
             for (std::ptrdiff_t k = 0; k < i; ++k) {
                 y[k]  = y[k] + temp1 * ai[k];
                 temp2 = temp2 + ai[k] * x[k];
@@ -279,14 +279,14 @@ static void msymv_contig(bool lower, std::ptrdiff_t n, const T *a, std::size_t l
 static void msymv_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda_,
-    const T *x, std::ptrdiff_t incx,
-    const T *beta_,
-    T *y, std::ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *a, std::ptrdiff_t lda_,
+    const TR *x, std::ptrdiff_t incx,
+    const TR *beta_,
+    TR *y, std::ptrdiff_t incy)
 {
     const std::size_t lda = static_cast<std::size_t>(lda_);
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     const bool lower = (up(&uplo) == 'L');
 
     if (n == 0) return;
@@ -301,7 +301,7 @@ static void msymv_core(
 
     /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
      * core, scatter y back. Handles negative increments; O(N) gather vs O(N^2). */
-    std::vector<T> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
+    std::vector<TR> xs(static_cast<std::size_t>(n)), ys(static_cast<std::size_t>(n));
     mf_kernels::gather_strided(n, x, incx, xs.data());
     mf_kernels::gather_strided(n, y, incy, ys.data());
     msymv_contig(lower, n, a, lda, xs.data(), ys.data(), alpha);
@@ -309,7 +309,7 @@ static void msymv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SYMV(msymv, T)
+EPBLAS_FACADE_SYMV(msymv, TR)
 }
 
 #undef A_

@@ -19,7 +19,7 @@
 #include "../common/epblas_facade.h"
 #undef fabsq
 #define fabsq(x) __builtin_fabsf128(x)
-typedef __float128 T;
+typedef __float128 TR;
 
 /* Blue's scaling constants — radix² powers chosen so that
  *   x in [btsml, btbig]  : accumulate x² directly (amed)
@@ -29,7 +29,7 @@ typedef __float128 T;
  * after first call. For __float128 (IEEE binary128):
  *   minexp = -16381, maxexp = 16384, digits = 113 (binary)
  */
-static T btsml, btbig, bssml, bsbig, maxN;
+static TR btsml, btbig, bssml, bsbig, maxN;
 static bool blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
@@ -50,12 +50,12 @@ static __attribute__((cold)) void blue_init(void)
     blue_inited = 1;
 }
 
-static inline T sq(T x) { return x * x; }
+static inline TR sq(TR x) { return x * x; }
 
 /* Combine the three magnitude buckets into the final norm (Anderson 2017). */
-static T qnrm2_finalize(T abig, T amed, T asml)
+static TR qnrm2_finalize(TR abig, TR amed, TR asml)
 {
-    T scl, sumsq;
+    TR scl, sumsq;
     if (abig > 0.0Q) {
         if (amed > 0.0Q || amed > maxN || amed != amed) {
             abig += (amed * bsbig) * bsbig;
@@ -64,9 +64,9 @@ static T qnrm2_finalize(T abig, T amed, T asml)
         sumsq = abig;
     } else if (asml > 0.0Q) {
         if (amed > 0.0Q || amed > maxN || amed != amed) {
-            T sa = sqrtq(amed);
-            T ss = sqrtq(asml) / bssml;
-            T ymin, ymax;
+            TR sa = sqrtq(amed);
+            TR ss = sqrtq(asml) / bssml;
+            TR ymin, ymax;
             if (ss > sa) { ymin = sa; ymax = ss; }
             else         { ymin = ss; ymax = sa; }
             scl   = 1.0Q;
@@ -87,12 +87,12 @@ static T qnrm2_finalize(T abig, T amed, T asml)
  * flag is chunk-local: asml is only consumed by qnrm2_finalize when the GLOBAL
  * abig==0 (no big element anywhere → every chunk kept notbig==1), so a
  * per-chunk notbig is exact. */
-static void qnrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
+static void qnrm2_bucket(ptrdiff_t n, const TR *x, TR *abig_, TR *amed_, TR *asml_)
 {
-    T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
+    TR abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
     bool notbig = 1;
     for (ptrdiff_t i = 0; i < n; ++i) {
-        T ax = fabsq(x[i]);
+        TR ax = fabsq(x[i]);
         if (ax > btbig) { abig += sq(ax * bsbig); notbig = 0; }
         else if (ax < btsml) { if (notbig) asml += sq(ax * bssml); }
         else amed += sq(ax);
@@ -107,13 +107,13 @@ static void qnrm2_bucket(ptrdiff_t n, const T *x, T *abig_, T *amed_, T *asml_)
  * differs from serial (not bit-identical), but within fuzz tolerance. */
 #define QNRM2_OMP_MIN 128
 #define QNRM2_MAX_CPUS 64
-__attribute__((noinline)) static bool qnrm2_omp(ptrdiff_t n, const T *x, T *out)
+__attribute__((noinline)) static bool qnrm2_omp(ptrdiff_t n, const TR *x, TR *out)
 {
     if (n <= QNRM2_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > QNRM2_MAX_CPUS) nthreads = QNRM2_MAX_CPUS;
-    T pbig[QNRM2_MAX_CPUS] = {0}, pmed[QNRM2_MAX_CPUS] = {0}, psml[QNRM2_MAX_CPUS] = {0};
+    TR pbig[QNRM2_MAX_CPUS] = {0}, pmed[QNRM2_MAX_CPUS] = {0}, psml[QNRM2_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -122,30 +122,30 @@ __attribute__((noinline)) static bool qnrm2_omp(ptrdiff_t n, const T *x, T *out)
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) qnrm2_bucket(hi - lo, x + lo, &pbig[tid], &pmed[tid], &psml[tid]);
     }
-    T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
+    TR abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
     for (ptrdiff_t i = 0; i < nthreads; ++i) { abig += pbig[i]; amed += pmed[i]; asml += psml[i]; }
     *out = qnrm2_finalize(abig, amed, asml);
     return 1;
 }
 #endif
 
-static T qnrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
+static TR qnrm2_core(ptrdiff_t n, const TR *x, ptrdiff_t incx)
 {
     if (n <= 0) return 0.0Q;
     if (!blue_inited) blue_init();
 
 #ifdef _OPENMP
     if (incx == 1) {
-        T r;
+        TR r;
         if (qnrm2_omp(n, x, &r)) return r;
     }
 #endif
 
-    T abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
+    TR abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
     bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
     for (ptrdiff_t i = 0; i < n; ++i) {
-        T ax = fabsq(x[ix]);
+        TR ax = fabsq(x[ix]);
         if (ax > btbig) {
             abig += sq(ax * bsbig);
             notbig = 0;
@@ -159,4 +159,4 @@ static T qnrm2_core(ptrdiff_t n, const T *x, ptrdiff_t incx)
     return qnrm2_finalize(abig, amed, asml);
 }
 
-EPBLAS_FACADE_ASUM(qnrm2, T, T)
+EPBLAS_FACADE_ASUM(qnrm2, TR, TR)

@@ -31,7 +31,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -47,7 +47,7 @@ namespace {
 #endif
 
 
-const T zero_dd{0.0, 0.0};
+const TR zero_dd{0.0, 0.0};
 
 #ifdef MBLAS_SIMD_DD
 using simd_exact::load_dd4;
@@ -62,8 +62,8 @@ using simd_exact::load_dd4;
  * scatter over only its rows (matrix read contiguous in i; ascending j ->
  * bit-exact vs serial). SIMD build packs y to SoA and uses the AVX2 DD kernel;
  * the scalar fallback runs the reference inner loop. */
-static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T *a, std::size_t lda,
-                           const T *x, T *y)
+static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const TR *a, std::size_t lda,
+                           const TR *x, TR *y)
 {
     std::ptrdiff_t nthreads = 1;
 #ifdef _OPENMP
@@ -89,13 +89,13 @@ static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
         const std::ptrdiff_t lo = blas_part_bound(m, tid, nthreads);
         const std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nthreads);
         for (std::ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[j];
+            const TR xj = x[j];
             if (eq0(xj)) continue;
-            const T t = alpha * xj;
+            const TR t = alpha * xj;
             const __m256d thi = _mm256_set1_pd(t.limbs[0]);
             const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
             const double *aj = reinterpret_cast<const double *>(&A_(0, j));
-            const T *ajs = &A_(0, j);
+            const TR *ajs = &A_(0, j);
             std::ptrdiff_t i = lo;
             for (; i + 3 < hi; i += 4) {
                 __m256d a_hi, a_lo;
@@ -110,7 +110,7 @@ static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
                 _mm256_storeu_pd(y_lo + i, nyl);
             }
             for (; i < hi; ++i) {
-                T yi = T{y_hi[i], y_lo[i]} + t * ajs[i];
+                TR yi = TR{y_hi[i], y_lo[i]} + t * ajs[i];
                 y_hi[i] = yi.limbs[0]; y_lo[i] = yi.limbs[1];
             }
         }
@@ -129,10 +129,10 @@ static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
         const std::ptrdiff_t lo = blas_part_bound(m, tid, nthreads);
         const std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nthreads);
         for (std::ptrdiff_t j = 0; j < n; ++j) {
-            const T xj = x[j];
+            const TR xj = x[j];
             if (eq0(xj)) continue;
-            const T t = alpha * xj;
-            const T *aj = &A_(0, j);
+            const TR t = alpha * xj;
+            const TR *aj = &A_(0, j);
             for (std::ptrdiff_t i = lo; i < hi; ++i) y[i] = y[i] + t * aj[i];
         }
     }
@@ -143,8 +143,8 @@ static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
  * Columns are independent dots over the shared read-only x; thread over j
  * (disjoint y[j], per-j reduction order fixed). SIMD build runs a 4-lane SoA
  * DD accumulator + hi/lo horizontal reduce; scalar fallback a plain dot. */
-static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T *a, std::size_t lda,
-                           const T *x, T *y)
+static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const TR *a, std::size_t lda,
+                           const TR *x, TR *y)
 {
 #ifdef _OPENMP
     const bool use_omp = (n >= MGEMV_OMP_MIN && blas_omp_should_thread());
@@ -186,9 +186,9 @@ static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
         double red_h[4], red_l[4];
         _mm256_storeu_pd(red_h, r_h);
         _mm256_storeu_pd(red_l, r_l);
-        T s{red_h[0], red_l[0]};
-        const T *ajs = &A_(0, j);
-        for (; i < m; ++i) s = s + ajs[i] * T{x_hi[i], x_lo[i]};
+        TR s{red_h[0], red_l[0]};
+        const TR *ajs = &A_(0, j);
+        for (; i < m; ++i) s = s + ajs[i] * TR{x_hi[i], x_lo[i]};
         y[j] = y[j] + alpha * s;
     }
     std::free(x_hi); std::free(x_lo);
@@ -197,8 +197,8 @@ static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const T *aj = &A_(0, j);
-        T s = zero_dd;
+        const TR *aj = &A_(0, j);
+        TR s = zero_dd;
         for (std::ptrdiff_t i = 0; i < m; ++i) s = s + aj[i] * x[i];
         y[j] = y[j] + alpha * s;
     }
@@ -208,14 +208,14 @@ static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, T alpha, const T 
 static void mgemv_core(
     char trans,
     std::ptrdiff_t m, std::ptrdiff_t n,
-    const T *alpha_,
-    const T *a, std::ptrdiff_t lda_,
-    const T *x, std::ptrdiff_t incx,
-    const T *beta_,
-    T *y, std::ptrdiff_t incy)
+    const TR *alpha_,
+    const TR *a, std::ptrdiff_t lda_,
+    const TR *x, std::ptrdiff_t incx,
+    const TR *beta_,
+    TR *y, std::ptrdiff_t incy)
 {
     const std::size_t lda = static_cast<std::size_t>(lda_);
-    const T alpha = *alpha_, beta = *beta_;
+    const TR alpha = *alpha_, beta = *beta_;
     char TRANS = up(&trans);
     if (TRANS == 'C') TRANS = 'T';
     const bool notrans = (TRANS == 'N');
@@ -236,7 +236,7 @@ static void mgemv_core(
 
     /* Strided x,y: gather to unit stride (y already beta-applied), run the SIMD
      * core, scatter y back. Handles negative increments; O(M+N) gather. */
-    std::vector<T> xs(static_cast<std::size_t>(lenx)), ys(static_cast<std::size_t>(leny));
+    std::vector<TR> xs(static_cast<std::size_t>(lenx)), ys(static_cast<std::size_t>(leny));
     mf_kernels::gather_strided(lenx, x, incx, xs.data());
     mf_kernels::gather_strided(leny, y, incy, ys.data());
     if (notrans) mgemv_n_contig(m, n, alpha, a, lda, xs.data(), ys.data());
@@ -245,7 +245,7 @@ static void mgemv_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_GEMV(mgemv, T)
+EPBLAS_FACADE_GEMV(mgemv, TR)
 }
 
 #undef A_

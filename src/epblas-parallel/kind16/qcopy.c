@@ -7,7 +7,7 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef __float128 T;
+typedef __float128 TR;
 
 #ifdef _OPENMP
 /* Threaded copy. Pure data movement, but threading still spreads the quad-wide
@@ -16,8 +16,8 @@ typedef __float128 T;
  * schedule(static) gives each thread a contiguous block (sequential stores).
  * Real-quad copy only wins past L2 (crossover ~8K; n=4096 still washes). */
 #define QCOPY_OMP_MIN 8192
-__attribute__((noinline)) static bool qcopy_omp(ptrdiff_t n, const T *x, ptrdiff_t incx,
-                                               T *y, ptrdiff_t incy)
+__attribute__((noinline)) static bool qcopy_omp(ptrdiff_t n, const TR *x, ptrdiff_t incx,
+                                               TR *y, ptrdiff_t incy)
 {
     if (n <= QCOPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
@@ -30,13 +30,13 @@ __attribute__((noinline)) static bool qcopy_omp(ptrdiff_t n, const T *x, ptrdiff
 }
 #endif
 
-static void qcopy_core(ptrdiff_t n, const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
+static void qcopy_core(ptrdiff_t n, const TR *x, ptrdiff_t incx, TR *y, ptrdiff_t incy)
 {
     if (n <= 0) return;
 #ifdef _OPENMP
     if (qcopy_omp(n, x, incx, y, incy)) return;
 #endif
-    if (incx == 1 && incy == 1) memcpy(y, x, (size_t)n * sizeof(T));
+    if (incx == 1 && incy == 1) memcpy(y, x, (size_t)n * sizeof(TR));
     else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
@@ -44,4 +44,4 @@ static void qcopy_core(ptrdiff_t n, const T *x, ptrdiff_t incx, T *y, ptrdiff_t 
     }
 }
 
-EPBLAS_FACADE_COPY(qcopy, T)
+EPBLAS_FACADE_COPY(qcopy, TR)

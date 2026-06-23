@@ -26,7 +26,7 @@
 #include <stddef.h>
 #include <complex.h>
 
-typedef _Complex long double ysyr2k_T;
+typedef _Complex long double ysyr2k_TC;
 
 /* Env-tunable block size (YSYR2K_NB). */
 ptrdiff_t ysyr2k_nb(void);
@@ -34,23 +34,23 @@ ptrdiff_t ysyr2k_nb(void);
 /* One diagonal block [jc, jc+jb): beta pre-scale of the block's triangular
  * columns, the scalar rank-2k diagonal add, and the two trailing
  * ygemm_serial updates against the rest of the panel. */
-void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, ysyr2k_T alpha, ysyr2k_T beta,
-                  const ysyr2k_T *a, ptrdiff_t lda, const ysyr2k_T *b, ptrdiff_t ldb,
-                  ysyr2k_T *c, ptrdiff_t ldc, char UPLO, char TRANS);
+void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, ysyr2k_TC alpha, ysyr2k_TC beta,
+                  const ysyr2k_TC *a, ptrdiff_t lda, const ysyr2k_TC *b, ptrdiff_t ldb,
+                  ysyr2k_TC *c, ptrdiff_t ldc, char UPLO, char TRANS);
 
 /* C := beta*C over the triangular columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. */
-void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, ysyr2k_T beta,
-                       ysyr2k_T *c, ptrdiff_t ldc, char UPLO);
+void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, ysyr2k_TC beta,
+                       ysyr2k_TC *c, ptrdiff_t ldc, char UPLO);
 
 /* Pure-serial Fortran-ABI entry (no OpenMP). Same signature as ysyr2k_. */
 void ysyr2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const ysyr2k_T *alpha_,
-    const ysyr2k_T *a, ptrdiff_t lda,
-    const ysyr2k_T *b, ptrdiff_t ldb,
-    const ysyr2k_T *beta_,
-    ysyr2k_T *c, ptrdiff_t ldc);
+    const ysyr2k_TC *alpha_,
+    const ysyr2k_TC *a, ptrdiff_t lda,
+    const ysyr2k_TC *b, ptrdiff_t ldb,
+    const ysyr2k_TC *beta_,
+    ysyr2k_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YSYR2K_KERNEL_H */

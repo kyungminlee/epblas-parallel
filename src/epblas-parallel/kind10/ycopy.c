@@ -6,7 +6,7 @@
 #include "../common/blas_omp.h"
 #endif
 #include "../common/epblas_facade.h"
-typedef _Complex long double T;
+typedef _Complex long double TC;
 
 #ifdef _OPENMP
 /* Threaded unit-stride complex COPY — cache-bandwidth rationale as ecopy_omp
@@ -19,7 +19,7 @@ typedef _Complex long double T;
  * Each thread memcpy's its own slice. */
 #define YCOPY_OMP_MIN 1024
 #define YCOPY_OMP_MAX 131072
-static bool ycopy_omp(ptrdiff_t n, const T *x, T *y)
+static bool ycopy_omp(ptrdiff_t n, const TC *x, TC *y)
 {
     if (n <= YCOPY_OMP_MIN || n > YCOPY_OMP_MAX ||
         !blas_omp_should_thread())
@@ -30,20 +30,20 @@ static bool ycopy_omp(ptrdiff_t n, const T *x, T *y)
         ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
         ptrdiff_t lo = blas_part_bound(n, tid, nth);
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
-        if (lo < hi) memcpy(y + lo, x + lo, (size_t)(hi - lo) * sizeof(T));
+        if (lo < hi) memcpy(y + lo, x + lo, (size_t)(hi - lo) * sizeof(TC));
     }
     return 1;
 }
 #endif
 
-static void ycopy_core(ptrdiff_t n, const T *x, ptrdiff_t incx, T *y, ptrdiff_t incy)
+static void ycopy_core(ptrdiff_t n, const TC *x, ptrdiff_t incx, TC *y, ptrdiff_t incy)
 {
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
 #ifdef _OPENMP
         if (ycopy_omp(n, x, y)) return;
 #endif
-        memcpy(y, x, (size_t)n * sizeof(T));
+        memcpy(y, x, (size_t)n * sizeof(TC));
     } else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
@@ -51,4 +51,4 @@ static void ycopy_core(ptrdiff_t n, const T *x, ptrdiff_t incx, T *y, ptrdiff_t 
     }
 }
 
-EPBLAS_FACADE_COPY(ycopy, T)
+EPBLAS_FACADE_COPY(ycopy, TC)

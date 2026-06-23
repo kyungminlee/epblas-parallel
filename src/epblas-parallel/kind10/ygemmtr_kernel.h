@@ -26,29 +26,29 @@
 #include <stddef.h>
 #include <complex.h>
 
-typedef _Complex long double ygemmtr_T;
+typedef _Complex long double ygemmtr_TC;
 
 /* C := beta*C over the triangle of columns [j_start, j_end) — the
  * alpha==0 / K==0 quick path. `upper` selects the stored triangle. */
 void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, bool upper,
-                        ygemmtr_T beta, ygemmtr_T *c, ptrdiff_t ldc);
+                        ygemmtr_TC beta, ygemmtr_TC *c, ptrdiff_t ldc);
 
 /* One triangle column j of C := alpha·op(A)·op(B) + beta·C. The resolved
  * transpose/conjugate flags are passed in (computed once by the entry). */
 void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
-                 ygemmtr_T alpha, ygemmtr_T beta,
-                 const ygemmtr_T *a, ptrdiff_t lda,
-                 const ygemmtr_T *b, ptrdiff_t ldb,
-                 ygemmtr_T *c, ptrdiff_t ldc,
+                 ygemmtr_TC alpha, ygemmtr_TC beta,
+                 const ygemmtr_TC *a, ptrdiff_t lda,
+                 const ygemmtr_TC *b, ptrdiff_t ldb,
+                 ygemmtr_TC *c, ptrdiff_t ldc,
                  bool trans_a, bool conj_a, bool trans_b, bool conj_b);
 
 /* Pure-serial by-value core (no OpenMP). */
 void ygemmtr_serial(char uplo, char transa, char transb,
                     ptrdiff_t n, ptrdiff_t k,
-                    const ygemmtr_T *alpha_,
-                    const ygemmtr_T *a, ptrdiff_t lda,
-                    const ygemmtr_T *b, ptrdiff_t ldb,
-                    const ygemmtr_T *beta_,
-                    ygemmtr_T *c, ptrdiff_t ldc);
+                    const ygemmtr_TC *alpha_,
+                    const ygemmtr_TC *a, ptrdiff_t lda,
+                    const ygemmtr_TC *b, ptrdiff_t ldb,
+                    const ygemmtr_TC *beta_,
+                    ygemmtr_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YGEMMTR_KERNEL_H */

@@ -21,7 +21,7 @@
 #include "etrsm_kernel.h"
 #include "etri_kernel.h"   /* etri_gemm_kernel substrate */
 
-typedef etrsm_T T;
+typedef etrsm_TR TR;
 
 /* Register-tile dims — must match the packed layout dims. */
 #define MR 2
@@ -29,9 +29,9 @@ typedef etrsm_T T;
 
 
 static inline void solve_LN(ptrdiff_t m, ptrdiff_t n,
-                            T *a, T *b, T *c, ptrdiff_t ldc)
+                            TR *a, TR *b, TR *c, ptrdiff_t ldc)
 {
-    T aa, bb;
+    TR aa, bb;
     ptrdiff_t i, j, k;
     a += (m - 1) * m;
     b += (m - 1) * n;
@@ -54,9 +54,9 @@ static inline void solve_LN(ptrdiff_t m, ptrdiff_t n,
 
 /* LT: solve walks i = 0 up → m-1; A holds strict-upper-triangle + invdiag */
 static inline void solve_LT(ptrdiff_t m, ptrdiff_t n,
-                            T *a, T *b, T *c, ptrdiff_t ldc)
+                            TR *a, TR *b, TR *c, ptrdiff_t ldc)
 {
-    T aa, bb;
+    TR aa, bb;
     ptrdiff_t i, j, k;
     for (i = 0; i < m; i++) {
         aa = *(a + i);
@@ -76,9 +76,9 @@ static inline void solve_LT(ptrdiff_t m, ptrdiff_t n,
 
 /* RN: solve walks i = 0 up → n-1; A holds strict-lower + invdiag (n×n) */
 static inline void solve_RN(ptrdiff_t m, ptrdiff_t n,
-                            T *a, T *b, T *c, ptrdiff_t ldc)
+                            TR *a, TR *b, TR *c, ptrdiff_t ldc)
 {
-    T aa, bb;
+    TR aa, bb;
     ptrdiff_t i, j, k;
     for (i = 0; i < n; i++) {
         bb = *(b + i);
@@ -98,9 +98,9 @@ static inline void solve_RN(ptrdiff_t m, ptrdiff_t n,
 
 /* RT: solve walks i = n-1 down → 0; A holds strict-upper + invdiag */
 static inline void solve_RT(ptrdiff_t m, ptrdiff_t n,
-                            T *a, T *b, T *c, ptrdiff_t ldc)
+                            TR *a, TR *b, TR *c, ptrdiff_t ldc)
 {
-    T aa, bb;
+    TR aa, bb;
     ptrdiff_t i, j, k;
     a += (n - 1) * m;
     b += (n - 1) * n;
@@ -123,24 +123,24 @@ static inline void solve_RT(ptrdiff_t m, ptrdiff_t n,
 
 void etrsm_solve_kernel(bool left, bool trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
-                        const T *ba, const T *bb,
-                        T *C, ptrdiff_t ldc,
+                        const TR *ba, const TR *bb,
+                        TR *C, ptrdiff_t ldc,
                         ptrdiff_t offset)
 {
-    const T dm1 = -1.0L;
+    const TR dm1 = -1.0L;
     const ptrdiff_t UR = MR;   /* register tile rows */
     const ptrdiff_t UN = NR;   /* register tile cols */
 
     /* Cast away const for solve() in-place writes into the local pack
      * buffers — `ba` and `bb` are caller-owned per-thread scratch, so
      * mutating them is fine. */
-    T *a_buf = (T *)ba;
-    T *b_buf = (T *)bb;
+    TR *a_buf = (TR *)ba;
+    TR *b_buf = (TR *)bb;
 
     if (left && !trans) {
         /* trsm_kernel_LN.c — solve walks down rows. */
         ptrdiff_t i, j;
-        T *aa, *cc;
+        TR *aa, *cc;
         ptrdiff_t kk;
 
         j = (bn / UN);
@@ -246,7 +246,7 @@ void etrsm_solve_kernel(bool left, bool trans,
     } else if (left && trans) {
         /* trsm_kernel_LT.c — solve walks up rows. */
         ptrdiff_t i, j;
-        T *aa, *cc;
+        TR *aa, *cc;
         ptrdiff_t kk;
 
         j = (bn / UN);
@@ -342,7 +342,7 @@ void etrsm_solve_kernel(bool left, bool trans,
     } else if (!left && !trans) {
         /* trsm_kernel_RN.c — solve walks up cols (i = 0 → n-1). */
         ptrdiff_t i, j;
-        T *aa, *cc;
+        TR *aa, *cc;
         ptrdiff_t kk;
 
         kk = -offset;
@@ -436,7 +436,7 @@ void etrsm_solve_kernel(bool left, bool trans,
     } else {
         /* trsm_kernel_RT.c — solve walks down cols (i = n-1 → 0). */
         ptrdiff_t i, j;
-        T *aa, *cc;
+        TR *aa, *cc;
         ptrdiff_t kk;
 
         kk = bn - offset;

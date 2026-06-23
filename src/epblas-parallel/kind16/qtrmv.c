@@ -23,7 +23,7 @@
 #endif
 #include "../common/epblas_facade.h"
 
-typedef __float128 T;
+typedef __float128 TR;
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -38,34 +38,34 @@ typedef __float128 T;
  * context. */
 __attribute__((noinline))
 static bool qtrmv_omp(bool upper, bool trans_t, bool nounit, ptrdiff_t n, ptrdiff_t lda,
-                     const T *restrict a, T *restrict x)
+                     const TR *restrict a, TR *restrict x)
 {
     const ptrdiff_t nthreads = blas_omp_max_threads();
     if (n < QTRMV_OMP_MIN || !blas_omp_should_thread()) return 0;
-    const T zero = 0.0Q;
+    const TR zero = 0.0Q;
 
     if (trans_t) {
         /* TRANS='T': each j writes a single x[j] (dot of column j with x). All
          * threads read x then write disjoint y_buf[j] — own j, no overlap. */
-        T *y_buf = (T *)malloc((size_t)n * sizeof(T));
+        TR *y_buf = (TR *)malloc((size_t)n * sizeof(TR));
         if (!y_buf) return 0;
         #pragma omp parallel num_threads(nthreads)
         {
             if (!upper) {
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T temp = nounit ? (x[j] * A_(j, j)) : x[j];
-                    const T *aj = &A_(0, j);
-                    T s = zero;
+                    TR temp = nounit ? (x[j] * A_(j, j)) : x[j];
+                    const TR *aj = &A_(0, j);
+                    TR s = zero;
                     for (ptrdiff_t i = j + 1; i < n; ++i) s += aj[i] * x[i];
                     y_buf[j] = temp + s;
                 }
             } else {
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T temp = nounit ? (x[j] * A_(j, j)) : x[j];
-                    const T *aj = &A_(0, j);
-                    T s = zero;
+                    TR temp = nounit ? (x[j] * A_(j, j)) : x[j];
+                    const TR *aj = &A_(0, j);
+                    TR s = zero;
                     for (ptrdiff_t i = 0; i < j; ++i) s += aj[i] * x[i];
                     y_buf[j] = temp + s;
                 }
@@ -77,32 +77,32 @@ static bool qtrmv_omp(bool upper, bool trans_t, bool nounit, ptrdiff_t n, ptrdif
         return 1;
     } else {
         /* TRANS='N': per-thread y_priv + reduction (cross-thread overlapping writes). */
-        T *y_priv_all = (T *)calloc((size_t)nthreads * (size_t)n, sizeof(T));
+        TR *y_priv_all = (TR *)calloc((size_t)nthreads * (size_t)n, sizeof(TR));
         if (!y_priv_all) return 0;
         #pragma omp parallel num_threads(nthreads)
         {
             const ptrdiff_t tid = omp_get_thread_num();
-            T *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
+            TR *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
             if (!upper) {
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    const T xj = x[j];
-                    const T *aj = &A_(0, j);
-                    y_priv[j] += xj * (nounit ? aj[j] : (T)1.0Q);
+                    const TR xj = x[j];
+                    const TR *aj = &A_(0, j);
+                    y_priv[j] += xj * (nounit ? aj[j] : (TR)1.0Q);
                     for (ptrdiff_t i = j + 1; i < n; ++i) y_priv[i] += xj * aj[i];
                 }
             } else {
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    const T xj = x[j];
-                    const T *aj = &A_(0, j);
+                    const TR xj = x[j];
+                    const TR *aj = &A_(0, j);
                     for (ptrdiff_t i = 0; i < j; ++i) y_priv[i] += xj * aj[i];
-                    y_priv[j] += xj * (nounit ? aj[j] : (T)1.0Q);
+                    y_priv[j] += xj * (nounit ? aj[j] : (TR)1.0Q);
                 }
             }
             #pragma omp for schedule(static)
             for (ptrdiff_t i = 0; i < n; ++i) {
-                T s = zero;
+                TR s = zero;
                 for (ptrdiff_t t = 0; t < nthreads; ++t) s += y_priv_all[(size_t)t * n + i];
                 x[i] = s;
             }
@@ -116,8 +116,8 @@ static bool qtrmv_omp(bool upper, bool trans_t, bool nounit, ptrdiff_t n, ptrdif
 void qtrmv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx)
+    const TR *restrict a, ptrdiff_t lda,
+    TR *restrict x, ptrdiff_t incx)
 {
     const char UPLO = blas_up(uplo);
     char TRANS = blas_up(trans);
@@ -126,7 +126,7 @@ void qtrmv_core(
     const bool nounit = (DIAG != 'U');
 
     if (n == 0) return;
-    const T zero = 0.0Q;
+    const TR zero = 0.0Q;
 
     if (incx == 1) {
 #ifdef _OPENMP
@@ -135,18 +135,18 @@ void qtrmv_core(
         if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    const T temp = x[j];
+                    const TR temp = x[j];
                     if (temp != zero) {
-                        const T *aj = &A_(0, j);
+                        const TR *aj = &A_(0, j);
                         for (ptrdiff_t i = j + 1; i < n; ++i) x[i] += temp * aj[i];
                     }
                     if (nounit) x[j] *= A_(j, j);
                 }
             } else {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    const T temp = x[j];
+                    const TR temp = x[j];
                     if (temp != zero) {
-                        const T *aj = &A_(0, j);
+                        const TR *aj = &A_(0, j);
                         for (ptrdiff_t i = 0; i < j; ++i) x[i] += temp * aj[i];
                     }
                     if (nounit) x[j] *= A_(j, j);
@@ -155,17 +155,17 @@ void qtrmv_core(
         } else {
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T temp = x[j];
+                    TR temp = x[j];
                     if (nounit) temp *= A_(j, j);
-                    const T *aj = &A_(0, j);
+                    const TR *aj = &A_(0, j);
                     for (ptrdiff_t i = j + 1; i < n; ++i) temp += aj[i] * x[i];
                     x[j] = temp;
                 }
             } else {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T temp = x[j];
+                    TR temp = x[j];
                     if (nounit) temp *= A_(j, j);
-                    const T *aj = &A_(0, j);
+                    const TR *aj = &A_(0, j);
                     for (ptrdiff_t i = 0; i < j; ++i) temp += aj[i] * x[i];
                     x[j] = temp;
                 }
@@ -179,7 +179,7 @@ void qtrmv_core(
          * lives in one place (qtrmv_omp) and the serial strided code below
          * stays byte-for-byte unchanged. */
         if (n >= QTRMV_OMP_MIN && blas_omp_should_thread()) {
-            T *xc = (T *)malloc((size_t)n * sizeof(T));
+            TR *xc = (TR *)malloc((size_t)n * sizeof(TR));
             if (xc) {
                 for (ptrdiff_t i = 0; i < n; ++i) xc[i] = x[kx + i * incx];
                 if (qtrmv_omp(UPLO == 'U', TRANS == 'T', nounit, n, lda, a, xc)) {
@@ -194,14 +194,14 @@ void qtrmv_core(
         if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    const T temp = x[kx + j * incx];
+                    const TR temp = x[kx + j * incx];
                     if (temp != zero)
                         for (ptrdiff_t i = j + 1; i < n; ++i) x[kx + i * incx] += temp * A_(i, j);
                     if (nounit) x[kx + j * incx] *= A_(j, j);
                 }
             } else {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    const T temp = x[kx + j * incx];
+                    const TR temp = x[kx + j * incx];
                     if (temp != zero)
                         for (ptrdiff_t i = 0; i < j; ++i) x[kx + i * incx] += temp * A_(i, j);
                     if (nounit) x[kx + j * incx] *= A_(j, j);
@@ -210,14 +210,14 @@ void qtrmv_core(
         } else {
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    T temp = x[kx + j * incx];
+                    TR temp = x[kx + j * incx];
                     if (nounit) temp *= A_(j, j);
                     for (ptrdiff_t i = j + 1; i < n; ++i) temp += A_(i, j) * x[kx + i * incx];
                     x[kx + j * incx] = temp;
                 }
             } else {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    T temp = x[kx + j * incx];
+                    TR temp = x[kx + j * incx];
                     if (nounit) temp *= A_(j, j);
                     for (ptrdiff_t i = 0; i < j; ++i) temp += A_(i, j) * x[kx + i * incx];
                     x[kx + j * incx] = temp;
@@ -227,6 +227,6 @@ void qtrmv_core(
     }
 }
 
-EPBLAS_FACADE_TRMV(qtrmv, T)
+EPBLAS_FACADE_TRMV(qtrmv, TR)
 
 #undef A_

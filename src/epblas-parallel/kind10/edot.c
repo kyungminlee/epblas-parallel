@@ -5,7 +5,7 @@
 #include <stddef.h>
 #endif
 #include "../common/epblas_facade.h"
-typedef long double T;
+typedef long double TR;
 
 /* Σ x·y over a contiguous logical range. FOUR independent accumulators hide
  * the ~3-cycle x87 fadd latency; four is the most chains that fit the 8-deep
@@ -15,11 +15,11 @@ typedef long double T;
  * increment/compare/branch over more work, recovering the small-N overhead and
  * keeping the large-N win. Unit-stride fast path; strided walk handles
  * arbitrary (possibly negative) increments for the serial case. */
-static T edot_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdiff_t incy)
+static TR edot_kernel(ptrdiff_t n, const TR *x, ptrdiff_t incx, const TR *y, ptrdiff_t incy)
 {
-    T s = 0.0L;
+    TR s = 0.0L;
     if (incx == 1 && incy == 1) {
-        T s0 = 0.0L, s1 = 0.0L, s2 = 0.0L, s3 = 0.0L;
+        TR s0 = 0.0L, s1 = 0.0L, s2 = 0.0L, s3 = 0.0L;
         ptrdiff_t i = 0;
         for (; i + 7 < n; i += 8) {
             s0 += x[i    ] * y[i    ];
@@ -47,13 +47,13 @@ static T edot_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx, const T *y, ptrdif
  * region bookkeeping off the serial kernel's x87 allocation. */
 #define EDOT_OMP_MIN 10000
 #define EDOT_MAX_CPUS 64
-__attribute__((noinline)) static ptrdiff_t edot_omp(ptrdiff_t n, const T *x, const T *y, T *out)
+__attribute__((noinline)) static ptrdiff_t edot_omp(ptrdiff_t n, const TR *x, const TR *y, TR *out)
 {
     if (n <= EDOT_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
     if (nthreads > EDOT_MAX_CPUS) nthreads = EDOT_MAX_CPUS;
-    T partial[EDOT_MAX_CPUS] = {0};
+    TR partial[EDOT_MAX_CPUS] = {0};
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
@@ -62,24 +62,24 @@ __attribute__((noinline)) static ptrdiff_t edot_omp(ptrdiff_t n, const T *x, con
         ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
         if (lo < hi) partial[tid] = edot_kernel(hi - lo, x + lo, 1, y + lo, 1);
     }
-    T s = 0.0L;
+    TR s = 0.0L;
     for (ptrdiff_t i = 0; i < nthreads; ++i) s += partial[i];
     *out = s;
     return 1;
 }
 #endif
 
-static T edot_core(ptrdiff_t n, const T *x, ptrdiff_t incx,
-                   const T *y, ptrdiff_t incy)
+static TR edot_core(ptrdiff_t n, const TR *x, ptrdiff_t incx,
+                   const TR *y, ptrdiff_t incy)
 {
     if (n <= 0) return 0.0L;
 #ifdef _OPENMP
     if (incx == 1 && incy == 1) {
-        T s;
+        TR s;
         if (edot_omp(n, x, y, &s)) return s;
     }
 #endif
     return edot_kernel(n, x, incx, y, incy);
 }
 
-EPBLAS_FACADE_DOT(edot, T, T)
+EPBLAS_FACADE_DOT(edot, TR, TR)

@@ -31,7 +31,8 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-typedef __float128 T;
+typedef xsyr2k_TC TC;
+typedef xsyr2k_TR TR;
 
 #define MR QBLAS_YGEMM_MR
 #define NR QBLAS_YGEMM_NR
@@ -41,14 +42,20 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 void xsyr2k_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    const T *b, ptrdiff_t ldb,
-    const T *beta_,
-    T *c, ptrdiff_t ldc)
+    const TC *alpha_c,
+    const TC *a_c, ptrdiff_t lda,
+    const TC *b_c, ptrdiff_t ldb,
+    const TC *beta_c,
+    TC *c_c, ptrdiff_t ldc)
 {
-    const T alphar = alpha_[0], alphai = alpha_[1];
-    const T beta_r = beta_[0],  beta_i = beta_[1];
+    /* Reinterpret the complex ABI as interleaved (re,im) __float128 storage. */
+    const TR *alpha_ = (const TR *)alpha_c;
+    const TR *a = (const TR *)a_c;
+    const TR *b = (const TR *)b_c;
+    const TR *beta_ = (const TR *)beta_c;
+    TR *c = (TR *)c_c;
+    const TR alphar = alpha_[0], alphai = alpha_[1];
+    const TR beta_r = beta_[0],  beta_i = beta_[1];
     const char UPLO  = blas_up(uplo);
     const char TRANS = blas_up(trans);
 
@@ -67,7 +74,7 @@ void xsyr2k_serial(
      * per-element footprint), capped at 4×MC0 and rounded to MR. */
     if (k <= KC) {
         const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(T));
+        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(TR));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
             MC = round_up((ptrdiff_t)target_mc, MR);
@@ -75,12 +82,12 @@ void xsyr2k_serial(
         }
     }
 
-    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(T);
-    T *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(TR);
+    TR *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap_A && Ap_B && Bp_A && Bp_B) {
         for (ptrdiff_t js = 0; js < n; js += NC) {
             const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
@@ -112,7 +119,7 @@ void xsyr2k_serial(
                         qblas_ygemm_ncopy(pb, min_i, 0, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
                     }
 
-                    T *cij = &c[((size_t)js * ldc + is) * 2];
+                    TR *cij = &c[((size_t)js * ldc + is) * 2];
                     const ptrdiff_t off = is - js;
 
                     /* Pass 1: alpha·A·Bᵀ + symmetric diagonal merge. */

@@ -21,7 +21,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -37,12 +37,12 @@ namespace {
 static void msyr2_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    const T *y, std::ptrdiff_t incy,
-    T *a, std::ptrdiff_t lda)
+    const TR *alpha_,
+    const TR *x, std::ptrdiff_t incx,
+    const TR *y, std::ptrdiff_t incy,
+    TR *a, std::ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     const char UPLO = up(&uplo);
 
     if (n == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
@@ -72,8 +72,8 @@ static void msyr2_core(
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j]) && eq0(yhp[j], ylp[j])) continue;
-            const T tx = alpha * T{yhp[j], ylp[j]};   /* x-row scale = alpha*y[j] */
-            const T ty = alpha * T{xhp[j], xlp[j]};   /* y-row scale = alpha*x[j] */
+            const TR tx = alpha * TR{yhp[j], ylp[j]};   /* x-row scale = alpha*y[j] */
+            const TR ty = alpha * TR{xhp[j], xlp[j]};   /* y-row scale = alpha*x[j] */
             mf_kernels::dd_axpy2(n - j, xhp + j, xlp + j, tx.limbs[0], tx.limbs[1],
                                yhp + j, ylp + j, ty.limbs[0], ty.limbs[1], &A_(j, j));
         }
@@ -83,8 +83,8 @@ static void msyr2_core(
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j]) && eq0(yhp[j], ylp[j])) continue;
-            const T tx = alpha * T{yhp[j], ylp[j]};
-            const T ty = alpha * T{xhp[j], xlp[j]};
+            const TR tx = alpha * TR{yhp[j], ylp[j]};
+            const TR ty = alpha * TR{xhp[j], xlp[j]};
             mf_kernels::dd_axpy2(j + 1, xhp, xlp, tx.limbs[0], tx.limbs[1],
                                yhp, ylp, ty.limbs[0], ty.limbs[1], &A_(0, j));
         }
@@ -92,7 +92,7 @@ static void msyr2_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SYR2(msyr2, T)
+EPBLAS_FACADE_SYR2(msyr2, TR)
 }
 
 #undef A_

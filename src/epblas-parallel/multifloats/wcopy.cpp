@@ -21,11 +21,11 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::complex64x2;
+using TC = mf::complex64x2;
 
 static void wcopy_core(std::ptrdiff_t n,
-                       const T *x, std::ptrdiff_t incx,
-                       T *y, std::ptrdiff_t incy)
+                       const TC *x, std::ptrdiff_t incx,
+                       TC *y, std::ptrdiff_t incy)
 {
     if (n <= 0) return;
     if (incx == 1 && incy == 1) {
@@ -43,7 +43,7 @@ static void wcopy_core(std::ptrdiff_t n,
             return;
         }
 #endif
-        std::memcpy(y, x, static_cast<std::size_t>(n) * sizeof(T));
+        std::memcpy(y, x, static_cast<std::size_t>(n) * sizeof(TC));
     } else {
         std::ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         std::ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
@@ -52,5 +52,5 @@ static void wcopy_core(std::ptrdiff_t n,
 }
 
 extern "C" {
-EPBLAS_FACADE_COPY(wcopy, T)
+EPBLAS_FACADE_COPY(wcopy, TC)
 }

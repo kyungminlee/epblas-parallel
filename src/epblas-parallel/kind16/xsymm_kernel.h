@@ -31,7 +31,7 @@
 #include <stddef.h>
 #include <quadmath.h>
 
-typedef __complex128 xsymm_T;
+typedef __complex128 xsymm_TC;
 
 /* Blocking plan for one xsymm call. side/uplo are uppercase Fortran codes;
  * K is the contraction dim (M for SIDE=L, N for SIDE=R). */
@@ -68,10 +68,10 @@ void xsymm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xsymm_plan_t *p,
 void xsymm_serial(
     char side, char uplo,
     ptrdiff_t m, ptrdiff_t n,
-    const xsymm_T *alpha_,
-    const xsymm_T *a, ptrdiff_t lda,
-    const xsymm_T *b, ptrdiff_t ldb,
-    const xsymm_T *beta_,
-    xsymm_T *c, ptrdiff_t ldc);
+    const xsymm_TC *alpha_,
+    const xsymm_TC *a, ptrdiff_t lda,
+    const xsymm_TC *b, ptrdiff_t ldb,
+    const xsymm_TC *beta_,
+    xsymm_TC *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_XSYMM_KERNEL_H */

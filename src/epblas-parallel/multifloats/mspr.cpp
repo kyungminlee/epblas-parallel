@@ -22,7 +22,7 @@
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
-using T = mf::float64x2;
+using TR = mf::float64x2;
 
 
 /* zero/one predicates — see mf_pred.h (2a-4 unification) */
@@ -36,11 +36,11 @@ namespace {
 static void mspr_core(
     char uplo,
     std::ptrdiff_t n,
-    const T *alpha_,
-    const T *x, std::ptrdiff_t incx,
-    T *ap)
+    const TR *alpha_,
+    const TR *x, std::ptrdiff_t incx,
+    TR *ap)
 {
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
     const char UPLO = up(&uplo);
 
     if (n == 0 || eq0(alpha.limbs[0], alpha.limbs[1])) return;
@@ -74,7 +74,7 @@ static void mspr_core(
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
-            const T tmp = alpha * T{xhp[j], xlp[j]};
+            const TR tmp = alpha * TR{xhp[j], xlp[j]};
             const std::ptrdiff_t kk = (j * (j + 1)) / 2;
             mf_kernels::dd_axpy(j + 1, xhp, xlp, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
@@ -84,7 +84,7 @@ static void mspr_core(
 #endif
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             if (eq0(xhp[j], xlp[j])) continue;
-            const T tmp = alpha * T{xhp[j], xlp[j]};
+            const TR tmp = alpha * TR{xhp[j], xlp[j]};
             const std::ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
             mf_kernels::dd_axpy(n - j, xhp + j, xlp + j, tmp.limbs[0], tmp.limbs[1], &ap[kk]);
         }
@@ -92,5 +92,5 @@ static void mspr_core(
 }
 
 extern "C" {
-EPBLAS_FACADE_SPR(mspr, T, T)
+EPBLAS_FACADE_SPR(mspr, TR, TR)
 }

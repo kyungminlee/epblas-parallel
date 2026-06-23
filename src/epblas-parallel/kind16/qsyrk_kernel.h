@@ -38,26 +38,26 @@
 
 #include <stddef.h>
 
-typedef __float128 qsyrk_T;
+typedef __float128 qsyrk_TR;
 
 #define QSYRK_MR 2
 #define QSYRK_NR 2
 
 /* Triangular β pre-pass: C := β·C over the UPLO triangle of C only (the
  * off-UPLO triangle is left untouched — the SYRK fuzz sentinel checks this). */
-void qsyrk_beta_u(ptrdiff_t n, qsyrk_T beta, qsyrk_T *c, ptrdiff_t ldc);
-void qsyrk_beta_l(ptrdiff_t n, qsyrk_T beta, qsyrk_T *c, ptrdiff_t ldc);
+void qsyrk_beta_u(ptrdiff_t n, qsyrk_TR beta, qsyrk_TR *c, ptrdiff_t ldc);
+void qsyrk_beta_l(ptrdiff_t n, qsyrk_TR beta, qsyrk_TR *c, ptrdiff_t ldc);
 
 /* Diagonal-aware writeback kernel for one packed (m,n,k) block whose top-left
  * corner sits at global diagonal offset (row_base - col_base). Off-diagonal
  * strict-triangle remainders are full GEMMs (qtri_gemm_kernel); the diagonal
  * NR×NR blocks go through a subbuffer so only the UPLO triangle merges into C. */
-void qsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyrk_T alpha,
-                    const qsyrk_T *a, const qsyrk_T *b,
-                    qsyrk_T *c, ptrdiff_t ldc, ptrdiff_t offset);
-void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyrk_T alpha,
-                    const qsyrk_T *a, const qsyrk_T *b,
-                    qsyrk_T *c, ptrdiff_t ldc, ptrdiff_t offset);
+void qsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyrk_TR alpha,
+                    const qsyrk_TR *a, const qsyrk_TR *b,
+                    qsyrk_TR *c, ptrdiff_t ldc, ptrdiff_t offset);
+void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyrk_TR alpha,
+                    const qsyrk_TR *a, const qsyrk_TR *b,
+                    qsyrk_TR *c, ptrdiff_t ldc, ptrdiff_t offset);
 
 /* Transpose path (trans='T'): accumulate the UPLO triangle of output column j
  * of C := alpha·A^T·A + C via the netlib-style stride-1 register inner product.
@@ -68,8 +68,8 @@ void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyrk_T alpha,
  * qsyrk_beta_{u,l}). Per-column so the parallel entry can `omp for` over j
  * (cyclic) for balanced triangular load with no shared pack or barrier. */
 void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
-                     qsyrk_T alpha, const qsyrk_T *a, ptrdiff_t lda,
-                     qsyrk_T *c, ptrdiff_t ldc);
+                     qsyrk_TR alpha, const qsyrk_TR *a, ptrdiff_t lda,
+                     qsyrk_TR *c, ptrdiff_t ldc);
 
 /* Pure-serial by-value entry (no OpenMP); the single-thread packed driver.
  * Shares the ptrdiff_t core ABI so callers already inside a parallel region can
@@ -78,9 +78,9 @@ void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
 void qsyrk_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const qsyrk_T *alpha_,
-    const qsyrk_T *a, ptrdiff_t lda,
-    const qsyrk_T *beta_,
-    qsyrk_T *c, ptrdiff_t ldc);
+    const qsyrk_TR *alpha_,
+    const qsyrk_TR *a, ptrdiff_t lda,
+    const qsyrk_TR *beta_,
+    qsyrk_TR *c, ptrdiff_t ldc);
 
 #endif /* EPBLAS_PARALLEL_KIND16_QSYRK_KERNEL_H */

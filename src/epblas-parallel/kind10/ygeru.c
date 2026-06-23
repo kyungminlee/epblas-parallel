@@ -18,19 +18,19 @@
  * Bit-exact (relerr 0). Uniform across the y* rank-update family. */
 #define YGERU_OMP_MIN 24
 
-typedef _Complex long double T;
-static const T ZERO = 0.0L + 0.0Li;
+typedef _Complex long double TC;
+static const TC ZERO = 0.0L + 0.0Li;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 static void ygeru_core(
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *restrict x, ptrdiff_t incx,
-    const T *restrict y, ptrdiff_t incy,
-    T *restrict a, ptrdiff_t lda)
+    const TC *alpha_,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *restrict y, ptrdiff_t incy,
+    TC *restrict a, ptrdiff_t lda)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
 
     if (m == 0 || n == 0 || alpha == ZERO) return;
 
@@ -39,10 +39,10 @@ static void ygeru_core(
         /* C-source branch on use_omp (Add-16). */
 #define YGERU_BODY                                                           \
         for (ptrdiff_t j = 0; j < n; ++j) {                                        \
-            const T yj = y[j];                                               \
+            const TC yj = y[j];                                               \
             if (yj != ZERO) {                                                \
-                const T t = alpha * yj;                                      \
-                T *aj = &A_(0, j);                                           \
+                const TC t = alpha * yj;                                      \
+                TC *aj = &A_(0, j);                                           \
                 for (ptrdiff_t i = 0; i < m; ++i) aj[i] += t * x[i];               \
             }                                                                \
         }
@@ -63,11 +63,11 @@ static void ygeru_core(
         const bool use_omp = (n >= YGERU_OMP_MIN && blas_omp_should_thread());
 #define YGERU_STRIDED_BODY                                                   \
         for (ptrdiff_t j = 0; j < n; ++j) {                                  \
-            const T yj = y[jy0 + j * incy];                                  \
+            const TC yj = y[jy0 + j * incy];                                  \
             if (yj != ZERO) {                                                \
-                const T t = alpha * yj;                                      \
+                const TC t = alpha * yj;                                      \
                 ptrdiff_t ix = ix0;                                          \
-                T *aj = &A_(0, j);                                           \
+                TC *aj = &A_(0, j);                                           \
                 for (ptrdiff_t i = 0; i < m; ++i) {                          \
                     aj[i] += t * x[ix];                                      \
                     ix += incx;                                              \
@@ -86,6 +86,6 @@ static void ygeru_core(
     }
 }
 
-EPBLAS_FACADE_GER(ygeru, T)
+EPBLAS_FACADE_GER(ygeru, TC)
 
 #undef A_

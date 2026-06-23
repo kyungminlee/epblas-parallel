@@ -27,7 +27,7 @@
 #include <stddef.h>
 #include <complex.h>
 
-typedef _Complex long double ytrmm_T;
+typedef _Complex long double ytrmm_TC;
 
 /* Blocked variant selectors (distinct names for the L and R families). */
 enum ytrmm_variant_L { YLLN, YLUN, YLLT, YLUT, YLLC, YLUC };
@@ -38,48 +38,48 @@ ptrdiff_t ytrmm_nb(void);
 
 /* ── SIDE='L' column-range cores: serial work over columns
  *    [j_start, j_end) of B; A is M×M. ──────────────────────────── */
-void ytrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
-                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
-                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrmm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
-                     const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
+void ytrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_TC alpha,
+                    const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb, bool nounit);
+void ytrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_TC alpha,
+                    const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb, bool nounit);
+void ytrmm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_TC alpha,
+                     const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void ytrmm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
-                     const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
+void ytrmm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_TC alpha,
+                     const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
 /* ── SIDE='R' row-range cores: serial work over rows [i_start, i_end)
  *    of B; A is N×N. ────────────────────────────────────────────── */
-void ytrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
-                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
-                    const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrmm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
-                     const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
+void ytrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_TC alpha,
+                    const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb, bool nounit);
+void ytrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_TC alpha,
+                    const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb, bool nounit);
+void ytrmm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_TC alpha,
+                     const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void ytrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
-                     const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
+void ytrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_TC alpha,
+                     const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
 /* Per-thread serial blocked-TRMM workers. SIDE='L' partitions B's columns
  * [j_start, j_end); SIDE='R' partitions B's rows [i_start, i_end).
  * Trailing updates call ygemm_serial. */
 void ytrmm_blocked_chunk_L(enum ytrmm_variant_L V, ptrdiff_t j_start, ptrdiff_t j_end,
-                           ptrdiff_t m, ptrdiff_t nb, ytrmm_T alpha,
-                           const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
+                           ptrdiff_t m, ptrdiff_t nb, ytrmm_TC alpha,
+                           const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb,
                            bool nounit);
 void ytrmm_blocked_chunk_R(enum ytrmm_variant_R V, ptrdiff_t i_start, ptrdiff_t i_end,
-                           ptrdiff_t n, ptrdiff_t nb, ytrmm_T alpha,
-                           const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
+                           ptrdiff_t n, ptrdiff_t nb, ytrmm_TC alpha,
+                           const ytrmm_TC *a, ptrdiff_t lda, ytrmm_TC *b, ptrdiff_t ldb,
                            bool nounit);
 
 /* Pure-serial by-value core (no OpenMP). */
 void ytrmm_serial(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const ytrmm_T *alpha_,
-    const ytrmm_T *a, ptrdiff_t lda,
-    ytrmm_T *b, ptrdiff_t ldb);
+    const ytrmm_TC *alpha_,
+    const ytrmm_TC *a, ptrdiff_t lda,
+    ytrmm_TC *b, ptrdiff_t ldb);
 
 #endif /* EPBLAS_PARALLEL_KIND10_YTRMM_KERNEL_H */

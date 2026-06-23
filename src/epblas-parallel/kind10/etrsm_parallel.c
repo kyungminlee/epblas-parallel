@@ -28,7 +28,7 @@
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
 #include "../common/epblas_facade.h"
 
-typedef etrsm_T T;
+typedef etrsm_TR TR;
 
 #define MR 2
 #define NR 2
@@ -36,9 +36,9 @@ typedef etrsm_T T;
 static void etrsm_core(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TR *alpha_,
+    const TR *a, ptrdiff_t lda,
+    TR *b, ptrdiff_t ldb)
 {
 #ifdef _OPENMP
     /* Called from inside another routine's parallel region: run fully
@@ -48,7 +48,7 @@ static void etrsm_core(
         return;
     }
 #endif
-    const T alpha = *alpha_;
+    const TR alpha = *alpha_;
 
     const bool lside = (blas_up(side)   == 'L');
     const bool upper = (blas_up(uplo)   == 'U');
@@ -66,8 +66,8 @@ static void etrsm_core(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(T);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(T);
+    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -89,8 +89,8 @@ static void etrsm_core(
      * alloc failure that skips a thread's loop body would deadlock the
      * others at no barrier here (there is none), but pre-allocating keeps
      * the failure path simple and race-free. */
-    T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
-    T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
+    TR **Ap_arr = calloc((size_t)nthreads, sizeof(TR *));
+    TR **Bp_arr = calloc((size_t)nthreads, sizeof(TR *));
     if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
     ptrdiff_t alloc_ok = 1;
     for (ptrdiff_t t = 0; t < nthreads; ++t) {
@@ -117,8 +117,8 @@ static void etrsm_core(
 #else
         ptrdiff_t tid = 0, nth = 1;
 #endif
-        T *Ap = Ap_arr[tid];
-        T *Bp = Bp_arr[tid];
+        TR *Ap = Ap_arr[tid];
+        TR *Bp = Bp_arr[tid];
 
         if (lside) {
             ptrdiff_t chunk = egemm_round_up((n + nth - 1) / nth, NR);
@@ -149,4 +149,4 @@ static void etrsm_core(
     free(Bp_arr);
 }
 
-EPBLAS_FACADE_TRMM(etrsm, T)
+EPBLAS_FACADE_TRMM(etrsm, TR)

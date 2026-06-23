@@ -54,13 +54,13 @@
  * xtrsv_blocked's Amdahl ceiling = M/nb for the dispatch heuristic. */
 #define XTRSM_XTRSV_LOOP_NB_HINT     64
 
-typedef xtrsm_T T;
+typedef xtrsm_TC TC;
 
 extern void xtrsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
-    const T *restrict a, ptrdiff_t lda,
-    T *restrict x, ptrdiff_t incx);
+    const TC *restrict a, ptrdiff_t lda,
+    TC *restrict x, ptrdiff_t incx);
 
 /* Maximum nrhs at which the xtrsv-loop fast path beats column-parallel
  * xtrsm. Derived from xtrsv_blocked's effective scaling factor:
@@ -85,8 +85,8 @@ static ptrdiff_t xtrsm_xtrsv_loop_max(ptrdiff_t m) {
     return v;
 }
 
-static const T ZERO = 0.0Q + 0.0Qi;
-static const T ONE  = 1.0Q + 0.0Qi;
+static const TC ZERO = 0.0Q + 0.0Qi;
+static const TC ONE  = 1.0Q + 0.0Qi;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
@@ -96,8 +96,8 @@ static const T ONE  = 1.0Q + 0.0Qi;
 
 #ifdef _OPENMP
 #define XTRSM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         if (n >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
@@ -111,8 +111,8 @@ static const T ONE  = 1.0Q + 0.0Qi;
         } else { core(0, n, m, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define XTRSM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         if (n >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
@@ -126,8 +126,8 @@ static const T ONE  = 1.0Q + 0.0Qi;
         } else { core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag); }     \
     }
 #define XTRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         if (m >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
@@ -141,8 +141,8 @@ static const T ONE  = 1.0Q + 0.0Qi;
         } else { core(0, m, n, alpha, a, lda, b, ldb, nounit); }            \
     }
 #define XTRSM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         if (m >= XTRSM_OMP_MIN && blas_omp_max_threads() > 1                 \
                               && !omp_in_parallel()) {                       \
@@ -157,26 +157,26 @@ static const T ONE  = 1.0Q + 0.0Qi;
     }
 #else
 #define XTRSM_OMP_WRAP_L(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         core(0, n, m, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRSM_OMP_WRAP_L_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         core(0, n, m, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
 #define XTRSM_OMP_WRAP_R(name, core)                                        \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         core(0, m, n, alpha, a, lda, b, ldb, nounit);                       \
     }
 #define XTRSM_OMP_WRAP_R_TC(name, core, cflag)                              \
-    static void name(ptrdiff_t m, ptrdiff_t n, T alpha,                     \
-                     const T *a, ptrdiff_t lda, T *b, ptrdiff_t ldb,        \
+    static void name(ptrdiff_t m, ptrdiff_t n, TC alpha,                     \
+                     const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,        \
                      bool nounit) {                                          \
         core(0, m, n, alpha, a, lda, b, ldb, nounit, cflag);                \
     }
@@ -200,11 +200,11 @@ XTRSM_OMP_WRAP_R_TC(xtrsm_ruc, xtrsm_rutc_core, 1)
 static void xtrsm_core(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    TC *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
     const char TRANS = xtrsm_uplo(transa);
@@ -267,7 +267,7 @@ static void xtrsm_core(
     }
 }
 
-EPBLAS_FACADE_TRMM(xtrsm, T)
+EPBLAS_FACADE_TRMM(xtrsm, TC)
 
 /* ── Block-parallel SIDE='L' variant ─────────────────────────────────
  *
@@ -298,11 +298,11 @@ static ptrdiff_t xtrsm_blocked_nb(void) {
 static void xtrsm_blocked_core(
     char side, char uplo, char transa, char diag,
     ptrdiff_t m, ptrdiff_t n,
-    const T *alpha_,
-    const T *a, ptrdiff_t lda,
-    T *b, ptrdiff_t ldb)
+    const TC *alpha_,
+    const TC *a, ptrdiff_t lda,
+    TC *b, ptrdiff_t ldb)
 {
-    const T alpha = *alpha_;
+    const TC alpha = *alpha_;
     const ptrdiff_t nb = xtrsm_blocked_nb();
     const char SIDE = xtrsm_uplo(side);
     const char UPLO = xtrsm_uplo(uplo);
@@ -322,9 +322,9 @@ static void xtrsm_blocked_core(
         return;
     }
 
-    const T neg_one = -1.0Q + 0.0Qi;
+    const TC neg_one = -1.0Q + 0.0Qi;
     const char TTc = (TRANS == 'C') ? 'C' : 'T';
-    const T one_v = ONE;
+    const TC one_v = ONE;
 
     const bool use_omp = (n >= 2 && blas_omp_should_thread());
 
@@ -413,7 +413,7 @@ static void xtrsm_blocked_core(
     }
 }
 
-EPBLAS_FACADE_TRMM(xtrsm_blocked, T)
+EPBLAS_FACADE_TRMM(xtrsm_blocked, TC)
 
 #undef A_
 #undef B_
