@@ -33,6 +33,25 @@ ptrdiff_t ytrsm_nb(void) {
     return g_nb_trsm;
 }
 
+/* Block size + blocking decision for one ytrsm solve. See ytrsm_kernel.h.
+ *
+ * Splitting the [nb, 2·nb) range (the old naive-only small regime) into
+ * nb/2 diagonal blocks routes ~half the FLOPs through the packed
+ * ygemm_serial trailing update, clearing the small-N gap vs OpenBLAS's
+ * always-packed kernel (which never falls back to a naive path). The
+ * axis≥2·nb path keeps the shipped nb granularity unchanged.
+ *
+ * The one exception is SIDE='L', TRANSA='T' (non-conjugate): its naive
+ * inner-product core already trails only gfortran (par beats OpenBLAS by
+ * ~25%) and blocking it through the small regime *widens* that gfortran
+ * gap, so it stays unblocked until the regular 2·nb threshold. */
+ptrdiff_t ytrsm_block_size(ptrdiff_t axis, bool l_trans_plain) {
+    const ptrdiff_t nb = ytrsm_nb();
+    if (axis >= 2 * nb) return nb;                    /* shipped large-axis path */
+    if (axis >= nb && !l_trans_plain) return nb / 2;  /* split the nb-regime */
+    return 0;                                         /* naive */
+}
+
 
 static const TC ZERO = 0.0L + 0.0Li;
 static const TC ONE  = 1.0L + 0.0Li;
@@ -382,8 +401,8 @@ void ytrsm_serial(
     }
 
     if (SIDE == 'L') {
-        const ptrdiff_t use_blocked = (m >= 2 * ytrsm_nb());
-        const ptrdiff_t nb = ytrsm_nb();
+        const ptrdiff_t nb = ytrsm_block_size(m, TRANS == 'T');
+        const ptrdiff_t use_blocked = (nb > 0);
         if (TRANS == 'N') {
             if (UPLO == 'L') {
                 if (use_blocked) ytrsm_blocked_chunk(YLLN, 0, n, m, nb, alpha, a, lda, b, ldb, nounit);
@@ -410,8 +429,8 @@ void ytrsm_serial(
             }
         }
     } else {
-        const ptrdiff_t use_blocked = (n >= 2 * ytrsm_nb());
-        const ptrdiff_t nb = ytrsm_nb();
+        const ptrdiff_t nb = ytrsm_block_size(n, false);
+        const ptrdiff_t use_blocked = (nb > 0);
         const bool upper = (UPLO == 'U');
         const bool trans = (TRANS != 'N');
         const bool conj  = (TRANS == 'C');

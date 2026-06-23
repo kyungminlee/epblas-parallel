@@ -97,10 +97,9 @@ YTRSM_OMP_WRAP_TC(ytrsm_luc, ytrsm_lutc_core, 1)
 /* ── Blocked SIDE='L': one outer `omp parallel` partitions B's columns
  *    across threads; each thread runs the serial blocked worker on its
  *    own column chunk. ─────────────────────────────────────────── */
-static void blocked_dispatch(enum ytrsm_variant V, ptrdiff_t m, ptrdiff_t n, TC alpha,
+static void blocked_dispatch(enum ytrsm_variant V, ptrdiff_t m, ptrdiff_t n, ptrdiff_t nb, TC alpha,
                              const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
-    const ptrdiff_t nb = ytrsm_nb();
 #ifdef _OPENMP
     if (n >= YTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
         #pragma omp parallel
@@ -121,10 +120,9 @@ static void blocked_dispatch(enum ytrsm_variant V, ptrdiff_t m, ptrdiff_t n, TC 
  *    across threads; each thread runs the serial blocked R worker on its
  *    own row band. Mirrors blocked_dispatch (SIDE='L'). ──────────── */
 static void blocked_dispatch_R(bool upper, bool trans, bool conj,
-                               ptrdiff_t m, ptrdiff_t n, TC alpha,
+                               ptrdiff_t m, ptrdiff_t n, ptrdiff_t nb, TC alpha,
                                const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb, bool nounit)
 {
-    const ptrdiff_t nb = ytrsm_nb();
 #ifdef _OPENMP
     if (m >= YTRSM_OMP_N_MIN && blas_omp_max_threads() > 1) {
         #pragma omp parallel
@@ -225,37 +223,39 @@ static void ytrsm_core(
     }
 
     if (SIDE == 'L') {
-        const ptrdiff_t use_blocked = (m >= 2 * ytrsm_nb());
+        const ptrdiff_t nb = ytrsm_block_size(m, TRANS == 'T');
+        const ptrdiff_t use_blocked = (nb > 0);
         if (TRANS == 'N') {
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch(YLLN, m, n, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch(YLLN, m, n, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_lln(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch(YLUN, m, n, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch(YLUN, m, n, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_lun(m, n, alpha, a, lda, b, ldb, nounit);
             }
         } else if (TRANS == 'T') {
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch(YLLT, m, n, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch(YLLT, m, n, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_llt(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch(YLUT, m, n, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch(YLUT, m, n, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_lut(m, n, alpha, a, lda, b, ldb, nounit);
             }
         } else { /* 'C' */
             if (UPLO == 'L') {
-                if (use_blocked) blocked_dispatch(YLLC, m, n, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch(YLLC, m, n, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_llc(m, n, alpha, a, lda, b, ldb, nounit);
             } else {
-                if (use_blocked) blocked_dispatch(YLUC, m, n, alpha, a, lda, b, ldb, nounit);
+                if (use_blocked) blocked_dispatch(YLUC, m, n, nb, alpha, a, lda, b, ldb, nounit);
                 else             ytrsm_luc(m, n, alpha, a, lda, b, ldb, nounit);
             }
         }
     } else {
-        const ptrdiff_t use_blocked = (n >= 2 * ytrsm_nb());
+        const ptrdiff_t nb = ytrsm_block_size(n, false);
+        const ptrdiff_t use_blocked = (nb > 0);
         if (use_blocked) {
             blocked_dispatch_R(UPLO == 'U', TRANS != 'N', TRANS == 'C',
-                               m, n, alpha, a, lda, b, ldb, nounit);
+                               m, n, nb, alpha, a, lda, b, ldb, nounit);
         } else if (TRANS == 'N') {
             if (UPLO == 'L') ytrsm_rln(m, n, alpha, a, lda, b, ldb, nounit);
             else             ytrsm_run(m, n, alpha, a, lda, b, ldb, nounit);

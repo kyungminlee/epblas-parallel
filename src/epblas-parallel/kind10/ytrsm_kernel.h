@@ -38,6 +38,14 @@ enum ytrsm_variant { YLLN, YLUN, YLLT, YLUT, YLLC, YLUC };
 /* Env-tunable block size for the SIDE='L' blocked path (YTRSM_NB). */
 ptrdiff_t ytrsm_nb(void);
 
+/* Block size + blocking decision for one ytrsm solve.
+ *   axis          — the triangular dimension (m for SIDE='L', n for SIDE='R').
+ *   l_trans_plain — set for SIDE='L', TRANSA='T' (non-conjugate): its naive
+ *                   inner-product core still beats the blocked path through
+ *                   the [nb, 2·nb) regime, so it is kept unblocked there.
+ * Returns the diagonal block size, or 0 to run the naive core. */
+ptrdiff_t ytrsm_block_size(ptrdiff_t axis, bool l_trans_plain);
+
 /* ── SIDE='L' column-range cores: serial work over columns
  *    [j_start, j_end) of B; A is M×M. ──────────────────────────── */
 void ytrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrsm_TC alpha,
