@@ -33,8 +33,6 @@ using mf_pred::ceq0;
 using mf_pred::ceq1;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
-namespace {
-}  // namespace
 
 static void wsyrk_core(
     char uplo, char trans,

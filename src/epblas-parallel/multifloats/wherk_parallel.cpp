@@ -36,8 +36,6 @@ using mf_pred::eq0;
 using mf_pred::eq1;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
-namespace {
-}  // namespace
 
 static void wherk_core(
     char uplo, char trans,

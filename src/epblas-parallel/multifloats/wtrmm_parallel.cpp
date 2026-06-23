@@ -36,8 +36,6 @@ using TC = mf::complex64x2;
 using mf_pred::ceq0;
 
 using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
-namespace {
-}  // namespace
 
 static void wtrmm_core(
     char side, char uplo, char transa, char diag,
