@@ -41,14 +41,19 @@ ptrdiff_t ytrsm_nb(void) {
  * always-packed kernel (which never falls back to a naive path). The
  * axis≥2·nb path keeps the shipped nb granularity unchanged.
  *
- * The one exception is SIDE='L', TRANSA='T' (non-conjugate): its naive
- * inner-product core already trails only gfortran (par beats OpenBLAS by
- * ~25%) and blocking it through the small regime *widens* that gfortran
- * gap, so it stays unblocked until the regular 2·nb threshold. */
+ * The one exception is SIDE='L', TRANSA='T' (non-conjugate): it runs the
+ * naive inner-product core at *every* axis. Its k-dot core now ties the
+ * gfortran netlib reference (see ytrsm_lltc_core), and that reference is
+ * itself unblocked — so blocking only adds a packed-transpose ygemm
+ * trailing update that loses to the plain dot (par/mig drifts to ~1.04 at
+ * axis≥128). Unblocked, par ties gfortran and beats OpenBLAS ~25-35% at
+ * every axis, serial and threaded (the naive L cores thread over B's
+ * independent columns). */
 ptrdiff_t ytrsm_block_size(ptrdiff_t axis, bool l_trans_plain) {
     const ptrdiff_t nb = ytrsm_nb();
+    if (l_trans_plain) return 0;                      /* naive at every axis */
     if (axis >= 2 * nb) return nb;                    /* shipped large-axis path */
-    if (axis >= nb && !l_trans_plain) return nb / 2;  /* split the nb-regime */
+    if (axis >= nb) return nb / 2;                    /* split the nb-regime */
     return 0;                                         /* naive */
 }
 
@@ -111,30 +116,73 @@ void ytrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
     }
 }
 
-/* (L, L, T or C): inner-product form on op(A)ᵀ where op may conj. */
+/* (L, L, T or C): inner-product form on op(A)ᵀ where op may conj.
+ *
+ * The k-dot decomposes each _Complex MAC into scalar re/im long-double
+ * locals (the [a|y]erot/ygemv trick): under gcc-15 the natural _Complex
+ * form emits a redundant fxch per iteration in this routine's register
+ * context, costing ~3-5% vs the gfortran netlib reference; the scalar
+ * form keeps the x87 stack tight (one fewer fxch/iter, gfortran parity).
+ * Bit-identical — same products, same accumulation order. */
 void ytrsm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
                      const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
+    const long double *ar = (const long double *)a;
+    long double *br = (long double *)b;
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        const long double *bc = br + 2 * (size_t)j * ldb;
         for (ptrdiff_t i = m - 1; i >= 0; --i) {
-            TC t = alpha * B_(i, j);
-            for (ptrdiff_t k = i + 1; k < m; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
+            TC t0 = alpha * B_(i, j);
+            long double tr = creall(t0), ti = cimagl(t0);
+            const long double *ac = ar + 2 * (size_t)i * lda;
+            if (conj_flag) {
+                for (ptrdiff_t k = i + 1; k < m; ++k) {
+                    long double are = ac[2*k], aim = -ac[2*k+1];
+                    long double bre = bc[2*k], bim = bc[2*k+1];
+                    tr -= are*bre - aim*bim; ti -= are*bim + aim*bre;
+                }
+            } else {
+                for (ptrdiff_t k = i + 1; k < m; ++k) {
+                    long double are = ac[2*k], aim = ac[2*k+1];
+                    long double bre = bc[2*k], bim = bc[2*k+1];
+                    tr -= are*bre - aim*bim; ti -= are*bim + aim*bre;
+                }
+            }
+            TC t = tr + ti * (long double complex)I;
             if (nounit) t /= A_op(a, lda, i, i, conj_flag);
             B_(i, j) = t;
         }
     }
 }
 
-/* (L, U, T or C). */
+/* (L, U, T or C). Scalar re/im k-dot — see ytrsm_lltc_core. */
 void ytrsm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, TC alpha,
                      const TC *a, ptrdiff_t lda, TC *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag)
 {
+    const long double *ar = (const long double *)a;
+    long double *br = (long double *)b;
     for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        const long double *bc = br + 2 * (size_t)j * ldb;
         for (ptrdiff_t i = 0; i < m; ++i) {
-            TC t = alpha * B_(i, j);
-            for (ptrdiff_t k = 0; k < i; ++k) t -= A_op(a, lda, k, i, conj_flag) * B_(k, j);
+            TC t0 = alpha * B_(i, j);
+            long double tr = creall(t0), ti = cimagl(t0);
+            const long double *ac = ar + 2 * (size_t)i * lda;
+            if (conj_flag) {
+                for (ptrdiff_t k = 0; k < i; ++k) {
+                    long double are = ac[2*k], aim = -ac[2*k+1];
+                    long double bre = bc[2*k], bim = bc[2*k+1];
+                    tr -= are*bre - aim*bim; ti -= are*bim + aim*bre;
+                }
+            } else {
+                for (ptrdiff_t k = 0; k < i; ++k) {
+                    long double are = ac[2*k], aim = ac[2*k+1];
+                    long double bre = bc[2*k], bim = bc[2*k+1];
+                    tr -= are*bre - aim*bim; ti -= are*bim + aim*bre;
+                }
+            }
+            TC t = tr + ti * (long double complex)I;
             if (nounit) t /= A_op(a, lda, i, i, conj_flag);
             B_(i, j) = t;
         }
