@@ -20,6 +20,8 @@
 
 typedef xgemmtr_TC TC;
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 char xgemmtr_trans_code(char c) {
     return blas_up(c);
 }
@@ -67,7 +69,7 @@ void xgemmtr_compute_core(
                 TC bl;
                 if (!trans_b)      bl = B_(l, j);
                 else if (!conj_b)  bl = B_(j, l);
-                else               bl = conjq(B_(j, l));
+                else               bl = cconj(B_(j, l));
                 if (bl != zero) {
                     const TC t = alpha * bl;
                     const TC *al = &A_(0, l);
@@ -80,13 +82,13 @@ void xgemmtr_compute_core(
                 TC s = zero;
                 if (!trans_b) {
                     if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i)        * B_(l, j);
-                    else         for (ptrdiff_t l = 0; l < k; ++l) s += conjq(A_(l, i)) * B_(l, j);
+                    else         for (ptrdiff_t l = 0; l < k; ++l) s += cconj(A_(l, i)) * B_(l, j);
                 } else if (!conj_b) {
                     if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i)        * B_(j, l);
-                    else         for (ptrdiff_t l = 0; l < k; ++l) s += conjq(A_(l, i)) * B_(j, l);
+                    else         for (ptrdiff_t l = 0; l < k; ++l) s += cconj(A_(l, i)) * B_(j, l);
                 } else {
-                    if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i)        * conjq(B_(j, l));
-                    else         for (ptrdiff_t l = 0; l < k; ++l) s += conjq(A_(l, i)) * conjq(B_(j, l));
+                    if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i)        * cconj(B_(j, l));
+                    else         for (ptrdiff_t l = 0; l < k; ++l) s += cconj(A_(l, i)) * cconj(B_(j, l));
                 }
                 cj[i] = (beta == zero) ? alpha * s : alpha * s + beta * cj[i];
             }

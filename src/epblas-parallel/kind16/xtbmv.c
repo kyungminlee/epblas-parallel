@@ -16,6 +16,8 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 /* Thread-entry threshold. x:=op(A)*x is a pure matvec (no solve dependency):
@@ -84,19 +86,19 @@ void xtbmv_core(
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TC tmp = x[j];
                     const ptrdiff_t L = k - j;
-                    if (nounit) tmp *= (noconj ? A_(k, j) : conjq(A_(k, j)));
+                    if (nounit) tmp *= (noconj ? A_(k, j) : cconj(A_(k, j)));
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     if (noconj) for (ptrdiff_t i = j - 1; i >= i_lo; --i) tmp += A_(L + i, j) * x[i];
-                    else        for (ptrdiff_t i = j - 1; i >= i_lo; --i) tmp += conjq(A_(L + i, j)) * x[i];
+                    else        for (ptrdiff_t i = j - 1; i >= i_lo; --i) tmp += cconj(A_(L + i, j)) * x[i];
                     x[j] = tmp;
                 }
             } else {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TC tmp = x[j];
-                    if (nounit) tmp *= (noconj ? A_(0, j) : conjq(A_(0, j)));
+                    if (nounit) tmp *= (noconj ? A_(0, j) : cconj(A_(0, j)));
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     if (noconj) for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += A_(i - j, j) * x[i];
-                    else        for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += conjq(A_(i - j, j)) * x[i];
+                    else        for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += cconj(A_(i - j, j)) * x[i];
                     x[j] = tmp;
                 }
             }
@@ -148,10 +150,10 @@ void xtbmv_core(
                     kx -= incx;
                     ptrdiff_t ix = kx;
                     const ptrdiff_t L = k - j;
-                    if (nounit) tmp *= (noconj ? A_(k, j) : conjq(A_(k, j)));
+                    if (nounit) tmp *= (noconj ? A_(k, j) : cconj(A_(k, j)));
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
-                        const TC aij = noconj ? A_(L + i, j) : conjq(A_(L + i, j));
+                        const TC aij = noconj ? A_(L + i, j) : cconj(A_(L + i, j));
                         tmp += aij * x[ix];
                         ix -= incx;
                     }
@@ -164,10 +166,10 @@ void xtbmv_core(
                     TC tmp = x[jx];
                     kx += incx;
                     ptrdiff_t ix = kx;
-                    if (nounit) tmp *= (noconj ? A_(0, j) : conjq(A_(0, j)));
+                    if (nounit) tmp *= (noconj ? A_(0, j) : cconj(A_(0, j)));
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
-                        const TC aij = noconj ? A_(i - j, j) : conjq(A_(i - j, j));
+                        const TC aij = noconj ? A_(i - j, j) : cconj(A_(i - j, j));
                         tmp += aij * x[ix];
                         ix += incx;
                     }
@@ -214,18 +216,18 @@ static void xtbmv_rowgather(bool upper, ptrdiff_t trans, bool conj, bool nounit,
             for (ptrdiff_t i = lo; i < hi; ++i) {
                 const TC *base = &A_(0, i);
                 ptrdiff_t len = (i < k) ? i : k;
-                TC s = nounit ? (conj ? conjq(base[k]) : base[k]) * x[i] : x[i];
+                TC s = nounit ? (conj ? cconj(base[k]) : base[k]) * x[i] : x[i];
                 if (!conj) for (ptrdiff_t d = 1; d <= len; ++d) s += base[k - d] * x[i - d];
-                else       for (ptrdiff_t d = 1; d <= len; ++d) s += conjq(base[k - d]) * x[i - d];
+                else       for (ptrdiff_t d = 1; d <= len; ++d) s += cconj(base[k - d]) * x[i - d];
                 y[i] = s;
             }
         } else {
             for (ptrdiff_t i = lo; i < hi; ++i) {
                 const TC *base = &A_(0, i);
                 ptrdiff_t len = (n - 1 - i < k) ? n - 1 - i : k;
-                TC s = nounit ? (conj ? conjq(base[0]) : base[0]) * x[i] : x[i];
+                TC s = nounit ? (conj ? cconj(base[0]) : base[0]) * x[i] : x[i];
                 if (!conj) for (ptrdiff_t d = 1; d <= len; ++d) s += base[d] * x[i + d];
-                else       for (ptrdiff_t d = 1; d <= len; ++d) s += conjq(base[d]) * x[i + d];
+                else       for (ptrdiff_t d = 1; d <= len; ++d) s += cconj(base[d]) * x[i + d];
                 y[i] = s;
             }
         }

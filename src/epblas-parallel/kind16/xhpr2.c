@@ -16,6 +16,8 @@
 #define XHPR2_OMP_MIN 64
 
 typedef __complex128 TC;
+
+static inline TC cconj(TC z) { return conjq(z); }
 typedef __float128 TR;
 
 
@@ -42,8 +44,8 @@ void xhpr2_core(
             for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = (j * (j + 1)) / 2;
                 if (x[j] != zero || y[j] != zero) {
-                    const TC t1 = alpha * conjq(y[j]);
-                    const TC t2 = conjq(alpha * x[j]);
+                    const TC t1 = alpha * cconj(y[j]);
+                    const TC t2 = cconj(alpha * x[j]);
                     for (ptrdiff_t i = 0; i < j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
                     ap[kk + j] = (TR)crealq(ap[kk + j]) + (TR)crealq(x[j] * t1 + y[j] * t2);
                 } else {
@@ -58,8 +60,8 @@ void xhpr2_core(
             for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
                 if (x[j] != zero || y[j] != zero) {
-                    const TC t1 = alpha * conjq(y[j]);
-                    const TC t2 = conjq(alpha * x[j]);
+                    const TC t1 = alpha * cconj(y[j]);
+                    const TC t2 = cconj(alpha * x[j]);
                     ap[kk] = (TR)crealq(ap[kk]) + (TR)crealq(x[j] * t1 + y[j] * t2);
                     for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
                 } else {
@@ -75,8 +77,8 @@ void xhpr2_core(
         if (UPLO == 'U') {
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
-                    const TC t1 = alpha * conjq(y[jy]);
-                    const TC t2 = conjq(alpha * x[jx]);
+                    const TC t1 = alpha * cconj(y[jy]);
+                    const TC t2 = cconj(alpha * x[jx]);
                     ptrdiff_t ix = kx, iy = ky;
                     for (ptrdiff_t k = kk; k < kk + j; ++k) {
                         ap[k] += x[ix] * t1 + y[iy] * t2;
@@ -92,8 +94,8 @@ void xhpr2_core(
         } else {
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
-                    const TC t1 = alpha * conjq(y[jy]);
-                    const TC t2 = conjq(alpha * x[jx]);
+                    const TC t1 = alpha * cconj(y[jy]);
+                    const TC t2 = cconj(alpha * x[jx]);
                     ap[kk] = (TR)crealq(ap[kk]) + (TR)crealq(x[jx] * t1 + y[jy] * t2);
                     ptrdiff_t ix = jx, iy = jy;
                     for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {

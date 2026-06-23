@@ -19,6 +19,8 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 void xher2_core(
@@ -43,8 +45,8 @@ void xher2_core(
         for (ptrdiff_t j = 0; j < n; ++j) {
             const TC xj = x[j], yj = y[j];
             if (xj != zero || yj != zero) {
-                const TC temp1 = alpha * conjq(yj);
-                const TC temp2 = conjq(alpha * xj);
+                const TC temp1 = alpha * cconj(yj);
+                const TC temp2 = cconj(alpha * xj);
                 TC *aj = &A_(0, j);
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j + 1; i < n; ++i) aj[i] += x[i] * temp1 + y[i] * temp2;
@@ -62,8 +64,8 @@ void xher2_core(
             const TC xj = x[kx + (ptrdiff_t)j * incx];
             const TC yj = y[ky + (ptrdiff_t)j * incy];
             if (xj != zero || yj != zero) {
-                const TC temp1 = alpha * conjq(yj);
-                const TC temp2 = conjq(alpha * xj);
+                const TC temp1 = alpha * cconj(yj);
+                const TC temp2 = cconj(alpha * xj);
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j + 1; i < n; ++i)
                         A_(i, j) += x[kx + (ptrdiff_t)i * incx] * temp1 + y[ky + (ptrdiff_t)i * incy] * temp2;

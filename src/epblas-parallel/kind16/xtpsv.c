@@ -19,9 +19,11 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 /* Matrix element with optional conjugation ('C' ⇒ conjugate, 'T' ⇒ as-is). */
 static inline TC xelem(TC a, bool noconj) {
-    return noconj ? a : conjq(a);
+    return noconj ? a : cconj(a);
 }
 
 #ifdef _OPENMP
@@ -74,8 +76,8 @@ static void xtpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                     TC tmp = x[j];
                     ptrdiff_t k = kk;
                     if (noconj) for (ptrdiff_t i = 0; i < j; ++i) { tmp -= ap[k] * x[i]; ++k; }
-                    else        for (ptrdiff_t i = 0; i < j; ++i) { tmp -= conjq(ap[k]) * x[i]; ++k; }
-                    if (nounit) tmp /= (noconj ? ap[kk + j] : conjq(ap[kk + j]));
+                    else        for (ptrdiff_t i = 0; i < j; ++i) { tmp -= cconj(ap[k]) * x[i]; ++k; }
+                    if (nounit) tmp /= (noconj ? ap[kk + j] : cconj(ap[kk + j]));
                     x[j] = tmp;
                     kk += j + 1;
                 }
@@ -85,8 +87,8 @@ static void xtpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                     TC tmp = x[j];
                     ptrdiff_t k = kk;
                     if (noconj) for (ptrdiff_t i = n - 1; i > j; --i) { tmp -= ap[k] * x[i]; --k; }
-                    else        for (ptrdiff_t i = n - 1; i > j; --i) { tmp -= conjq(ap[k]) * x[i]; --k; }
-                    if (nounit) tmp /= (noconj ? ap[kk - (n - 1 - j)] : conjq(ap[kk - (n - 1 - j)]));
+                    else        for (ptrdiff_t i = n - 1; i > j; --i) { tmp -= cconj(ap[k]) * x[i]; --k; }
+                    if (nounit) tmp /= (noconj ? ap[kk - (n - 1 - j)] : cconj(ap[kk - (n - 1 - j)]));
                     x[j] = tmp;
                     kk -= (n - j);
                 }
@@ -136,10 +138,10 @@ static void xtpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                     TC tmp = x[jx];
                     ptrdiff_t ix = kx;
                     for (ptrdiff_t k = kk; k < kk + j; ++k) {
-                        tmp -= (noconj ? ap[k] : conjq(ap[k])) * x[ix];
+                        tmp -= (noconj ? ap[k] : cconj(ap[k])) * x[ix];
                         ix += incx;
                     }
-                    if (nounit) tmp /= (noconj ? ap[kk + j] : conjq(ap[kk + j]));
+                    if (nounit) tmp /= (noconj ? ap[kk + j] : cconj(ap[kk + j]));
                     x[jx] = tmp;
                     jx += incx;
                     kk += j + 1;
@@ -152,10 +154,10 @@ static void xtpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                     TC tmp = x[jx];
                     ptrdiff_t ix = kx;
                     for (ptrdiff_t k = kk; k > kk - (n - 1 - j); --k) {
-                        tmp -= (noconj ? ap[k] : conjq(ap[k])) * x[ix];
+                        tmp -= (noconj ? ap[k] : cconj(ap[k])) * x[ix];
                         ix -= incx;
                     }
-                    if (nounit) tmp /= (noconj ? ap[kk - (n - 1 - j)] : conjq(ap[kk - (n - 1 - j)]));
+                    if (nounit) tmp /= (noconj ? ap[kk - (n - 1 - j)] : cconj(ap[kk - (n - 1 - j)]));
                     x[jx] = tmp;
                     jx -= incx;
                     kk -= (n - j);

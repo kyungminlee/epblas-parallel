@@ -16,6 +16,8 @@
 #define XHER_OMP_MIN 64
 
 typedef __complex128 TC;
+
+static inline TC cconj(TC z) { return conjq(z); }
 typedef __float128   TR;
 
 
@@ -43,7 +45,7 @@ void xher_core(
         for (ptrdiff_t j = 0; j < n; ++j) {
             const TC xj = x[j];
             if (xj != czero) {
-                const TC t = alpha * conjq(xj);
+                const TC t = alpha * cconj(xj);
                 TC *aj = &A_(0, j);
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j + 1; i < n; ++i) aj[i] += t * x[i];
@@ -59,7 +61,7 @@ void xher_core(
         for (ptrdiff_t j = 0; j < n; ++j) {
             const TC xj = x[kx + (ptrdiff_t)j * incx];
             if (xj != czero) {
-                const TC t = alpha * conjq(xj);
+                const TC t = alpha * cconj(xj);
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j + 1; i < n; ++i) A_(i, j) += t * x[kx + (ptrdiff_t)i * incx];
                     A_(j, j) = crealq(A_(j, j)) + crealq(t * x[kx + (ptrdiff_t)j * incx]);

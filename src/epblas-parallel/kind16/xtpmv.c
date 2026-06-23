@@ -28,6 +28,8 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #ifdef _OPENMP
 static inline size_t col_start_U(ptrdiff_t j) { return (size_t)j * (size_t)(j + 1) / 2; }
 static inline size_t col_start_L(ptrdiff_t j, ptrdiff_t n) {
@@ -102,7 +104,7 @@ static void tpmv_kernel_T(bool upper, bool nounit, bool conj, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
                           const TC *ap, const TC *x, TC *y)
 {
-#define APV(k) (conj ? conjq(ap[k]) : ap[k])
+#define APV(k) (conj ? cconj(ap[k]) : ap[k])
     if (upper) {
         /* Diagonal at column END (cs+j): accumulate the run first, fold diag
          * last to keep the packed read stream sequential. */
@@ -238,10 +240,10 @@ void xtpmv_core(
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TC tmp = x[j];
-                    if (nounit) tmp *= (noconj ? ap[kk] : conjq(ap[kk]));
+                    if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
                     ptrdiff_t k = kk - 1;
                     if (noconj) for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
-                    else        for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += conjq(ap[k]) * x[i]; --k; }
+                    else        for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += cconj(ap[k]) * x[i]; --k; }
                     x[j] = tmp;
                     kk -= j + 1;
                 }
@@ -249,10 +251,10 @@ void xtpmv_core(
                 ptrdiff_t kk = 0;
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TC tmp = x[j];
-                    if (nounit) tmp *= (noconj ? ap[kk] : conjq(ap[kk]));
+                    if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
                     ptrdiff_t k = kk + 1;
                     if (noconj) for (ptrdiff_t i = j + 1; i < n; ++i) { tmp += ap[k] * x[i]; ++k; }
-                    else        for (ptrdiff_t i = j + 1; i < n; ++i) { tmp += conjq(ap[k]) * x[i]; ++k; }
+                    else        for (ptrdiff_t i = j + 1; i < n; ++i) { tmp += cconj(ap[k]) * x[i]; ++k; }
                     x[j] = tmp;
                     kk += n - j;
                 }
@@ -302,10 +304,10 @@ void xtpmv_core(
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TC tmp = x[jx];
                     ptrdiff_t ix = jx;
-                    if (nounit) tmp *= (noconj ? ap[kk] : conjq(ap[kk]));
+                    if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
                     for (ptrdiff_t k = kk - 1; k >= kk - j; --k) {
                         ix -= incx;
-                        tmp += (noconj ? ap[k] : conjq(ap[k])) * x[ix];
+                        tmp += (noconj ? ap[k] : cconj(ap[k])) * x[ix];
                     }
                     x[jx] = tmp;
                     jx -= incx;
@@ -317,10 +319,10 @@ void xtpmv_core(
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TC tmp = x[jx];
                     ptrdiff_t ix = jx;
-                    if (nounit) tmp *= (noconj ? ap[kk] : conjq(ap[kk]));
+                    if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
                     for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                         ix += incx;
-                        tmp += (noconj ? ap[k] : conjq(ap[k])) * x[ix];
+                        tmp += (noconj ? ap[k] : cconj(ap[k])) * x[ix];
                     }
                     x[jx] = tmp;
                     jx += incx;

@@ -26,6 +26,8 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 #ifndef XTRMV_OMP_MIN
@@ -89,9 +91,9 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TC temp = x[j];
-                    if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
+                    if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
                     const TC *aj = &A_(0, j);
-                    if (conj_a) for (ptrdiff_t i = j + 1; i < n; ++i) temp += conjq(aj[i]) * x[i];
+                    if (conj_a) for (ptrdiff_t i = j + 1; i < n; ++i) temp += cconj(aj[i]) * x[i];
                     else        for (ptrdiff_t i = j + 1; i < n; ++i) temp += aj[i] * x[i];
                     y_buf[j] = temp;
                 }
@@ -99,9 +101,9 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TC temp = x[j];
-                    if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
+                    if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
                     const TC *aj = &A_(0, j);
-                    if (conj_a) for (ptrdiff_t i = 0; i < j; ++i) temp += conjq(aj[i]) * x[i];
+                    if (conj_a) for (ptrdiff_t i = 0; i < j; ++i) temp += cconj(aj[i]) * x[i];
                     else        for (ptrdiff_t i = 0; i < j; ++i) temp += aj[i] * x[i];
                     y_buf[j] = temp;
                 }
@@ -158,10 +160,10 @@ void xtrmv_core(
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TC temp = x[j];
-                    if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
+                    if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
                     const TC *aj = &A_(0, j);
                     if (conj_a) {
-                        for (ptrdiff_t i = j + 1; i < n; ++i) temp += conjq(aj[i]) * x[i];
+                        for (ptrdiff_t i = j + 1; i < n; ++i) temp += cconj(aj[i]) * x[i];
                     } else {
                         for (ptrdiff_t i = j + 1; i < n; ++i) temp += aj[i] * x[i];
                     }
@@ -170,10 +172,10 @@ void xtrmv_core(
             } else {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TC temp = x[j];
-                    if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
+                    if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
                     const TC *aj = &A_(0, j);
                     if (conj_a) {
-                        for (ptrdiff_t i = 0; i < j; ++i) temp += conjq(aj[i]) * x[i];
+                        for (ptrdiff_t i = 0; i < j; ++i) temp += cconj(aj[i]) * x[i];
                     } else {
                         for (ptrdiff_t i = 0; i < j; ++i) temp += aj[i] * x[i];
                     }
@@ -222,9 +224,9 @@ void xtrmv_core(
             if (UPLO == 'L') {
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TC temp = x[kx + j * incx];
-                    if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
+                    if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
                     for (ptrdiff_t i = j + 1; i < n; ++i) {
-                        const TC aij = conj_a ? conjq(A_(i, j)) : A_(i, j);
+                        const TC aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
                         temp += aij * x[kx + i * incx];
                     }
                     x[kx + j * incx] = temp;
@@ -232,9 +234,9 @@ void xtrmv_core(
             } else {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TC temp = x[kx + j * incx];
-                    if (nounit) temp *= (conj_a ? conjq(A_(j, j)) : A_(j, j));
+                    if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
                     for (ptrdiff_t i = 0; i < j; ++i) {
-                        const TC aij = conj_a ? conjq(A_(i, j)) : A_(i, j);
+                        const TC aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
                         temp += aij * x[kx + i * incx];
                     }
                     x[kx + j * incx] = temp;

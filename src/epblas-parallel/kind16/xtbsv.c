@@ -11,6 +11,8 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 void xtbsv_core(
@@ -56,8 +58,8 @@ void xtbsv_core(
                     const ptrdiff_t L = k - j;
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     if (noconj) for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= A_(L + i, j) * x[i];
-                    else        for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= conjq(A_(L + i, j)) * x[i];
-                    if (nounit) tmp /= (noconj ? A_(k, j) : conjq(A_(k, j)));
+                    else        for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= cconj(A_(L + i, j)) * x[i];
+                    if (nounit) tmp /= (noconj ? A_(k, j) : cconj(A_(k, j)));
                     x[j] = tmp;
                 }
             } else {
@@ -65,8 +67,8 @@ void xtbsv_core(
                     TC tmp = x[j];
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     if (noconj) for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= A_(i - j, j) * x[i];
-                    else        for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= conjq(A_(i - j, j)) * x[i];
-                    if (nounit) tmp /= (noconj ? A_(0, j) : conjq(A_(0, j)));
+                    else        for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= cconj(A_(i - j, j)) * x[i];
+                    if (nounit) tmp /= (noconj ? A_(0, j) : cconj(A_(0, j)));
                     x[j] = tmp;
                 }
             }
@@ -118,11 +120,11 @@ void xtbsv_core(
                     const ptrdiff_t L = k - j;
                     const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                     for (ptrdiff_t i = i_lo; i < j; ++i) {
-                        const TC aij = noconj ? A_(L + i, j) : conjq(A_(L + i, j));
+                        const TC aij = noconj ? A_(L + i, j) : cconj(A_(L + i, j));
                         tmp -= aij * x[ix];
                         ix += incx;
                     }
-                    if (nounit) tmp /= (noconj ? A_(k, j) : conjq(A_(k, j)));
+                    if (nounit) tmp /= (noconj ? A_(k, j) : cconj(A_(k, j)));
                     x[jx] = tmp;
                     jx += incx;
                     if (j >= k) kx += incx;
@@ -135,11 +137,11 @@ void xtbsv_core(
                     ptrdiff_t ix = kx;
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = i_hi - 1; i > j; --i) {
-                        const TC aij = noconj ? A_(i - j, j) : conjq(A_(i - j, j));
+                        const TC aij = noconj ? A_(i - j, j) : cconj(A_(i - j, j));
                         tmp -= aij * x[ix];
                         ix -= incx;
                     }
-                    if (nounit) tmp /= (noconj ? A_(0, j) : conjq(A_(0, j)));
+                    if (nounit) tmp /= (noconj ? A_(0, j) : cconj(A_(0, j)));
                     x[jx] = tmp;
                     jx -= incx;
                     if ((n - 1 - j) >= k) kx -= incx;

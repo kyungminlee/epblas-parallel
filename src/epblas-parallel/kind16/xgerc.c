@@ -15,6 +15,8 @@
 
 typedef __complex128 TC;
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 void xgerc_core(
@@ -35,7 +37,7 @@ void xgerc_core(
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const TC yj = conjq(y[j]);
+            const TC yj = cconj(y[j]);
             if (yj != zero) {
                 const TC t = alpha * yj;
                 TC *aj = &A_(0, j);
@@ -52,7 +54,7 @@ void xgerc_core(
         #pragma omp parallel for if(use_omp) schedule(static)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j) {
-            const TC yj = conjq(y[jy0 + (ptrdiff_t)j * incy]);
+            const TC yj = cconj(y[jy0 + (ptrdiff_t)j * incy]);
             if (yj != zero) {
                 const TC t = alpha * yj;
                 ptrdiff_t ix = ix0;

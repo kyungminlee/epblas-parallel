@@ -20,6 +20,8 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 void xhemv_core(
@@ -70,7 +72,7 @@ void xhemv_core(
                             y_priv[j] += temp1 * crealq(aj[j]);
                             for (ptrdiff_t k = j + 1; k < n; ++k) {
                                 y_priv[k] += temp1 * aj[k];
-                                temp2 += conjq(aj[k]) * x[k];
+                                temp2 += cconj(aj[k]) * x[k];
                             }
                             y_priv[j] += alpha * temp2;
                         }
@@ -82,7 +84,7 @@ void xhemv_core(
                             const TC *aj = &A_(0, j);
                             for (ptrdiff_t k = 0; k < j; ++k) {
                                 y_priv[k] += temp1 * aj[k];
-                                temp2 += conjq(aj[k]) * x[k];
+                                temp2 += cconj(aj[k]) * x[k];
                             }
                             y_priv[j] += temp1 * crealq(aj[j]) + alpha * temp2;
                         }
@@ -108,7 +110,7 @@ void xhemv_core(
                 y[i] += temp1 * crealq(ai[i]);
                 for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[k]  += temp1 * ai[k];
-                    temp2 += conjq(ai[k]) * x[k];
+                    temp2 += cconj(ai[k]) * x[k];
                 }
                 y[i] += alpha * temp2;
             }
@@ -119,7 +121,7 @@ void xhemv_core(
                 const TC *ai = &A_(0, i);
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     y[k]  += temp1 * ai[k];
-                    temp2 += conjq(ai[k]) * x[k];
+                    temp2 += cconj(ai[k]) * x[k];
                 }
                 y[i] += temp1 * crealq(ai[i]) + alpha * temp2;
             }
@@ -134,7 +136,7 @@ void xhemv_core(
                 y[ky + (ptrdiff_t)i * incy] += temp1 * crealq(A_(i, i));
                 for (ptrdiff_t k = i + 1; k < n; ++k) {
                     y[ky + (ptrdiff_t)k * incy] += temp1 * A_(k, i);
-                    temp2 += conjq(A_(k, i)) * x[kx + (ptrdiff_t)k * incx];
+                    temp2 += cconj(A_(k, i)) * x[kx + (ptrdiff_t)k * incx];
                 }
                 y[ky + (ptrdiff_t)i * incy] += alpha * temp2;
             }
@@ -144,7 +146,7 @@ void xhemv_core(
                 TC temp2 = zero;
                 for (ptrdiff_t k = 0; k < i; ++k) {
                     y[ky + (ptrdiff_t)k * incy] += temp1 * A_(k, i);
-                    temp2 += conjq(A_(k, i)) * x[kx + (ptrdiff_t)k * incx];
+                    temp2 += cconj(A_(k, i)) * x[kx + (ptrdiff_t)k * incx];
                 }
                 y[ky + (ptrdiff_t)i * incy] += temp1 * crealq(A_(i, i)) + alpha * temp2;
             }

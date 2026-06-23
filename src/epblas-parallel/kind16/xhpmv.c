@@ -15,6 +15,8 @@
 #include "../common/epblas_facade.h"
 
 typedef __complex128 TC;
+
+static inline TC cconj(TC z) { return conjq(z); }
 typedef __float128 TR;
 
 /* Thread the contiguous path once n*n exceeds this (matches OpenBLAS zhpmv's
@@ -106,7 +108,7 @@ void xhpmv_core(
                             TC t2 = zero;
                             for (ptrdiff_t i = 0; i < j; ++i) {
                                 slot[i] += t1 * aj[i];
-                                t2      += conjq(aj[i]) * x[i];
+                                t2      += cconj(aj[i]) * x[i];
                             }
                             slot[j] += t1 * (TR)crealq(aj[j]) + t2;  /* real diag */
                         }
@@ -118,7 +120,7 @@ void xhpmv_core(
                             slot[j] += t1 * (TR)crealq(aj[j]);       /* real diag */
                             for (ptrdiff_t i = j + 1; i < n; ++i) {
                                 slot[i] += t1 * aj[i];
-                                t2      += conjq(aj[i]) * x[i];
+                                t2      += cconj(aj[i]) * x[i];
                             }
                             slot[j] += t2;
                         }
@@ -155,7 +157,7 @@ void xhpmv_core(
                 ptrdiff_t k = kk;
                 for (ptrdiff_t i = 0; i < j; ++i) {
                     y[i] += t1 * ap[k];
-                    t2 += conjq(ap[k]) * x[i];
+                    t2 += cconj(ap[k]) * x[i];
                     ++k;
                 }
                 y[j] += t1 * (TR)crealq(ap[kk + j]) + alpha * t2;
@@ -169,7 +171,7 @@ void xhpmv_core(
                 ptrdiff_t k = kk + 1;
                 for (ptrdiff_t i = j + 1; i < n; ++i) {
                     y[i] += t1 * ap[k];
-                    t2 += conjq(ap[k]) * x[i];
+                    t2 += cconj(ap[k]) * x[i];
                     ++k;
                 }
                 y[j] += alpha * t2;
@@ -187,7 +189,7 @@ void xhpmv_core(
                 ptrdiff_t ix = kx, iy = ky;
                 for (ptrdiff_t k = kk; k < kk + j; ++k) {
                     y[iy] += t1 * ap[k];
-                    t2 += conjq(ap[k]) * x[ix];
+                    t2 += cconj(ap[k]) * x[ix];
                     ix += incx; iy += incy;
                 }
                 y[jy] += t1 * (TR)crealq(ap[kk + j]) + alpha * t2;
@@ -204,7 +206,7 @@ void xhpmv_core(
                 for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
                     ix += incx; iy += incy;
                     y[iy] += t1 * ap[k];
-                    t2 += conjq(ap[k]) * x[ix];
+                    t2 += cconj(ap[k]) * x[ix];
                 }
                 y[jy] += alpha * t2;
                 jx += incx; jy += incy;

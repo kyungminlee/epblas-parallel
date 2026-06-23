@@ -36,6 +36,8 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 #ifdef _OPENMP
@@ -116,7 +118,7 @@ void xgbmv_core(
             const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;             \
             const ptrdiff_t k = KU - j;                                            \
             if (noconj) for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += A_(k + i, j) * x[i];        \
-            else        for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += conjq(A_(k + i, j)) * x[i]; \
+            else        for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += cconj(A_(k + i, j)) * x[i]; \
             y[j] += alpha * s;                                               \
         }
         if (use_omp) {
@@ -147,7 +149,7 @@ void xgbmv_core(
             if (noconj) {
                 for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += A_(k + i, j) * x[ix]; ix += incx; }
             } else {
-                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += conjq(A_(k + i, j)) * x[ix]; ix += incx; }
+                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += cconj(A_(k + i, j)) * x[ix]; ix += incx; }
             }
             y[jy] += alpha * s;
             jy += incy;
@@ -224,7 +226,7 @@ static void xgbmv_t_colgather(ptrdiff_t m, ptrdiff_t n, ptrdiff_t kl, ptrdiff_t 
         const TC *col = &A_(k + i_lo, j);
         TC s = 0.0Q + 0.0Qi;
         if (noconj) for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += *col++ * x[i];
-        else        for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += conjq(*col++) * x[i];
+        else        for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += cconj(*col++) * x[i];
         y[j * incy] += alpha * s;
     }
 }

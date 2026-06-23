@@ -32,6 +32,8 @@
 typedef __complex128 TC;
 
 
+
+static inline TC cconj(TC z) { return conjq(z); }
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
 #define XTRSV_BLOCKED_NB_DEFAULT 64
@@ -127,8 +129,8 @@ void xtrsv_serial_(
                     TC t = x[i];
                     const TC *ai = &A_(0, i);
                     if (conj_a) {
-                        for (ptrdiff_t k = i + 1; k < n; ++k) t -= conjq(ai[k]) * x[k];
-                        if (nounit) t /= conjq(ai[i]);
+                        for (ptrdiff_t k = i + 1; k < n; ++k) t -= cconj(ai[k]) * x[k];
+                        if (nounit) t /= cconj(ai[i]);
                     } else {
                         for (ptrdiff_t k = i + 1; k < n; ++k) t -= ai[k] * x[k];
                         if (nounit) t /= ai[i];
@@ -140,8 +142,8 @@ void xtrsv_serial_(
                     TC t = x[i];
                     const TC *ai = &A_(0, i);
                     if (conj_a) {
-                        for (ptrdiff_t k = 0; k < i; ++k) t -= conjq(ai[k]) * x[k];
-                        if (nounit) t /= conjq(ai[i]);
+                        for (ptrdiff_t k = 0; k < i; ++k) t -= cconj(ai[k]) * x[k];
+                        if (nounit) t /= cconj(ai[i]);
                     } else {
                         for (ptrdiff_t k = 0; k < i; ++k) t -= ai[k] * x[k];
                         if (nounit) t /= ai[i];
@@ -178,20 +180,20 @@ void xtrsv_serial_(
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     TC t = x[kx + i * incx];
                     for (ptrdiff_t k = i + 1; k < n; ++k) {
-                        const TC aki = conj_a ? conjq(A_(k, i)) : A_(k, i);
+                        const TC aki = conj_a ? cconj(A_(k, i)) : A_(k, i);
                         t -= aki * x[kx + k * incx];
                     }
-                    if (nounit) t /= (conj_a ? conjq(A_(i, i)) : A_(i, i));
+                    if (nounit) t /= (conj_a ? cconj(A_(i, i)) : A_(i, i));
                     x[kx + i * incx] = t;
                 }
             } else {
                 for (ptrdiff_t i = 0; i < n; ++i) {
                     TC t = x[kx + i * incx];
                     for (ptrdiff_t k = 0; k < i; ++k) {
-                        const TC aki = conj_a ? conjq(A_(k, i)) : A_(k, i);
+                        const TC aki = conj_a ? cconj(A_(k, i)) : A_(k, i);
                         t -= aki * x[kx + k * incx];
                     }
-                    if (nounit) t /= (conj_a ? conjq(A_(i, i)) : A_(i, i));
+                    if (nounit) t /= (conj_a ? cconj(A_(i, i)) : A_(i, i));
                     x[kx + i * incx] = t;
                 }
             }

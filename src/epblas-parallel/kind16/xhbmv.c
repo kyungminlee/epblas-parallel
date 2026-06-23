@@ -15,6 +15,8 @@
 #include "../common/epblas_facade.h"
 
 typedef __complex128 TC;
+
+static inline TC cconj(TC z) { return conjq(z); }
 typedef __float128 TR;
 
 
@@ -75,7 +77,7 @@ void xhbmv_core(
                 const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                 for (ptrdiff_t i = i_lo; i < j; ++i) {
                     y[i] += t1 * A_(L + i, j);
-                    t2 += conjq(A_(L + i, j)) * x[i];
+                    t2 += cconj(A_(L + i, j)) * x[i];
                 }
                 y[j] += t1 * (TR)crealq(A_(k, j)) + alpha * t2;
             }
@@ -87,7 +89,7 @@ void xhbmv_core(
                 const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                 for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                     y[i] += t1 * A_(i - j, j);
-                    t2 += conjq(A_(i - j, j)) * x[i];
+                    t2 += cconj(A_(i - j, j)) * x[i];
                 }
                 y[j] += alpha * t2;
             }
@@ -105,7 +107,7 @@ void xhbmv_core(
                 const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
                 for (ptrdiff_t i = i_lo; i < j; ++i) {
                     y[iy] += t1 * A_(L + i, j);
-                    t2 += conjq(A_(L + i, j)) * x[ix];
+                    t2 += cconj(A_(L + i, j)) * x[ix];
                     ix += incx; iy += incy;
                 }
                 y[jy] += t1 * (TR)crealq(A_(k, j)) + alpha * t2;
@@ -123,7 +125,7 @@ void xhbmv_core(
                 for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
                     ix += incx; iy += incy;
                     y[iy] += t1 * A_(i - j, j);
-                    t2 += conjq(A_(i - j, j)) * x[ix];
+                    t2 += cconj(A_(i - j, j)) * x[ix];
                 }
                 y[jy] += alpha * t2;
                 jx += incx; jy += incy;
@@ -152,7 +154,7 @@ static void xhbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
             for (ptrdiff_t d = 1; d <= rlen; ++d) s += base[k + d * s1] * x[i + d];
             ptrdiff_t llen = (i < k) ? i : k;
-            for (ptrdiff_t d = 1; d <= llen; ++d) s += conjq(base[k - d]) * x[i - d];
+            for (ptrdiff_t d = 1; d <= llen; ++d) s += cconj(base[k - d]) * x[i - d];
             y[i * incy] += alpha * s;
         }
     } else {
@@ -162,7 +164,7 @@ static void xhbmv_rowgather(bool upper, ptrdiff_t n, ptrdiff_t k,
             ptrdiff_t llen = (i < k) ? i : k;
             for (ptrdiff_t d = 1; d <= llen; ++d) s += base[-d * s1] * x[i - d];
             ptrdiff_t rlen = (n - 1 - i < k) ? n - 1 - i : k;
-            for (ptrdiff_t d = 1; d <= rlen; ++d) s += conjq(base[d]) * x[i + d];
+            for (ptrdiff_t d = 1; d <= rlen; ++d) s += cconj(base[d]) * x[i + d];
             y[i * incy] += alpha * s;
         }
     }
