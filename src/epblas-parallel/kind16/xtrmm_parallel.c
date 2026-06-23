@@ -120,16 +120,16 @@ static const T ZERO = 0.0Q + 0.0Qi;
 
 XTRMM_OMP_WRAP_L   (xtrmm_lln, xtrmm_lln_core)
 XTRMM_OMP_WRAP_L   (xtrmm_lun, xtrmm_lun_core)
-XTRMM_OMP_WRAP_L_TC(xtrmm_llt, xtrmm_llTC_core, 0)
-XTRMM_OMP_WRAP_L_TC(xtrmm_lut, xtrmm_luTC_core, 0)
-XTRMM_OMP_WRAP_L_TC(xtrmm_llc, xtrmm_llTC_core, 1)
-XTRMM_OMP_WRAP_L_TC(xtrmm_luc, xtrmm_luTC_core, 1)
+XTRMM_OMP_WRAP_L_TC(xtrmm_llt, xtrmm_lltc_core, 0)
+XTRMM_OMP_WRAP_L_TC(xtrmm_lut, xtrmm_lutc_core, 0)
+XTRMM_OMP_WRAP_L_TC(xtrmm_llc, xtrmm_lltc_core, 1)
+XTRMM_OMP_WRAP_L_TC(xtrmm_luc, xtrmm_lutc_core, 1)
 XTRMM_OMP_WRAP_R   (xtrmm_rln, xtrmm_rln_core)
 XTRMM_OMP_WRAP_R   (xtrmm_run, xtrmm_run_core)
-XTRMM_OMP_WRAP_R_TC(xtrmm_rlt, xtrmm_rlTC_core, 0)
-XTRMM_OMP_WRAP_R_TC(xtrmm_rut, xtrmm_ruTC_core, 0)
-XTRMM_OMP_WRAP_R_TC(xtrmm_rlc, xtrmm_rlTC_core, 1)
-XTRMM_OMP_WRAP_R_TC(xtrmm_ruc, xtrmm_ruTC_core, 1)
+XTRMM_OMP_WRAP_R_TC(xtrmm_rlt, xtrmm_rltc_core, 0)
+XTRMM_OMP_WRAP_R_TC(xtrmm_rut, xtrmm_rutc_core, 0)
+XTRMM_OMP_WRAP_R_TC(xtrmm_rlc, xtrmm_rltc_core, 1)
+XTRMM_OMP_WRAP_R_TC(xtrmm_ruc, xtrmm_rutc_core, 1)
 
 static void xtrmm_core(
     char side, char uplo, char transa, char diag,

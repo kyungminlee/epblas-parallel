@@ -88,10 +88,10 @@ static const T ZERO = 0.0L + 0.0Li;
 
 YTRSM_OMP_WRAP_LLN_LUN(ytrsm_lln, ytrsm_lln_core)
 YTRSM_OMP_WRAP_LLN_LUN(ytrsm_lun, ytrsm_lun_core)
-YTRSM_OMP_WRAP_TC(ytrsm_llt, ytrsm_llTC_core, 0)
-YTRSM_OMP_WRAP_TC(ytrsm_lut, ytrsm_luTC_core, 0)
-YTRSM_OMP_WRAP_TC(ytrsm_llc, ytrsm_llTC_core, 1)
-YTRSM_OMP_WRAP_TC(ytrsm_luc, ytrsm_luTC_core, 1)
+YTRSM_OMP_WRAP_TC(ytrsm_llt, ytrsm_lltc_core, 0)
+YTRSM_OMP_WRAP_TC(ytrsm_lut, ytrsm_lutc_core, 0)
+YTRSM_OMP_WRAP_TC(ytrsm_llc, ytrsm_lltc_core, 1)
+YTRSM_OMP_WRAP_TC(ytrsm_luc, ytrsm_lutc_core, 1)
 
 /* ── Blocked SIDE='L': one outer `omp parallel` partitions B's columns
  *    across threads; each thread runs the serial blocked worker on its
@@ -187,10 +187,10 @@ static void blocked_dispatch_R(bool upper, bool trans, bool conj,
 
 YTRSM_OMP_WRAP_R   (ytrsm_rln, ytrsm_rln_core)
 YTRSM_OMP_WRAP_R   (ytrsm_run, ytrsm_run_core)
-YTRSM_OMP_WRAP_R_TC(ytrsm_rlt, ytrsm_rlTC_core, 0)
-YTRSM_OMP_WRAP_R_TC(ytrsm_rut, ytrsm_ruTC_core, 0)
-YTRSM_OMP_WRAP_R_TC(ytrsm_rlc, ytrsm_rlTC_core, 1)
-YTRSM_OMP_WRAP_R_TC(ytrsm_ruc, ytrsm_ruTC_core, 1)
+YTRSM_OMP_WRAP_R_TC(ytrsm_rlt, ytrsm_rltc_core, 0)
+YTRSM_OMP_WRAP_R_TC(ytrsm_rut, ytrsm_rutc_core, 0)
+YTRSM_OMP_WRAP_R_TC(ytrsm_rlc, ytrsm_rltc_core, 1)
+YTRSM_OMP_WRAP_R_TC(ytrsm_ruc, ytrsm_rutc_core, 1)
 
 /* ── Entry point ──────────────────────────────────────────────── */
 

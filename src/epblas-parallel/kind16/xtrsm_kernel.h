@@ -44,10 +44,10 @@ void xtrsm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alp
                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, bool nounit);
 void xtrsm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrsm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
+void xtrsm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
                      const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void xtrsm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
+void xtrsm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, xtrsm_T alpha,
                      const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
@@ -57,10 +57,10 @@ void xtrsm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alp
                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, bool nounit);
 void xtrsm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
                     const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb, bool nounit);
-void xtrsm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
+void xtrsm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
                      const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void xtrsm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
+void xtrsm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, xtrsm_T alpha,
                      const xtrsm_T *a, ptrdiff_t lda, xtrsm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 

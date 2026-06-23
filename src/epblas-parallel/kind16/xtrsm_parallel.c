@@ -184,16 +184,16 @@ static const T ONE  = 1.0Q + 0.0Qi;
 
 XTRSM_OMP_WRAP_L   (xtrsm_lln, xtrsm_lln_core)
 XTRSM_OMP_WRAP_L   (xtrsm_lun, xtrsm_lun_core)
-XTRSM_OMP_WRAP_L_TC(xtrsm_llt, xtrsm_llTC_core, 0)
-XTRSM_OMP_WRAP_L_TC(xtrsm_lut, xtrsm_luTC_core, 0)
-XTRSM_OMP_WRAP_L_TC(xtrsm_llc, xtrsm_llTC_core, 1)
-XTRSM_OMP_WRAP_L_TC(xtrsm_luc, xtrsm_luTC_core, 1)
+XTRSM_OMP_WRAP_L_TC(xtrsm_llt, xtrsm_lltc_core, 0)
+XTRSM_OMP_WRAP_L_TC(xtrsm_lut, xtrsm_lutc_core, 0)
+XTRSM_OMP_WRAP_L_TC(xtrsm_llc, xtrsm_lltc_core, 1)
+XTRSM_OMP_WRAP_L_TC(xtrsm_luc, xtrsm_lutc_core, 1)
 XTRSM_OMP_WRAP_R   (xtrsm_rln, xtrsm_rln_core)
 XTRSM_OMP_WRAP_R   (xtrsm_run, xtrsm_run_core)
-XTRSM_OMP_WRAP_R_TC(xtrsm_rlt, xtrsm_rlTC_core, 0)
-XTRSM_OMP_WRAP_R_TC(xtrsm_rut, xtrsm_ruTC_core, 0)
-XTRSM_OMP_WRAP_R_TC(xtrsm_rlc, xtrsm_rlTC_core, 1)
-XTRSM_OMP_WRAP_R_TC(xtrsm_ruc, xtrsm_ruTC_core, 1)
+XTRSM_OMP_WRAP_R_TC(xtrsm_rlt, xtrsm_rltc_core, 0)
+XTRSM_OMP_WRAP_R_TC(xtrsm_rut, xtrsm_rutc_core, 0)
+XTRSM_OMP_WRAP_R_TC(xtrsm_rlc, xtrsm_rltc_core, 1)
+XTRSM_OMP_WRAP_R_TC(xtrsm_ruc, xtrsm_rutc_core, 1)
 
 /* ── Entry point ──────────────────────────────────────────────── */
 
@@ -383,7 +383,7 @@ static void xtrsm_blocked_core(
                 ptrdiff_t ic = ((m - 1) / nb) * nb;
                 while (ic >= 0) {
                     ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
-                    xtrsm_llTC_core(j_lo, j_hi, ib, ONE,
+                    xtrsm_lltc_core(j_lo, j_hi, ib, ONE,
                                     &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, cflag);
                     if (ic > 0) {
                         xgemm_serial(TTc, 'N', ic, n_slice, ib, &neg_one,
@@ -397,7 +397,7 @@ static void xtrsm_blocked_core(
                 /* L,U,T/C: top-down walk. */
                 for (ptrdiff_t ic = 0; ic < m; ic += nb) {
                     ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
-                    xtrsm_luTC_core(j_lo, j_hi, ib, ONE,
+                    xtrsm_lutc_core(j_lo, j_hi, ib, ONE,
                                     &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, cflag);
                     ptrdiff_t mt = m - ic - ib;
                     if (mt > 0) {

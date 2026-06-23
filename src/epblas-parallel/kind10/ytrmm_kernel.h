@@ -42,10 +42,10 @@ void ytrmm_lln_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alp
                     const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
 void ytrmm_lun_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
                     const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrmm_llTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
+void ytrmm_lltc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
                      const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void ytrmm_luTC_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
+void ytrmm_lutc_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ytrmm_T alpha,
                      const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 
@@ -55,10 +55,10 @@ void ytrmm_rln_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alp
                     const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
 void ytrmm_run_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
                     const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb, bool nounit);
-void ytrmm_rlTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
+void ytrmm_rltc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
                      const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
-void ytrmm_ruTC_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
+void ytrmm_rutc_core(ptrdiff_t i_start, ptrdiff_t i_end, ptrdiff_t n, ytrmm_T alpha,
                      const ytrmm_T *a, ptrdiff_t lda, ytrmm_T *b, ptrdiff_t ldb,
                      bool nounit, bool conj_flag);
 

@@ -118,7 +118,7 @@ inline T A_op(const T *a, std::ptrdiff_t lda, std::ptrdiff_t row, std::ptrdiff_t
 /* (L, L, T) and (L, L, C): solve op(A)ᵀ X = α B where A is lower-tri.
  * Inner-product form: t = α B[i,j]; for k > i: t -= op(A)[k,i] B[k,j];
  *                     B[i,j] = t / op(A)[i,i] (or = t if unit). */
-inline void wtrsm_llTC_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, T alpha,
+inline void wtrsm_lltc_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, T alpha,
                             const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb,
                             bool nounit, bool conj_flag)
 {
@@ -135,7 +135,7 @@ inline void wtrsm_llTC_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::p
 }
 
 /* (L, U, T) and (L, U, C): solve op(A)ᵀ X = α B, A upper. */
-inline void wtrsm_luTC_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, T alpha,
+inline void wtrsm_lutc_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, T alpha,
                             const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb,
                             bool nounit, bool conj_flag)
 {
@@ -191,7 +191,7 @@ inline void wtrsm_run_core(std::ptrdiff_t m, std::ptrdiff_t n, T alpha,
     }
 }
 
-inline void wtrsm_rlTC_core(std::ptrdiff_t m, std::ptrdiff_t n, T alpha,
+inline void wtrsm_rltc_core(std::ptrdiff_t m, std::ptrdiff_t n, T alpha,
                             const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb,
                             bool nounit, bool conj_flag)
 {
@@ -211,7 +211,7 @@ inline void wtrsm_rlTC_core(std::ptrdiff_t m, std::ptrdiff_t n, T alpha,
     }
 }
 
-inline void wtrsm_ruTC_core(std::ptrdiff_t m, std::ptrdiff_t n, T alpha,
+inline void wtrsm_rutc_core(std::ptrdiff_t m, std::ptrdiff_t n, T alpha,
                             const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb,
                             bool nounit, bool conj_flag)
 {
@@ -410,7 +410,7 @@ inline void simd_bwd_sub_lun_cdd(std::ptrdiff_t m, const T *a, std::ptrdiff_t ld
 }
 
 /* (L, L, T) and (L, L, C): inner-product form on op(A)ᵀ. */
-inline void simd_fwd_sub_llTC_cdd(std::ptrdiff_t m, const T *a, std::ptrdiff_t lda, T alpha,
+inline void simd_fwd_sub_lltc_cdd(std::ptrdiff_t m, const T *a, std::ptrdiff_t lda, T alpha,
                                   bool nounit, bool conj_flag,
                                   double *brh, double *brl,
                                   double *bih, double *bil)
@@ -456,7 +456,7 @@ inline void simd_fwd_sub_llTC_cdd(std::ptrdiff_t m, const T *a, std::ptrdiff_t l
     }
 }
 
-inline void simd_bwd_sub_luTC_cdd(std::ptrdiff_t m, const T *a, std::ptrdiff_t lda, T alpha,
+inline void simd_bwd_sub_lutc_cdd(std::ptrdiff_t m, const T *a, std::ptrdiff_t lda, T alpha,
                                   bool nounit, bool conj_flag,
                                   double *brh, double *brl,
                                   double *bih, double *bil)
@@ -529,16 +529,16 @@ inline void wtrsm_simd_diag(trsm_simd_cop op, std::ptrdiff_t j_start, std::ptrdi
             simd_bwd_sub_lun_cdd(m, a, lda, nounit, brh, brl, bih, bil);
             break;
         case CSLLT:
-            simd_fwd_sub_llTC_cdd(m, a, lda, alpha, nounit, 0, brh, brl, bih, bil);
+            simd_fwd_sub_lltc_cdd(m, a, lda, alpha, nounit, 0, brh, brl, bih, bil);
             break;
         case CSLUT:
-            simd_bwd_sub_luTC_cdd(m, a, lda, alpha, nounit, 0, brh, brl, bih, bil);
+            simd_bwd_sub_lutc_cdd(m, a, lda, alpha, nounit, 0, brh, brl, bih, bil);
             break;
         case CSLLC:
-            simd_fwd_sub_llTC_cdd(m, a, lda, alpha, nounit, 1, brh, brl, bih, bil);
+            simd_fwd_sub_lltc_cdd(m, a, lda, alpha, nounit, 1, brh, brl, bih, bil);
             break;
         case CSLUC:
-            simd_bwd_sub_luTC_cdd(m, a, lda, alpha, nounit, 1, brh, brl, bih, bil);
+            simd_bwd_sub_lutc_cdd(m, a, lda, alpha, nounit, 1, brh, brl, bih, bil);
             break;
         }
         unpack_B_4col_complex(m, b, ldb, j, jc, brh, brl, bih, bil);
@@ -892,7 +892,7 @@ void blocked_chunk(wtrsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end
                 wgemm_serial(trans_gemm[0], NN[0], ib, my_N, trailing, &m_one, &A_(i0, ic), lda, &B_chunk[i0], ldb, &one, &B_chunk[ic], ldb);
             }
             DIAG_C((conj_flag ? CSLLC : CSLLT),
-                wtrsm_llTC_core(j_start, j_end, ib, one,
+                wtrsm_lltc_core(j_start, j_end, ib, one,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb,
                                 nounit, conj_flag),
                 ib);
@@ -907,7 +907,7 @@ void blocked_chunk(wtrsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end
                 wgemm_serial(trans_gemm[0], NN[0], ib, my_N, ic, &m_one, &A_(0, ic), lda, B_chunk, ldb, &one, &B_chunk[ic], ldb);
             }
             DIAG_C((conj_flag ? CSLUC : CSLUT),
-                wtrsm_luTC_core(j_start, j_end, ib, one,
+                wtrsm_lutc_core(j_start, j_end, ib, one,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb,
                                 nounit, conj_flag),
                 ib);
@@ -967,10 +967,10 @@ void wtrsm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
     switch (V) {
     case WLLN: wtrsm_lln_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit); break;
     case WLUN: wtrsm_lun_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit); break;
-    case WLLT: wtrsm_llTC_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 0); break;
-    case WLUT: wtrsm_luTC_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 0); break;
-    case WLLC: wtrsm_llTC_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 1); break;
-    case WLUC: wtrsm_luTC_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 1); break;
+    case WLLT: wtrsm_lltc_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 0); break;
+    case WLUT: wtrsm_lutc_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 0); break;
+    case WLLC: wtrsm_lltc_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 1); break;
+    case WLUC: wtrsm_lutc_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 1); break;
     }
 }
 
@@ -992,11 +992,11 @@ void wtrsm_R_slice(char UPLO, char TRANS, std::ptrdiff_t row_lo, std::ptrdiff_t 
         if (UPLO == 'L') wtrsm_rln_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
         else             wtrsm_run_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
     } else if (TRANS == 'C') {
-        if (UPLO == 'L') wtrsm_rlTC_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 1);
-        else             wtrsm_ruTC_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 1);
+        if (UPLO == 'L') wtrsm_rltc_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 1);
+        else             wtrsm_rutc_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 1);
     } else {
-        if (UPLO == 'L') wtrsm_rlTC_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 0);
-        else             wtrsm_ruTC_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 0);
+        if (UPLO == 'L') wtrsm_rltc_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 0);
+        else             wtrsm_rutc_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 0);
     }
 #endif
 }

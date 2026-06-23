@@ -377,7 +377,7 @@ inline void wtrmm_lun_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::pt
     }
 }
 
-inline void wtrmm_llTC_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, T alpha,
+inline void wtrmm_lltc_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, T alpha,
                             const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb,
                             bool nounit, bool conj_flag)
 {
@@ -392,7 +392,7 @@ inline void wtrmm_llTC_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::p
     }
 }
 
-inline void wtrmm_luTC_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, T alpha,
+inline void wtrmm_lutc_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, T alpha,
                             const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb,
                             bool nounit, bool conj_flag)
 {
@@ -414,8 +414,8 @@ inline void wtrmm_luTC_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::p
 /* Forward decls for scalar tails (defined below). */
 inline void wtrmm_rln_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, bool);
 inline void wtrmm_run_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, bool);
-inline void wtrmm_rlTC_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, bool, bool);
-inline void wtrmm_ruTC_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, bool, bool);
+inline void wtrmm_rltc_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, bool, bool);
+inline void wtrmm_rutc_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, T, const T*, std::ptrdiff_t, T*, std::ptrdiff_t, bool, bool);
 
 using simd_exact::cload4;
 using simd_exact::cstore4;
@@ -593,10 +593,10 @@ inline void wtrmm_simd_diag_R(wtrmm_r_op op, std::ptrdiff_t i_start, std::ptrdif
         switch (op) {
         case WRLN_OP: wtrmm_rln_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit); break;
         case WRUN_OP: wtrmm_run_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit); break;
-        case WRLT_OP: wtrmm_rlTC_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit, 0); break;
-        case WRUT_OP: wtrmm_ruTC_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit, 0); break;
-        case WRLC_OP: wtrmm_rlTC_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit, 1); break;
-        case WRUC_OP: wtrmm_ruTC_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit, 1); break;
+        case WRLT_OP: wtrmm_rltc_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit, 0); break;
+        case WRUT_OP: wtrmm_rutc_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit, 0); break;
+        case WRLC_OP: wtrmm_rltc_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit, 1); break;
+        case WRUC_OP: wtrmm_rutc_core(i4_end, i_end, n, alpha, a, lda, b, ldb, nounit, 1); break;
         }
     }
 }
@@ -639,7 +639,7 @@ inline void wtrmm_run_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::pt
     }
 }
 
-inline void wtrmm_rlTC_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t n, T alpha,
+inline void wtrmm_rltc_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t n, T alpha,
                             const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb,
                             bool nounit, bool conj_flag)
 {
@@ -659,7 +659,7 @@ inline void wtrmm_rlTC_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::p
     }
 }
 
-inline void wtrmm_ruTC_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t n, T alpha,
+inline void wtrmm_rutc_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t n, T alpha,
                             const T *a, std::ptrdiff_t lda, T *b, std::ptrdiff_t ldb,
                             bool nounit, bool conj_flag)
 {
@@ -741,7 +741,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
 #endif
-            wtrmm_llTC_core(j_start, j_end, ib, alpha,
+            wtrmm_lltc_core(j_start, j_end, ib, alpha,
                             &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, conj_flag);
             const std::ptrdiff_t trailing = m - (ic + ib);
             if (trailing > 0) {
@@ -761,7 +761,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
 #endif
-            wtrmm_luTC_core(j_start, j_end, ib, alpha,
+            wtrmm_lutc_core(j_start, j_end, ib, alpha,
                             &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit, conj_flag);
             if (ic > 0) {
                 wgemm_serial(gemm_trans[0], NN[0], ib, my_N, ic, &alpha, &A_(0, ic), lda, B_chunk, ldb, &one_cdd, &B_chunk[ic], ldb);
@@ -829,7 +829,7 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
             wtrmm_simd_diag_R(conj_flag ? WRLC_OP : WRLT_OP, i_start, i_end, jb, alpha,
                               &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #else
-            wtrmm_rlTC_core(i_start, i_end, jb, alpha,
+            wtrmm_rltc_core(i_start, i_end, jb, alpha,
                             &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj_flag);
 #endif
             if (jc > 0) {
@@ -846,7 +846,7 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
             wtrmm_simd_diag_R(conj_flag ? WRUC_OP : WRUT_OP, i_start, i_end, jb, alpha,
                               &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
 #else
-            wtrmm_ruTC_core(i_start, i_end, jb, alpha,
+            wtrmm_rutc_core(i_start, i_end, jb, alpha,
                             &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj_flag);
 #endif
             const std::ptrdiff_t trailing = n - (jc + jb);
@@ -907,10 +907,10 @@ void wtrmm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
     switch (V) {
     case WLLN: wtrmm_lln_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit); break;
     case WLUN: wtrmm_lun_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit); break;
-    case WLLT: wtrmm_llTC_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 0); break;
-    case WLUT: wtrmm_luTC_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 0); break;
-    case WLLC: wtrmm_llTC_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 1); break;
-    case WLUC: wtrmm_luTC_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 1); break;
+    case WLLT: wtrmm_lltc_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 0); break;
+    case WLUT: wtrmm_lutc_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 0); break;
+    case WLLC: wtrmm_lltc_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 1); break;
+    case WLUC: wtrmm_lutc_core(j_start, j_end, m, alpha, a, lda, b, ldb, nounit, 1); break;
     }
 }
 
@@ -934,10 +934,10 @@ void wtrmm_R_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
     switch (V) {
     case WRLN: wtrmm_rln_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit); break;
     case WRUN: wtrmm_run_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit); break;
-    case WRLT: wtrmm_rlTC_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 0); break;
-    case WRUT: wtrmm_ruTC_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 0); break;
-    case WRLC: wtrmm_rlTC_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 1); break;
-    case WRUC: wtrmm_ruTC_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 1); break;
+    case WRLT: wtrmm_rltc_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 0); break;
+    case WRUT: wtrmm_rutc_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 0); break;
+    case WRLC: wtrmm_rltc_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 1); break;
+    case WRUC: wtrmm_rutc_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 1); break;
     }
 #endif
 }

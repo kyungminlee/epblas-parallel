@@ -160,16 +160,16 @@ static void blocked_dispatch_R(enum ytrmm_variant_R V, ptrdiff_t m, ptrdiff_t n,
 
 YTRMM_OMP_WRAP_L   (ytrmm_lln, ytrmm_lln_core)
 YTRMM_OMP_WRAP_L   (ytrmm_lun, ytrmm_lun_core)
-YTRMM_OMP_WRAP_L_TC(ytrmm_llt, ytrmm_llTC_core, 0)
-YTRMM_OMP_WRAP_L_TC(ytrmm_lut, ytrmm_luTC_core, 0)
-YTRMM_OMP_WRAP_L_TC(ytrmm_llc, ytrmm_llTC_core, 1)
-YTRMM_OMP_WRAP_L_TC(ytrmm_luc, ytrmm_luTC_core, 1)
+YTRMM_OMP_WRAP_L_TC(ytrmm_llt, ytrmm_lltc_core, 0)
+YTRMM_OMP_WRAP_L_TC(ytrmm_lut, ytrmm_lutc_core, 0)
+YTRMM_OMP_WRAP_L_TC(ytrmm_llc, ytrmm_lltc_core, 1)
+YTRMM_OMP_WRAP_L_TC(ytrmm_luc, ytrmm_lutc_core, 1)
 YTRMM_OMP_WRAP_R   (ytrmm_rln, ytrmm_rln_core)
 YTRMM_OMP_WRAP_R   (ytrmm_run, ytrmm_run_core)
-YTRMM_OMP_WRAP_R_TC(ytrmm_rlt, ytrmm_rlTC_core, 0)
-YTRMM_OMP_WRAP_R_TC(ytrmm_rut, ytrmm_ruTC_core, 0)
-YTRMM_OMP_WRAP_R_TC(ytrmm_rlc, ytrmm_rlTC_core, 1)
-YTRMM_OMP_WRAP_R_TC(ytrmm_ruc, ytrmm_ruTC_core, 1)
+YTRMM_OMP_WRAP_R_TC(ytrmm_rlt, ytrmm_rltc_core, 0)
+YTRMM_OMP_WRAP_R_TC(ytrmm_rut, ytrmm_rutc_core, 0)
+YTRMM_OMP_WRAP_R_TC(ytrmm_rlc, ytrmm_rltc_core, 1)
+YTRMM_OMP_WRAP_R_TC(ytrmm_ruc, ytrmm_rutc_core, 1)
 
 static void ytrmm_core(
     char side, char uplo, char transa, char diag,
