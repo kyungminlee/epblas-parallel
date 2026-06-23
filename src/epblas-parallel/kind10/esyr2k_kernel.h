@@ -34,7 +34,7 @@
  * contiguous-odd-tail packing. The triangular β pre-pass is the SYRK helper
  * (esyrk_beta_{u,l} from esyrk_kernel.h), reused verbatim as ob does. The
  * layout-agnostic block-size policy is shared with egemm (egemm_choose_blocks
- * / egemm_round_up).
+ * / blas_round_up).
  */
 #ifndef EPBLAS_PARALLEL_KIND10_ESYR2K_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_ESYR2K_KERNEL_H

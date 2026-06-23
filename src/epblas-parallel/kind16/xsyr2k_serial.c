@@ -26,6 +26,7 @@
 
 #include "xsyr2k_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "xl3_complex.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -37,7 +38,6 @@ typedef xsyr2k_TR TR;
 #define MR QBLAS_XGEMM_MR
 #define NR QBLAS_XGEMM_NR
 
-static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 void xsyr2k_serial(
     char uplo, char trans,
@@ -77,13 +77,13 @@ void xsyr2k_serial(
         long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(TR));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
-            MC = round_up((ptrdiff_t)target_mc, MR);
+            MC = blas_round_up((ptrdiff_t)target_mc, MR);
             if (MC < MC0) MC = MC0;
         }
     }
 
-    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * 2 * sizeof(TR);
     TR *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);

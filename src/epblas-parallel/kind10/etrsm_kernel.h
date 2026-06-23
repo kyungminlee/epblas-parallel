@@ -29,7 +29,7 @@
  * self-consistent ob-convention kernel/packer substrate (etri_kernel.c).
  * The layout-AGNOSTIC helpers ARE reused from the egemm overlay:
  * egemm_choose_blocks (incl. its L2-detected adaptive MC),
- * egemm_beta_prepass, egemm_round_up, egemm_trans_code.
+ * egemm_beta_prepass, blas_round_up, egemm_trans_code.
  *
  * Nested calls must run serial: opening a nested OpenMP region trips the
  * libgomp barrier wedge. The entry

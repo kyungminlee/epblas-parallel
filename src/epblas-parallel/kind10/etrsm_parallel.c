@@ -18,6 +18,7 @@
 
 #include <stddef.h>
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP
@@ -25,7 +26,7 @@
 #endif
 
 #include "etrsm_kernel.h"
-#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
+#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / blas_round_up */
 #include "../common/epblas_facade.h"
 
 typedef etrsm_TR TR;
@@ -66,8 +67,8 @@ static void etrsm_core(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -121,7 +122,7 @@ static void etrsm_core(
         TR *Bp = Bp_arr[tid];
 
         if (lside) {
-            ptrdiff_t chunk = egemm_round_up((n + nth - 1) / nth, NR);
+            ptrdiff_t chunk = blas_round_up((n + nth - 1) / nth, NR);
             ptrdiff_t js0 = tid * chunk;
             ptrdiff_t js1 = js0 + chunk;
             if (js0 > n) js0 = n;
@@ -130,7 +131,7 @@ static void etrsm_core(
                 etrsm_L_band(upper, trans, unit, m, js0, js1,
                              MC, KC, NC, a, lda, b, ldb, Ap, Bp);
         } else {
-            ptrdiff_t chunk = egemm_round_up((m + nth - 1) / nth, MR);
+            ptrdiff_t chunk = blas_round_up((m + nth - 1) / nth, MR);
             ptrdiff_t m_lo = tid * chunk;
             ptrdiff_t m_hi = m_lo + chunk;
             if (m_lo > m) m_lo = m;

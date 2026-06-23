@@ -16,7 +16,7 @@
  * mismatch on every odd m/n/k). This substrate is therefore self-consistent
  * with the triangular packers (etrsm_pack.c, etrmm_pack.c). The
  * layout-AGNOSTIC block-size policy is still shared with egemm
- * (egemm_choose_blocks / egemm_beta_prepass / egemm_round_up).
+ * (egemm_choose_blocks / egemm_beta_prepass / blas_round_up).
  *
  * Both etrsm and etrmm depend on this substrate: etrsm pairs it with the
  * diagonal solve kernel (etrsm_kernel.c), etrmm with the TRMM kernel

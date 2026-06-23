@@ -45,7 +45,6 @@ typedef __float128 qgemm_TR;
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
 char qgemm_trans_code(char c);
 
-ptrdiff_t qgemm_round_up(ptrdiff_t v, ptrdiff_t m);
 
 /* Cache-block sizes (env-overridable QBLAS_MC/KC/NC) with OpenBLAS-style
  * adaptive MC when K fits one panel. */

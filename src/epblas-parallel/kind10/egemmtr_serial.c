@@ -13,6 +13,7 @@
 
 #include "egemmtr_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -34,8 +35,6 @@ ptrdiff_t egemmtr_trans_code(const char *p) {
     return (c == 'C') ? 'T' : c;
 }
 
-ptrdiff_t egemmtr_round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
-static inline ptrdiff_t imin(ptrdiff_t a, ptrdiff_t b) { return a < b ? a : b; }
 
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
@@ -296,8 +295,8 @@ void egemmtr_serial(char uplo, char transa, char transb,
     if (NC > n) NC = n;
     if (NC < NR) NC = NR;
 
-    const ptrdiff_t sa_rows = egemmtr_round_up(MC, MR);
-    const ptrdiff_t sb_cols = egemmtr_round_up(NC, NR);
+    const ptrdiff_t sa_rows = blas_round_up(MC, MR);
+    const ptrdiff_t sb_cols = blas_round_up(NC, NR);
     const size_t ap_bytes = (size_t)sa_rows * KC * sizeof(TR);
     const size_t bp_bytes = (size_t)KC * sb_cols * sizeof(TR);
 
@@ -310,12 +309,12 @@ void egemmtr_serial(char uplo, char transa, char transb,
     }
 
     for (ptrdiff_t jc = 0; jc < n; jc += NC) {
-        const ptrdiff_t jb = imin(NC, n - jc);
+        const ptrdiff_t jb = blas_imin(NC, n - jc);
         for (ptrdiff_t pc = 0; pc < k; pc += KC) {
-            const ptrdiff_t pb = imin(KC, k - pc);
+            const ptrdiff_t pb = blas_imin(KC, k - pc);
             egemmtr_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
             for (ptrdiff_t ic = 0; ic < n; ic += MC) {
-                const ptrdiff_t ib = imin(MC, n - ic);
+                const ptrdiff_t ib = blas_imin(MC, n - ic);
 
                 ptrdiff_t tile_class;
                 if (UPLO == 'L') {

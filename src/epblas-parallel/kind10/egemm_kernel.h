@@ -36,7 +36,6 @@ typedef long double egemm_TR;
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
 ptrdiff_t egemm_trans_code(char c);
 
-ptrdiff_t egemm_round_up(ptrdiff_t v, ptrdiff_t m);
 
 /* Cache-block sizes (env-overridable EBLAS_MC/KC/NC) with OpenBLAS-style
  * adaptive MC when K fits one panel. */

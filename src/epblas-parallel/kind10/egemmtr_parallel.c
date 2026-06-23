@@ -19,6 +19,7 @@
 
 #include "egemmtr_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "../common/epblas_facade.h"
 #include <stdlib.h>
 #include <ctype.h>
@@ -34,7 +35,6 @@ typedef egemmtr_TR TR;
 #define NR EGEMMTR_NR
 #define EGEMMTR_OMP_MIN 32
 
-static inline ptrdiff_t imin(ptrdiff_t a, ptrdiff_t b) { return a < b ? a : b; }
 
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
@@ -104,14 +104,14 @@ static void egemmtr_core(char uplo, char transa, char transb,
      * (large N) since we only ever lower MC. */
     const ptrdiff_t nthr = blas_omp_max_threads();
     if (n >= EGEMMTR_OMP_MIN && nthr > 1) {
-        ptrdiff_t cap = egemmtr_round_up((n + 3 * nthr - 1) / (3 * nthr), MR);
+        ptrdiff_t cap = blas_round_up((n + 3 * nthr - 1) / (3 * nthr), MR);
         if (cap < 32) cap = 32;        /* keep the register kernel amortized */
         if (MC > cap) MC = cap;
     }
 #endif
 
-    const ptrdiff_t sa_rows = egemmtr_round_up(MC, MR);
-    const ptrdiff_t sb_cols = egemmtr_round_up(NC, NR);
+    const ptrdiff_t sa_rows = blas_round_up(MC, MR);
+    const ptrdiff_t sb_cols = blas_round_up(NC, NR);
     const size_t ap_bytes = (size_t)sa_rows * KC * sizeof(TR);
     const size_t bp_bytes = (size_t)KC * sb_cols * sizeof(TR);
 
@@ -129,9 +129,9 @@ static void egemmtr_core(char uplo, char transa, char transb,
         TR *Ap = (TR *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
         if (Ap) {
             for (ptrdiff_t jc = 0; jc < n; jc += NC) {
-                const ptrdiff_t jb = imin(NC, n - jc);
+                const ptrdiff_t jb = blas_imin(NC, n - jc);
                 for (ptrdiff_t pc = 0; pc < k; pc += KC) {
-                    const ptrdiff_t pb = imin(KC, k - pc);
+                    const ptrdiff_t pb = blas_imin(KC, k - pc);
 
 #ifdef _OPENMP
                     #pragma omp single
@@ -143,7 +143,7 @@ static void egemmtr_core(char uplo, char transa, char transb,
                     #pragma omp for schedule(static, 1)
 #endif
                     for (ptrdiff_t ic = 0; ic < n; ic += MC) {
-                        const ptrdiff_t ib = imin(MC, n - ic);
+                        const ptrdiff_t ib = blas_imin(MC, n - ic);
 
                         ptrdiff_t tile_class;
                         if (UPLO == 'L') {

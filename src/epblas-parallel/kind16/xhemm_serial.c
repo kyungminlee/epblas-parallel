@@ -23,6 +23,7 @@
 
 #include "xhemm_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "xl3_complex.h"
 #include <ctype.h>
 #include <stddef.h>
@@ -33,7 +34,6 @@ typedef __float128 R;
 #define MR QBLAS_XGEMM_MR
 #define NR QBLAS_XGEMM_NR
 
-static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 /* ── Block plan (mirrors ob xhemm.c lines 92-107) ───────────────── */
 void xhemm_make_plan(ptrdiff_t m, ptrdiff_t n, char side, char uplo, xhemm_plan_t *p)
@@ -48,14 +48,14 @@ void xhemm_make_plan(ptrdiff_t m, ptrdiff_t n, char side, char uplo, xhemm_plan_
         long target_mc = L2_TARGET_BYTES / ((long)k * (long)(2 * sizeof(R)));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
-            MC = round_up((ptrdiff_t)target_mc, MR);
+            MC = blas_round_up((ptrdiff_t)target_mc, MR);
             if (MC < MC0) MC = MC0;
         }
     }
 
     p->MC = MC; p->KC = KC; p->NC = NC;
-    p->ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(R);
-    p->bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(R);
+    p->ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * 2 * sizeof(R);
+    p->bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * 2 * sizeof(R);
     p->side = side; p->uplo = uplo; p->k = k;
 }
 

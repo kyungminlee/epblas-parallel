@@ -38,6 +38,7 @@
 
 #include "egemm_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include <stdlib.h>
 #include <ctype.h>
 #include <unistd.h>
@@ -71,7 +72,6 @@ ptrdiff_t egemm_trans_code(char c) {
     return (c == 'C') ? 'T' : c;  /* real: 'C' ≡ 'T' */
 }
 
-ptrdiff_t egemm_round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 /*
  * OpenBLAS-style adaptive MC: when K fits in one panel, grow MC so
@@ -85,7 +85,7 @@ void egemm_choose_blocks(ptrdiff_t k, ptrdiff_t *MC_out, ptrdiff_t *KC_out, ptrd
         long target_mc = g_l2_bytes / ((long)k * (long)sizeof(TR));
         if (target_mc > MC) {
             if (target_mc > 4L * g_mc) target_mc = 4L * g_mc;
-            MC = egemm_round_up((ptrdiff_t)target_mc, MR);
+            MC = blas_round_up((ptrdiff_t)target_mc, MR);
             if (MC < g_mc) MC = g_mc;
         }
     }
@@ -312,8 +312,8 @@ void egemm_serial(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * egemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * blas_round_up(NC, NR) * sizeof(TR);
     TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {

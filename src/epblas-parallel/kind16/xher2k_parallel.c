@@ -33,6 +33,7 @@
 
 #include "xher2k_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "xl3_complex.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
@@ -48,7 +49,6 @@ typedef xher2k_TR TR;
 #define MR QBLAS_XGEMM_MR
 #define NR QBLAS_XGEMM_NR
 
-static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 static void xher2k_core(
     char uplo, char trans,
@@ -93,7 +93,7 @@ static void xher2k_core(
         long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(TR));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
-            MC = round_up((ptrdiff_t)target_mc, MR);
+            MC = blas_round_up((ptrdiff_t)target_mc, MR);
             if (MC < MC0) MC = MC0;
         }
     }
@@ -103,8 +103,8 @@ static void xher2k_core(
     const bool conj_a_pack = (TRANS == 'C') ? 1 : 0;
     const bool conj_b_pack = (TRANS == 'N') ? 1 : 0;
 
-    const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * 2 * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * 2 * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -144,7 +144,7 @@ static void xher2k_core(
             TR *Ap_B = Ap_B_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks. */
-            const ptrdiff_t m_chunk = round_up((n + nth - 1) / nth, MR);
+            const ptrdiff_t m_chunk = blas_round_up((n + nth - 1) / nth, MR);
             const ptrdiff_t m_lo = tid * m_chunk;
             ptrdiff_t m_hi = m_lo + m_chunk;
             if (m_hi > n) m_hi = n;

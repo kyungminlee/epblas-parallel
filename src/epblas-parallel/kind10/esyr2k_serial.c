@@ -21,7 +21,7 @@
  * offsets, valid only under OpenBLAS's contiguous-odd-tail packing. The
  * triangular β pre-pass is the SYRK helper (esyrk_beta_{u,l}), reused as ob
  * does. The layout-agnostic block policy is shared with egemm
- * (egemm_choose_blocks / egemm_round_up). Calling only these *serial*
+ * (egemm_choose_blocks / blas_round_up). Calling only these *serial*
  * primitives keeps esyr2k free of any nested OpenMP team, so it is safe inside
  * another routine's parallel region (the libgomp barrier-wedge guard, memory
  * project-etrsm-omp4-wedge).
@@ -29,9 +29,10 @@
 
 #include "esyr2k_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "esyrk_kernel.h"   /* esyrk_beta_{u,l} — shared triangular β pre-pass */
 #include "etri_kernel.h"
-#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_round_up */
+#include "egemm_kernel.h"   /* egemm_choose_blocks / blas_round_up */
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -206,8 +207,8 @@ void esyr2k_serial(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
     TR *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);

@@ -25,7 +25,7 @@
  * buffers; that sub-block indexing only lands on valid strip boundaries under
  * OpenBLAS's contiguous-odd-tail packing, which the etri substrate provides
  * and par's zero-padded egemm layout does not. The layout-agnostic block-size
- * policy is still shared with egemm (egemm_choose_blocks / egemm_round_up).
+ * policy is still shared with egemm (egemm_choose_blocks / blas_round_up).
  */
 #ifndef EPBLAS_PARALLEL_KIND10_ESYRK_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_ESYRK_KERNEL_H

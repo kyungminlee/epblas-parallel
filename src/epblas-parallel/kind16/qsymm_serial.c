@@ -19,6 +19,7 @@
 
 #include "qsymm_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "qgemm_kernel.h"
 #include <stdlib.h>
 #include <ctype.h>
@@ -151,8 +152,8 @@ void qsymm_serial(
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * blas_round_up(NC, NR) * sizeof(TR);
     TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {

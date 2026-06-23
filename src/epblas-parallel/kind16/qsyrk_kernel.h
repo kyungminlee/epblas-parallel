@@ -26,7 +26,7 @@
  * boundaries under OpenBLAS's contiguous-odd-tail packing, which the qtri
  * substrate provides and par's zero-padded qgemm layout does not. The
  * layout-agnostic block-size policy is still shared with qgemm
- * (qgemm_choose_blocks / qgemm_round_up).
+ * (qgemm_choose_blocks / blas_round_up).
  *
  * Why packed rather than the old unblocked register-tile: at small N (≈64) the
  * unblocked rank-k trailed ob's packed kernel ~3-4% on the NoTrans serial

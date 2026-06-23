@@ -16,6 +16,7 @@
 
 #include "qsymm_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "qgemm_kernel.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
@@ -76,8 +77,8 @@ static void qsymm_core(
     /* Tiny problems: the team setup + Bp barrier cost outweighs the split. */
     if ((long)m * (long)n * (long)k < 64L * 64L * 64L) nthreads = 1;
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * qgemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * blas_round_up(NC, NR) * sizeof(TR);
 
     /* Pre-allocate the shared Bp and one private Ap per thread BEFORE the
      * region: a thread that skipped the loop on a failed in-region alloc
@@ -102,7 +103,7 @@ static void qsymm_core(
 #endif
             TR *Ap = Ap_arr[tid];
 
-            const ptrdiff_t m_chunk = qgemm_round_up((m + nth - 1) / nth, MR);
+            const ptrdiff_t m_chunk = blas_round_up((m + nth - 1) / nth, MR);
             const ptrdiff_t m_lo = tid * m_chunk;
             ptrdiff_t m_hi = m_lo + m_chunk;
             if (m_hi > m) m_hi = m;

@@ -23,6 +23,7 @@
 #include "xgemm_kernel.h"
 #include "xl3_complex.h"
 #include "../common/epblas_facade.h"
+#include "../common/blas_math.h"
 #include <stddef.h>
 #include <stdlib.h>
 #ifdef _OPENMP
@@ -35,7 +36,6 @@ typedef xgemm_TC TC;
 
 #define MR QBLAS_XGEMM_MR
 
-static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 static void xgemm_core(
     char transa, char transb,
@@ -132,7 +132,7 @@ static void xgemm_core(
 #endif
         R *Ap = Ap_arr[tid];
 
-        ptrdiff_t m_chunk = round_up((m + nth - 1) / nth, MR);
+        ptrdiff_t m_chunk = blas_round_up((m + nth - 1) / nth, MR);
         ptrdiff_t m_lo = (ptrdiff_t)tid * m_chunk;
         ptrdiff_t m_hi = m_lo + m_chunk;
         if (m_hi > m) m_hi = m;

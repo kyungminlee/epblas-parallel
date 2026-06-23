@@ -30,6 +30,7 @@
 
 #include "egemm_kernel.h"
 #include "../common/epblas_facade.h"
+#include "../common/blas_math.h"
 #include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -98,7 +99,7 @@ static void egemm_core(
      * other axes) is untouched. Only shrinks MC; stays a multiple of MR. */
     const ptrdiff_t nthr = omp_get_max_threads();
     if (nthr > 1) {
-        ptrdiff_t cap = egemm_round_up((m + nthr - 1) / nthr, MR);
+        ptrdiff_t cap = blas_round_up((m + nthr - 1) / nthr, MR);
         if (cap < MR) cap = MR;
         if (MC > cap) MC = cap;
     }
@@ -114,8 +115,8 @@ static void egemm_core(
      * re-packing a naive collapse(2) would force. Effective parallelism
      * is bounded by (M / MC) per jc-band — ample for square problems.
      */
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * egemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * blas_round_up(NC, NR) * sizeof(TR);
     TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (!Bp) return;
 #ifdef _OPENMP

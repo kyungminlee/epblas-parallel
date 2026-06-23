@@ -28,9 +28,10 @@
 
 #include "qsyr2k_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "qsyrk_kernel.h"   /* qsyrk_beta_{u,l} — shared triangular β pre-pass */
 #include "qtri_kernel.h"
-#include "qgemm_kernel.h"   /* qgemm_choose_blocks / qgemm_round_up */
+#include "qgemm_kernel.h"   /* qgemm_choose_blocks / blas_round_up */
 #include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -77,8 +78,8 @@ static void qsyr2k_core(
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();

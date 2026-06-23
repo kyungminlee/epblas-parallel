@@ -14,7 +14,7 @@
  * pair. par's qgemm packs odd tails zero-padded at stride MR instead, so its
  * kernel reads those bytes differently. This substrate is self-consistent
  * with the syrk/syr2k diagonal kernels. The layout-AGNOSTIC block-size policy
- * is still shared with qgemm (qgemm_choose_blocks / qgemm_round_up).
+ * is still shared with qgemm (qgemm_choose_blocks / blas_round_up).
  */
 #ifndef EPBLAS_PARALLEL_KIND16_QTRI_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_QTRI_KERNEL_H

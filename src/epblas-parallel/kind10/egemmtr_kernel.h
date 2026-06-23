@@ -32,7 +32,6 @@ typedef long double egemmtr_TR;
 /* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
 ptrdiff_t egemmtr_trans_code(const char *p);
 
-ptrdiff_t egemmtr_round_up(ptrdiff_t v, ptrdiff_t m);
 
 /* Cache-block sizes (env-overridable EGEMMTR_MC/KC/NC); lazy-initialized. */
 void egemmtr_block_sizes(ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);

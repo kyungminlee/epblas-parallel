@@ -24,8 +24,9 @@
 
 #include "esyrk_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "etri_kernel.h"
-#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_round_up */
+#include "egemm_kernel.h"   /* egemm_choose_blocks / blas_round_up */
 #include "../common/epblas_facade.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -69,8 +70,8 @@ static void esyrk_core(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -107,7 +108,7 @@ static void esyrk_core(
             TR *Ap = Ap_arr[tid];
 
             /* M-axis (= N output rows) partition into per-thread chunks. */
-            const ptrdiff_t m_chunk = egemm_round_up((n + nth - 1) / nth, MR);
+            const ptrdiff_t m_chunk = blas_round_up((n + nth - 1) / nth, MR);
             const ptrdiff_t m_lo = tid * m_chunk;
             ptrdiff_t m_hi = m_lo + m_chunk;
             if (m_hi > n) m_hi = n;

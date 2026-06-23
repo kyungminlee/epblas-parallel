@@ -22,12 +22,13 @@
 
 #include <stddef.h>
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include <stdlib.h>
 #include <ctype.h>
 
 #include "etrsm_kernel.h"
 #include "etri_kernel.h"    /* etri_gemm_kernel / etri_ncopy / etri_tcopy */
-#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / egemm_round_up */
+#include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / blas_round_up */
 
 typedef etrsm_TR TR;
 
@@ -523,8 +524,8 @@ void etrsm_serial(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
     TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {

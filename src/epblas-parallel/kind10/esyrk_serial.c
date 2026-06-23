@@ -22,7 +22,7 @@
  * offsets, which is only valid under OpenBLAS's contiguous-odd-tail packing
  * (par's egemm zero-pads odd tails at stride MR and would mis-read those
  * bytes). The layout-agnostic block policy is shared with egemm
- * (egemm_choose_blocks / egemm_round_up). Calling only these *serial*
+ * (egemm_choose_blocks / blas_round_up). Calling only these *serial*
  * primitives (never the threaded entries) keeps esyrk free of any nested
  * OpenMP team, so it is safe inside another routine's parallel region (the
  * libgomp barrier-wedge guard).
@@ -30,6 +30,7 @@
 
 #include "esyrk_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "etri_kernel.h"
 #include "egemm_kernel.h"
 #include <stddef.h>
@@ -235,8 +236,8 @@ void esyrk_serial(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)egemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)egemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
     TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {

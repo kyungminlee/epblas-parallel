@@ -21,16 +21,17 @@
  * kernel indexes the packed buffers at arbitrary (possibly odd) offsets, valid
  * only under OpenBLAS's contiguous-odd-tail packing. The triangular β pre-pass
  * is the SYRK helper (qsyrk_beta_{u,l}), reused as ob does. The layout-agnostic
- * block policy is shared with qgemm (qgemm_choose_blocks / qgemm_round_up).
+ * block policy is shared with qgemm (qgemm_choose_blocks / blas_round_up).
  * Calling only these *serial* primitives keeps qsyr2k free of any nested
  * OpenMP team, so it is safe inside another routine's parallel region.
  */
 
 #include "qsyr2k_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
 #include "qsyrk_kernel.h"   /* qsyrk_beta_{u,l} — shared triangular β pre-pass */
 #include "qtri_kernel.h"
-#include "qgemm_kernel.h"   /* qgemm_choose_blocks / qgemm_round_up */
+#include "qgemm_kernel.h"   /* qgemm_choose_blocks / blas_round_up */
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -244,8 +245,8 @@ void qsyr2k_serial(
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)qgemm_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)qgemm_round_up(NC, NR) * sizeof(TR);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
     TR *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
