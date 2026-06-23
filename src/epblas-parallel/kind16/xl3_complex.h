@@ -6,12 +6,12 @@
  * etri_kernel.c convention. Symbol names are unchanged from the ob source.
  *
  * Port source: OpenBLAS.
- *   - kernel/generic/zgemmkernel_2x2.c   → qblas_ygemm_kernel
+ *   - kernel/generic/zgemmkernel_2x2.c   → qblas_xgemm_kernel
  *                                          (NN path only; conjugation absorbed
  *                                           into the packers — see below)
- *   - kernel/generic/zgemm_ncopy_2.c     → qblas_ygemm_ncopy
- *   - kernel/generic/zgemm_tcopy_2.c     → qblas_ygemm_tcopy
- *   - kernel/generic/zgemm_beta.c        → qblas_ygemm_beta
+ *   - kernel/generic/zgemm_ncopy_2.c     → qblas_xgemm_ncopy
+ *   - kernel/generic/zgemm_tcopy_2.c     → qblas_xgemm_tcopy
+ *   - kernel/generic/zgemm_beta.c        → qblas_xgemm_beta
  *
  * Shared across the L3 complex ports (xgemm, xsymm, xsyrk, xsyr2k, xtrmm,
  * xtrsm, xgemmtr, xhemm, xherk, xher2k — qtrsm added). Each routine still owns its own
@@ -36,8 +36,8 @@ extern "C" {
 #endif
 
 /* ── Register-tile dimensions (compile-time constants) ───────────── */
-#define QBLAS_YGEMM_MR 2
-#define QBLAS_YGEMM_NR 2
+#define QBLAS_XGEMM_MR 2
+#define QBLAS_XGEMM_NR 2
 
 /* ── Cache-block sizes (fixed compile-time constants) ───────────────
  *
@@ -48,9 +48,9 @@ extern "C" {
  *
  * NC = 512 keeps KC*NC = 4 MB which lives in L3 across the KC-walk
  * (one OCOPY per (jc, pc) tile). */
-#define QBLAS_YGEMM_GEMM_P  64
-#define QBLAS_YGEMM_GEMM_Q  256
-#define QBLAS_YGEMM_GEMM_R  512
+#define QBLAS_XGEMM_GEMM_P  64
+#define QBLAS_XGEMM_GEMM_Q  256
+#define QBLAS_XGEMM_GEMM_R  512
 
 /* ── Microkernel: NN-only 2x2 complex outer-product over K ────────────
  *
@@ -71,7 +71,7 @@ extern "C" {
  * alpha is split into (alphar, alphai) — the complex multiply is fused
  * with the C accumulate at the bottom of each tile.
  */
-void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+void qblas_xgemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         __float128 alphar, __float128 alphai,
                         const __float128 *Ap,
                         const __float128 *Bp,
@@ -89,7 +89,7 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
  * as it is written into `b` — this handles op = 'R' (conj-no-trans)
  * via ncopy and op = 'C' (conj-trans) via the ICOPY path.
  */
-void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xgemm_ncopy(ptrdiff_t m, ptrdiff_t n,
                        bool conj,
                        const __float128 *a, ptrdiff_t lda,
                        __float128 *b);
@@ -98,20 +98,20 @@ void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
  *
  * Used as ICOPY for normal A and as OCOPY for trans B.
  *
- * Same `conj` semantics and lda convention as qblas_ygemm_ncopy.
+ * Same `conj` semantics and lda convention as qblas_xgemm_ncopy.
  */
-void qblas_ygemm_tcopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xgemm_tcopy(ptrdiff_t m, ptrdiff_t n,
                        bool conj,
                        const __float128 *a, ptrdiff_t lda,
                        __float128 *b);
 
 /* ── Beta pre-pass: C := beta * C with complex beta ──────────────── */
-void qblas_ygemm_beta(ptrdiff_t m, ptrdiff_t n,
+void qblas_xgemm_beta(ptrdiff_t m, ptrdiff_t n,
                       __float128 beta_r, __float128 beta_i,
                       __float128 *c, ptrdiff_t ldc);
 
 /* ── Env-var block-size overrides (lazy, idempotent) ──────────────── */
-void qblas_ygemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc);
+void qblas_xgemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc);
 
 /* ── SYMM-aware packers (complex) ────────────────────────────────────
  *
@@ -128,12 +128,12 @@ void qblas_ygemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc);
  *
  * lda is in COMPLEX elements; the implementation doubles internally.
  */
-void qblas_ysymm_ucopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xsymm_ucopy(ptrdiff_t m, ptrdiff_t n,
                        const __float128 *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
                        __float128 *b);
 
-void qblas_ysymm_lcopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xsymm_lcopy(ptrdiff_t m, ptrdiff_t n,
                        const __float128 *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
                        __float128 *b);
@@ -153,12 +153,12 @@ void qblas_ysymm_lcopy(ptrdiff_t m, ptrdiff_t n,
  * roles via the same function — exactly the upstream convention where
  * the Makefile maps HEMM_IUTCOPY and HEMM_OUTCOPY to the same source.
  */
-void qblas_yhemm_ucopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xhemm_ucopy(ptrdiff_t m, ptrdiff_t n,
                        const __float128 *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
                        __float128 *b);
 
-void qblas_yhemm_lcopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xhemm_lcopy(ptrdiff_t m, ptrdiff_t n,
                        const __float128 *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
                        __float128 *b);
@@ -180,12 +180,12 @@ void qblas_yhemm_lcopy(ptrdiff_t m, ptrdiff_t n,
  * time), so we provide the OC variants directly instead of growing a
  * GEMM_KERNEL_R analogue just for HEMM.
  */
-void qblas_yhemm_ucopy_oc(ptrdiff_t m, ptrdiff_t n,
+void qblas_xhemm_ucopy_oc(ptrdiff_t m, ptrdiff_t n,
                           const __float128 *a, ptrdiff_t lda,
                           ptrdiff_t posX, ptrdiff_t posY,
                           __float128 *b);
 
-void qblas_yhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
+void qblas_xhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
                           const __float128 *a, ptrdiff_t lda,
                           ptrdiff_t posX, ptrdiff_t posY,
                           __float128 *b);
@@ -201,31 +201,31 @@ void qblas_yhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
  * adds the off-diagonal strips). Port source: OpenBLAS
  * driver/level3/{syr2k,zher2k}_kernel.c + {syrk,zherk}_beta.c.
  */
-void qblas_ysyrk_beta_u(ptrdiff_t n, __float128 br, __float128 bi,
+void qblas_xsyrk_beta_u(ptrdiff_t n, __float128 br, __float128 bi,
                         __float128 *c, ptrdiff_t ldc);
-void qblas_ysyrk_beta_l(ptrdiff_t n, __float128 br, __float128 bi,
+void qblas_xsyrk_beta_l(ptrdiff_t n, __float128 br, __float128 bi,
                         __float128 *c, ptrdiff_t ldc);
-void qblas_yherk_beta_u(ptrdiff_t n, __float128 br,
+void qblas_xherk_beta_u(ptrdiff_t n, __float128 br,
                         __float128 *c, ptrdiff_t ldc);
-void qblas_yherk_beta_l(ptrdiff_t n, __float128 br,
+void qblas_xherk_beta_l(ptrdiff_t n, __float128 br,
                         __float128 *c, ptrdiff_t ldc);
 
-void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+void qblas_xsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 alphar, __float128 alphai,
                            const __float128 *a, const __float128 *b,
                            __float128 *c, ptrdiff_t ldc,
                            ptrdiff_t offset, bool flag);
-void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+void qblas_xsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 alphar, __float128 alphai,
                            const __float128 *a, const __float128 *b,
                            __float128 *c, ptrdiff_t ldc,
                            ptrdiff_t offset, bool flag);
-void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+void qblas_xher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 alphar, __float128 alphai,
                            const __float128 *a, const __float128 *b,
                            __float128 *c, ptrdiff_t ldc,
                            ptrdiff_t offset, bool flag);
-void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+void qblas_xher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 alphar, __float128 alphai,
                            const __float128 *a, const __float128 *b,
                            __float128 *c, ptrdiff_t ldc,

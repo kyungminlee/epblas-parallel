@@ -37,8 +37,8 @@
 typedef xsyr2k_TC TC;
 typedef xsyr2k_TR TR;
 
-#define MR QBLAS_YGEMM_MR
-#define NR QBLAS_YGEMM_NR
+#define MR QBLAS_XGEMM_MR
+#define NR QBLAS_XGEMM_NR
 
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
@@ -72,13 +72,13 @@ static void xsyr2k_core(
 
     if (n <= 0) return;
 
-    if (UPLO == 'U') qblas_ysyrk_beta_u(n, beta_r, beta_i, c, ldc);
-    else             qblas_ysyrk_beta_l(n, beta_r, beta_i, c, ldc);
+    if (UPLO == 'U') qblas_xsyrk_beta_u(n, beta_r, beta_i, c, ldc);
+    else             qblas_xsyrk_beta_l(n, beta_r, beta_i, c, ldc);
 
     if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
     ptrdiff_t MC0, KC0, NC0;
-    qblas_ygemm_blocks(&MC0, &KC0, &NC0);
+    qblas_xgemm_blocks(&MC0, &KC0, &NC0);
     ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
 
     if (k <= KC) {
@@ -154,11 +154,11 @@ static void xsyr2k_core(
 #endif
                     {
                         if (TRANS == 'N') {
-                            qblas_ygemm_tcopy(pb, jb, 0, &a[((size_t)ls * lda + js) * 2], lda, Bp_A);
-                            qblas_ygemm_tcopy(pb, jb, 0, &b[((size_t)ls * ldb + js) * 2], ldb, Bp_B);
+                            qblas_xgemm_tcopy(pb, jb, 0, &a[((size_t)ls * lda + js) * 2], lda, Bp_A);
+                            qblas_xgemm_tcopy(pb, jb, 0, &b[((size_t)ls * ldb + js) * 2], ldb, Bp_B);
                         } else {
-                            qblas_ygemm_ncopy(pb, jb, 0, &a[((size_t)js * lda + ls) * 2], lda, Bp_A);
-                            qblas_ygemm_ncopy(pb, jb, 0, &b[((size_t)js * ldb + ls) * 2], ldb, Bp_B);
+                            qblas_xgemm_ncopy(pb, jb, 0, &a[((size_t)js * lda + ls) * 2], lda, Bp_A);
+                            qblas_xgemm_ncopy(pb, jb, 0, &b[((size_t)js * ldb + ls) * 2], ldb, Bp_B);
                         }
                     }
                     /* implicit barrier at end of `single` → Bp safe to read */
@@ -167,11 +167,11 @@ static void xsyr2k_core(
                         const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
                         if (TRANS == 'N') {
-                            qblas_ygemm_tcopy(pb, min_i, 0, &a[((size_t)ls * lda + is) * 2], lda, Ap_A);
-                            qblas_ygemm_tcopy(pb, min_i, 0, &b[((size_t)ls * ldb + is) * 2], ldb, Ap_B);
+                            qblas_xgemm_tcopy(pb, min_i, 0, &a[((size_t)ls * lda + is) * 2], lda, Ap_A);
+                            qblas_xgemm_tcopy(pb, min_i, 0, &b[((size_t)ls * ldb + is) * 2], ldb, Ap_B);
                         } else {
-                            qblas_ygemm_ncopy(pb, min_i, 0, &a[((size_t)is * lda + ls) * 2], lda, Ap_A);
-                            qblas_ygemm_ncopy(pb, min_i, 0, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
+                            qblas_xgemm_ncopy(pb, min_i, 0, &a[((size_t)is * lda + ls) * 2], lda, Ap_A);
+                            qblas_xgemm_ncopy(pb, min_i, 0, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
                         }
 
                         TR *cij = &c[((size_t)js * ldc + is) * 2];
@@ -179,15 +179,15 @@ static void xsyr2k_core(
 
                         /* Pass 1: alpha·A·Bᵀ + symmetric diagonal merge. */
                         if (UPLO == 'U')
-                            qblas_ysyr2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
+                            qblas_xsyr2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
                         else
-                            qblas_ysyr2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
+                            qblas_xsyr2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
 
                         /* Pass 2: alpha·B·Aᵀ into the off-diagonal strips. */
                         if (UPLO == 'U')
-                            qblas_ysyr2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_B, Bp_A, cij, ldc, off, 0);
+                            qblas_xsyr2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_B, Bp_A, cij, ldc, off, 0);
                         else
-                            qblas_ysyr2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_B, Bp_A, cij, ldc, off, 0);
+                            qblas_xsyr2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_B, Bp_A, cij, ldc, off, 0);
                     }
                 }
             }

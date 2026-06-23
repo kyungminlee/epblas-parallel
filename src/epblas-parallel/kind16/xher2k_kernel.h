@@ -19,14 +19,14 @@
  * Faithful port of OpenBLAS ZHER2K (interface/syr2k.c with the HEMM macro →
  * driver/level3/zher2k_k.c blocking nest → driver/level3/zher2k_kernel.c
  * diagonal kernel, the latter transcribed into the shared xl3_complex.c
- * substrate as qblas_yher2k_kernel_{u,l}):
+ * substrate as qblas_xher2k_kernel_{u,l}):
  *
  *   C := alpha·A·Bᴴ + conj(alpha)·B·Aᴴ + beta·C   (trans='N', A,B are N×K)
  *   C := alpha·Aᴴ·B + conj(alpha)·Bᴴ·A + beta·C   (trans='C', A,B are K×N)
  *
  * alpha is COMPLEX, beta is REAL, C is HERMITIAN: only the UPLO triangle is
  * read/written and the diagonal stays real on output (the β pre-pass
- * qblas_yherk_beta_{u,l} unconditionally clears the diagonal imaginary part).
+ * qblas_xherk_beta_{u,l} unconditionally clears the diagonal imaginary part).
  * Each (is,js) tile does TWO kernel passes: pass 1 (Ap=A-pack, Bp=B-pack,
  * flag=1) GEMMs the diagonal NR×NR block to a subbuffer and merges it
  * Hermitian-symmetrically, covering both A·Bᴴ and conj(alpha)·B·Aᴴ on the

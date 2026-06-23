@@ -6,12 +6,12 @@
  * x* drivers below it never reach across into the openblas tree.
  *
  * Port source: OpenBLAS.
- *   - kernel/generic/zgemmkernel_2x2.c   ← qblas_ygemm_kernel
+ *   - kernel/generic/zgemmkernel_2x2.c   ← qblas_xgemm_kernel
  *                                          (NN path only; conjugation absorbed
  *                                           into the packers via the `conj` flag)
- *   - kernel/generic/zgemm_ncopy_2.c     ← qblas_ygemm_ncopy
- *   - kernel/generic/zgemm_tcopy_2.c     ← qblas_ygemm_tcopy
- *   - kernel/generic/zgemm_beta.c        ← qblas_ygemm_beta
+ *   - kernel/generic/zgemm_ncopy_2.c     ← qblas_xgemm_ncopy
+ *   - kernel/generic/zgemm_tcopy_2.c     ← qblas_xgemm_tcopy
+ *   - kernel/generic/zgemm_beta.c        ← qblas_xgemm_beta
  */
 
 #include "xl3_complex.h"
@@ -20,8 +20,8 @@
 
 typedef __float128 TR;
 
-#define MR QBLAS_YGEMM_MR
-#define NR QBLAS_YGEMM_NR
+#define MR QBLAS_XGEMM_MR
+#define NR QBLAS_XGEMM_NR
 
 
 /* ── Microkernel: 2x2 complex outer-product over K (NN path) ──────────
@@ -37,7 +37,7 @@ typedef __float128 TR;
  * Order of operations matches OpenBLAS zgemmkernel_2x2.c so the
  * float-summation order is identical across the K-loop.
  */
-void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+void qblas_xgemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         TR alphar, TR alphai,
                         const TR *Ap,
                         const TR *Bp,
@@ -195,7 +195,7 @@ void qblas_ygemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
  * When `conj` is set, every imag float (odd-index in the interleaved
  * pair) is negated as it's written into `b`.
  */
-void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xgemm_ncopy(ptrdiff_t m, ptrdiff_t n,
                        bool conj,
                        const TR *a, ptrdiff_t lda,
                        TR *b)
@@ -261,7 +261,7 @@ void qblas_ygemm_ncopy(ptrdiff_t m, ptrdiff_t n,
 
 
 /* ── tcopy: faithful port of OpenBLAS zgemm_tcopy_2.c, with conj ──── */
-void qblas_ygemm_tcopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xgemm_tcopy(ptrdiff_t m, ptrdiff_t n,
                        bool conj,
                        const TR *a, ptrdiff_t lda,
                        TR *b)
@@ -346,7 +346,7 @@ void qblas_ygemm_tcopy(ptrdiff_t m, ptrdiff_t n,
 
 
 /* ── Beta pre-pass: C := beta * C with complex beta ──────────────── */
-void qblas_ygemm_beta(ptrdiff_t m, ptrdiff_t n,
+void qblas_xgemm_beta(ptrdiff_t m, ptrdiff_t n,
                       TR beta_r, TR beta_i,
                       TR *c, ptrdiff_t ldc)
 {
@@ -375,8 +375,8 @@ void qblas_ygemm_beta(ptrdiff_t m, ptrdiff_t n,
 
 
 /* ── Block-size constants ───────────────────────────────────────── */
-void qblas_ygemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc) {
-    *mc = QBLAS_YGEMM_GEMM_P; *kc = QBLAS_YGEMM_GEMM_Q; *nc = QBLAS_YGEMM_GEMM_R;
+void qblas_xgemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc) {
+    *mc = QBLAS_XGEMM_GEMM_P; *kc = QBLAS_XGEMM_GEMM_Q; *nc = QBLAS_XGEMM_GEMM_R;
 }
 
 
@@ -393,7 +393,7 @@ void qblas_ygemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc) {
  * +lda" — each path corresponds to a different direction of mirror
  * across the diagonal (column-walk vs row-walk in storage).
  */
-void qblas_ysymm_ucopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xsymm_ucopy(ptrdiff_t m, ptrdiff_t n,
                        const TR *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
                        TR *b)
@@ -456,7 +456,7 @@ void qblas_ysymm_ucopy(ptrdiff_t m, ptrdiff_t n,
 }
 
 
-void qblas_ysymm_lcopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xsymm_lcopy(ptrdiff_t m, ptrdiff_t n,
                        const TR *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
                        TR *b)
@@ -536,7 +536,7 @@ void qblas_ysymm_lcopy(ptrdiff_t m, ptrdiff_t n,
  * Which branch is "directly stored" vs "reflected" differs between
  * ucopy (upper triangle stored) and lcopy (lower triangle stored).
  */
-void qblas_yhemm_ucopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xhemm_ucopy(ptrdiff_t m, ptrdiff_t n,
                        const TR *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
                        TR *b)
@@ -627,7 +627,7 @@ void qblas_yhemm_ucopy(ptrdiff_t m, ptrdiff_t n,
 }
 
 
-void qblas_yhemm_lcopy(ptrdiff_t m, ptrdiff_t n,
+void qblas_xhemm_lcopy(ptrdiff_t m, ptrdiff_t n,
                        const TR *a, ptrdiff_t lda,
                        ptrdiff_t posX, ptrdiff_t posY,
                        TR *b)
@@ -725,11 +725,11 @@ void qblas_yhemm_lcopy(ptrdiff_t m, ptrdiff_t n,
  * match the (col/row) reinterpretation of (posX/posY) that the SIDE=R
  * call site triggers.
  *
- * See the header comment on qblas_yhemm_ucopy_oc for the rationale
+ * See the header comment on qblas_xhemm_ucopy_oc for the rationale
  * (why we need a distinct OC variant instead of reusing the IC one as
  * upstream OpenBLAS does).
  */
-void qblas_yhemm_ucopy_oc(ptrdiff_t m, ptrdiff_t n,
+void qblas_xhemm_ucopy_oc(ptrdiff_t m, ptrdiff_t n,
                           const TR *a, ptrdiff_t lda,
                           ptrdiff_t posX, ptrdiff_t posY,
                           TR *b)
@@ -822,7 +822,7 @@ void qblas_yhemm_ucopy_oc(ptrdiff_t m, ptrdiff_t n,
 }
 
 
-void qblas_yhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
+void qblas_xhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
                           const TR *a, ptrdiff_t lda,
                           ptrdiff_t posX, ptrdiff_t posY,
                           TR *b)
@@ -918,7 +918,7 @@ void qblas_yhemm_lcopy_oc(ptrdiff_t m, ptrdiff_t n,
 /* ── Triangular beta pre-pass (complex) ──────────────────────────────
  *
  * `c` is interleaved (re, im); `ldc` in complex elements. We unroll
- * inside the row loop instead of touching `qblas_ygemm_beta`'s full-
+ * inside the row loop instead of touching `qblas_xgemm_beta`'s full-
  * rectangle helper.
  */
 static inline void xsyrk_scale_strip(TR *cj_re,
@@ -941,7 +941,7 @@ static inline void xsyrk_scale_strip(TR *cj_re,
     }
 }
 
-void qblas_ysyrk_beta_u(ptrdiff_t n, TR br, TR bi, TR *c, ptrdiff_t ldc) {
+void qblas_xsyrk_beta_u(ptrdiff_t n, TR br, TR bi, TR *c, ptrdiff_t ldc) {
     if (br == 1.0Q && bi == 0.0Q) return;
     const ptrdiff_t ldc2 = 2 * ldc;
     for (ptrdiff_t j = 0; j < n; ++j) {
@@ -949,7 +949,7 @@ void qblas_ysyrk_beta_u(ptrdiff_t n, TR br, TR bi, TR *c, ptrdiff_t ldc) {
     }
 }
 
-void qblas_ysyrk_beta_l(ptrdiff_t n, TR br, TR bi, TR *c, ptrdiff_t ldc) {
+void qblas_xsyrk_beta_l(ptrdiff_t n, TR br, TR bi, TR *c, ptrdiff_t ldc) {
     if (br == 1.0Q && bi == 0.0Q) return;
     const ptrdiff_t ldc2 = 2 * ldc;
     for (ptrdiff_t j = 0; j < n; ++j) {
@@ -967,7 +967,7 @@ void qblas_ysyrk_beta_l(ptrdiff_t n, TR br, TR bi, TR *c, ptrdiff_t ldc) {
  * Diagonal handling deviates from xsyrk_beta: we ALWAYS write imag=0
  * on the diagonal, even when beta == 1.0Q (matches zherk_beta).
  */
-void qblas_yherk_beta_u(ptrdiff_t n, TR br, TR *c, ptrdiff_t ldc) {
+void qblas_xherk_beta_u(ptrdiff_t n, TR br, TR *c, ptrdiff_t ldc) {
     const ptrdiff_t ldc2 = 2 * ldc;
     for (ptrdiff_t j = 0; j < n; ++j) {
         TR *col = c + j * ldc2;
@@ -991,7 +991,7 @@ void qblas_yherk_beta_u(ptrdiff_t n, TR br, TR *c, ptrdiff_t ldc) {
     }
 }
 
-void qblas_yherk_beta_l(ptrdiff_t n, TR br, TR *c, ptrdiff_t ldc) {
+void qblas_xherk_beta_l(ptrdiff_t n, TR br, TR *c, ptrdiff_t ldc) {
     const ptrdiff_t ldc2 = 2 * ldc;
     for (ptrdiff_t j = 0; j < n; ++j) {
         TR *col = c + j * ldc2;
@@ -1026,7 +1026,7 @@ void qblas_yherk_beta_l(ptrdiff_t n, TR br, TR *c, ptrdiff_t ldc) {
  * All pointer arithmetic accounts for COMPSIZE=2 __float128s per
  * complex element. ldc, k, m, n are in complex elements.
  */
-void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+void qblas_xsyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            TR alphar, TR alphai,
                            const TR *a, const TR *b,
                            TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
@@ -1035,7 +1035,7 @@ void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const ptrdiff_t ldc2 = 2 * ldc;
 
     if (m + offset < 0) {
-        qblas_ygemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
+        qblas_xgemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
         return;
     }
     if (n < offset) {
@@ -1049,14 +1049,14 @@ void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         if (n <= 0) return;
     }
     if (n > m + offset) {
-        qblas_ygemm_kernel(m, n - m - offset, k, alphar, alphai,
+        qblas_xgemm_kernel(m, n - m - offset, k, alphar, alphai,
                            a, b + (m + offset) * k * 2,
                            c + (m + offset) * ldc2, ldc);
         n = m + offset;
         if (n <= 0) return;
     }
     if (offset < 0) {
-        qblas_ygemm_kernel(-offset, n, k, alphar, alphai, a, b, c, ldc);
+        qblas_xgemm_kernel(-offset, n, k, alphar, alphai, a, b, c, ldc);
         a -= offset * k * 2;
         c -= offset * 2;
         m += offset;
@@ -1068,14 +1068,14 @@ void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
 
         if (loop > 0) {
-            qblas_ygemm_kernel(loop, nn, k, alphar, alphai,
+            qblas_xgemm_kernel(loop, nn, k, alphar, alphai,
                                a, b + loop * k * 2,
                                c + loop * ldc2, ldc);
         }
 
         if (flag) {
             for (ptrdiff_t z = 0; z < nn * nn * 2; ++z) subbuf[z] = 0;
-            qblas_ygemm_kernel(nn, nn, k, alphar, alphai,
+            qblas_xgemm_kernel(nn, nn, k, alphar, alphai,
                                a + loop * k * 2, b + loop * k * 2,
                                subbuf, nn);
 
@@ -1092,7 +1092,7 @@ void qblas_ysyr2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     }
 }
 
-void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+void qblas_xsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            TR alphar, TR alphai,
                            const TR *a, const TR *b,
                            TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
@@ -1104,11 +1104,11 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         return;
     }
     if (n < offset) {
-        qblas_ygemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
+        qblas_xgemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
         return;
     }
     if (offset > 0) {
-        qblas_ygemm_kernel(m, offset, k, alphar, alphai, a, b, c, ldc);
+        qblas_xgemm_kernel(m, offset, k, alphar, alphai, a, b, c, ldc);
         b += offset * k * 2;
         c += offset * ldc2;
         n -= offset;
@@ -1127,7 +1127,7 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         if (m <= 0) return;
     }
     if (m > n - offset) {
-        qblas_ygemm_kernel(m - n + offset, n, k, alphar, alphai,
+        qblas_xgemm_kernel(m - n + offset, n, k, alphar, alphai,
                            a + (n - offset) * k * 2, b,
                            c + (n - offset) * 2, ldc);
         m = n + offset;
@@ -1140,7 +1140,7 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 
         if (flag) {
             for (ptrdiff_t z = 0; z < nn * nn * 2; ++z) subbuf[z] = 0;
-            qblas_ygemm_kernel(nn, nn, k, alphar, alphai,
+            qblas_xgemm_kernel(nn, nn, k, alphar, alphai,
                                a + loop * k * 2, b + loop * k * 2,
                                subbuf, nn);
 
@@ -1156,7 +1156,7 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         }
 
         if (m > mm + nn) {
-            qblas_ygemm_kernel(m - mm - nn, nn, k, alphar, alphai,
+            qblas_xgemm_kernel(m - mm - nn, nn, k, alphar, alphai,
                                a + (mm + nn) * k * 2, b + loop * k * 2,
                                c + (mm + nn) * 2 + loop * ldc2, ldc);
         }
@@ -1167,7 +1167,7 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 /* ── HER2K kernel: two-pass diagonal-aware GEMM (complex Hermitian) ──
  *
  * Faithful port of OpenBLAS driver/level3/zher2k_kernel.c. Structural
- * twin of qblas_ysyr2k_kernel_{u,l}; differs only in the diagonal
+ * twin of qblas_xsyr2k_kernel_{u,l}; differs only in the diagonal
  * NR×NR subblock writeback:
  *
  *   imag part subtracts subbuf[j,i] (instead of adding) and the
@@ -1176,7 +1176,7 @@ void qblas_ysyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
  * See header for the two-pass calling convention. Conjugation is
  * absorbed by the caller's packers per upstream's GEMM_KERNEL_R/L pick.
  */
-void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+void qblas_xher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            TR alphar, TR alphai,
                            const TR *a, const TR *b,
                            TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
@@ -1185,7 +1185,7 @@ void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     const ptrdiff_t ldc2 = 2 * ldc;
 
     if (m + offset < 0) {
-        qblas_ygemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
+        qblas_xgemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
         return;
     }
     if (n < offset) {
@@ -1199,14 +1199,14 @@ void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         if (n <= 0) return;
     }
     if (n > m + offset) {
-        qblas_ygemm_kernel(m, n - m - offset, k, alphar, alphai,
+        qblas_xgemm_kernel(m, n - m - offset, k, alphar, alphai,
                            a, b + (m + offset) * k * 2,
                            c + (m + offset) * ldc2, ldc);
         n = m + offset;
         if (n <= 0) return;
     }
     if (offset < 0) {
-        qblas_ygemm_kernel(-offset, n, k, alphar, alphai, a, b, c, ldc);
+        qblas_xgemm_kernel(-offset, n, k, alphar, alphai, a, b, c, ldc);
         a -= offset * k * 2;
         c -= offset * 2;
         m += offset;
@@ -1218,14 +1218,14 @@ void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
 
         if (loop > 0) {
-            qblas_ygemm_kernel(loop, nn, k, alphar, alphai,
+            qblas_xgemm_kernel(loop, nn, k, alphar, alphai,
                                a, b + loop * k * 2,
                                c + loop * ldc2, ldc);
         }
 
         if (flag) {
             for (ptrdiff_t z = 0; z < nn * nn * 2; ++z) subbuf[z] = 0;
-            qblas_ygemm_kernel(nn, nn, k, alphar, alphai,
+            qblas_xgemm_kernel(nn, nn, k, alphar, alphai,
                                a + loop * k * 2, b + loop * k * 2,
                                subbuf, nn);
 
@@ -1246,7 +1246,7 @@ void qblas_yher2k_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
     }
 }
 
-void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+void qblas_xher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            TR alphar, TR alphai,
                            const TR *a, const TR *b,
                            TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag)
@@ -1258,11 +1258,11 @@ void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         return;
     }
     if (n < offset) {
-        qblas_ygemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
+        qblas_xgemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
         return;
     }
     if (offset > 0) {
-        qblas_ygemm_kernel(m, offset, k, alphar, alphai, a, b, c, ldc);
+        qblas_xgemm_kernel(m, offset, k, alphar, alphai, a, b, c, ldc);
         b += offset * k * 2;
         c += offset * ldc2;
         n -= offset;
@@ -1281,7 +1281,7 @@ void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         if (m <= 0) return;
     }
     if (m > n - offset) {
-        qblas_ygemm_kernel(m - n + offset, n, k, alphar, alphai,
+        qblas_xgemm_kernel(m - n + offset, n, k, alphar, alphai,
                            a + (n - offset) * k * 2, b,
                            c + (n - offset) * 2, ldc);
         m = n + offset;
@@ -1294,7 +1294,7 @@ void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 
         if (flag) {
             for (ptrdiff_t z = 0; z < nn * nn * 2; ++z) subbuf[z] = 0;
-            qblas_ygemm_kernel(nn, nn, k, alphar, alphai,
+            qblas_xgemm_kernel(nn, nn, k, alphar, alphai,
                                a + loop * k * 2, b + loop * k * 2,
                                subbuf, nn);
 
@@ -1314,7 +1314,7 @@ void qblas_yher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         }
 
         if (m > mm + nn) {
-            qblas_ygemm_kernel(m - mm - nn, nn, k, alphar, alphai,
+            qblas_xgemm_kernel(m - mm - nn, nn, k, alphar, alphai,
                                a + (mm + nn) * k * 2, b + loop * k * 2,
                                c + (mm + nn) * 2 + loop * ldc2, ldc);
         }

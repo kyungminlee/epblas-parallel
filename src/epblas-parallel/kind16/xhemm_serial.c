@@ -30,8 +30,8 @@
 
 typedef __float128 R;
 
-#define MR QBLAS_YGEMM_MR
-#define NR QBLAS_YGEMM_NR
+#define MR QBLAS_XGEMM_MR
+#define NR QBLAS_XGEMM_NR
 
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
@@ -40,7 +40,7 @@ void xhemm_make_plan(ptrdiff_t m, ptrdiff_t n, char side, char uplo, xhemm_plan_
 {
     const ptrdiff_t k = (side == 'L') ? m : n;
     ptrdiff_t MC0, KC, NC;
-    qblas_ygemm_blocks(&MC0, &KC, &NC);
+    qblas_xgemm_blocks(&MC0, &KC, &NC);
 
     ptrdiff_t MC = MC0;
     if (k > 0 && k <= KC) {
@@ -67,12 +67,12 @@ void xhemm_pack_B(const xhemm_plan_t *p,
                   R *Bp)
 {
     if (p->side == 'L') {
-        qblas_ygemm_ncopy(pb, jb, 0,
+        qblas_xgemm_ncopy(pb, jb, 0,
                           &B_eff[((size_t)js * ldb_eff + ls) * 2], ldb_eff, Bp);
     } else if (p->uplo == 'U') {
-        qblas_yhemm_ucopy_oc(pb, jb, B_eff, ldb_eff, js, ls, Bp);
+        qblas_xhemm_ucopy_oc(pb, jb, B_eff, ldb_eff, js, ls, Bp);
     } else {
-        qblas_yhemm_lcopy_oc(pb, jb, B_eff, ldb_eff, js, ls, Bp);
+        qblas_xhemm_lcopy_oc(pb, jb, B_eff, ldb_eff, js, ls, Bp);
     }
 }
 
@@ -91,15 +91,15 @@ void xhemm_level3_slab(ptrdiff_t m_lo, ptrdiff_t m_hi, const xhemm_plan_t *p,
 
         if (p->side == 'L') {
             if (p->uplo == 'U')
-                qblas_yhemm_ucopy(pb, min_i, A_eff, lda_eff, is, ls, Ap);
+                qblas_xhemm_ucopy(pb, min_i, A_eff, lda_eff, is, ls, Ap);
             else
-                qblas_yhemm_lcopy(pb, min_i, A_eff, lda_eff, is, ls, Ap);
+                qblas_xhemm_lcopy(pb, min_i, A_eff, lda_eff, is, ls, Ap);
         } else {
-            qblas_ygemm_tcopy(pb, min_i, 0,
+            qblas_xgemm_tcopy(pb, min_i, 0,
                               &A_eff[((size_t)ls * lda_eff + is) * 2], lda_eff, Ap);
         }
 
-        qblas_ygemm_kernel(min_i, jb, pb, alphar, alphai,
+        qblas_xgemm_kernel(min_i, jb, pb, alphar, alphai,
                            Ap, Bp,
                            &C[((size_t)js * ldc + is) * 2], ldc);
     }
@@ -123,7 +123,7 @@ void xhemm_serial(
     if (m <= 0 || n <= 0) return;
 
     R *C = (R *)c;
-    qblas_ygemm_beta(m, n, beta_r, beta_i, C, ldc);
+    qblas_xgemm_beta(m, n, beta_r, beta_i, C, ldc);
     if (alphar == 0.0Q && alphai == 0.0Q) return;
 
     const R *A_eff = (const R *)((sd == 'L') ? a : b);

@@ -34,7 +34,7 @@
 typedef __float128 R;
 typedef xhemm_TC TC;
 
-#define MR QBLAS_YGEMM_MR
+#define MR QBLAS_XGEMM_MR
 
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
@@ -61,7 +61,7 @@ static void xhemm_core(
     if (m <= 0 || n <= 0) return;
 
     R *C = (R *)c;
-    qblas_ygemm_beta(m, n, beta_r, beta_i, C, ldc);
+    qblas_xgemm_beta(m, n, beta_r, beta_i, C, ldc);
     if (alphar == 0.0Q && alphai == 0.0Q) return;
 
     const R *A_eff = (const R *)((sd == 'L') ? a : b);

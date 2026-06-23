@@ -19,7 +19,7 @@
  * Faithful port of OpenBLAS ZSYR2K (interface/syr2k.c dispatch →
  * driver/level3/level3_syr2k.c blocking nest → driver/level3/syr2k_kernel.c
  * diagonal kernel, the latter transcribed into the shared xl3_complex.c
- * substrate as qblas_ysyr2k_kernel_{u,l}):
+ * substrate as qblas_xsyr2k_kernel_{u,l}):
  *
  *   C := alpha·(A·Bᵀ + B·Aᵀ) + beta·C   (trans='N', A,B are N×K)
  *   C := alpha·(Aᵀ·B + Bᵀ·A) + beta·C   (trans='T', A,B are K×N)

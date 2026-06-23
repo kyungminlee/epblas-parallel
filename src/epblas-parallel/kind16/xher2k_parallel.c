@@ -45,8 +45,8 @@
 typedef xher2k_TC TC;
 typedef xher2k_TR TR;
 
-#define MR QBLAS_YGEMM_MR
-#define NR QBLAS_YGEMM_NR
+#define MR QBLAS_XGEMM_MR
+#define NR QBLAS_XGEMM_NR
 
 static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
@@ -79,13 +79,13 @@ static void xher2k_core(
 
     if (n <= 0) return;
 
-    if (UPLO == 'U') qblas_yherk_beta_u(n, beta_r, c, ldc);
-    else             qblas_yherk_beta_l(n, beta_r, c, ldc);
+    if (UPLO == 'U') qblas_xherk_beta_u(n, beta_r, c, ldc);
+    else             qblas_xherk_beta_l(n, beta_r, c, ldc);
 
     if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
     ptrdiff_t MC0, KC0, NC0;
-    qblas_ygemm_blocks(&MC0, &KC0, &NC0);
+    qblas_xgemm_blocks(&MC0, &KC0, &NC0);
     ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
 
     if (k <= KC) {
@@ -166,11 +166,11 @@ static void xher2k_core(
 #endif
                     {
                         if (TRANS == 'N') {
-                            qblas_ygemm_tcopy(pb, jb, conj_b_pack, &a[((size_t)ls * lda + js) * 2], lda, Bp_A);
-                            qblas_ygemm_tcopy(pb, jb, conj_b_pack, &b[((size_t)ls * ldb + js) * 2], ldb, Bp_B);
+                            qblas_xgemm_tcopy(pb, jb, conj_b_pack, &a[((size_t)ls * lda + js) * 2], lda, Bp_A);
+                            qblas_xgemm_tcopy(pb, jb, conj_b_pack, &b[((size_t)ls * ldb + js) * 2], ldb, Bp_B);
                         } else {
-                            qblas_ygemm_ncopy(pb, jb, conj_b_pack, &a[((size_t)js * lda + ls) * 2], lda, Bp_A);
-                            qblas_ygemm_ncopy(pb, jb, conj_b_pack, &b[((size_t)js * ldb + ls) * 2], ldb, Bp_B);
+                            qblas_xgemm_ncopy(pb, jb, conj_b_pack, &a[((size_t)js * lda + ls) * 2], lda, Bp_A);
+                            qblas_xgemm_ncopy(pb, jb, conj_b_pack, &b[((size_t)js * ldb + ls) * 2], ldb, Bp_B);
                         }
                     }
                     /* implicit barrier at end of `single` → Bp safe to read */
@@ -179,11 +179,11 @@ static void xher2k_core(
                         const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
 
                         if (TRANS == 'N') {
-                            qblas_ygemm_tcopy(pb, min_i, conj_a_pack, &a[((size_t)ls * lda + is) * 2], lda, Ap_A);
-                            qblas_ygemm_tcopy(pb, min_i, conj_a_pack, &b[((size_t)ls * ldb + is) * 2], ldb, Ap_B);
+                            qblas_xgemm_tcopy(pb, min_i, conj_a_pack, &a[((size_t)ls * lda + is) * 2], lda, Ap_A);
+                            qblas_xgemm_tcopy(pb, min_i, conj_a_pack, &b[((size_t)ls * ldb + is) * 2], ldb, Ap_B);
                         } else {
-                            qblas_ygemm_ncopy(pb, min_i, conj_a_pack, &a[((size_t)is * lda + ls) * 2], lda, Ap_A);
-                            qblas_ygemm_ncopy(pb, min_i, conj_a_pack, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
+                            qblas_xgemm_ncopy(pb, min_i, conj_a_pack, &a[((size_t)is * lda + ls) * 2], lda, Ap_A);
+                            qblas_xgemm_ncopy(pb, min_i, conj_a_pack, &b[((size_t)is * ldb + ls) * 2], ldb, Ap_B);
                         }
 
                         TR *cij = &c[((size_t)js * ldc + is) * 2];
@@ -191,15 +191,15 @@ static void xher2k_core(
 
                         /* Pass 1: alpha·A·Bᴴ + Hermitian diagonal merge. */
                         if (UPLO == 'U')
-                            qblas_yher2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
+                            qblas_xher2k_kernel_u(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
                         else
-                            qblas_yher2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
+                            qblas_xher2k_kernel_l(min_i, jb, pb, alphar, alphai, Ap_A, Bp_B, cij, ldc, off, 1);
 
                         /* Pass 2: conj(alpha)·B·Aᴴ into the off-diagonal strips. */
                         if (UPLO == 'U')
-                            qblas_yher2k_kernel_u(min_i, jb, pb, alphar, -alphai, Ap_B, Bp_A, cij, ldc, off, 0);
+                            qblas_xher2k_kernel_u(min_i, jb, pb, alphar, -alphai, Ap_B, Bp_A, cij, ldc, off, 0);
                         else
-                            qblas_yher2k_kernel_l(min_i, jb, pb, alphar, -alphai, Ap_B, Bp_A, cij, ldc, off, 0);
+                            qblas_xher2k_kernel_l(min_i, jb, pb, alphar, -alphai, Ap_B, Bp_A, cij, ldc, off, 0);
                     }
                 }
             }

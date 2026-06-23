@@ -16,7 +16,7 @@
  *                      inside another routine's parallel region.
  *
  * Both drivers run the OpenBLAS GotoBLAS blocking nest over the shared
- * packed substrate (xl3_complex.c): qblas_ygemm_beta / _blocks / _ncopy /
+ * packed substrate (xl3_complex.c): qblas_xgemm_beta / _blocks / _ncopy /
  * _tcopy / _kernel. __complex128 has no SIMD path — every multiply lowers to
  * a libquadmath soft-float call — but the 2×2 register microkernel forms
  * four independent accumulator chains that overlap that call latency, which
