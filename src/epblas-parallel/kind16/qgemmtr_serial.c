@@ -19,11 +19,6 @@
 
 typedef qgemmtr_TR TR;
 
-char qgemmtr_trans_code(const char *p) {
-    char c = blas_up(*p);
-    return (c == 'C') ? 'T' : c;
-}
-
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
@@ -108,8 +103,8 @@ void qgemmtr_serial(char uplo, char transa, char transb,
 {
     const TR alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
-    const char ta = qgemmtr_trans_code(&transa);
-    const char tb = qgemmtr_trans_code(&transb);
+    const char ta = blas_trans_real(transa);
+    const char tb = blas_trans_real(transb);
 
     if (n <= 0) return;
     const TR zero = 0.0Q, one = 1.0Q;

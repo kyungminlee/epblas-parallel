@@ -29,8 +29,6 @@
 
 typedef __float128 qgemmtr_TR;
 
-/* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-char qgemmtr_trans_code(const char *p);
 
 /* Beta-only pass over columns [j0,j1): the body run on the alpha==0 / K==0
  * early-exit path. Scales (or zeros) the UPLO triangle of each column by beta.

@@ -13,6 +13,7 @@
  */
 
 #include "wgemm_kernel.h"
+#include "../common/blas_char.h"
 #include "mf_kernels.h"
 #include "mf_pred.h"
 #include <cstdlib>
@@ -46,10 +47,6 @@ using mf_pred::ceq1;
 const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
 
 }  // namespace
-
-std::ptrdiff_t wgemm_trans_code(const char *p, std::size_t /*len*/) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-}
 
 void wgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC) {
     init_blocks();
@@ -379,8 +376,8 @@ extern "C" void wgemm_serial(
     TC *c, std::ptrdiff_t ldc)
 {
     const TC alpha = *alpha_, beta = *beta_;
-    const std::ptrdiff_t ta = wgemm_trans_code(&transa, 1);
-    const std::ptrdiff_t tb = wgemm_trans_code(&transb, 1);
+    const char ta = blas_trans_complex(transa);
+    const char tb = blas_trans_complex(transb);
 
     if (m <= 0 || n <= 0) return;
 

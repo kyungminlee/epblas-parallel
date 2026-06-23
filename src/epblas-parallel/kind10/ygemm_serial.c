@@ -34,10 +34,6 @@ typedef ygemm_TC TC;
 static const TC zero = 0.0L + 0.0iL;
 static const TC one  = 1.0L + 0.0iL;
 
-static ptrdiff_t trans_code(char c) {
-    return blas_up(c);
-}
-
 /* ── beta pre-pass ────────────────────────────────────────────── */
 
 void ygemm_beta_prepass(ptrdiff_t m, ptrdiff_t n, TC beta, TC *c, ptrdiff_t ldc) {
@@ -191,8 +187,8 @@ void ygemm_serial(
     TC *c, ptrdiff_t ldc)
 {
     const TC alpha = *alpha_, beta = *beta_;
-    const char ta = trans_code(transa);
-    const char tb = trans_code(transb);
+    const char ta = blas_trans_complex(transa);
+    const char tb = blas_trans_complex(transb);
 
     if (m <= 0 || n <= 0) return;
 

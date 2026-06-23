@@ -23,6 +23,7 @@
  */
 
 #include "mgemm_kernel.h"
+#include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include <cstddef>
 #include <cstdlib>
@@ -57,8 +58,8 @@ static void mgemm_core(
 #endif
 
     const TR alpha = *alpha_, beta = *beta_;
-    const std::ptrdiff_t ta = mgemm_trans_code(&transa, 1);
-    const std::ptrdiff_t tb = mgemm_trans_code(&transb, 1);
+    const char ta = blas_trans_real(transa);
+    const char tb = blas_trans_real(transb);
 
     if (m <= 0 || n <= 0) return;
 

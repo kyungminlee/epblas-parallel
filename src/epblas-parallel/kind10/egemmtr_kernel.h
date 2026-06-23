@@ -29,8 +29,6 @@ typedef long double egemmtr_TR;
 #define EGEMMTR_MR 2
 #define EGEMMTR_NR 2
 
-/* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-ptrdiff_t egemmtr_trans_code(const char *p);
 
 
 /* Cache-block sizes (env-overridable EGEMMTR_MC/KC/NC); lazy-initialized. */

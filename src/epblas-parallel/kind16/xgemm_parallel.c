@@ -21,6 +21,7 @@
  */
 
 #include "xgemm_kernel.h"
+#include "../common/blas_char.h"
 #include "xl3_complex.h"
 #include "../common/epblas_facade.h"
 #include "../common/blas_math.h"
@@ -58,8 +59,8 @@ static void xgemm_core(
 
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
-    const char ta = xgemm_trans_code(transa);
-    const char tb = xgemm_trans_code(transb);
+    const char ta = blas_trans_complex(transa);
+    const char tb = blas_trans_complex(transb);
 
     if (m <= 0 || n <= 0) return;
 

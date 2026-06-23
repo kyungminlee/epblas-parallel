@@ -15,6 +15,7 @@
  */
 
 #include "mgemm_kernel.h"
+#include "../common/blas_char.h"
 #include <cstdlib>
 #include <cctype>
 
@@ -40,11 +41,6 @@ const TR zero_dd{0.0, 0.0};
 const TR one_dd {1.0, 0.0};
 
 }  // namespace
-
-std::ptrdiff_t mgemm_trans_code(const char *p, std::size_t /*len*/) {
-    char c = static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
-    return (c == 'C') ? 'T' : c;  /* real type: C == T */
-}
 
 void mgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC) {
     init_blocks();
@@ -329,8 +325,8 @@ extern "C" void mgemm_serial(
     TR *c, std::ptrdiff_t ldc)
 {
     const TR alpha = *alpha_, beta = *beta_;
-    const std::ptrdiff_t ta = mgemm_trans_code(&transa, 1);
-    const std::ptrdiff_t tb = mgemm_trans_code(&transb, 1);
+    const char ta = blas_trans_real(transa);
+    const char tb = blas_trans_real(transb);
 
     if (m <= 0 || n <= 0) return;
 

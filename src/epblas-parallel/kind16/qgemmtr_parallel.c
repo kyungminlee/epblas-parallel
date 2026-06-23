@@ -44,8 +44,8 @@ static void qgemmtr_core(char uplo, char transa, char transb,
 {
     const TR alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
-    const char ta = qgemmtr_trans_code(&transa);
-    const char tb = qgemmtr_trans_code(&transb);
+    const char ta = blas_trans_real(transa);
+    const char tb = blas_trans_real(transb);
 
     if (n <= 0) return;
     const TR zero = 0.0Q, one = 1.0Q;

@@ -29,6 +29,7 @@
  */
 
 #include "egemm_kernel.h"
+#include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include "../common/blas_math.h"
 #include <stdlib.h>
@@ -64,8 +65,8 @@ static void egemm_core(
 #endif
 
     const TR alpha = *alpha_, beta = *beta_;
-    const char ta = egemm_trans_code(transa);
-    const char tb = egemm_trans_code(transb);
+    const char ta = blas_trans_real(transa);
+    const char tb = blas_trans_real(transb);
 
     if (m <= 0 || n <= 0) return;
 

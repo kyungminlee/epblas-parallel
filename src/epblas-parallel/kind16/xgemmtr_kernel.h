@@ -31,9 +31,6 @@
 
 typedef __complex128 xgemmtr_TC;
 
-/* Normalize a Fortran trans char to a code (upper-cased; 'C' kept distinct
- * from 'T' so conjugation can be applied for complex input). */
-char xgemmtr_trans_code(char c);
 
 /* Beta-only pass over columns [j0,j1): the body run on the alpha==0 / K==0
  * early-exit path. Scales (or zeros) the UPLO triangle of each column by beta.

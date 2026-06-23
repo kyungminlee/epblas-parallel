@@ -27,8 +27,6 @@
 
 using wgemm_T = multifloats::complex64x2;
 
-/* Normalize a Fortran trans char (N/T/C kept distinct for complex). */
-std::ptrdiff_t wgemm_trans_code(const char *p, std::size_t len);
 
 /* Cache-block sizes (env-overridable MBLAS_MC/KC/NC). */
 void wgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC);

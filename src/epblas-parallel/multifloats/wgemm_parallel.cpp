@@ -18,6 +18,7 @@
  */
 
 #include "wgemm_kernel.h"
+#include "../common/blas_char.h"
 #include "mf_kernels.h"
 #include "mf_pred.h"
 #include "../common/epblas_facade.h"
@@ -57,8 +58,8 @@ static void wgemm_core(
 #endif
 
     const TC alpha = *alpha_, beta = *beta_;
-    const std::ptrdiff_t ta = wgemm_trans_code(&transa, 1);
-    const std::ptrdiff_t tb = wgemm_trans_code(&transb, 1);
+    const char ta = blas_trans_complex(transa);
+    const char tb = blas_trans_complex(transb);
 
     if (m <= 0 || n <= 0) return;
 

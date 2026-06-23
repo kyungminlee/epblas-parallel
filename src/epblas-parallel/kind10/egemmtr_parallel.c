@@ -57,8 +57,8 @@ static void egemmtr_core(char uplo, char transa, char transb,
 #endif
     const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    const char ta = egemmtr_trans_code(&transa);
-    const char tb = egemmtr_trans_code(&transb);
+    const char ta = blas_trans_real(transa);
+    const char tb = blas_trans_real(transb);
 
     if (n <= 0) return;
     const TR zero = 0.0L, one = 1.0L;

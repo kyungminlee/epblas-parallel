@@ -20,11 +20,7 @@
 
 typedef xgemmtr_TC TC;
 
-
 static inline TC cconj(TC z) { return conjq(z); }
-char xgemmtr_trans_code(char c) {
-    return blas_up(c);
-}
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define B_(i, j)  b[(size_t)(j) * ldb + (i)]
@@ -106,8 +102,8 @@ void xgemmtr_serial(char uplo, char transa, char transb,
 {
     const TC alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
-    const char ta = xgemmtr_trans_code(transa);
-    const char tb = xgemmtr_trans_code(transb);
+    const char ta = blas_trans_complex(transa);
+    const char tb = blas_trans_complex(transb);
 
     if (n <= 0) return;
     const TC zero = 0.0Q + 0.0Qi;

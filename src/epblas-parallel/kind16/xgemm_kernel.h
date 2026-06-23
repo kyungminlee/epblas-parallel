@@ -36,8 +36,6 @@
 
 typedef __complex128 xgemm_TC;
 
-/* Normalize a Fortran trans char to its uppercase code ('N'/'T'/'C'/'R'). */
-char xgemm_trans_code(char c);
 
 /* Blocking plan for one xgemm call. MC may be grown adaptively for small K.
  * The conj/trans flags are decoded once from the (ta, tb) codes. */

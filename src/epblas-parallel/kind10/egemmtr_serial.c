@@ -30,12 +30,6 @@ void egemmtr_block_sizes(ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC) {
     *MC = EGEMMTR_MC_DEFAULT; *KC = EGEMMTR_KC_DEFAULT; *NC = EGEMMTR_NC_DEFAULT;
 }
 
-ptrdiff_t egemmtr_trans_code(const char *p) {
-    char c = blas_up(*p);
-    return (c == 'C') ? 'T' : c;
-}
-
-
 #define C_(i, j)  c[(size_t)(j) * ldc + (i)]
 
 /* ─── Packers ──────────────────────────────────────────────────── */
@@ -275,8 +269,8 @@ void egemmtr_serial(char uplo, char transa, char transb,
 {
     const TR alpha = *alpha_, beta = *beta_;
     const char UPLO = blas_up(uplo);
-    const char ta = egemmtr_trans_code(&transa);
-    const char tb = egemmtr_trans_code(&transb);
+    const char ta = blas_trans_real(transa);
+    const char tb = blas_trans_real(transb);
 
     if (n <= 0) return;
     const TR zero = 0.0L, one = 1.0L;

@@ -33,10 +33,6 @@ typedef __float128 R;
 #define MR QBLAS_XGEMM_MR
 #define NR QBLAS_XGEMM_NR
 
-char xgemm_trans_code(char c) {
-    return blas_up(c);
-}
-
 static bool op_is_conj(char c)  { return (c == 'C' || c == 'R') ? 1 : 0; }
 static bool op_is_trans(char c) { return (c == 'T' || c == 'C') ? 1 : 0; }
 
@@ -125,8 +121,8 @@ void xgemm_serial(
 {
     const R alphar = __real__ *alpha_, alphai = __imag__ *alpha_;
     const R beta_r = __real__ *beta_,  beta_i = __imag__ *beta_;
-    const char ta = xgemm_trans_code(transa);
-    const char tb = xgemm_trans_code(transb);
+    const char ta = blas_trans_complex(transa);
+    const char tb = blas_trans_complex(transb);
 
     if (m <= 0 || n <= 0) return;
 

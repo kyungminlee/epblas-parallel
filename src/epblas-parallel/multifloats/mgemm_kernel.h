@@ -35,8 +35,6 @@
 
 using mgemm_T = multifloats::float64x2;
 
-/* Normalize a Fortran trans char to a code ('C' ≡ 'T' for real input). */
-std::ptrdiff_t mgemm_trans_code(const char *p, std::size_t len);
 
 /* Cache-block sizes (env-overridable MBLAS_MC/KC/NC). */
 void mgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC);

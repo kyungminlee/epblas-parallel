@@ -68,12 +68,6 @@ static void init_blocks(void) {
     g_mc = 64;  /* set last: g_mc!=0 is the init flag */
 }
 
-char qgemm_trans_code(char c) {
-    c = blas_up(c);
-    return (c == 'C') ? 'T' : c;  /* real: 'C' ≡ 'T' */
-}
-
-
 /*
  * OpenBLAS-style adaptive MC: when K fits in one panel, grow MC so
  * MC*KC stays roughly L2-sized (rounded to MR).
@@ -271,8 +265,8 @@ void qgemm_serial(
     TR *c, ptrdiff_t ldc)
 {
     const TR alpha = *alpha_, beta = *beta_;
-    const char ta = qgemm_trans_code(transa);
-    const char tb = qgemm_trans_code(transb);
+    const char ta = blas_trans_real(transa);
+    const char tb = blas_trans_real(transb);
 
     if (m <= 0 || n <= 0) return;
 

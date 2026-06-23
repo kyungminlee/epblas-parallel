@@ -54,8 +54,8 @@ static void xgemmtr_core(char uplo, char transa, char transb,
 #endif
     const TC alpha = *alpha_, beta = *beta_;
     const bool upper = (blas_up(uplo) == 'U');
-    const char ta = xgemmtr_trans_code(transa);
-    const char tb = xgemmtr_trans_code(transb);
+    const char ta = blas_trans_complex(transa);
+    const char tb = blas_trans_complex(transb);
 
     if (n <= 0) return;
     const TC zero = 0.0Q + 0.0Qi;
