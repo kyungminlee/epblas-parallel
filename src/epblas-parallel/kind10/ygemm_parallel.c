@@ -21,6 +21,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
@@ -94,6 +95,40 @@ static void ygemm_core(
 
 #ifdef _OPENMP
     if (n >= YGEMM_OMP_N_MIN && blas_omp_max_threads() > 1) {
+        /* TT under threading: op(B)=B^T is read row-strided (ldb) and the
+         * dot re-reads each B row M times. With 4 threads at N≥128 the
+         * scattered B traffic (a 256×256 complex(10) panel is 2 MB) makes
+         * it bandwidth-bound — par loses to ob's packed B. Transpose B^T
+         * into a contiguous K×N buffer ONCE (folding conj_b in), then run
+         * it as a TN dot over contiguous Bt: same l-order, bit-identical,
+         * and TN already threads well. Cheap O(N·K) vs the O(M·N·K) GEMM. */
+        if (klass == Y_TT && k >= 8) {
+            TC *bt = malloc((size_t)k * (size_t)n * sizeof(TC));
+            if (bt) {
+                #pragma omp parallel
+                {
+                    ptrdiff_t tid = omp_get_thread_num();
+                    ptrdiff_t nth = omp_get_num_threads();
+                    ptrdiff_t js  = blas_part_bound(n, tid, nth);
+                    ptrdiff_t je  = blas_part_bound(n, tid + 1, nth);
+                    for (ptrdiff_t j2 = js; j2 < je; ++j2) {
+                        TC *btj = &bt[(size_t)j2 * k];
+                        for (ptrdiff_t l = 0; l < k; ++l) {
+                            const TC v = b[(size_t)l * ldb + j2];
+                            btj[l] = conj_b ? ~v : v;
+                        }
+                    }
+                    /* Each thread transposes and consumes only its own
+                     * [js,je) columns of bt — no cross-thread sharing,
+                     * so no barrier needed. */
+                    ygemm_tn_core(js, je, m, k, alpha, a, lda, bt, k,
+                                  c, ldc, conj_a);
+                }
+                free(bt);
+                return;
+            }
+            /* malloc failed — fall through to the strided core. */
+        }
         #pragma omp parallel
         {
             ptrdiff_t tid = omp_get_thread_num();

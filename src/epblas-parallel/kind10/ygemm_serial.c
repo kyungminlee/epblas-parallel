@@ -154,13 +154,46 @@ void ygemm_nt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k,
     }
 }
 
-/* Both transposed: A col i × B row j. Dot-product form — single
- * accumulator (same reason as the T*N path; the conditional on
- * conj_a/conj_b inside an unrolled hot loop wrecks codegen). */
+/* Both transposed: A col i × B row j. Dot-product form, scalar re/im
+ * decompose. The conj_a/conj_b flags are SPLIT OUT of the inner loop
+ * (compile-time const in the always-inline kernel, one branch-free body
+ * per combo) — mirroring tn_core. Leaving the `conj ? ~v : v` ternary
+ * inside the hot loop costs a per-element `test/je/fchs` that GCC won't
+ * unswitch; the migrated zgemm reference specializes the same way and
+ * its TT loop is ~3-4 x87 ops/iter leaner (see ygemm_migrated_ disasm).
+ * B is row-strided (ldb) here, A col is stride-1. */
+/* Plain (no-conj) specialization, carved into its own function so the
+ * single _Complex accumulator stays fp80-stack resident. Folded into the
+ * one branchy tt_core body, GCC over-pressures the x87 stack and spills
+ * the accumulator (4→6 fldt/iter); standalone it matches the migrated
+ * zgemm TT loop (4 fldt, no conj test/fchs). */
+__attribute__((noinline))
+static void ygemm_tt_plain(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, TC alpha,
+                           const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+                           TC *c, ptrdiff_t ldc)
+{
+    for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
+        TC *cj = &c[(size_t)j2 * ldc];
+        for (ptrdiff_t i2 = 0; i2 < m; ++i2) {
+            const TC *ai = &a[(size_t)i2 * lda];
+            TC acc = zero;
+            for (ptrdiff_t l = 0; l < k; ++l)
+                acc += ai[l] * b[(size_t)l * ldb + j2];
+            cj[i2] += alpha * acc;
+        }
+    }
+}
+
 void ygemm_tt_core(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t m, ptrdiff_t k, TC alpha,
                    const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
                    TC *c, ptrdiff_t ldc, bool conj_a, bool conj_b)
 {
+    if (!conj_a && !conj_b) {
+        ygemm_tt_plain(j_start, j_end, m, k, alpha, a, lda, b, ldb, c, ldc);
+        return;
+    }
+    /* Conjugated paths (herk/syrk 'C' routes) — rare; keep the single
+     * branchy body. */
     for (ptrdiff_t j2 = j_start; j2 < j_end; ++j2) {
         TC *cj = &c[(size_t)j2 * ldc];
         for (ptrdiff_t i2 = 0; i2 < m; ++i2) {
