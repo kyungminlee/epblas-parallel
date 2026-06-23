@@ -16,6 +16,7 @@
 #include "qtrsm_kernel.h"
 #include "../common/blas_char.h"
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <quadmath.h>

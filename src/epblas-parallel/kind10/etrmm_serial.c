@@ -19,6 +19,7 @@
  */
 
 #include <stddef.h>
+#include <stdbool.h>
 #include "../common/blas_char.h"
 #include "../common/blas_math.h"
 #include <stdlib.h>

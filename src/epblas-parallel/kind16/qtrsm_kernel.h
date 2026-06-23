@@ -27,6 +27,7 @@
 #define EPBLAS_PARALLEL_KIND16_QTRSM_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef __float128 qtrsm_TR;
 

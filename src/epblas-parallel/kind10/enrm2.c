@@ -9,6 +9,7 @@
  *   minexp = -16381, maxexp = 16384, digits = 64 (binary)
  */
 #include <math.h>
+#include <stdbool.h>
 #include <float.h>
 #include <stddef.h>
 #ifdef _OPENMP

@@ -11,6 +11,7 @@
  * second pass doubled the soft-float call count.
  */
 #include <stddef.h>
+#include <stdbool.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>

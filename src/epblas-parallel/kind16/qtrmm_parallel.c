@@ -22,6 +22,7 @@
 #include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
+#include <stdbool.h>
 #include <ctype.h>
 #include <quadmath.h>
 #ifdef _OPENMP

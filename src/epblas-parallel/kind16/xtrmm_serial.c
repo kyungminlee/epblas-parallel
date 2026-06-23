@@ -18,6 +18,7 @@
 #include "xtrmm_kernel.h"
 #include "../common/blas_char.h"
 #include <ctype.h>
+#include <stdbool.h>
 #include <quadmath.h>
 
 typedef xtrmm_TC TC;

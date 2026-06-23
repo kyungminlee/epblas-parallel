@@ -32,6 +32,7 @@
 #define EPBLAS_PARALLEL_KIND16_XGEMM_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <quadmath.h>
 
 typedef __complex128 xgemm_TC;

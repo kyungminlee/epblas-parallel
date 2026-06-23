@@ -30,6 +30,7 @@
 #define EPBLAS_PARALLEL_KIND10_YGEMM_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <complex.h>
 
 typedef _Complex long double ygemm_TC;

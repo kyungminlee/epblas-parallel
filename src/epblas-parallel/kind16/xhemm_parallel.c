@@ -25,6 +25,7 @@
 #include "xl3_complex.h"
 #include "../common/epblas_facade.h"
 #include <ctype.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
 #ifdef _OPENMP

@@ -32,6 +32,7 @@
 #include "../common/blas_math.h"
 #include "xl3_complex.h"
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <ctype.h>
 

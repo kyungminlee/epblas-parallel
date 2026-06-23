@@ -17,6 +17,7 @@
  */
 
 #include <stddef.h>
+#include <stdbool.h>
 
 #include "etrsm_kernel.h"
 #include "etri_kernel.h"   /* etri_gemm_kernel substrate */

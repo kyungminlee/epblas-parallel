@@ -6,6 +6,7 @@
  */
 
 #include <stddef.h>
+#include <stdbool.h>
 #include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>

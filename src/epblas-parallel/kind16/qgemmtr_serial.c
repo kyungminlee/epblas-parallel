@@ -15,6 +15,7 @@
 #include "qgemmtr_kernel.h"
 #include "../common/blas_char.h"
 #include <ctype.h>
+#include <stdbool.h>
 #include <quadmath.h>
 
 typedef qgemmtr_TR TR;

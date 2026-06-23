@@ -26,6 +26,7 @@
 #include "../common/epblas_facade.h"
 #include "../common/blas_math.h"
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>

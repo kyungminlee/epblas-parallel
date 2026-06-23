@@ -16,6 +16,7 @@
 
 #include "xl3_complex.h"
 #include <quadmath.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 typedef __float128 TR;

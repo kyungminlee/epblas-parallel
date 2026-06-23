@@ -4,6 +4,7 @@
  * Same as qnrm2 but processes Re/Im as two values per element.
  */
 #include <stddef.h>
+#include <stdbool.h>
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <omp.h>

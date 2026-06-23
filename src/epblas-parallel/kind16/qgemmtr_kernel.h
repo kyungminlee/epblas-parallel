@@ -26,6 +26,7 @@
 #define EPBLAS_PARALLEL_KIND16_QGEMMTR_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef __float128 qgemmtr_TR;
 

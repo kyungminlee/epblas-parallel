@@ -34,6 +34,7 @@
 #define EPBLAS_PARALLEL_KIND10_ETRMM_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef long double etrmm_TR;
 

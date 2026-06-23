@@ -20,6 +20,7 @@
 #include "ytrmm_kernel.h"
 #include "../common/blas_char.h"
 #include <stdlib.h>
+#include <stdbool.h>
 #include <ctype.h>
 #include <stddef.h>
 

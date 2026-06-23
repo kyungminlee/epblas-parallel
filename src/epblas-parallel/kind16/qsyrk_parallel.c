@@ -32,6 +32,7 @@
 #include "qgemm_kernel.h"   /* qgemm_choose_blocks / blas_round_up */
 #include "../common/epblas_facade.h"
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP

@@ -11,6 +11,7 @@
 #include "ygemmtr_kernel.h"
 #include "../common/blas_char.h"
 #include <ctype.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef ygemmtr_TC TC;

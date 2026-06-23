@@ -26,6 +26,7 @@
  */
 
 #include <stddef.h>
+#include <stdbool.h>
 
 #include "etrsm_kernel.h"
 

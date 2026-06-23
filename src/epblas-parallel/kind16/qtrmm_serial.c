@@ -17,6 +17,7 @@
 #include "qtrmm_kernel.h"
 #include "../common/blas_char.h"
 #include <ctype.h>
+#include <stdbool.h>
 #include <quadmath.h>
 
 typedef qtrmm_TR TR;

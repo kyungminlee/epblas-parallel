@@ -20,6 +20,7 @@
 #include "qgemm_kernel.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP

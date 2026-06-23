@@ -15,6 +15,7 @@
  * fork/buffer almost immediately. Serial reference unchanged. */
 
 #include <stddef.h>
+#include <stdbool.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>

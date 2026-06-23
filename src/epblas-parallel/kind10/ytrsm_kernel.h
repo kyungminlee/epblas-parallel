@@ -27,6 +27,7 @@
 #define EPBLAS_PARALLEL_KIND10_YTRSM_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <complex.h>
 
 typedef _Complex long double ytrsm_TC;

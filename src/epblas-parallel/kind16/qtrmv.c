@@ -13,6 +13,7 @@
  * fork/buffer almost immediately. Serial reference stays byte-for-byte. */
 
 #include <stddef.h>
+#include <stdbool.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>

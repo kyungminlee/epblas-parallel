@@ -24,6 +24,7 @@
 #define EPBLAS_PARALLEL_KIND10_YGEMMTR_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <complex.h>
 
 typedef _Complex long double ygemmtr_TC;

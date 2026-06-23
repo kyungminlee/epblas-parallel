@@ -37,6 +37,7 @@
 #include "qtrsm_kernel.h"
 #include "../common/epblas_facade.h"
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <quadmath.h>
 #include "../common/blas_omp.h"

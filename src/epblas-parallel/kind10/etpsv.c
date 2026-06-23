@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include <stdbool.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP

@@ -18,6 +18,7 @@
  */
 
 #include <stddef.h>
+#include <stdbool.h>
 
 #include "etrmm_kernel.h"
 

@@ -27,6 +27,7 @@
 #include "ygemm_kernel.h"
 #include "../common/blas_char.h"
 #include <ctype.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef ygemm_TC TC;

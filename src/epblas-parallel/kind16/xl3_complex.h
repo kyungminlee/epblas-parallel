@@ -29,6 +29,7 @@
 #define EPBLAS_PARALLEL_KIND16_XL3_COMPLEX_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <quadmath.h>
 
 #ifdef __cplusplus
