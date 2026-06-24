@@ -80,6 +80,27 @@ static inline ptrdiff_t egemm_tn_use_fast(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k)
     return mn <= 8 || (long)m * (long)n * (long)k <= 32L * 32L * 32L;
 }
 
+/* TN moderate-square ceiling for the unpacked register-tiled path
+ * (egemm_unpacked_tn): the 4-chain unpacked kernel beats both fast_col (1 acc)
+ * and the blocked path (pays the pack) while A/B re-streaming stays L2-resident.
+ * Above this the blocked path's cache tiling wins; below mn<=8 fast_col already
+ * handles it. Pinned at 64: the 64-cube A panel is 64KB (firmly L2-resident, a
+ * clean win); at 128 the A panel is 256KB — right at the L2 edge, where the
+ * unpacked re-stream only TIES the blocked path (no win) and risks regressing
+ * non-square shapes near the crossover, so 128 stays on the blocked path. */
+#define EGEMM_UNPACKED_TN_MAX 64
+static inline ptrdiff_t egemm_tn_use_unpacked(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k) {
+    return m <= EGEMM_UNPACKED_TN_MAX && n <= EGEMM_UNPACKED_TN_MAX
+        && k <= EGEMM_UNPACKED_TN_MAX;
+}
+
+/* Unpacked stride-1 TN kernel (no A/B pack); 4-chain 2x2 register tile, full
+ * M×N rectangle. Bit-identical to the blocked path (l-ascending sum). */
+void egemm_unpacked_tn(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, egemm_TR alpha,
+                       const egemm_TR *restrict a, ptrdiff_t lda,
+                       const egemm_TR *restrict b, ptrdiff_t ldb,
+                       egemm_TR *restrict c, ptrdiff_t ldc);
+
 /* Pure single-thread GEMM (by-value core). Same math as egemm_ — no OpenMP. */
 void egemm_serial(
     char transa, char transb,

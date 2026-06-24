@@ -275,6 +275,67 @@ void egemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, TR alpha,
     }
 }
 
+/* ── Unpacked register-tiled TN fast path (moderate, L2-resident N) ──
+ *
+ * TN (ta='T', tb='N') reads A column i and B column j both stride-1 in the
+ * contraction index l, so no packing is needed. fast_col above already exploits
+ * that — but with a SINGLE fp80 accumulator, whose ~3-cyc x87 `fadd` latency
+ * serializes the reduction (~5.1 cyc/MAC); that is why fast_col is gated to
+ * skinny/tiny only and the moderate square cube is sent to the blocked path.
+ *
+ * This kernel keeps the blocked path's FOUR independent MR×NR accumulator
+ * chains (so it hides the fadd latency, ~2.9 cyc/MAC) WITHOUT the pack — the
+ * pack is pure overhead when the cube is small enough to stay L2-resident, so
+ * the blocked path's only edge there is its ILP, which this matches. Net: the
+ * small-square TN cells that lost ~1-2% to OpenBLAS's native A^T·B kernel
+ * (TN/64, TN/128) close to a win. l-ascending summation is bit-identical to
+ * both the blocked path and the netlib oracle. (The egemmtr 2026-06-24 lesson,
+ * minus the triangle: egemm writes the full M×N rectangle.) */
+static inline void egemm_tn_kernel_2x2(ptrdiff_t k, TR alpha,
+        const TR *restrict ai0, const TR *restrict ai1,
+        const TR *restrict bj0, const TR *restrict bj1,
+        TR *restrict C, ptrdiff_t ldc)
+{
+    TR c00 = 0.0L, c10 = 0.0L, c01 = 0.0L, c11 = 0.0L;
+    for (ptrdiff_t l = 0; l < k; ++l) {
+        const TR a0 = ai0[l], a1 = ai1[l], b0 = bj0[l], b1 = bj1[l];
+        c00 += a0 * b0; c10 += a1 * b0; c01 += a0 * b1; c11 += a1 * b1;
+    }
+    C[0]       += alpha * c00; C[1]       += alpha * c10;
+    C[ldc]     += alpha * c01; C[ldc + 1] += alpha * c11;
+}
+
+void egemm_unpacked_tn(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                       const TR *restrict a, ptrdiff_t lda,
+                       const TR *restrict b, ptrdiff_t ldb,
+                       TR *restrict c, ptrdiff_t ldc)
+{
+    for (ptrdiff_t j0 = 0; j0 < n; j0 += NR) {
+        const ptrdiff_t njr = blas_imin(NR, n - j0);
+        TR *restrict Ccol = &c[(size_t)j0 * ldc];
+        for (ptrdiff_t i0 = 0; i0 < m; i0 += MR) {
+            const ptrdiff_t mir = blas_imin(MR, m - i0);
+            if (mir == MR && njr == NR) {
+                egemm_tn_kernel_2x2(k, alpha,
+                    &a[(size_t)i0 * lda], &a[(size_t)(i0 + 1) * lda],
+                    &b[(size_t)j0 * ldb], &b[(size_t)(j0 + 1) * ldb],
+                    &Ccol[i0], ldc);
+            } else {
+                for (ptrdiff_t jj = 0; jj < njr; ++jj) {
+                    const TR *restrict bj = &b[(size_t)(j0 + jj) * ldb];
+                    TR *restrict cj = &Ccol[(size_t)jj * ldc];
+                    for (ptrdiff_t ii = 0; ii < mir; ++ii) {
+                        const TR *restrict ai = &a[(size_t)(i0 + ii) * lda];
+                        TR s = 0.0L;
+                        for (ptrdiff_t l = 0; l < k; ++l) s += ai[l] * bj[l];
+                        cj[i0 + ii] += alpha * s;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /* ── Single-thread entry ──────────────────────────────────────── */
 
 void egemm_serial(
@@ -300,6 +361,13 @@ void egemm_serial(
     if (ta == 'T' && tb == 'N' && egemm_tn_use_fast(m, n, k)) {
         for (ptrdiff_t j2 = 0; j2 < n; ++j2)
             egemm_fast_col(j2, m, k, alpha, a, lda, b, ldb, c, ldc);
+        return;
+    }
+
+    /* Moderate-square TN: unpacked 4-chain tile (skips the pack, which buys
+     * nothing while L2-resident). Bit-identical to the blocked path. */
+    if (ta == 'T' && tb == 'N' && egemm_tn_use_unpacked(m, n, k)) {
+        egemm_unpacked_tn(m, n, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 

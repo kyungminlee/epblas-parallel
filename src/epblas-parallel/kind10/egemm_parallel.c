@@ -33,6 +33,7 @@
 #include "../common/epblas_facade.h"
 #include "../common/blas_math.h"
 #include <stdlib.h>
+#include <stdbool.h>
 #ifdef _OPENMP
 #include <omp.h>
 #include <stddef.h>
@@ -84,6 +85,18 @@ static void egemm_core(
 #endif
         for (ptrdiff_t j2 = 0; j2 < n; ++j2)
             egemm_fast_col(j2, m, k, alpha, a, lda, b, ldb, c, ldc);
+        return;
+    }
+
+#ifdef _OPENMP
+    const bool tn_serial = (omp_get_max_threads() <= 1);
+#else
+    const bool tn_serial = true;
+#endif
+    /* Moderate-square TN, NON-threaded: unpacked 4-chain tile, no pack. The
+     * threaded path keeps the blocked kernel below. Bit-identical. */
+    if (tn_serial && ta == 'T' && tb == 'N' && egemm_tn_use_unpacked(m, n, k)) {
+        egemm_unpacked_tn(m, n, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
