@@ -73,6 +73,26 @@ void ysyr2k_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TC beta,
     }
 }
 
+/* One column's flat NoTrans rank-2k sweep. Carved out noinline so its x87
+ * register schedule is isolated from ysyr2k_block's ygemm_serial-call scaffold:
+ * inlined, the surrounding call live-ranges perturb GCC's allocation inside
+ * this hot loop and cost ~4% (a refactor exposed it — same trigger-3 pattern as
+ * yher2). With its own minimal frame the loop recovers the clean schedule that
+ * beats the gfortran reference. cf. workspace/docs/accepted-floors.md. */
+static __attribute__((noinline)) void
+ysyr2k_col_n(ptrdiff_t i_lo, ptrdiff_t i_hi, ptrdiff_t k, TC alpha,
+             const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
+             TC *cj, ptrdiff_t j)
+{
+    for (ptrdiff_t l = 0; l < k; ++l) {
+        const TC t1 = alpha * A_(j, l);
+        const TC t2 = alpha * B_(j, l);
+        const TC *al = a + (size_t)l * lda, *bl = b + (size_t)l * ldb;
+        for (ptrdiff_t i = i_lo; i < i_hi; ++i)
+            cj[i] += bl[i] * t1 + al[i] * t2;
+    }
+}
+
 void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha, TC beta,
                   const TC *a, ptrdiff_t lda, const TC *b, ptrdiff_t ldb,
                   TC *c, ptrdiff_t ldc, char UPLO, char TRANS)
@@ -100,13 +120,7 @@ void ysyr2k_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha
             const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
             const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
             TC *cj = c + (size_t)j * ldc;
-            for (ptrdiff_t l = 0; l < k; ++l) {
-                const TC t1 = alpha * A_(j, l);
-                const TC t2 = alpha * B_(j, l);
-                const TC *al = a + (size_t)l * lda, *bl = b + (size_t)l * ldb;
-                for (ptrdiff_t i = i_lo; i < i_hi; ++i)
-                    cj[i] += bl[i] * t1 + al[i] * t2;
-            }
+            ysyr2k_col_n(i_lo, i_hi, k, alpha, a, lda, b, ldb, cj, j);
         }
         return;
     }
