@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-24 18:35 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-24 19:11 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -114,8 +114,8 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **yhpr** | 18 | 1.027 ob1 @L/128 | 0.999 | ⚠ |
 | **ytbsv** | 108 | 1.024 ob1 @LTN/128 | 1.022 @LTN/128 | ⚠ |
 | **esyr2k** | 16 | 1.022 mig @LT/64 | 1.005 | ⚠ |
-| ygemmtr | 54 | 1.018 | 0.925 | ✅ |
 | etbsv | 96 | 1.017 | 1.018 | ✅ |
+| ygemmtr | 54 | 1.017 | 0.924 | ✅ |
 | etpmv | 96 | 1.015 | 1.016 | ✅ |
 | egbmv | 24 | 1.016 | 1.012 | ✅ |
 | erotmg | 1 | 1.015 | 1.015 | ✅ |
