@@ -150,10 +150,40 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
                 else         for (ptrdiff_t l = 0; l < k; ++l) s += ~A_(l, i) * B_(l, j);
             } else if (!conj_b) {
                 if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i) * B_(j, l);
-                else         for (ptrdiff_t l = 0; l < k; ++l) s += ~A_(l, i) * B_(j, l);
+                /* C·T = conj(A)·B. A SINGLE operand conjugate is the awkward case
+                 * for gcc -fcx-fortran-rules: it emits a per-element `fchs` that
+                 * serializes the x87 multiply (zero- and two-conj cases fold —
+                 * conj(a)·conj(b)=conj(a·b) — so only this one and T·C below lose
+                 * ~2-4% to the ob clone). Fuse by hand: decompose into scalar
+                 * re/im so the sign flip becomes an fadd/fsub swap (no fchs), and
+                 * accumulate two independent fp80 chains (sr,si) to overlap faddp
+                 * latency. Bit-identical: a-(-b)==a+b exactly on x87, same
+                 * products, same per-part accumulation order as `~A * B`. */
+                else {
+                    long double sr = 0.0L, si = 0.0L;
+                    for (ptrdiff_t l = 0; l < k; ++l) {
+                        const TC av = A_(l, i), bv = B_(j, l);
+                        const long double ar = __real__ av, ai = __imag__ av;
+                        const long double br = __real__ bv, bi = __imag__ bv;
+                        sr += ar * br + ai * bi;   /* conj(a)·b real */
+                        si += ar * bi - ai * br;   /* conj(a)·b imag */
+                    }
+                    __real__ s = sr; __imag__ s = si;
+                }
             } else {
-                if (!conj_a) for (ptrdiff_t l = 0; l < k; ++l) s += A_(l, i) * ~B_(j, l);
-                else         for (ptrdiff_t l = 0; l < k; ++l) s += ~A_(l, i) * ~B_(j, l);
+                /* T·C = A·conj(B). Same single-conj fchs trap as C·T — fuse it. */
+                if (!conj_a) {
+                    long double sr = 0.0L, si = 0.0L;
+                    for (ptrdiff_t l = 0; l < k; ++l) {
+                        const TC av = A_(l, i), bv = B_(j, l);
+                        const long double ar = __real__ av, ai = __imag__ av;
+                        const long double br = __real__ bv, bi = __imag__ bv;
+                        sr += ar * br + ai * bi;   /* a·conj(b) real */
+                        si += ai * br - ar * bi;   /* a·conj(b) imag */
+                    }
+                    __real__ s = sr; __imag__ s = si;
+                }
+                else for (ptrdiff_t l = 0; l < k; ++l) s += ~A_(l, i) * ~B_(j, l);
             }
             cj[i] = (beta == zero) ? alpha * s : alpha * s + beta * cj[i];
         }
