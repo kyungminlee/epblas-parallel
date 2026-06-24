@@ -136,13 +136,18 @@ void egemm_pack_A(const TR *restrict A, ptrdiff_t lda,
 /*
  * Pack op(B)(pc..pc+pb, jc..jc+jb) into Bp as a stack of NR-col panels.
  * Panel layout:  Bp[(jj_panel * pb + p) * NR + jj] = op(B)[pc + p, jc + jj_panel*NR + jj].
- */
-void egemm_pack_B(const TR *restrict B, ptrdiff_t ldb,
-                  ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
-                  char tb, TR *restrict Bp)
+ *
+ * egemm_pack_B_range packs only panels [q_lo, q_hi) of the npanel total; panels
+ * write DISJOINT Bp regions, so the threaded entry can split this `omp for` over
+ * the team (kills the serial `omp single` B-pack fraction that Amdahl-capped
+ * small-N OMP=4 scaling) while keeping a shared Bp — no redundant pack, no axis
+ * change. egemm_pack_B is the whole-panel-range wrapper (serial path). */
+void egemm_pack_B_range(const TR *restrict B, ptrdiff_t ldb,
+                        ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
+                        char tb, TR *restrict Bp, ptrdiff_t q_lo, ptrdiff_t q_hi)
 {
     const ptrdiff_t npanel = (jb + NR - 1) / NR;
-    for (ptrdiff_t q = 0; q < npanel; ++q) {
+    for (ptrdiff_t q = q_lo; q < q_hi; ++q) {
         const ptrdiff_t j0 = jc + q * NR;
         const ptrdiff_t cols = (q == npanel - 1) ? (jb - q * NR) : NR;
         TR *Bpanel = &Bp[(size_t)q * pb * NR];
@@ -164,6 +169,13 @@ void egemm_pack_B(const TR *restrict B, ptrdiff_t ldb,
             }
         }
     }
+}
+
+void egemm_pack_B(const TR *restrict B, ptrdiff_t ldb,
+                  ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
+                  char tb, TR *restrict Bp)
+{
+    egemm_pack_B_range(B, ldb, pc, jc, pb, jb, tb, Bp, 0, (jb + NR - 1) / NR);
 }
 
 /* ── Inner kernel: MR × NR outer-product over K ──────────────── */

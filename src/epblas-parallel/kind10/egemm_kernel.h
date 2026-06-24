@@ -50,6 +50,13 @@ void egemm_pack_B(const egemm_TR *restrict B, ptrdiff_t ldb,
                   ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb, char tb,
                   egemm_TR *restrict Bp);
 
+/* Pack only B-panels [q_lo, q_hi) (disjoint Bp regions) — lets the threaded
+ * entry split the B-pack across the team instead of serializing it. */
+void egemm_pack_B_range(const egemm_TR *restrict B, ptrdiff_t ldb,
+                        ptrdiff_t pc, ptrdiff_t jc, ptrdiff_t pb, ptrdiff_t jb,
+                        char tb, egemm_TR *restrict Bp,
+                        ptrdiff_t q_lo, ptrdiff_t q_hi);
+
 /* Drive one packed (ib,jb,pb) macro-tile via MR×NR sub-tiles. */
 void egemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemm_TR alpha,
                         const egemm_TR *restrict Ap, const egemm_TR *restrict Bp,

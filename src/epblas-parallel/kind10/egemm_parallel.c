@@ -120,14 +120,28 @@ static void egemm_core(
 #endif
 
     /*
-     * Threading: single outer `omp parallel`, shared Bp packed once per
-     * (jc, pc) via `omp single` (implicit barrier), then `omp for` over
-     * the ic loop. Each thread keeps a private Ap.
+     * Threading: single outer `omp parallel`, shared Bp, then `omp for`
+     * over the ic loop. Each thread keeps a private Ap.
      *
      * Splitting along ic (the M axis) keeps parallelism even when
-     * N ≤ NC (only one jc band); keeping Bp shared avoids the per-tile
+     * N ≤ NC (only one jc band) and stays load-balanced over egemm's FULL
+     * rectangular output (unlike egemmtr's triangular output, which had to
+     * switch to a column axis). Keeping Bp shared avoids the per-tile
      * re-packing a naive collapse(2) would force. Effective parallelism
      * is bounded by (M / MC) per jc-band — ample for square problems.
+     *
+     * When threaded, the shared Bp is packed by an `omp for` over its NR-col
+     * panels (each a disjoint Bp region) instead of by a single thread: the
+     * serial single-thread B-pack was a ~6% serial fraction that Amdahl-capped
+     * small-N OMP=4 scaling at ~2.87x (e.g. TN/64 par4/ob4 1.047). Spreading
+     * the pack over the team — same barrier count, no redundant work, no axis
+     * change — lifts scaling toward ~3.5x and flips the small-N TN/TT cells to
+     * a win. The nthr==1 path keeps the original single packer call (the `omp
+     * for` form costs ~1% even with one thread). (The
+     * egemmtr 2026-06-24 OMP=4 lesson, adapted: egemmtr needed a full
+     * column-panel rewrite because its triangular output was imbalanced on the
+     * M axis; egemm's rectangle is already balanced, so only the serial B-pack
+     * needed fixing.) Bit-identical — packing only moves data.
      */
     const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * KC * sizeof(TR);
     const size_t bp_bytes = (size_t)KC * blas_round_up(NC, NR) * sizeof(TR);
@@ -144,11 +158,22 @@ static void egemm_core(
                 for (ptrdiff_t pc = 0; pc < k; pc += KC) {
                     const ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
 #ifdef _OPENMP
-                    #pragma omp single
+                    /* Threaded: spread the B-pack over the team by NR-col
+                     * panel (each a disjoint Bp region); implicit barrier at
+                     * the `for` makes the fully packed Bp safe below. Serial
+                     * (nthr==1): there is nothing to spread, so take the
+                     * original single packer call — the `omp for` construct
+                     * carries ~1% loop-setup + per-panel call overhead per
+                     * (jc,pc) even with one thread, which regressed the serial
+                     * workhorse. Bit-identical either way. */
+                    if (nthr > 1) {
+                        const ptrdiff_t npb = (jb + NR - 1) / NR;
+                        #pragma omp for schedule(static)
+                        for (ptrdiff_t q = 0; q < npb; ++q)
+                            egemm_pack_B_range(b, ldb, pc, jc, pb, jb, tb, Bp, q, q + 1);
+                    } else
 #endif
-                    egemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
-                    /* implicit barrier at end of `single` makes Bp safe to
-                     * read in the for below. */
+                        egemm_pack_B(b, ldb, pc, jc, pb, jb, tb, Bp);
 #ifdef _OPENMP
                     #pragma omp for schedule(static)
 #endif
