@@ -23,6 +23,26 @@ typedef ygemmtr_TC TC;
 static const TC zero = 0.0L + 0.0iL;
 static const TC one  = 1.0L + 0.0iL;
 
+/* 2x2 register tile for the !trans_a axpy path: L-unroll by 2 (two temps
+ * t0,t1, already done by the caller) AND I-unroll by 2 (two independent C
+ * accumulators cj[i], cj[i+1]). The two i-chains are independent RMWs into
+ * distinct C rows, so their faddp latency overlaps — the lever the single-i
+ * 2-chain can't pull. noinline isolates the x87 register schedule from the
+ * caller's scaffold (project-x87-accumulator-spill trigger 3). restrict: cj is
+ * a C column, al0/al1 are A columns — provably distinct arrays. */
+static void __attribute__((noinline))
+ygemmtr_axpy2(TC *restrict cj, const TC *restrict al0, const TC *restrict al1,
+              TC t0, TC t1, ptrdiff_t is, ptrdiff_t ie)
+{
+    ptrdiff_t i = is;
+    for (; i + 1 < ie; i += 2) {
+        cj[i]     += t0 * al0[i]     + t1 * al1[i];
+        cj[i + 1] += t0 * al0[i + 1] + t1 * al1[i + 1];
+    }
+    for (; i < ie; ++i)
+        cj[i] += t0 * al0[i] + t1 * al1[i];
+}
+
 void ygemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, bool upper,
                         TC beta, TC *c, ptrdiff_t ldc)
 {
@@ -48,69 +68,60 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
     if (!trans_a) {
         if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
         else if (beta != one)  for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
-        /* K-unroll by 2 — expose two independent products t0*al0, t1*al1 into
-         * one accumulator per i, halving the passes over cj. conj_b is hoisted
-         * out of the hot loop into the three l-loops below; a runtime branch
-         * inside the unrolled body defeats gcc's scheduling here.
+        /* The !trans_a axpy path: L-unroll by 2 (two temps t0,t1, computed
+         * here) feeding a 2x2 register tile (ygemmtr_axpy2 also I-unrolls by 2).
+         * conj_b is hoisted out of the hot loop into the three l-loops below; a
+         * runtime branch inside the body defeats gcc's scheduling here.
          *
-         * WHY 2-CHAIN AND NOT A PLAIN SINGLE CHAIN (do not "simplify" this):
-         * the trans_a=='N' keys (UNN/UNT/UNC/LNN/LNT/LNC — note transb is
-         * irrelevant, uplo is irrelevant; it is purely the !trans_a axpy path
-         * here vs the trans_a dot path below) sit ~8% behind the gfortran
-         * (migrated) reference. trans_a=='T'/'C' (the dot path) already ties
-         * mig. The 8% is a genuine gcc-vs-gfortran x87 codegen gap, quantified
-         * 2026-06-24 by isolated perf at UNN/256, OMP=1, 2000 calls:
-         *
-         *     leg            instr/call   IPC     wall ratio
-         *     par (2-chain)   148.9M       1.359   1.08  (reproduces harness)
-         *     mig (gfortran)  145.2M       1.424   1.00
-         *
-         *   So the 2-chain MATCHES mig's instruction count (+2.5%); the residual
-         *   is ~5% lower IPC — gcc schedules the fp80 complex MAC across the
-         *   8-deep x87 stack slightly worse than gfortran. That is below the
-         *   source level; every structural alternative was measured WORSE:
-         *     - plain single chain: 1.45. Its inner i-loop disassembles
-         *       op-for-op identical to gfortran's REMAINDER loop, but gcc does
-         *       NOT i-unroll it, so it retires ~29% MORE instructions/call
-         *       (187M vs mig's 145M — mig i-unrolls its main loop x2). NOT a
-         *       placement effect: -falign-loops=8/16/32 all 1.45.
-         *     - register-resident dot for NN (A(i,l) strided by lda): 1.22 for
-         *       N-N, 1.55+ for N-T/N-C — strided A kills it.
-         *     - explicit i-unroll x2, single temp: 1.36 (gcc's i-unroll codegen
-         *       is worse than gfortran's).
-         *     - 3rd l-chain to out-ILP mig: spills the 8-deep x87 stack
+         * WHY 2x2 (do not "simplify" back to a single-i or single-l loop):
+         * the trans_a=='N' keys (UNN/UNT/UNC/LNN/LNT/LNC — transb and uplo are
+         * irrelevant; it is purely this axpy path vs the trans_a dot path below)
+         * trail the gfortran (migrated) reference, which i-unrolls its main loop
+         * x2 and schedules the fp80 complex MAC across the 8-deep x87 stack a bit
+         * better than gcc. trans_a=='T'/'C' (the dot path) already ties mig.
+         * Progression of structural alternatives, all MEASURED on the dual
+         * harness (REPS=40), worst cell = UNC/256 unless noted:
+         *     - plain single chain: par/mig 1.45 — gcc won't i-unroll it,
+         *       retires ~29% more instrs/call (187M vs mig 145M). NOT placement
+         *       (-falign-loops=8/16/32 all 1.45).
+         *     - explicit i-unroll x2, single temp: 1.36 (gcc's lone-axis i-unroll
+         *       codegen is worse than gfortran's).
+         *     - L-unroll x2, single i (the old shipped "2-chain"): 1.08. Matches
+         *       mig's instr count (+2.5%), residual ~5% lower IPC.
+         *     - register-resident dot for NN (A(i,l) strided by lda): 1.22 (N-N),
+         *       1.55+ (N-T/N-C) — strided A kills it.
+         *     - 2x2 tile = L-unroll x2 AND I-unroll x2 (SHIPPED, 2026-06-24):
+         *       1.041. Two independent C-accumulators (cj[i], cj[i+1]) overlap
+         *       their faddp latency while t0,t1 stay register-resident (4 x87
+         *       slots, NO spill — verified in the ygemmtr_axpy2 disasm). Halves
+         *       the gap the single-axis unrolls left (~8% -> ~4%); helps all 6
+         *       cells (e.g. UNC/256 1.080->1.041, UNN/64 1.068->1.063).
+         *     - 3rd l-chain (L-unroll x3): spills the 8-deep x87 stack
          *       (project-x87-accumulator-spill trigger 6 — complex fp80).
-         *   The 2-chain is gcc's best and beats OpenBLAS ~26% (par/ob ~0.74).
-         * Same floor class as yhemm LL and yher2 LOWER. The ygemm TT levers
-         * (conj-unswitch; strided-B transpose) target failure modes absent
-         * here (no per-element conj branch; B is stride-1; omp4 already wins). */
+         *   The 2x2 is gcc's best and beats OpenBLAS ~28% (par/ob ~0.72). The
+         *   residual ~4% vs mig (binding at small N) is the genuine gcc-vs-
+         *   gfortran x87 scheduling gap — same floor class as yhemm UPPER and
+         *   yher2 LOWER. The ygemm TT levers (conj-unswitch; strided-B transpose)
+         *   target failure modes absent here (no per-element conj branch; B is
+         *   stride-1; omp4 already wins). */
         ptrdiff_t l = 0;
         if (!trans_b) {
             for (; l + 1 < k; l += 2) {
                 const TC t0 = alpha * B_(l,     j);
                 const TC t1 = alpha * B_(l + 1, j);
-                const TC *al0 = &A_(0, l);
-                const TC *al1 = &A_(0, l + 1);
-                for (ptrdiff_t i = is; i < ie; ++i)
-                    cj[i] += t0 * al0[i] + t1 * al1[i];
+                ygemmtr_axpy2(cj, &A_(0, l), &A_(0, l + 1), t0, t1, is, ie);
             }
         } else if (!conj_b) {
             for (; l + 1 < k; l += 2) {
                 const TC t0 = alpha * B_(j, l);
                 const TC t1 = alpha * B_(j, l + 1);
-                const TC *al0 = &A_(0, l);
-                const TC *al1 = &A_(0, l + 1);
-                for (ptrdiff_t i = is; i < ie; ++i)
-                    cj[i] += t0 * al0[i] + t1 * al1[i];
+                ygemmtr_axpy2(cj, &A_(0, l), &A_(0, l + 1), t0, t1, is, ie);
             }
         } else {
             for (; l + 1 < k; l += 2) {
                 const TC t0 = alpha * ~B_(j, l);
                 const TC t1 = alpha * ~B_(j, l + 1);
-                const TC *al0 = &A_(0, l);
-                const TC *al1 = &A_(0, l + 1);
-                for (ptrdiff_t i = is; i < ie; ++i)
-                    cj[i] += t0 * al0[i] + t1 * al1[i];
+                ygemmtr_axpy2(cj, &A_(0, l), &A_(0, l + 1), t0, t1, is, ie);
             }
         }
         for (; l < k; ++l) {
