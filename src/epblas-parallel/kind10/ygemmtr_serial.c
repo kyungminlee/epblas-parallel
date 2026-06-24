@@ -76,16 +76,22 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
          * WHY 2x2 (do not "simplify" back to a single-i or single-l loop):
          * the trans_a=='N' keys (UNN/UNT/UNC/LNN/LNT/LNC — transb and uplo are
          * irrelevant; it is purely this axpy path vs the trans_a dot path below)
-         * trail the gfortran (migrated) reference, which i-unrolls its main loop
-         * x2 and schedules the fp80 complex MAC across the 8-deep x87 stack a bit
-         * better than gcc. trans_a=='T'/'C' (the dot path) already ties mig.
+         * trail the gfortran (migrated) reference. mig's main axpy loop is itself
+         * an L-unroll-by-2, single-i 2-chain (two A-columns %rdx/%rsi, two temps,
+         * one C accumulator) — NOT an i-unroll. par's 2x2 body is byte-for-byte
+         * two stacked copies of mig's body (2 C rows x the same 2-MAC unit), so
+         * the per-complex-MAC x87 op mix is now IDENTICAL to mig (4.5 fldt, 4
+         * fmul, 3 faddp, 1 fsubrp, 0.5 fxch, 1 fstpt per MAC — verified by disasm,
+         * 2026-06-24). gcc just schedules that identical instruction stream across
+         * the 8-deep x87 stack a hair worse than gfortran. trans_a=='T'/'C' (the
+         * dot path) already ties mig.
          * Progression of structural alternatives, all MEASURED on the dual
          * harness (REPS=40), worst cell = UNC/256 unless noted:
-         *     - plain single chain: par/mig 1.45 — gcc won't i-unroll it,
+         *     - plain single chain: par/mig 1.45 — gcc won't unroll it,
          *       retires ~29% more instrs/call (187M vs mig 145M). NOT placement
          *       (-falign-loops=8/16/32 all 1.45).
          *     - explicit i-unroll x2, single temp: 1.36 (gcc's lone-axis i-unroll
-         *       codegen is worse than gfortran's).
+         *       codegen is poor; the winning axis is L, matching mig).
          *     - L-unroll x2, single i (the old shipped "2-chain"): 1.08. Matches
          *       mig's instr count (+2.5%), residual ~5% lower IPC.
          *     - register-resident dot for NN (A(i,l) strided by lda): 1.22 (N-N),
@@ -100,10 +106,13 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
          *       (project-x87-accumulator-spill trigger 6 — complex fp80).
          *   The 2x2 is gcc's best and beats OpenBLAS ~28% (par/ob ~0.72). The
          *   residual ~4% vs mig (binding at small N) is the genuine gcc-vs-
-         *   gfortran x87 scheduling gap — same floor class as yhemm UPPER and
-         *   yher2 LOWER. The ygemm TT levers (conj-unswitch; strided-B transpose)
-         *   target failure modes absent here (no per-element conj branch; B is
-         *   stride-1; omp4 already wins). */
+         *   gfortran x87 scheduling gap — and now a PURE one: 0% instruction
+         *   difference (the per-MAC mix matches mig exactly, see above), 100%
+         *   IPC. Same floor class as yher2 LOWER (par/ob/mig all emit the
+         *   identical loop, gfortran just orders it ~3.5% better). The ygemm TT
+         *   levers (conj-unswitch; strided-B transpose) target failure modes
+         *   absent here (no per-element conj branch; B is stride-1; omp4 already
+         *   wins). */
         ptrdiff_t l = 0;
         if (!trans_b) {
             for (; l + 1 < k; l += 2) {
