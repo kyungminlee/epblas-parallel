@@ -224,6 +224,44 @@ void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, char UP
     }
 }
 
+/* Buffer-free triangular GEMM-update over the column band [j_lo, j_hi). Used as
+ * the allocation-failure fallback; the full-range egemmtr_scalar_fallback is the
+ * [0, n) case. The threaded entry calls the banded form per OOM thread so each
+ * touches only its disjoint columns (no double-compute). */
+void egemmtr_scalar_fallback_cols(ptrdiff_t j_lo, ptrdiff_t j_hi,
+                                  ptrdiff_t n, ptrdiff_t k, char UPLO, char ta, char tb,
+                                  TR alpha,
+                                  const TR *a, ptrdiff_t lda,
+                                  const TR *b, ptrdiff_t ldb,
+                                  TR *c, ptrdiff_t ldc)
+{
+    const TR zero = 0.0L;
+    for (ptrdiff_t j = j_lo; j < j_hi; ++j) {
+        const ptrdiff_t is = (UPLO == 'L') ? j : 0;
+        const ptrdiff_t ie = (UPLO == 'L') ? n : j + 1;
+        TR *cj = &C_(0, j);
+        for (ptrdiff_t i = is; i < ie; ++i) {
+            TR s = zero;
+            if (ta == 'N') {
+                if (tb == 'N')
+                    for (ptrdiff_t l = 0; l < k; ++l)
+                        s += a[(size_t)l * lda + i] * b[(size_t)j * ldb + l];
+                else
+                    for (ptrdiff_t l = 0; l < k; ++l)
+                        s += a[(size_t)l * lda + i] * b[(size_t)l * ldb + j];
+            } else {
+                if (tb == 'N')
+                    for (ptrdiff_t l = 0; l < k; ++l)
+                        s += a[(size_t)i * lda + l] * b[(size_t)j * ldb + l];
+                else
+                    for (ptrdiff_t l = 0; l < k; ++l)
+                        s += a[(size_t)i * lda + l] * b[(size_t)l * ldb + j];
+            }
+            cj[i] += alpha * s;
+        }
+    }
+}
+
 void egemmtr_scalar_fallback(ptrdiff_t n, ptrdiff_t k, char UPLO, char ta, char tb,
                              TR alpha,
                              const TR *a, ptrdiff_t lda,

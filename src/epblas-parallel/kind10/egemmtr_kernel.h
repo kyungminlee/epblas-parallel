@@ -10,13 +10,16 @@
  *                       Called by egemmtr_ as its serial branch (and by any
  *                       L3 routine that needs the serial path).
  *
+ *                       Owns `egemmtr_scalar_fallback_cols`, the buffer-free
+ *                       per-column-band path the threaded entry uses on OOM.
+ *
  *   egemmtr_parallel.c  The public Fortran entry `egemmtr_` — threading
  *                       orchestration only. Delegates to egemmtr_serial when
  *                       called from inside a parallel region (the libgomp
  *                       barrier wedge guard, project-etrsm-omp4-wedge);
  *                       otherwise fans these same kernel pieces across an
- *                       OpenMP team (shared Bp under `omp single`, `omp for`
- *                       over the ic loop with the triangular load balanced).
+ *                       OpenMP team by COLUMN PANEL (each thread private Ap+Bp,
+ *                       `omp for schedule(dynamic,1)` over jc, no barrier).
  */
 #ifndef EPBLAS_PARALLEL_KIND10_EGEMMTR_KERNEL_H
 #define EPBLAS_PARALLEL_KIND10_EGEMMTR_KERNEL_H
@@ -65,6 +68,15 @@ void egemmtr_scalar_fallback(ptrdiff_t n, ptrdiff_t k, char UPLO, char ta, char 
                              const egemmtr_TR *a, ptrdiff_t lda,
                              const egemmtr_TR *b, ptrdiff_t ldb,
                              egemmtr_TR *c, ptrdiff_t ldc);
+
+/* Buffer-free fallback over a column band [j_lo, j_hi) — per-thread OOM path
+ * for the column-threaded entry (disjoint columns, no double-compute). */
+void egemmtr_scalar_fallback_cols(ptrdiff_t j_lo, ptrdiff_t j_hi,
+                                  ptrdiff_t n, ptrdiff_t k, char UPLO, char ta, char tb,
+                                  egemmtr_TR alpha,
+                                  const egemmtr_TR *a, ptrdiff_t lda,
+                                  const egemmtr_TR *b, ptrdiff_t ldb,
+                                  egemmtr_TR *c, ptrdiff_t ldc);
 
 /* Pure single-thread entry (by-value core). No OpenMP. */
 void egemmtr_serial(char uplo, char transa, char transb,
