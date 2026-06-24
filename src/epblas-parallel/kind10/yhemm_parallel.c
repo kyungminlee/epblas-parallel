@@ -73,7 +73,13 @@ static void yhemm_core(
 #endif
     const ptrdiff_t nb = yhemm_nb();
 
-    if (SIDE == 'L' && m <= nb) {
+    /* SIDE='L' unblocked per-column Hermitian sweep (yhemm_L_singleblock = the
+     * faithful Netlib zhemm port) for (a) small m<=nb, OR (b) UPLO='L' at any m.
+     * For LL the unblocked sweep beats the blocked panel path: gfortran's
+     * unblocked zhemm runs ~43M vs our blocked ~47M at N=128..256. Columns of C
+     * are disjoint, so threading over j stays exact. UPLO='U' keeps the blocked
+     * path below (par already beats gfortran there) — see yhemm_serial.c. */
+    if (SIDE == 'L' && (m <= nb || UPLO == 'L')) {
 #ifdef _OPENMP
         const bool use_omp = (n >= YHEMM_OMP_MIN && nthreads > 1);
         #pragma omp parallel for if(use_omp) schedule(static)

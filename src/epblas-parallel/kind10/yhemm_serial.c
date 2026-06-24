@@ -9,17 +9,19 @@
  * panel worker runs inside the team yhemm_parallel.c opened, a nested ygemm
  * team would trip the libgomp barrier wedge (project-etrsm-omp4-wedge).
  *
- * KNOWN SERIAL FLOOR — LOWER (LL), N>=128, ~1.06-1.08 vs the gfortran
- * (migrated) zhemm reference. This is STRUCTURAL and ACCEPTED (user-OK'd
- * 2026-06-16), not a TODO: gfortran's zhemm runs an UNBLOCKED Lower sweep
- * (~43M) while ours is the dir-symmetric BLOCKED algorithm above
- * (nb=32 ygemm_serial calls + scalar diagonal sweep, ~47M). par BEATS
- * gfortran on UPPER; omp4 is fine (~0.82). Unroll / modulo-sched / align /
- * loop-fission were all tried and no-op — it is a gcc-vs-gfortran x87
- * scheduling gap, the same floor class as ygemmtr *N* (see ygemmtr_serial.c)
- * and yher2 LOWER. Do NOT "fix" by un-blocking: that would regress the
- * UPPER win and the omp4 path. The ygemm TT levers (per-element conj
- * unswitch; strided-B transpose) do NOT apply here.
+ * LOWER (LL) DISPATCH — UNBLOCKED. The old ~1.06-1.08 LL "floor" vs the
+ * gfortran (migrated) zhemm reference was NOT an x87 codegen gap: it was the
+ * cost of the BLOCKED algorithm (nb=32 ygemm_serial panels + scalar diagonal)
+ * losing to gfortran's UNBLOCKED Lower sweep (~43M) at N=128..256. Fix
+ * (2026-06-24): route LL through the faithful Netlib port yhemm_L_singleblock
+ * over the full m — the same unblocked per-column Hermitian sweep gfortran
+ * runs, but with our scalar re/im "read-once" decompose (hemm_L_conj_sweep),
+ * so it now BEATS gfortran's unblocked: serial par/mig 1.06 -> ~0.95, omp4
+ * par/ob 0.81 -> 0.73 (columns of C are disjoint, threaded over j). UPPER (LU)
+ * keeps the BLOCKED path below — par already beats gfortran there (par/mig
+ * ~0.80) and unblocking would regress it. So the blocked yhemm_L_panel is now
+ * UPPER-only on the L side; LL never reaches it. Bit-exact. The dispatch lives
+ * in yhemm_serial() and yhemm_core() (yhemm_parallel.c).
  */
 
 #include "yhemm_kernel.h"
@@ -285,7 +287,10 @@ void yhemm_serial(
 
     const ptrdiff_t nb = yhemm_nb();
 
-    if (SIDE == 'L' && m <= nb) {
+    /* Unblocked per-column sweep (faithful Netlib port) for small m, OR for
+     * UPLO='L' at any m — it beats the blocked panel path on LL (see
+     * yhemm_parallel.c). UPLO='U' stays blocked below (par wins there). */
+    if (SIDE == 'L' && (m <= nb || UPLO == 'L')) {
         yhemm_L_singleblock(0, n, m, alpha, beta, a, lda, b, ldb, c, ldc, UPLO);
         return;
     }
