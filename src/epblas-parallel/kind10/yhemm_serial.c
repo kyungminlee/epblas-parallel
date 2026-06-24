@@ -8,6 +8,18 @@
  * real. The trailing updates run through ygemm_serial (NOT ygemm_): when a
  * panel worker runs inside the team yhemm_parallel.c opened, a nested ygemm
  * team would trip the libgomp barrier wedge (project-etrsm-omp4-wedge).
+ *
+ * KNOWN SERIAL FLOOR — LOWER (LL), N>=128, ~1.06-1.08 vs the gfortran
+ * (migrated) zhemm reference. This is STRUCTURAL and ACCEPTED (user-OK'd
+ * 2026-06-16), not a TODO: gfortran's zhemm runs an UNBLOCKED Lower sweep
+ * (~43M) while ours is the dir-symmetric BLOCKED algorithm above
+ * (nb=32 ygemm_serial calls + scalar diagonal sweep, ~47M). par BEATS
+ * gfortran on UPPER; omp4 is fine (~0.82). Unroll / modulo-sched / align /
+ * loop-fission were all tried and no-op — it is a gcc-vs-gfortran x87
+ * scheduling gap, the same floor class as ygemmtr *N* (see ygemmtr_serial.c)
+ * and yher2 LOWER. Do NOT "fix" by un-blocking: that would regress the
+ * UPPER win and the omp4 path. The ygemm TT levers (per-element conj
+ * unswitch; strided-B transpose) do NOT apply here.
  */
 
 #include "yhemm_kernel.h"

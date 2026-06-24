@@ -48,10 +48,42 @@ void ygemmtr_col(ptrdiff_t j, ptrdiff_t n, ptrdiff_t k, bool upper,
     if (!trans_a) {
         if (beta == zero)      for (ptrdiff_t i = is; i < ie; ++i) cj[i]  = zero;
         else if (beta != one)  for (ptrdiff_t i = is; i < ie; ++i) cj[i] *= beta;
-        /* K-unroll by 2 — expose two independent FMA chains per i to mask
-         * x87 fmul latency. conj_b is hoisted out of the hot loop; a runtime
-         * branch inside the K-unrolled body defeats gcc's scheduling for
-         * this kind10 complex pattern. */
+        /* K-unroll by 2 — expose two independent products t0*al0, t1*al1 into
+         * one accumulator per i, halving the passes over cj. conj_b is hoisted
+         * out of the hot loop into the three l-loops below; a runtime branch
+         * inside the unrolled body defeats gcc's scheduling here.
+         *
+         * WHY 2-CHAIN AND NOT A PLAIN SINGLE CHAIN (do not "simplify" this):
+         * the trans_a=='N' keys (UNN/UNT/UNC/LNN/LNT/LNC — note transb is
+         * irrelevant, uplo is irrelevant; it is purely the !trans_a axpy path
+         * here vs the trans_a dot path below) sit ~8% behind the gfortran
+         * (migrated) reference. trans_a=='T'/'C' (the dot path) already ties
+         * mig. The 8% is a genuine gcc-vs-gfortran x87 codegen gap, quantified
+         * 2026-06-24 by isolated perf at UNN/256, OMP=1, 2000 calls:
+         *
+         *     leg            instr/call   IPC     wall ratio
+         *     par (2-chain)   148.9M       1.359   1.08  (reproduces harness)
+         *     mig (gfortran)  145.2M       1.424   1.00
+         *
+         *   So the 2-chain MATCHES mig's instruction count (+2.5%); the residual
+         *   is ~5% lower IPC — gcc schedules the fp80 complex MAC across the
+         *   8-deep x87 stack slightly worse than gfortran. That is below the
+         *   source level; every structural alternative was measured WORSE:
+         *     - plain single chain: 1.45. Its inner i-loop disassembles
+         *       op-for-op identical to gfortran's REMAINDER loop, but gcc does
+         *       NOT i-unroll it, so it retires ~29% MORE instructions/call
+         *       (187M vs mig's 145M — mig i-unrolls its main loop x2). NOT a
+         *       placement effect: -falign-loops=8/16/32 all 1.45.
+         *     - register-resident dot for NN (A(i,l) strided by lda): 1.22 for
+         *       N-N, 1.55+ for N-T/N-C — strided A kills it.
+         *     - explicit i-unroll x2, single temp: 1.36 (gcc's i-unroll codegen
+         *       is worse than gfortran's).
+         *     - 3rd l-chain to out-ILP mig: spills the 8-deep x87 stack
+         *       (project-x87-accumulator-spill trigger 6 — complex fp80).
+         *   The 2-chain is gcc's best and beats OpenBLAS ~26% (par/ob ~0.74).
+         * Same floor class as yhemm LL and yher2 LOWER. The ygemm TT levers
+         * (conj-unswitch; strided-B transpose) target failure modes absent
+         * here (no per-element conj branch; B is stride-1; omp4 already wins). */
         ptrdiff_t l = 0;
         if (!trans_b) {
             for (; l + 1 < k; l += 2) {
