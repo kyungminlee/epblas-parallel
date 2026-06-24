@@ -32,6 +32,10 @@ typedef long double egemmtr_TR;
 #define EGEMMTR_MR 2
 #define EGEMMTR_NR 2
 
+/* TN orientation at or below this N uses the unpacked stride-1 path (no GotoBLAS
+ * pack — pure overhead when the problem is L2-resident). */
+#define EGEMMTR_UNPACKED_TN_MAX 64
+
 
 
 /* Cache-block sizes (env-overridable EGEMMTR_MC/KC/NC); lazy-initialized. */
@@ -61,6 +65,13 @@ void egemmtr_macro_kernel_tri(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, egemmtr_
                               const egemmtr_TR *restrict Bp,
                               egemmtr_TR *restrict C, ptrdiff_t ldc,
                               ptrdiff_t row_base, ptrdiff_t col_base, char UPLO);
+
+/* Unpacked stride-1 TN fast path (tiny N; skips the A/B pack). Bit-identical to
+ * the blocked path. Honours the UPLO triangle per 2x2 tile. */
+void egemmtr_unpacked_tn(char UPLO, ptrdiff_t n, ptrdiff_t k, egemmtr_TR alpha,
+                         const egemmtr_TR *restrict a, ptrdiff_t lda,
+                         const egemmtr_TR *restrict b, ptrdiff_t ldb,
+                         egemmtr_TR *restrict c, ptrdiff_t ldc);
 
 /* O(N²·K) scalar fallback (alloc failure path). */
 void egemmtr_scalar_fallback(ptrdiff_t n, ptrdiff_t k, char UPLO, char ta, char tb,

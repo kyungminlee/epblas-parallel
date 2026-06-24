@@ -16,6 +16,7 @@
 #include "../common/blas_math.h"
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef egemmtr_TR TR;
@@ -211,6 +212,92 @@ void egemmtr_macro_kernel_tri(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, TR alpha
     }
 }
 
+/* ─── Unpacked tiny-N TN fast path ─────────────────────────────────
+ *
+ * For op(A)=A^T, op(B)=B (the TN orientation) BOTH operands are stride-1 in the
+ * contraction index l: column i of A is &a[i*lda] and column j of B is &b[j*ldb],
+ * each contiguous in l. So at tiny N the GotoBLAS pack of A and B buys nothing —
+ * the whole problem is L2-resident and the packed kernel just pays the copy. At
+ * N=64 (where egemmtr computes only the triangle, ~half the flops, so the pack is
+ * ~2x the relative overhead) that copy is the entire ~5% gap to OpenBLAS's native
+ * A^T·B kernel.
+ *
+ * This reads A/B in place (no Ap/Bp) through a 2x2 register tile — same 4
+ * independent accumulator chains as the packed kernel_2x2, so it keeps the ILP
+ * that made egemm route TN to blocking (a single-accumulator dot is fadd-latency
+ * bound and LOSES). Summation order is l-ascending, identical to the packed path
+ * and the netlib oracle → BIT-IDENTICAL output. Triangle is honoured per 2x2 tile
+ * (all_in → kernel; crossing/edge → masked scalar). Gated to the non-threaded
+ * tiny-N TN case only; the blocked path still owns every other shape (and the
+ * omp4 N=64 cell, which already wins). */
+static inline void egemmtr_tn_kernel_2x2(ptrdiff_t k, TR alpha,
+        const TR *restrict ai0, const TR *restrict ai1,
+        const TR *restrict bj0, const TR *restrict bj1,
+        TR *restrict C, ptrdiff_t ldc)
+{
+    TR c00 = 0.0L, c10 = 0.0L, c01 = 0.0L, c11 = 0.0L;
+    for (ptrdiff_t l = 0; l < k; ++l) {
+        const TR a0 = ai0[l], a1 = ai1[l], b0 = bj0[l], b1 = bj1[l];
+        c00 += a0 * b0;
+        c10 += a1 * b0;
+        c01 += a0 * b1;
+        c11 += a1 * b1;
+    }
+    C[0]       += alpha * c00;
+    C[1]       += alpha * c10;
+    C[ldc]     += alpha * c01;
+    C[ldc + 1] += alpha * c11;
+}
+
+void egemmtr_unpacked_tn(char UPLO, ptrdiff_t n, ptrdiff_t k, TR alpha,
+                         const TR *restrict a, ptrdiff_t lda,
+                         const TR *restrict b, ptrdiff_t ldb,
+                         TR *restrict c, ptrdiff_t ldc)
+{
+    const bool upper = (UPLO != 'L');
+    for (ptrdiff_t j0 = 0; j0 < n; j0 += NR) {
+        const ptrdiff_t njr = blas_imin(NR, n - j0);
+        /* Only rows that can intersect the triangle for these columns. */
+        const ptrdiff_t i_lo = upper ? 0  : j0;
+        const ptrdiff_t i_hi = upper ? (j0 + njr) : n;
+        for (ptrdiff_t i0 = i_lo; i0 < i_hi; i0 += MR) {
+            const ptrdiff_t mir = blas_imin(MR, n - i0);
+
+            bool all_in, all_out;
+            if (upper) {                       /* keep i <= j */
+                all_in  = (i0 + mir - 1) <= j0;
+                all_out = (i0 > j0 + njr - 1);
+            } else {                           /* keep i >= j */
+                all_in  = (i0 >= j0 + njr - 1);
+                all_out = (i0 + mir - 1) < j0;
+            }
+            if (all_out) continue;
+
+            TR *Ctile = &c[(size_t)j0 * ldc + i0];
+            if (all_in && mir == MR && njr == NR) {
+                egemmtr_tn_kernel_2x2(k, alpha,
+                    &a[(size_t)i0 * lda], &a[(size_t)(i0 + 1) * lda],
+                    &b[(size_t)j0 * ldb], &b[(size_t)(j0 + 1) * ldb],
+                    Ctile, ldc);
+            } else {
+                for (ptrdiff_t jj = 0; jj < njr; ++jj) {
+                    const ptrdiff_t j = j0 + jj;
+                    const TR *restrict bj = &b[(size_t)j * ldb];
+                    for (ptrdiff_t ii = 0; ii < mir; ++ii) {
+                        const ptrdiff_t i = i0 + ii;
+                        const bool keep = upper ? (i <= j) : (i >= j);
+                        if (!keep) continue;
+                        const TR *restrict ai = &a[(size_t)i * lda];
+                        TR s = 0.0L;
+                        for (ptrdiff_t l = 0; l < k; ++l) s += ai[l] * bj[l];
+                        Ctile[(size_t)jj * ldc + ii] += alpha * s;
+                    }
+                }
+            }
+        }
+    }
+}
+
 void egemmtr_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, char UPLO,
                         TR beta, TR *c, ptrdiff_t ldc)
 {
@@ -321,6 +408,13 @@ void egemmtr_serial(char uplo, char transa, char transb,
 
     if (beta != one)
         egemmtr_beta_scale(0, n, n, UPLO, beta, c, ldc);
+
+    /* Tiny-N TN: skip the GotoBLAS pack (pure overhead when L2-resident) and run
+     * the unpacked stride-1 2x2 kernel. Bit-identical; blocked path owns all else. */
+    if (ta == 'T' && tb == 'N' && n <= EGEMMTR_UNPACKED_TN_MAX) {
+        egemmtr_unpacked_tn(UPLO, n, k, alpha, a, lda, b, ldb, c, ldc);
+        return;
+    }
 
     ptrdiff_t MC, KC, NC;
     egemmtr_block_sizes(&MC, &KC, &NC);

@@ -98,12 +98,26 @@ static void egemmtr_core(char uplo, char transa, char transb,
             egemmtr_beta_scale(j, j + 1, n, UPLO, beta, c, ldc);
     }
 
+#ifdef _OPENMP
+    const ptrdiff_t nthr = blas_omp_max_threads();
+    const bool use_omp = (n >= EGEMMTR_OMP_MIN && nthr > 1);
+#else
+    const bool use_omp = false;
+#endif
+
+    /* Tiny-N TN, NON-threaded: skip the GotoBLAS pack (pure overhead when the
+     * problem is L2-resident) and run the unpacked stride-1 2x2 path — closes the
+     * ~5% small-N gap to OpenBLAS's native A^T·B kernel. The threaded N=64 cell
+     * keeps the blocked path (it already wins). Bit-identical. */
+    if (!use_omp && ta == 'T' && tb == 'N' && n <= EGEMMTR_UNPACKED_TN_MAX) {
+        egemmtr_unpacked_tn(UPLO, n, k, alpha, a, lda, b, ldb, c, ldc);
+        return;
+    }
+
     ptrdiff_t MC, KC, NC;
     egemmtr_block_sizes(&MC, &KC, &NC);
 
 #ifdef _OPENMP
-    const ptrdiff_t nthr = blas_omp_max_threads();
-    const bool use_omp = (n >= EGEMMTR_OMP_MIN && nthr > 1);
     /* Column-panel threading: cap NC so the (threaded) jc loop yields ~3 panels
      * per thread, giving static,1 enough chunks to balance the linear triangular
      * column-work ramp. Columns are the threaded axis now, so this REPLACES the
@@ -117,8 +131,6 @@ static void egemmtr_core(char uplo, char transa, char transb,
         if (cap < NR) cap = NR;
         if (NC > cap) NC = cap;
     }
-#else
-    const bool use_omp = false;
 #endif
     if (NC > n) NC = n;
     if (NC < NR) NC = NR;
