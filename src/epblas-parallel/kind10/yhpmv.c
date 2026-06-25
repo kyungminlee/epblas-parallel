@@ -114,9 +114,18 @@ static void yhpmv_core(
                 #pragma omp parallel num_threads(num_cpu)
                 {
                     ptrdiff_t t = omp_get_thread_num();
-                    ptrdiff_t m_from = range[t], m_to = range[t + 1];
                     TC *restrict slot = buf + (size_t)t * (size_t)n;
                     if (UPLO == 'U') {
+                        /* REVERSE the thread->column assignment so the master
+                         * (thread 0, which runs the post-region serial fold)
+                         * processes the HIGH columns [range[num_cpu-1],n). Then
+                         * its OWN slot 0 gets full [0,n) coverage and becomes the
+                         * LOCAL reduction target — mirroring LOWER, where slot 0
+                         * is naturally full. Otherwise the only full-coverage
+                         * UPPER slot is the last thread's (remote to the master),
+                         * and the serial fold RMWs it across cores (~4.5% tail). */
+                        ptrdiff_t r = num_cpu - 1 - t;
+                        ptrdiff_t m_from = range[r], m_to = range[r + 1];
                         for (ptrdiff_t j = m_from; j < m_to; ++j) {
                             const TC *restrict aj = &ap[(size_t)j * (size_t)(j + 1) / 2];
                             const TC t1 = x[j];
@@ -128,6 +137,7 @@ static void yhpmv_core(
                             slot[j] += t1 * (TR)__real__ aj[j] + t2;  /* real diag */
                         }
                     } else {
+                        ptrdiff_t m_from = range[t], m_to = range[t + 1];
                         for (ptrdiff_t j = m_from; j < m_to; ++j) {
                             const TC *restrict aj = &ap[(size_t)j * (size_t)(2 * n - j - 1) / 2];
                             const TC t1 = x[j];
@@ -144,10 +154,12 @@ static void yhpmv_core(
                 /* Range-limited reduction: UPPER thread touched [0,range[t+1]),
                  * LOWER thread [range[t],n). Fold into one slot, then alpha-AXPY. */
                 if (UPLO == 'U') {
-                    TC *restrict target = buf + (size_t)(num_cpu - 1) * (size_t)n;
-                    for (ptrdiff_t t = 0; t < num_cpu - 1; ++t) {
+                    /* slot 0 is the master's own (full coverage via the reversed
+                     * assignment above); fold the partial remote slots into it. */
+                    TC *restrict target = buf;
+                    for (ptrdiff_t t = 1; t < num_cpu; ++t) {
                         const TC *restrict src = buf + (size_t)t * (size_t)n;
-                        ptrdiff_t len = range[t + 1];
+                        ptrdiff_t len = range[num_cpu - t];  /* slot t covers [0,range[num_cpu-t]) */
                         for (ptrdiff_t k = 0; k < len; ++k) target[k] += src[k];
                     }
                     for (ptrdiff_t k = 0; k < n; ++k) y[k] += alpha * target[k];
