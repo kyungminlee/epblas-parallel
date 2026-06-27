@@ -18,6 +18,7 @@ typedef _Complex long double TC;
 typedef long double R;
 
 static R btsml, btbig, bssml, bsbig, maxN;
+static R btsml2, btbig2;   /* squared thresholds — see hot loop */
 static ptrdiff_t blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
@@ -27,6 +28,13 @@ static __attribute__((cold)) void blue_init(void)
     bssml = ldexpl(1.0L,  8222);
     bsbig = ldexpl(1.0L, -8224);
     maxN  = LDBL_MAX;
+    /* Squared bucket thresholds. The hot loop squares each component anyway
+     * (for amed), so it routes on the square vs these instead of on |ax| vs
+     * the linear thresholds — eliminating the per-element abs (fld-dup + fabs)
+     * and the x87 stack-shuffle (fxch/fstp) it forced. Exact powers of two, so
+     * btbig2/btsml2 are representable (2^16320 / 2^-16382, both in range). */
+    btbig2 = btbig * btbig;
+    btsml2 = btsml * btsml;
     blue_inited = 1;
 }
 
@@ -75,18 +83,19 @@ static void eynrm2_bucket(ptrdiff_t nel, const TC *x, R *abig_, R *amed_, R *asm
     for (ptrdiff_t i = 0; i < nel; ++i) {
         const R *p = (const R *)&x[i];
         for (ptrdiff_t c = 0; c < 2; ++c) {
-            R ax = ldabs(p[c]);
-            if (ax > btbig) {
-                R t = ax * bsbig;
+            R v = p[c];
+            R s = v * v;                    /* Inf if huge, 0 if tiny — caught below */
+            if (s > btbig2) {
+                R t = v * bsbig;
                 abig += t * t;
                 notbig = 0;
-            } else if (ax < btsml) {
+            } else if (s < btsml2) {
                 if (notbig) {
-                    R t = ax * bssml;
+                    R t = v * bssml;
                     asml += t * t;
                 }
             } else {
-                amed += ax * ax;
+                amed += s;                  /* medium: square is exact, reuse it */
             }
         }
     }
@@ -130,32 +139,72 @@ static R eynrm2_core(ptrdiff_t n, const TC *x, ptrdiff_t incx)
     }
 #endif
 
+    /* Fast path — no per-element thresholds at all. Accumulate the raw sum of
+     * squares across four independent chains (two complex elements per
+     * iteration: Re/Im × even/odd) so the fp80 fadd latencies (~3-5 cyc)
+     * overlap instead of serializing through one accumulator — the only ILP
+     * lever on x87 (no SIMD). With the thresholds gone there is stack room for
+     * the four chains (an earlier split *with* thresholds resident spilled).
+     *
+     * If the total is finite and nonzero then no component overflowed when
+     * squared and not every component underflowed to zero, so the naive norm
+     * is accurate and we are done — the common case, with ZERO compares in the
+     * loop body. A non-finite-or-zero total (data near LDBL_MAX, or all tiny,
+     * or Inf/NaN inputs) is rare and falls through to Blue's three-bucket
+     * scaling below, which pays for its threshold work only when it matters.
+     * Reorders the sum vs the reference (4 chains) — within fuzz tolerance. */
+    R c0 = 0.0L, c1 = 0.0L, c2 = 0.0L, c3 = 0.0L;
+    ptrdiff_t i = 0;
+    if (incx == 1) {
+        ptrdiff_t n2 = n & ~(ptrdiff_t)1;
+        for (; i < n2; i += 2) {
+            const R *p = (const R *)&x[i];
+            c0 += p[0] * p[0];
+            c1 += p[1] * p[1];
+            c2 += p[2] * p[2];
+            c3 += p[3] * p[3];
+        }
+        for (; i < n; ++i) {
+            const R *p = (const R *)&x[i];
+            c0 += p[0] * p[0];
+            c1 += p[1] * p[1];
+        }
+    } else {
+        ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
+        for (; i < n; ++i) {
+            const R *p = (const R *)&x[ix];
+            c0 += p[0] * p[0];
+            c1 += p[1] * p[1];
+            ix += incx;
+        }
+    }
+    R s = (c0 + c1) + (c2 + c3);
+    if (s > 0.0L && s <= maxN)        /* finite, nonzero, no overflow */
+        return sqrtl(s);
+
+    /* Robust fallback: Blue's three-bucket scaling. Reached only for huge /
+     * all-tiny / Inf / NaN data. Routes on the square v*v against the squared
+     * thresholds (the abs is unnecessary once squared); the big/small buckets
+     * rescale from the raw v before squaring, preserving the overflow guard. */
     R abig = 0.0L, amed = 0.0L, asml = 0.0L;
     bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
-    /* Hot loop transcribed from the epblas-openblas port: a complex element
-     * is two reals read through `p[c]`, and the three-way Blue bucketing is
-     * inlined here with the accumulators as plain locals.  This exact shape
-     * is what lets gcc keep the dominant medium-magnitude accumulator `amed`
-     * (and the `btsml` threshold) on the x87 register stack — only the
-     * rare-path constant spills.  An earlier by-pointer/macro form spilled
-     * `amed` instead, costing a per-element 80-bit load/store (~1.8x slower).
-     * Same ops in the same order, so bit-identical to the reference. */
-    for (ptrdiff_t i = 0; i < n; ++i) {
+    for (ptrdiff_t k = 0; k < n; ++k) {
         const R *p = (const R *)&x[ix];
         for (ptrdiff_t c = 0; c < 2; ++c) {
-            R ax = ldabs(p[c]);
-            if (ax > btbig) {
-                R t = ax * bsbig;
+            R v = p[c];
+            R s2 = v * v;
+            if (s2 > btbig2) {
+                R t = v * bsbig;
                 abig += t * t;
                 notbig = 0;
-            } else if (ax < btsml) {
+            } else if (s2 < btsml2) {
                 if (notbig) {
-                    R t = ax * bssml;
+                    R t = v * bssml;
                     asml += t * t;
                 }
             } else {
-                amed += ax * ax;
+                amed += s2;
             }
         }
         ix += incx;
