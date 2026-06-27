@@ -4,6 +4,8 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
+#include <stdbool.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
@@ -56,6 +58,47 @@ static void yhpr2_col_lower(ptrdiff_t j, ptrdiff_t n, TC t1, TC t2,
     c0[0] = (TR)__real__ c0[0] + (TR)__real__ (x[j] * t1 + y[j] * t2);
 }
 
+/* Unit-stride dispatch, shared by the contiguous fast path and the gathered
+ * strided path. schedule(static,1): column j touches j (upper) or N-1-j (lower)
+ * off-diagonal packed elements, so a contiguous static block hands one thread
+ * the heavy triangle end and starves the rest (par caps at ~2x on 4 cores).
+ * Cyclic static,1 interleaves short and long columns across the team, balancing
+ * the skew symmetrically for both UPLO. The Hermitian diagonal is forced real
+ * every column — including the skipped (x[j]==y[j]==0) ones — so the else branch
+ * still writes it. */
+static void yhpr2_contig(char UPLO, ptrdiff_t n, TC alpha,
+                         const TC *restrict x, const TC *restrict y, TC *restrict ap)
+{
+    const TC zero = 0.0L + 0.0Li;
+    if (UPLO == 'U') {
+#ifdef _OPENMP
+        const bool use_omp = (n >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
+#endif
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            if (x[j] != zero || y[j] != zero)
+                yhpr2_col_upper(j, alpha * cconj(y[j]), cconj(alpha * x[j]), x, y, ap);
+            else {
+                const size_t kk = (size_t)j * (j + 1) / 2;
+                ap[kk + j] = (TR)__real__ ap[kk + j];
+            }
+        }
+    } else {
+#ifdef _OPENMP
+        const bool use_omp = (n >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
+#endif
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            if (x[j] != zero || y[j] != zero)
+                yhpr2_col_lower(j, n, alpha * cconj(y[j]), cconj(alpha * x[j]), x, y, ap);
+            else {
+                const size_t kk = (size_t)j * n - (size_t)j * (j - 1) / 2;
+                ap[kk] = (TR)__real__ ap[kk];
+            }
+        }
+    }
+}
+
 static void yhpr2_core(
     char uplo,
     ptrdiff_t n,
@@ -71,41 +114,44 @@ static void yhpr2_core(
     if (n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
-        /* schedule(static,1): column j touches j (upper) or N-1-j (lower)
-         * off-diagonal packed elements, so a contiguous static block hands one
-         * thread the heavy triangle end and starves the rest (par caps at ~2x
-         * on 4 cores). Cyclic static,1 interleaves short and long columns
-         * across the team, balancing the skew symmetrically for both UPLO. The
-         * Hermitian diagonal is forced real every column — including the
-         * skipped (x[j]==y[j]==0) ones — so the else branch still writes it. */
-        if (UPLO == 'U') {
-#ifdef _OPENMP
-            const bool use_omp = (n >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
-#endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                if (x[j] != zero || y[j] != zero)
-                    yhpr2_col_upper(j, alpha * cconj(y[j]), cconj(alpha * x[j]), x, y, ap);
-                else {
-                    const size_t kk = (size_t)j * (j + 1) / 2;
-                    ap[kk + j] = (TR)__real__ ap[kk + j];
-                }
-            }
+        yhpr2_contig(UPLO, n, alpha, x, y, ap);
+        return;
+    }
+
+    /* General stride: gather x and y into contiguous scratch and run the
+     * stride-1 core — which already beats both refs and threads. x and y are
+     * read-only here (only ap is written), so unlike esymv there is no
+     * scatter-back. The gather is O(N) against O(N^2) work, so it is free past
+     * tiny N; the strided per-element walk below loses ~4-9% to the references
+     * (placement-bound, see project_l2_strided_gather). Same column-order
+     * accumulation as the direct walk, so bit-identical. Falls back to the
+     * direct strided loop if the scratch allocation fails. */
+    {
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
+        TC stackbuf[2 * 256];
+        TC *heap = NULL;
+        TC *xc, *yc;
+        if (n <= 256) {
+            xc = stackbuf; yc = stackbuf + n;
         } else {
-#ifdef _OPENMP
-            const bool use_omp = (n >= YHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
-#endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                if (x[j] != zero || y[j] != zero)
-                    yhpr2_col_lower(j, n, alpha * cconj(y[j]), cconj(alpha * x[j]), x, y, ap);
-                else {
-                    const size_t kk = (size_t)j * n - (size_t)j * (j - 1) / 2;
-                    ap[kk] = (TR)__real__ ap[kk];
-                }
-            }
+            heap = (TC *)malloc((size_t)2 * n * sizeof(TC));
+            xc = heap; yc = heap ? heap + n : NULL;
         }
-    } else {
+        if (xc && yc) {
+            ptrdiff_t ix = kx, iy = ky;
+            for (ptrdiff_t k = 0; k < n; ++k) {
+                xc[k] = x[ix]; yc[k] = y[iy];
+                ix += incx; iy += incy;
+            }
+            yhpr2_contig(UPLO, n, alpha, xc, yc, ap);
+            free(heap);
+            return;
+        }
+        free(heap);
+    }
+
+    {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t kk = 0;
@@ -128,15 +174,8 @@ static void yhpr2_core(
                 kk += j + 1;
             }
         } else {
-            /* Lower-triangle strided column. This loop carries a uniform ~3.8%
-             * conversion overhead vs the int baseline (vs UPPER which is clean).
-             * It is a placement effect, not added work: the inner loop's
-             * instructions are byte-identical to int once the surrounding body
-             * shifted. Both a noinline carve-out and an increment-ordering
-             * rewrite were tried and either failed to move the alignment or
-             * made it marginally worse, so this is the plain converted form for
-             * now — the ~4% LOWER-strided residual is STILL OPEN and wants a
-             * fresh angle. project_ptrdiff_conversion_regressors (placement). */
+            /* Direct strided lower walk — now only the malloc-failure fallback;
+             * the common strided path gathers into the contiguous core above. */
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const TC t1 = alpha * cconj(y[jy]);
