@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
@@ -20,6 +21,33 @@ typedef __float128 TR;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
+/* Contiguous (incx=incy=1) symmetric rank-2 core over all columns.
+ * schedule(static, 1): per-column work is linear in (N-j) for L / (j+1) for U,
+ * so plain schedule(static) hands one thread the heavy triangle end and caps
+ * threading at ~2x; cyclic chunk-1 balances it (mirrors the kind10 esyr2 twin —
+ * the full-storage body is heavy enough that the finest balance wins over the
+ * static,8 the lighter packed espr2 uses). */
+static void qsyr2_contig(char UPLO, ptrdiff_t n, TR alpha,
+                         const TR *restrict x, const TR *restrict y,
+                         TR *restrict a, ptrdiff_t lda)
+{
+    const TR zero = 0.0Q;
+#ifdef _OPENMP
+    const bool use_omp = (n >= QSYR2_OMP_MIN && blas_omp_max_threads() > 1);
+    #pragma omp parallel for if(use_omp) schedule(static, 1)
+#endif
+    for (ptrdiff_t j = 0; j < n; ++j) {
+        const TR xj = x[j], yj = y[j];
+        if (xj != zero || yj != zero) {
+            const TR tx = alpha * yj;
+            const TR ty = alpha * xj;
+            TR *aj = &A_(0, j);
+            if (UPLO == 'L') for (ptrdiff_t i = j; i < n; ++i) aj[i] += x[i] * tx + y[i] * ty;
+            else             for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += x[i] * tx + y[i] * ty;
+        }
+    }
+}
+
 void qsyr2_core(
     char uplo,
     ptrdiff_t n,
@@ -35,23 +63,53 @@ void qsyr2_core(
     if (n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
+        qsyr2_contig(UPLO, n, alpha, x, y, a, lda);
+        return;
+    }
+
+    /* Threaded strided only: gather x/y into contiguous scratch and run the
+     * stride-1 core (which threads).  x/y read-only (only A written) so no
+     * scatter-back; the O(N) gather is dwarfed by the O(N^2) threaded work and
+     * buys the contig core's omp scaling (the direct strided walk never
+     * threaded).  At SERIAL strided the gather buys nothing — the contig core is
+     * itself at the __float128 codegen floor vs gfortran, so a gathered serial
+     * run only adds overhead — so serial falls through to the direct in-place
+     * loop (mirrors the kind10 yher2 gate).  See project_l2_strided_gather. */
 #ifdef _OPENMP
-        const bool use_omp = (n >= QSYR2_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
+    const bool would_thread = (n >= QSYR2_OMP_MIN && blas_omp_max_threads() > 1);
+#else
+    const bool would_thread = false;
 #endif
-        for (ptrdiff_t j = 0; j < n; ++j) {
-            const TR xj = x[j], yj = y[j];
-            if (xj != zero || yj != zero) {
-                const TR tx = alpha * yj;
-                const TR ty = alpha * xj;
-                TR *aj = &A_(0, j);
-                if (UPLO == 'L') for (ptrdiff_t i = j; i < n; ++i) aj[i] += x[i] * tx + y[i] * ty;
-                else             for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += x[i] * tx + y[i] * ty;
-            }
+    if (would_thread) {
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
+        TR stackbuf[2 * 256];
+        TR *heap = NULL;
+        TR *xc, *yc;
+        if (n <= 256) {
+            xc = stackbuf; yc = stackbuf + n;
+        } else {
+            heap = (TR *)malloc((size_t)2 * n * sizeof(TR));
+            xc = heap; yc = heap ? heap + n : NULL;
         }
-    } else {
-        ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-        ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
+        if (xc && yc) {
+            ptrdiff_t ix = kx, iy = ky;
+            for (ptrdiff_t k = 0; k < n; ++k) {
+                xc[k] = x[ix]; yc[k] = y[iy];
+                ix += incx; iy += incy;
+            }
+            qsyr2_contig(UPLO, n, alpha, xc, yc, a, lda);
+            free(heap);
+            return;
+        }
+        free(heap);
+    }
+
+    /* Direct strided walk: the serial path (gather not worth it) and the
+     * alloc-failure fallback for the threaded path. */
+    {
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         for (ptrdiff_t j = 0; j < n; ++j) {
             const TR xj = x[kx + j * incx];
             const TR yj = y[ky + j * incy];

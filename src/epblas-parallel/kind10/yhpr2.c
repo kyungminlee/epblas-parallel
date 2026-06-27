@@ -26,157 +26,9 @@ typedef long double TR;
 static inline TC cconj(TC z) { return ~z; }
 
 
-/* Off-diagonal rank-2 run: c[i] += xc[i]*t1 + yc[i]*t2 for i in [0,mo), all three
- * arrays contiguous and base-aligned. Both triangles reduce to this same kernel:
- * the upper column's run is over [0,j) at the array bases; the lower column's run
- * is over [0,N-1-j) at x+j+1 / y+j+1 / c0+1. Inputs are unit-stride here
- * (native-contiguous input or the gathered scratch).
- *
- * Hand-written x87 inline asm transcribing gfortran's strided `.L40` schedule —
- * the fastest code any compiler emits for this kernel (43.6k vs gcc's 46.8k,
- * equal 9 fldt/elt; the gap is pure x87 instruction scheduling that gcc will not
- * reproduce from C, see task 16 / project_l2_strided_gather). The 4 loop-invariant
- * constants stay resident (stack top->bottom t1i,t2r,t1r,t2i); the pointer
- * increments are interleaved exactly as gfortran places them (AP early after the
- * first load with -16/-32 back-offsets, X mid-loop, Y late). Same left-folded
- * association ((AP + X*T1) + Y*T2) the references use — bit-exact (fuzz relerr 0).
- * incx==incy==1 here, so all increments are +32 bytes. no_stack_protector: the
- * "m" constant operands + "memory" clobber trip -fstack-protector-strong, adding
- * a per-column canary prologue gfortran's inlined .L40 has not; the asm touches
- * no stack buffer so the guard is pure overhead. always_inline folds the run into
- * the col helper so each column is a single call (contig->col), matching the
- * references' fully-inlined column body instead of layering contig->col->run. */
-__attribute__((always_inline, no_stack_protector))
-static inline void yhpr2_run(ptrdiff_t mo, TC t1, TC t2,
-                      const TC *restrict xc, const TC *restrict yc, TC *restrict c) {
-    if (mo <= 0) return;
-    /* Alias the by-value complex params as {re,im} pairs so the asm loads the
-     * constants straight from their incoming stack slots — referencing fresh
-     * `__real__ t1` locals instead made gcc reload-then-restore each into a new
-     * slot (12 fp80 mem ops/column vs 4). */
-    const TR *p1 = (const TR *)&t1, *p2 = (const TR *)&t2;
-    const TC *end = c + mo;          /* post-increment sentinel */
-    __asm__ volatile(
-        "fldt %[t2i]\n\t"            /* st: t2i */
-        "fldt %[t1r]\n\t"           /* st: t1r t2i */
-        "fldt %[t2r]\n\t"           /* st: t2r t1r t2i */
-        "fldt %[t1i]\n\t"           /* st: t1i t2r t1r t2i  (resident) */
-        ".p2align 4\n\t"            /* match gfortran .L40 (16B); 32B was no better */
-        ".p2align 3\n\t"
-        "1:\n\t"
-        "fldt (%[x])\n\t"           /* Xr */
-        "addq $32, %[c]\n\t"        /* AP += 32 (early) */
-        "fldt 16(%[x])\n\t"         /* Xi */
-        "fmul %%st(4), %%st\n\t"
-        "fld %%st(2)\n\t"
-        "fmul %%st(2), %%st\n\t"
-        "faddp %%st, %%st(1)\n\t"   /* Im(X*T1) */
-        "fldt -16(%[c])\n\t"        /* AP.im */
-        "faddp %%st, %%st(1)\n\t"
-        "fldt (%[y])\n\t"           /* Yr */
-        "fmul %%st(6), %%st\n\t"
-        "fldt 16(%[y])\n\t"         /* Yi */
-        "fmul %%st(5), %%st\n\t"
-        "faddp %%st, %%st(1)\n\t"   /* Im(Y*T2) */
-        "faddp %%st, %%st(1)\n\t"   /* AP.im result */
-        "fxch %%st(1)\n\t"
-        "fmul %%st(4), %%st\n\t"
-        "fldt 16(%[x])\n\t"         /* Xi reload */
-        "addq $32, %[x]\n\t"        /* X += 32 (mid) */
-        "fmul %%st(3), %%st\n\t"
-        "fsubrp %%st, %%st(1)\n\t"  /* Re(X*T1) */
-        "fldt -32(%[c])\n\t"        /* AP.re */
-        "faddp %%st, %%st(1)\n\t"
-        "fldt (%[y])\n\t"           /* Yr reload */
-        "fmul %%st(4), %%st\n\t"
-        "fldt 16(%[y])\n\t"         /* Yi reload */
-        "addq $32, %[y]\n\t"        /* Y += 32 (late) */
-        "fmul %%st(7), %%st\n\t"
-        "fsubrp %%st, %%st(1)\n\t"  /* Re(Y*T2) */
-        "faddp %%st, %%st(1)\n\t"   /* AP.re result */
-        "fstpt -32(%[c])\n\t"
-        "fstpt -16(%[c])\n\t"
-        "cmpq %[end], %[c]\n\t"
-        "jne 1b\n\t"
-        "fstp %%st(0)\n\t"          /* drop the 4 resident constants */
-        "fstp %%st(0)\n\t"
-        "fstp %%st(0)\n\t"
-        "fstp %%st(0)\n\t"
-        : [x] "+r"(xc), [y] "+r"(yc), [c] "+r"(c)
-        : [end] "r"(end),
-          [t1r] "m"(p1[0]), [t1i] "m"(p1[1]), [t2r] "m"(p2[0]), [t2i] "m"(p2[1])
-        : "memory", "cc",
-          "st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)");
-}
-
-/* Strided twin of yhpr2_run: identical .L40 schedule, but x and y advance by the
- * caller's byte strides (sx = incx*sizeof(TC), sy = incy*sizeof(TC)) instead of a
- * fixed +32. c (the packed column) is always contiguous, so its +32 advance and
- * the cmpq sentinel are unchanged. This lets the SERIAL strided path walk the
- * input vectors in place — exactly matching gfortran's strided .L40 — instead of
- * paying the O(N) gather the threaded path uses. addq reg,ptr is the same cost as
- * addq imm,ptr, and sx/sy hoist out of the loop, so this is schedule-identical to
- * the contiguous core for the work that matters. Kept as a separate body so the
- * proven contiguous core stays byte-for-byte unperturbed. */
-__attribute__((always_inline, no_stack_protector))
-static inline void yhpr2_run_strided(ptrdiff_t mo, TC t1, TC t2,
-                      const TC *restrict xc, const TC *restrict yc, TC *restrict c,
-                      ptrdiff_t sx, ptrdiff_t sy) {
-    if (mo <= 0) return;
-    const TR *p1 = (const TR *)&t1, *p2 = (const TR *)&t2;
-    const TC *end = c + mo;
-    __asm__ volatile(
-        "fldt %[t2i]\n\t"
-        "fldt %[t1r]\n\t"
-        "fldt %[t2r]\n\t"
-        "fldt %[t1i]\n\t"
-        ".p2align 4\n\t"
-        ".p2align 3\n\t"
-        "1:\n\t"
-        "fldt (%[x])\n\t"
-        "addq $32, %[c]\n\t"
-        "fldt 16(%[x])\n\t"
-        "fmul %%st(4), %%st\n\t"
-        "fld %%st(2)\n\t"
-        "fmul %%st(2), %%st\n\t"
-        "faddp %%st, %%st(1)\n\t"
-        "fldt -16(%[c])\n\t"
-        "faddp %%st, %%st(1)\n\t"
-        "fldt (%[y])\n\t"
-        "fmul %%st(6), %%st\n\t"
-        "fldt 16(%[y])\n\t"
-        "fmul %%st(5), %%st\n\t"
-        "faddp %%st, %%st(1)\n\t"
-        "faddp %%st, %%st(1)\n\t"
-        "fxch %%st(1)\n\t"
-        "fmul %%st(4), %%st\n\t"
-        "fldt 16(%[x])\n\t"
-        "addq %[sx], %[x]\n\t"      /* X += incx*sizeof(TC) */
-        "fmul %%st(3), %%st\n\t"
-        "fsubrp %%st, %%st(1)\n\t"
-        "fldt -32(%[c])\n\t"
-        "faddp %%st, %%st(1)\n\t"
-        "fldt (%[y])\n\t"
-        "fmul %%st(4), %%st\n\t"
-        "fldt 16(%[y])\n\t"
-        "addq %[sy], %[y]\n\t"      /* Y += incy*sizeof(TC) */
-        "fmul %%st(7), %%st\n\t"
-        "fsubrp %%st, %%st(1)\n\t"
-        "faddp %%st, %%st(1)\n\t"
-        "fstpt -32(%[c])\n\t"
-        "fstpt -16(%[c])\n\t"
-        "cmpq %[end], %[c]\n\t"
-        "jne 1b\n\t"
-        "fstp %%st(0)\n\t"
-        "fstp %%st(0)\n\t"
-        "fstp %%st(0)\n\t"
-        "fstp %%st(0)\n\t"
-        : [x] "+r"(xc), [y] "+r"(yc), [c] "+r"(c)
-        : [end] "r"(end), [sx] "r"(sx), [sy] "r"(sy),
-          [t1r] "m"(p1[0]), [t1i] "m"(p1[1]), [t2r] "m"(p2[0]), [t2i] "m"(p2[1])
-        : "memory", "cc",
-          "st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)");
-}
+/* Shared x87 inline-asm rank-2 cores (yr2c_run / yr2c_run_strided) —
+ * also used by yher2 (full-storage twin). See the header. */
+#include "rank2c_x87_core.h"
 
 /* Per-column rank-2 updates: off-diagonal run via the hand-tuned asm core, then
  * the Hermitian diagonal forced real (the run last would dirty the x87 stack, so
@@ -186,7 +38,7 @@ __attribute__((always_inline))
 static inline void yhpr2_col_upper(ptrdiff_t j, TC t1, TC t2,
                             const TC *restrict x, const TC *restrict y, TC *restrict ap) {
     TC *restrict c = ap + (size_t)j * (j + 1) / 2;
-    yhpr2_run(j, t1, t2, x, y, c);
+    yr2c_run(j, t1, t2, x, y, c);
     c[j] = (TR)__real__ c[j] + (TR)__real__ (x[j] * t1 + y[j] * t2);
 }
 
@@ -195,11 +47,11 @@ static inline void yhpr2_col_lower(ptrdiff_t j, ptrdiff_t n, TC t1, TC t2,
                             const TC *restrict x, const TC *restrict y, TC *restrict ap) {
     const ptrdiff_t mo = n - j - 1;
     TC *restrict c0 = ap + ((size_t)j * n - (size_t)j * (j - 1) / 2);
-    yhpr2_run(mo, t1, t2, x + j + 1, y + j + 1, c0 + 1);
+    yr2c_run(mo, t1, t2, x + j + 1, y + j + 1, c0 + 1);
     c0[0] = (TR)__real__ c0[0] + (TR)__real__ (x[j] * t1 + y[j] * t2);
 }
 
-/* Strided column twins: x/y are walked with incx/incy via yhpr2_run_strided (no
+/* Strided column twins: x/y are walked with incx/incy via yr2c_run_strided (no
  * gather). kx/ky are the negative-stride base offsets; jx/jy index the diagonal
  * vector element. Same packed-column layout and accumulation order as the unit
  * helpers, so bit-identical to the gathered path. */
@@ -210,7 +62,7 @@ static inline void yhpr2_col_upper_s(ptrdiff_t j, TC t1, TC t2,
                             TC *restrict ap) {
     TC *restrict c = ap + (size_t)j * (j + 1) / 2;
     const ptrdiff_t es = (ptrdiff_t)sizeof(TC);
-    yhpr2_run_strided(j, t1, t2, x + kx, y + ky, c, incx * es, incy * es);
+    yr2c_run_strided(j, t1, t2, x + kx, y + ky, c, incx * es, incy * es);
     const ptrdiff_t jx = kx + j * incx, jy = ky + j * incy;
     c[j] = (TR)__real__ c[j] + (TR)__real__ (x[jx] * t1 + y[jy] * t2);
 }
@@ -224,7 +76,7 @@ static inline void yhpr2_col_lower_s(ptrdiff_t j, ptrdiff_t n, TC t1, TC t2,
     TC *restrict c0 = ap + ((size_t)j * n - (size_t)j * (j - 1) / 2);
     const ptrdiff_t es = (ptrdiff_t)sizeof(TC);
     const ptrdiff_t jx = kx + j * incx, jy = ky + j * incy;
-    yhpr2_run_strided(mo, t1, t2, x + jx + incx, y + jy + incy, c0 + 1,
+    yr2c_run_strided(mo, t1, t2, x + jx + incx, y + jy + incy, c0 + 1,
                       incx * es, incy * es);
     c0[0] = (TR)__real__ c0[0] + (TR)__real__ (x[jx] * t1 + y[jy] * t2);
 }

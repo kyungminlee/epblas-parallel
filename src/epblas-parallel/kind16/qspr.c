@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
@@ -17,6 +18,43 @@
 
 typedef __float128 TR;
 
+
+/* Contiguous (incx=1) symmetric packed rank-1 core over all columns.  Columns
+ * are independent in packed storage via kk(j).  schedule(static, 8): plain
+ * static dumps the heavy triangle end on one thread (~1.8x cap); a balanced
+ * schedule fixes it, and a moderate chunk dodges the false sharing cyclic
+ * chunk-1 would create on the contiguous packed columns (kind10 espr twin). */
+static void qspr_contig(char UPLO, ptrdiff_t n, TR alpha,
+                        const TR *restrict x, TR *restrict ap)
+{
+    const TR zero = 0.0Q;
+    if (UPLO == 'U') {
+#ifdef _OPENMP
+        const bool use_omp = (n >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
+        #pragma omp parallel for if(use_omp) schedule(static, 8)
+#endif
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            if (x[j] != zero) {
+                const TR tmp = alpha * x[j];
+                const ptrdiff_t kk = (j * (j + 1)) / 2;
+                for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * tmp;
+            }
+        }
+    } else {
+#ifdef _OPENMP
+        const bool use_omp = (n >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
+        #pragma omp parallel for if(use_omp) schedule(static, 8)
+#endif
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            if (x[j] != zero) {
+                const TR tmp = alpha * x[j];
+                /* kk0 = sum_{l=0}^{j-1}(N-l) = j*N - j*(j-1)/2 */
+                const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
+                for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
+            }
+        }
+    }
+}
 
 void qspr_core(
     char uplo,
@@ -32,34 +70,36 @@ void qspr_core(
     if (n == 0 || alpha == zero) return;
 
     if (incx == 1) {
-        /* Columns are independent in packed storage when accessed via kk(j). */
-        if (UPLO == 'U') {
-#ifdef _OPENMP
-            const bool use_omp = (n >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 8)
-#endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                if (x[j] != zero) {
-                    const TR tmp = alpha * x[j];
-                    const ptrdiff_t kk = (j * (j + 1)) / 2;
-                    for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * tmp;
-                }
-            }
+        qspr_contig(UPLO, n, alpha, x, ap);
+        return;
+    }
+
+    /* General stride: gather x into contiguous scratch and run the stride-1 core
+     * (which threads).  x read-only (only ap written), no scatter-back; O(N)
+     * gather vs O(N^2) work.  Direct strided walk is the alloc-failure fallback.
+     * See project_l2_strided_gather. */
+    {
+        const ptrdiff_t kx0 = (incx < 0) ? -(n - 1) * incx : 0;
+        TR stackbuf[256];
+        TR *heap = NULL;
+        TR *xc;
+        if (n <= 256) {
+            xc = stackbuf;
         } else {
-#ifdef _OPENMP
-            const bool use_omp = (n >= QSPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 8)
-#endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                if (x[j] != zero) {
-                    const TR tmp = alpha * x[j];
-                    /* kk0 = sum_{l=0}^{j-1}(N-l) = j*N - j*(j-1)/2 */
-                    const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
-                    for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
-                }
-            }
+            heap = (TR *)malloc((size_t)n * sizeof(TR));
+            xc = heap;
         }
-    } else {
+        if (xc) {
+            ptrdiff_t ix = kx0;
+            for (ptrdiff_t k = 0; k < n; ++k) { xc[k] = x[ix]; ix += incx; }
+            qspr_contig(UPLO, n, alpha, xc, ap);
+            free(heap);
+            return;
+        }
+        free(heap);
+    }
+
+    {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t kk = 0;
         if (UPLO == 'U') {

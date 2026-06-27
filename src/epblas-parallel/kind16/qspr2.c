@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
@@ -17,6 +18,47 @@
 
 typedef __float128 TR;
 
+
+/* Contiguous (incx=incy=1) symmetric packed rank-2 core over all columns.
+ * schedule(static, 8): per-column work grows with j (U) / shrinks with j (L),
+ * so plain static dumps the heavy triangle end on one thread (caps at ~2x); a
+ * balanced schedule fixes that, and a MODERATE chunk beats cyclic chunk-1 for
+ * this body because adjacent packed columns are contiguous in ap (chunk-1 puts
+ * neighbour pairs on different threads → false sharing).  Mirrors the kind10
+ * espr2 packed twin. */
+static void qspr2_contig(char UPLO, ptrdiff_t n, TR alpha,
+                         const TR *restrict x, const TR *restrict y,
+                         TR *restrict ap)
+{
+    const TR zero = 0.0Q;
+    if (UPLO == 'U') {
+#ifdef _OPENMP
+        const bool use_omp = (n >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
+        #pragma omp parallel for if(use_omp) schedule(static, 8)
+#endif
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            if (x[j] != zero || y[j] != zero) {
+                const TR t1 = alpha * y[j];
+                const TR t2 = alpha * x[j];
+                const ptrdiff_t kk = (j * (j + 1)) / 2;
+                for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
+            }
+        }
+    } else {
+#ifdef _OPENMP
+        const bool use_omp = (n >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
+        #pragma omp parallel for if(use_omp) schedule(static, 8)
+#endif
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            if (x[j] != zero || y[j] != zero) {
+                const TR t1 = alpha * y[j];
+                const TR t2 = alpha * x[j];
+                const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
+                for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
+            }
+        }
+    }
+}
 
 void qspr2_core(
     char uplo,
@@ -33,34 +75,49 @@ void qspr2_core(
     if (n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
-        if (UPLO == 'U') {
+        qspr2_contig(UPLO, n, alpha, x, y, ap);
+        return;
+    }
+
+    /* Threaded strided only: gather x/y into contiguous scratch and run the
+     * stride-1 core (which threads).  x/y read-only (only ap written) so no
+     * scatter-back; the O(N) gather is dwarfed by the O(N^2) threaded work and
+     * buys the contig core's omp scaling (the direct walk never threaded).  At
+     * SERIAL strided the contig core is itself at the __float128 codegen floor vs
+     * gfortran, so gathering only adds overhead — serial falls through to the
+     * direct in-place loop (mirrors the kind10 yher2 gate).  See
+     * project_l2_strided_gather. */
 #ifdef _OPENMP
-            const bool use_omp = (n >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+    const bool would_thread = (n >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
+#else
+    const bool would_thread = false;
 #endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                if (x[j] != zero || y[j] != zero) {
-                    const TR t1 = alpha * y[j];
-                    const TR t2 = alpha * x[j];
-                    const ptrdiff_t kk = (j * (j + 1)) / 2;
-                    for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
-                }
-            }
+    if (would_thread) {
+        const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+        const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
+        TR stackbuf[2 * 256];
+        TR *heap = NULL;
+        TR *xc, *yc;
+        if (n <= 256) {
+            xc = stackbuf; yc = stackbuf + n;
         } else {
-#ifdef _OPENMP
-            const bool use_omp = (n >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                if (x[j] != zero || y[j] != zero) {
-                    const TR t1 = alpha * y[j];
-                    const TR t2 = alpha * x[j];
-                    const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
-                    for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
-                }
-            }
+            heap = (TR *)malloc((size_t)2 * n * sizeof(TR));
+            xc = heap; yc = heap ? heap + n : NULL;
         }
-    } else {
+        if (xc && yc) {
+            ptrdiff_t ix = kx, iy = ky;
+            for (ptrdiff_t k = 0; k < n; ++k) {
+                xc[k] = x[ix]; yc[k] = y[iy];
+                ix += incx; iy += incy;
+            }
+            qspr2_contig(UPLO, n, alpha, xc, yc, ap);
+            free(heap);
+            return;
+        }
+        free(heap);
+    }
+
+    {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t kk = 0;
