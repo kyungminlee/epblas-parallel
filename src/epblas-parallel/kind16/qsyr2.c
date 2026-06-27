@@ -42,8 +42,15 @@ static void qsyr2_contig(char UPLO, ptrdiff_t n, TR alpha,
             const TR tx = alpha * yj;
             const TR ty = alpha * xj;
             TR *aj = &A_(0, j);
-            if (UPLO == 'L') for (ptrdiff_t i = j; i < n; ++i) aj[i] += x[i] * tx + y[i] * ty;
-            else             for (ptrdiff_t i = 0; i <= j; ++i) aj[i] += x[i] * tx + y[i] * ty;
+            /* Left-to-right ((aj + x*tx) + y*ty) — netlib's associativity.
+             * NOT aj += (x*tx + y*ty): that first adds two PRODUCTS, whose
+             * exponent pattern drives __addtf3's data-dependent normalize
+             * branch into a worse-predicted path (+95M mispredicts vs the
+             * gfortran leg on the byte-identical libgcc __addtf3). Matching
+             * netlib's accumulator+product order halves the mispredicts and
+             * makes the result bit-identical to the mig reference. */
+            if (UPLO == 'L') for (ptrdiff_t i = j; i < n; ++i) aj[i] = aj[i] + x[i] * tx + y[i] * ty;
+            else             for (ptrdiff_t i = 0; i <= j; ++i) aj[i] = aj[i] + x[i] * tx + y[i] * ty;
         }
     }
 }
@@ -118,10 +125,10 @@ void qsyr2_core(
                 const TR ty = alpha * xj;
                 if (UPLO == 'L') {
                     for (ptrdiff_t i = j; i < n; ++i)
-                        A_(i, j) += x[kx + i * incx] * tx + y[ky + i * incy] * ty;
+                        A_(i, j) = A_(i, j) + x[kx + i * incx] * tx + y[ky + i * incy] * ty;
                 } else {
                     for (ptrdiff_t i = 0; i <= j; ++i)
-                        A_(i, j) += x[kx + i * incx] * tx + y[ky + i * incy] * ty;
+                        A_(i, j) = A_(i, j) + x[kx + i * incx] * tx + y[ky + i * incy] * ty;
                 }
             }
         }

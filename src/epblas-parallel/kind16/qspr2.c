@@ -41,7 +41,11 @@ static void qspr2_contig(char UPLO, ptrdiff_t n, TR alpha,
                 const TR t1 = alpha * y[j];
                 const TR t2 = alpha * x[j];
                 const ptrdiff_t kk = (j * (j + 1)) / 2;
-                for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
+                /* Left-to-right ((ap + x*t1) + y*t2) — netlib's order; NOT
+                 * ap += (x*t1 + y*t2). Adding two products first drives the
+                 * __addtf3 normalize branch into a worse-predicted path
+                 * (~+95M mispredicts vs the gfortran leg). See qsyr2.c. */
+                for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] = ap[kk + i] + x[i] * t1 + y[i] * t2;
             }
         }
     } else {
@@ -54,7 +58,7 @@ static void qspr2_contig(char UPLO, ptrdiff_t n, TR alpha,
                 const TR t1 = alpha * y[j];
                 const TR t2 = alpha * x[j];
                 const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
-                for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
+                for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] = ap[kk + (i - j)] + x[i] * t1 + y[i] * t2;
             }
         }
     }
@@ -129,7 +133,7 @@ void qspr2_core(
                     const TR t2 = alpha * x[jx];
                     ptrdiff_t ix = kx, iy = ky;
                     for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
-                        ap[k] += x[ix] * t1 + y[iy] * t2;
+                        ap[k] = ap[k] + x[ix] * t1 + y[iy] * t2;
                         ix += incx; iy += incy;
                     }
                 }
@@ -143,7 +147,7 @@ void qspr2_core(
                     const TR t2 = alpha * x[jx];
                     ptrdiff_t ix = jx, iy = jy;
                     for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
-                        ap[k] += x[ix] * t1 + y[iy] * t2;
+                        ap[k] = ap[k] + x[ix] * t1 + y[iy] * t2;
                         ix += incx; iy += incy;
                     }
                 }
