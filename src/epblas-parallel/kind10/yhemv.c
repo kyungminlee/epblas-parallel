@@ -15,6 +15,7 @@
 #include "../common/blas_omp.h"
 #ifdef _OPENMP
 #include <omp.h>
+#include <math.h>
 #endif
 
 /* RECALIBRATED 2026-06-07 (was 128): old break-even predates iomp5 hot-team reuse
@@ -23,6 +24,7 @@
  * N=64 ~0.42, N=128 ~0.32; clear win at 32. omp4-vs-omp1 relerr ~1e-19 (fp80
  * floor; the Hermitian two-sided fold reorders at ULP level, within tolerance). */
 #define YHEMV_OMP_MIN 32
+#define YHEMV_MAX_CPUS 256
 
 typedef _Complex long double TC;
 static const TC ZERO = 0.0L + 0.0Li;
@@ -31,6 +33,44 @@ static inline TC cconj(TC z) { return ~z; }
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
+
+#ifdef _OPENMP
+/* Sqrt-balanced contiguous column partition (OpenBLAS symv_partition,
+ * mask=3, min_width=4): per-column work grows with j for UPPER, shrinks
+ * for LOWER. Mirrors the espmv/yhpmv packed twins and this routine's own
+ * OpenBLAS reference (epblas-openblas/kind10/yhemv.c). */
+static ptrdiff_t yhemv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
+{
+    const ptrdiff_t mask = 3, min_width = 4;
+    const double dnum = (double)n * (double)n / (double)nthreads;
+    ptrdiff_t num_cpu = 0;
+    range[0] = 0;
+    ptrdiff_t i = 0;
+    while (i < n) {
+        ptrdiff_t width;
+        if (nthreads - num_cpu > 1) {
+            if (upper) {
+                double di = (double)i;
+                width = (ptrdiff_t)(sqrt(di * di + dnum) - di);
+            } else {
+                double di = (double)(n - i);
+                double rad = di * di - dnum;
+                width = (rad > 0.0) ? (ptrdiff_t)(-sqrt(rad) + di) : (n - i);
+            }
+            width = (width + mask) & ~(ptrdiff_t)mask;
+            if (width < min_width) width = min_width;
+            if (width > n - i)     width = n - i;
+        } else {
+            width = n - i;
+        }
+        range[num_cpu + 1] = range[num_cpu] + width;
+        num_cpu++;
+        i += width;
+        if (num_cpu >= YHEMV_MAX_CPUS) break;
+    }
+    return num_cpu;
+}
+#endif
 
 static void yhemv_core(
     char uplo,
@@ -63,60 +103,79 @@ static void yhemv_core(
     if (alpha == ZERO) return;
 
     if (incx == 1 && incy == 1) {
-        const ptrdiff_t nthreads = blas_omp_max_threads();
-        const bool use_omp = (n >= YHEMV_OMP_MIN && blas_omp_should_thread());
-        if (use_omp) {
-            /* Parallel column-walk with per-thread private y, then reduce.
-             * Same pattern as esymv (Addendum 36). Hermitian conjugation
-             * stays inside the column loop unchanged. */
-            TC *y_priv_all = (TC *)calloc((size_t)nthreads * (size_t)n, sizeof(TC));
-            if (y_priv_all) {
 #ifdef _OPENMP
-                #pragma omp parallel num_threads(nthreads)
+        const ptrdiff_t nthreads = blas_omp_max_threads();
+        if (n >= YHEMV_OMP_MIN && blas_omp_should_thread() && nthreads > 1) {
+            /* Faithful port of this routine's OpenBLAS reference (and the
+             * espmv/yhpmv packed twins): sqrt-balanced contiguous column
+             * partition, each thread accumulating bare A*x into a private
+             * range-limited slot, then a serial fold + single alpha-AXPY.
+             * This replaces the old cyclic schedule(static,1) + rectangular
+             * parallel reduction, whose nthreads*n re-read cost the complex
+             * (2x data) variant ~3-6% at omp4 on N>=256 (task 15). */
+            ptrdiff_t nt = (nthreads > YHEMV_MAX_CPUS) ? YHEMV_MAX_CPUS : nthreads;
+            ptrdiff_t range[YHEMV_MAX_CPUS + 1];
+            ptrdiff_t num_cpu = yhemv_partition(UPLO == 'U', n, nt, range);
+            TC *buf = (num_cpu > 1)
+                ? (TC *)calloc((size_t)num_cpu * (size_t)n, sizeof(TC)) : NULL;
+            if (buf) {
+                #pragma omp parallel num_threads(num_cpu)
                 {
-                    const ptrdiff_t tid = omp_get_thread_num();
-                    TC *y_priv = &y_priv_all[(size_t)tid * n];  /* calloc-zeroed */
-
-                    if (UPLO == 'L') {
-                        #pragma omp for schedule(static, 1)
-                        for (ptrdiff_t j = 0; j < n; ++j) {
-                            const TC temp1 = alpha * x[j];
-                            TC temp2 = ZERO;
-                            const TC *aj = &A_(0, j);
-                            y_priv[j] += temp1 * __real__ aj[j];
-                            for (ptrdiff_t k = j + 1; k < n; ++k) {
-                                y_priv[k] += temp1 * aj[k];
-                                temp2 += cconj(aj[k]) * x[k];
+                    ptrdiff_t t = omp_get_thread_num();
+                    TC *restrict slot = buf + (size_t)t * (size_t)n;
+                    if (UPLO == 'U') {
+                        /* Reversed thread->column assignment (task 14): the
+                         * master (thread 0) takes the HIGH columns so its own
+                         * slot 0 gains full [0,n) coverage and the serial fold
+                         * below RMWs core-0-local memory (mirroring LOWER). */
+                        ptrdiff_t r = num_cpu - 1 - t;
+                        for (ptrdiff_t j = range[r]; j < range[r + 1]; ++j) {
+                            const TC *restrict aj = &A_(0, j);
+                            const TC t1 = x[j];
+                            TC t2 = ZERO;
+                            for (ptrdiff_t i = 0; i < j; ++i) {
+                                slot[i] += t1 * aj[i];
+                                t2      += cconj(aj[i]) * x[i];
                             }
-                            y_priv[j] += alpha * temp2;
+                            slot[j] += t1 * __real__ aj[j] + t2;   /* real diag */
                         }
                     } else {
-                        #pragma omp for schedule(static, 1)
-                        for (ptrdiff_t j = 0; j < n; ++j) {
-                            const TC temp1 = alpha * x[j];
-                            TC temp2 = ZERO;
-                            const TC *aj = &A_(0, j);
-                            for (ptrdiff_t k = 0; k < j; ++k) {
-                                y_priv[k] += temp1 * aj[k];
-                                temp2 += cconj(aj[k]) * x[k];
+                        for (ptrdiff_t j = range[t]; j < range[t + 1]; ++j) {
+                            const TC *restrict aj = &A_(0, j);
+                            const TC t1 = x[j];
+                            TC t2 = ZERO;
+                            slot[j] += t1 * __real__ aj[j];        /* real diag */
+                            for (ptrdiff_t i = j + 1; i < n; ++i) {
+                                slot[i] += t1 * aj[i];
+                                t2      += cconj(aj[i]) * x[i];
                             }
-                            y_priv[j] += temp1 * __real__ aj[j] + alpha * temp2;
+                            slot[j] += t2;
                         }
                     }
-
-                    #pragma omp for schedule(static)
-                    for (ptrdiff_t i = 0; i < n; ++i) {
-                        TC s = ZERO;
-                        for (ptrdiff_t t = 0; t < nthreads; ++t)
-                            s += y_priv_all[(size_t)t * n + i];
-                        y[i] += s;
+                }
+                /* Range-limited serial fold into the master's full-coverage
+                 * slot 0 (local), then one alpha-AXPY into y. UPPER slot t
+                 * covers [0,range[num_cpu-t]); LOWER slot t covers [range[t],n). */
+                TC *restrict target = buf;
+                if (UPLO == 'U') {
+                    for (ptrdiff_t t = 1; t < num_cpu; ++t) {
+                        const TC *restrict src = buf + (size_t)t * (size_t)n;
+                        ptrdiff_t len = range[num_cpu - t];
+                        for (ptrdiff_t k = 0; k < len; ++k) target[k] += src[k];
+                    }
+                } else {
+                    for (ptrdiff_t t = 1; t < num_cpu; ++t) {
+                        const TC *restrict src = buf + (size_t)t * (size_t)n;
+                        for (ptrdiff_t k = range[t]; k < n; ++k) target[k] += src[k];
                     }
                 }
-#endif
-                free(y_priv_all);
+                for (ptrdiff_t k = 0; k < n; ++k) y[k] += alpha * target[k];
+                free(buf);
                 return;
             }
+            free(buf);
         }
+#endif
         if (UPLO == 'L') {
             for (ptrdiff_t i = 0; i < n; ++i) {
                 const TC temp1 = alpha * x[i];
