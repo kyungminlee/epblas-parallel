@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-27 03:37 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-27 10:05 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -174,11 +174,11 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | yhbmv | 18 | 0.897 | 0.728 | ✅ |
 | esbmv | 24 | 0.856 | 0.822 | ✅ |
 | erotg | 1 | 0.821 | 0.818 | ✅ |
-| enrm2 | 3 | 0.801 | 0.768 | ✅ |
 | ycopy | 2 | 0.347 | 0.785 | ✅ |
 | ecopy | 3 | 0.550 | 0.751 | ✅ |
 | iyamax | 2 | 0.697 | 0.576 | ✅ |
 | eyasum | 2 | 0.573 | 0.576 | ✅ |
+| enrm2 | 3 | 0.455 | 0.324 | ✅ |
 | eynrm2 | 2 | 0.330 | 0.326 | ✅ |
 | yrotg | 1 | 0.079 | 0.078 | ✅ |
 
@@ -422,7 +422,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xtbsv | 108 | 1.010 | 1.010 | ✅ |
 | xswap | 2 | 1.010 | 1.005 | ✅ |
 | qtbmv | 96 | 1.009 | 0.888 | ✅ |
-| qnrm2 | 3 | 1.009 | 0.283 | ✅ |
 | qswap | 3 | 1.009 | 1.002 | ✅ |
 | qsyr | 24 | 1.005 | 1.009 | ✅ |
 | qtpsv | 96 | 1.008 | 1.008 | ✅ |
@@ -451,11 +450,12 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qcabs1 | 1 | 1.000 | 0.620 | ✅ |
 | qcopy | 3 | 0.794 | 1.000 | ✅ |
 | xcopy | 2 | 0.794 | 1.000 | ✅ |
-| qxnrm2 | 2 | 0.997 | 0.255 | ✅ |
 | qxasum | 2 | 0.974 | 0.797 | ✅ |
 | ixamax | 2 | 0.973 | 0.716 | ✅ |
 | qrotg | 1 | 0.949 | 0.950 | ✅ |
 | iqamax | 3 | 0.916 | 0.664 | ✅ |
+| qxnrm2 | 2 | 0.791 | 0.253 | ✅ |
+| qnrm2 | 3 | 0.770 | 0.276 | ✅ |
 | xrotg | 1 | 0.690 | 0.689 | ✅ |
 
 <details><summary>q: 108 flagged cells (par/ref > 1.02, smaller=faster)</summary>

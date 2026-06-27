@@ -17,6 +17,7 @@ typedef __complex128 TC;
 typedef __float128 R;
 
 static R btsml, btbig, bssml, bsbig, maxN;
+static R btsml2, btbig2;   /* squared thresholds — see blue_bucket / fast path */
 static bool blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
@@ -26,21 +27,32 @@ static __attribute__((cold)) void blue_init(void)
     bssml = scalbnq(1.0Q,  8247);
     bsbig = scalbnq(1.0Q, -8248);
     maxN  = FLT128_MAX;
+    /* Squared bucket thresholds. The buckets square each component anyway, so
+     * route on v*v vs these instead of |v| vs the linear thresholds — dropping
+     * the per-element fabsq. For quad this matters more than for fp80: the
+     * comparisons are libquadmath calls, so fewer of them is a real win. Exact
+     * powers of two (2^16272 / 2^-16382), both in __float128 range. */
+    btbig2 = btbig * btbig;
+    btsml2 = btsml * btsml;
     blue_inited = 1;
 }
 
 static inline R sq(R x) { return x * x; }
 
-/* Bucket one scalar component into (abig, amed, asml). */
-static inline void blue_bucket(R ax, R *abig, R *amed, R *asml, bool *notbig)
+/* Bucket one scalar component into (abig, amed, asml). Routes on the square
+ * s = v*v (Inf if v overflows on square → big bucket; 0 if it underflows →
+ * small bucket), so no abs is needed; the big/small buckets rescale from the
+ * raw v before squaring (sign irrelevant once squared). */
+static inline void blue_bucket(R v, R *abig, R *amed, R *asml, bool *notbig)
 {
-    if (ax > btbig) {
-        *abig += sq(ax * bsbig);
+    R s = v * v;
+    if (s > btbig2) {
+        *abig += sq(v * bsbig);
         *notbig = 0;
-    } else if (ax < btsml) {
-        if (*notbig) *asml += sq(ax * bssml);
+    } else if (s < btsml2) {
+        if (*notbig) *asml += sq(v * bssml);
     } else {
-        *amed += sq(ax);
+        *amed += s;
     }
 }
 
@@ -84,8 +96,8 @@ static void qxnrm2_bucket(ptrdiff_t n, const TC *x, R *abig_, R *amed_, R *asml_
     R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
     bool notbig = 1;
     for (ptrdiff_t i = 0; i < n; ++i) {
-        blue_bucket(fabsq(__real__ x[i]), &abig, &amed, &asml, &notbig);
-        blue_bucket(fabsq(__imag__ x[i]), &abig, &amed, &asml, &notbig);
+        blue_bucket(__real__ x[i], &abig, &amed, &asml, &notbig);
+        blue_bucket(__imag__ x[i], &abig, &amed, &asml, &notbig);
     }
     *abig_ = abig; *amed_ = amed; *asml_ = asml;
 }
@@ -127,12 +139,53 @@ static R qxnrm2_core(ptrdiff_t n, const TC *x, ptrdiff_t incx)
     }
 #endif
 
+    /* Fast path — no per-element thresholds. Accumulate the raw sum of squares
+     * across four independent chains (two complex elts/iter, Re/Im × even/odd)
+     * to expose ILP to the out-of-order engine across the libquadmath add/mul
+     * calls. If the total is finite and nonzero, nothing overflowed when
+     * squared and not everything underflowed, so the naive norm is accurate —
+     * the common case, with ZERO comparisons (libquadmath calls) in the loop.
+     * A non-finite-or-zero total (near-FLT128_MAX / all-tiny / Inf / NaN) is
+     * rare and falls through to Blue's bucketing below. Reorders the sum vs the
+     * reference (4 chains) — within fuzz tolerance. */
+    R c0 = 0.0Q, c1 = 0.0Q, c2 = 0.0Q, c3 = 0.0Q;
+    ptrdiff_t i = 0;
+    if (incx == 1) {
+        ptrdiff_t n2 = n & ~(ptrdiff_t)1;
+        for (; i < n2; i += 2) {
+            const R *p = (const R *)&x[i];
+            c0 += p[0] * p[0];
+            c1 += p[1] * p[1];
+            c2 += p[2] * p[2];
+            c3 += p[3] * p[3];
+        }
+        for (; i < n; ++i) {
+            const R *p = (const R *)&x[i];
+            c0 += p[0] * p[0];
+            c1 += p[1] * p[1];
+        }
+    } else {
+        ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
+        for (; i < n; ++i) {
+            const R *p = (const R *)&x[ix];
+            c0 += p[0] * p[0];
+            c1 += p[1] * p[1];
+            ix += incx;
+        }
+    }
+    R s = (c0 + c1) + (c2 + c3);
+    if (s > 0.0Q && s <= maxN)        /* finite, nonzero, no overflow */
+        return sqrtq(s);
+
+    /* Robust fallback: Blue's three-bucket scaling. Reached only for huge /
+     * all-tiny / Inf / NaN data. */
     R abig = 0.0Q, amed = 0.0Q, asml = 0.0Q;
     bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
-    for (ptrdiff_t i = 0; i < n; ++i) {
-        blue_bucket(fabsq(__real__ x[ix]), &abig, &amed, &asml, &notbig);
-        blue_bucket(fabsq(__imag__ x[ix]), &abig, &amed, &asml, &notbig);
+    for (ptrdiff_t k = 0; k < n; ++k) {
+        const R *p = (const R *)&x[ix];
+        blue_bucket(p[0], &abig, &amed, &asml, &notbig);
+        blue_bucket(p[1], &abig, &amed, &asml, &notbig);
         ix += incx;
     }
     return qxnrm2_finalize(abig, amed, asml);

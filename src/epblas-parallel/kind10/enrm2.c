@@ -22,6 +22,7 @@
 typedef long double TR;
 
 static TR btsml, btbig, bssml, bsbig, maxN;
+static TR btsml2, btbig2;   /* squared thresholds — route on v² to drop fabsl */
 static ptrdiff_t blue_inited = 0;
 
 static __attribute__((cold)) void blue_init(void)
@@ -37,6 +38,10 @@ static __attribute__((cold)) void blue_init(void)
     bssml = ldexpl(1.0L,  8222);
     bsbig = ldexpl(1.0L, -8224);
     maxN  = LDBL_MAX;
+    /* btbig/btsml are exact powers of two, so the squares are exact:
+     * btbig2 = 2^16320, btsml2 = 2^-16382 — both inside x87 long double. */
+    btbig2 = btbig * btbig;
+    btsml2 = btsml * btsml;
     blue_inited = 1;
 }
 
@@ -82,10 +87,11 @@ static void enrm2_bucket(ptrdiff_t n, const TR *x, TR *abig_, TR *amed_, TR *asm
     TR abig = 0.0L, amed = 0.0L, asml = 0.0L;
     bool notbig = 1;
     for (ptrdiff_t i = 0; i < n; ++i) {
-        TR ax = fabsl(x[i]);
-        if (ax > btbig) { abig += sq(ax * bsbig); notbig = 0; }
-        else if (ax < btsml) { if (notbig) asml += sq(ax * bssml); }
-        else amed += sq(ax);
+        TR v = x[i];
+        TR s = v * v;
+        if (s > btbig2) { TR ax = fabsl(v); abig += sq(ax * bsbig); notbig = 0; }
+        else if (s < btsml2) { if (notbig) { TR ax = fabsl(v); asml += sq(ax * bssml); } }
+        else amed += s;
     }
     *abig_ = abig; *amed_ = amed; *asml_ = asml;
 }
@@ -127,18 +133,48 @@ static TR enrm2_core(ptrdiff_t n, const TR *x, ptrdiff_t incx)
     }
 #endif
 
+    /* Fast path: accumulate the raw sum-of-squares across four independent
+     * chains so the fadd latency is hidden by ILP (fp80 has no SIMD/FMA, so
+     * chain-splitting is the only lever). The Blue threshold compares are
+     * skipped on every element; we detect overflow/total-underflow once at
+     * the end. If the sum is finite and nonzero, return sqrt(s) directly;
+     * only a genuinely extreme vector falls through to the Blue buckets. */
+    {
+        TR c0 = 0.0L, c1 = 0.0L, c2 = 0.0L, c3 = 0.0L;
+        ptrdiff_t i = 0;
+        if (incx == 1) {
+            ptrdiff_t n4 = n & ~(ptrdiff_t)3;
+            for (; i < n4; i += 4) {
+                c0 += x[i] * x[i];
+                c1 += x[i + 1] * x[i + 1];
+                c2 += x[i + 2] * x[i + 2];
+                c3 += x[i + 3] * x[i + 3];
+            }
+            for (; i < n; ++i) c0 += x[i] * x[i];
+        } else {
+            ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
+            for (; i < n; ++i) { c0 += x[ix] * x[ix]; ix += incx; }
+        }
+        TR s = (c0 + c1) + (c2 + c3);
+        if (s > 0.0L && s <= maxN) return sqrtl(s);
+    }
+
+    /* Blue fallback (rare): square-routed buckets, fabsl only on out-of-band
+     * elements. */
     TR abig = 0.0L, amed = 0.0L, asml = 0.0L;
     bool notbig = 1;
     ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
     for (ptrdiff_t i = 0; i < n; ++i) {
-        TR ax = fabsl(x[ix]);
-        if (ax > btbig) {
+        TR v = x[ix];
+        TR s = v * v;
+        if (s > btbig2) {
+            TR ax = fabsl(v);
             abig += sq(ax * bsbig);
             notbig = 0;
-        } else if (ax < btsml) {
-            if (notbig) asml += sq(ax * bssml);
+        } else if (s < btsml2) {
+            if (notbig) { TR ax = fabsl(v); asml += sq(ax * bssml); }
         } else {
-            amed += sq(ax);
+            amed += s;
         }
         ix += incx;
     }
