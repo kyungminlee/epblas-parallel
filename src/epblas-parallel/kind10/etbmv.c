@@ -40,6 +40,38 @@ typedef long double TR;
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 
+/* Contiguous (incx==1) Trans band dot: x := A^T*x in place, each output x[j] a
+ * register-resident band dot. NOINLINE so its x87 register allocation is
+ * isolated from etbmv_core's surrounding blocks — inlined, the Lower-Trans loop
+ * lost ~3-6% (LTU/128 par/ob 1.057) to inline-context regalloc pressure
+ * (project_x87_accumulator_spill trigger 3); extracted, it comes to parity-or-
+ * better. Upper hoists L=k-j and reads the macro (already wins); Lower hoists
+ * the column base pointer (the macro re-derives j*lda per element). */
+__attribute__((noinline))
+static void etbmv_contig_trans(char UPLO, bool nounit, ptrdiff_t n, ptrdiff_t k,
+                               const TR *restrict a, ptrdiff_t lda, TR *restrict x)
+{
+    if (UPLO == 'U') {
+        for (ptrdiff_t j = n - 1; j >= 0; --j) {
+            TR tmp = x[j];
+            const ptrdiff_t L = k - j;
+            if (nounit) tmp *= A_(k, j);
+            const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
+            for (ptrdiff_t i = j - 1; i >= i_lo; --i) tmp += A_(L + i, j) * x[i];
+            x[j] = tmp;
+        }
+    } else {
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            TR tmp = x[j];
+            const TR *restrict col = &a[(size_t)j * (size_t)lda];
+            if (nounit) tmp *= col[0];
+            const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
+            for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += col[i - j] * x[i];
+            x[j] = tmp;
+        }
+    }
+}
+
 /* Thread-entry thresholds = the measured break-even where par4 < par1 (forking
  * actually beats our own serial path). Both serial paths are register-resident
  * (NoTrans in-place gather, Trans dot), so threading only pays once N is large
@@ -106,24 +138,7 @@ static void etbmv_core(
                 }
             }
         } else {
-            if (UPLO == 'U') {
-                for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    TR tmp = x[j];
-                    const ptrdiff_t L = k - j;
-                    if (nounit) tmp *= A_(k, j);
-                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
-                    for (ptrdiff_t i = j - 1; i >= i_lo; --i) tmp += A_(L + i, j) * x[i];
-                    x[j] = tmp;
-                }
-            } else {
-                for (ptrdiff_t j = 0; j < n; ++j) {
-                    TR tmp = x[j];
-                    if (nounit) tmp *= A_(0, j);
-                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
-                    for (ptrdiff_t i = j + 1; i < i_hi; ++i) tmp += A_(i - j, j) * x[i];
-                    x[j] = tmp;
-                }
-            }
+            etbmv_contig_trans(UPLO, nounit, n, k, a, lda, x);
         }
     } else {
         if (TRANS == 'N') {
@@ -174,15 +189,23 @@ static void etbmv_core(
                     jx -= incx;
                 }
             } else {
+                /* Lower strided Trans: hoist the column base pointer once per
+                 * column (col = &a[j*lda]) and walk col[i-j] — the A_(i,j) macro
+                 * re-derives (size_t)j*lda at every band element, leaving par
+                 * ~3% behind the refs on these strided cells (the same fix that
+                 * brought etbsv's strided cells to parity). The Upper strided
+                 * branch above already wins with the macro form, so it is left
+                 * untouched (measured per-shape, do not unify). */
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TR tmp = x[jx];
                     kx += incx;
                     ptrdiff_t ix = kx;
-                    if (nounit) tmp *= A_(0, j);
+                    const TR *restrict col = &a[(size_t)j * (size_t)lda];
+                    if (nounit) tmp *= col[0];
                     const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
                     for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
-                        tmp += A_(i - j, j) * x[ix];
+                        tmp += col[i - j] * x[ix];
                         ix += incx;
                     }
                     x[jx] = tmp;
