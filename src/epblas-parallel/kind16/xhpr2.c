@@ -36,10 +36,16 @@ void xhpr2_core(
     if (n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
+        /* schedule(static,1): column j touches j (upper) or N-1-j (lower)
+         * off-diagonal packed elements, so a contiguous static block hands one
+         * thread the heavy triangle end and starves the rest (par caps at ~2x
+         * on 4 cores). Cyclic static,1 interleaves short and long columns across
+         * the team, balancing the skew symmetrically for both UPLO. Mirrors the
+         * kind10 yhpr2 twin. */
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const bool use_omp = (n >= XHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = (j * (j + 1)) / 2;
@@ -55,7 +61,7 @@ void xhpr2_core(
         } else {
 #ifdef _OPENMP
             const bool use_omp = (n >= XHPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static)
+            #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
             for (ptrdiff_t j = 0; j < n; ++j) {
                 const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;

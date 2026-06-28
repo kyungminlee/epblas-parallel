@@ -38,9 +38,14 @@ void xher2_core(
     if (n == 0 || alpha == zero) return;
 
     if (incx == 1 && incy == 1) {
+        /* schedule(static,1): column j touches (N-1-j) (lower) or j (upper)
+         * off-diagonal elements, so a contiguous static block hands one thread
+         * the heavy triangle end and starves the rest (par caps at ~2x on 4
+         * cores). Cyclic static,1 interleaves short and long columns across the
+         * team, balancing the skew for both UPLO. Mirrors the kind10 yher2 twin. */
 #ifdef _OPENMP
         const bool use_omp = (n >= XHER2_OMP_MIN && blas_omp_should_thread());
-        #pragma omp parallel for if(use_omp) schedule(static)
+        #pragma omp parallel for if(use_omp) schedule(static, 1)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j) {
             const TC xj = x[j], yj = y[j];
