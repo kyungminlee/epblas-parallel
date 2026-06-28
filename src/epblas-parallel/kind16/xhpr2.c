@@ -20,6 +20,30 @@ typedef __complex128 TC;
 static inline TC cconj(TC z) { return conjq(z); }
 typedef __float128 TR;
 
+/* Off-diagonal contiguous run: a[i] += x[i]*t1 + y[i]*t2 for i in [0,cnt).
+ * Decomposing the complex constants into scalar real/imag locals keeps them
+ * register-resident across the loop (gcc otherwise reloads the __complex128
+ * temps each iteration), and reinterpreting x/y/a as 2n reals lets the eight
+ * loop-invariant __float128 operands stay put — ~2-3% fewer cycles in the
+ * compute-bound (L2-resident) regime, neutral when memory-bound. Product-then-
+ * sum-then-accumulate order is byte-identical to gcc's inlined complex MAC, so
+ * the result is bit-exact. (TFmode analogue of the kind10 yerot decompose.) */
+__attribute__((noinline)) static void
+xhpr2_run(ptrdiff_t cnt, TR t1r, TR t1i, TR t2r, TR t2i,
+          const TC *restrict x, const TC *restrict y, TC *restrict a)
+{
+    const TR *restrict xr = (const TR *)x;
+    const TR *restrict yr = (const TR *)y;
+    TR *restrict ar = (TR *)a;
+    for (ptrdiff_t i = 0; i < cnt; ++i) {
+        const TR xR = xr[2*i], xI = xr[2*i+1], yR = yr[2*i], yI = yr[2*i+1];
+        const TR pxr = xR*t1r - xI*t1i, pyr = yR*t2r - yI*t2i;
+        const TR pxi = xR*t1i + xI*t1r, pyi = yR*t2i + yI*t2r;
+        ar[2*i]   += pxr + pyr;
+        ar[2*i+1] += pxi + pyi;
+    }
+}
+
 
 void xhpr2_core(
     char uplo,
@@ -52,7 +76,7 @@ void xhpr2_core(
                 if (x[j] != zero || y[j] != zero) {
                     const TC t1 = alpha * cconj(y[j]);
                     const TC t2 = cconj(alpha * x[j]);
-                    for (ptrdiff_t i = 0; i < j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
+                    xhpr2_run(j, crealq(t1), cimagq(t1), crealq(t2), cimagq(t2), x, y, ap + kk);
                     ap[kk + j] = (TR)crealq(ap[kk + j]) + (TR)crealq(x[j] * t1 + y[j] * t2);
                 } else {
                     ap[kk + j] = (TR)crealq(ap[kk + j]);
@@ -69,7 +93,8 @@ void xhpr2_core(
                     const TC t1 = alpha * cconj(y[j]);
                     const TC t2 = cconj(alpha * x[j]);
                     ap[kk] = (TR)crealq(ap[kk]) + (TR)crealq(x[j] * t1 + y[j] * t2);
-                    for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
+                    xhpr2_run(n - (j + 1), crealq(t1), cimagq(t1), crealq(t2), cimagq(t2),
+                              x + j + 1, y + j + 1, ap + kk + 1);
                 } else {
                     ap[kk] = (TR)crealq(ap[kk]);
                 }
