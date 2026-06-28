@@ -63,18 +63,49 @@ static void espr2_core(
          * yhpr2 keeps static,1 — its heavier body fully hides the false sharing
          * and the finest balance wins there; the lighter real rank-1 espr also
          * uses static,8. */
+        /* The per-column noinline helper exists for the OMP body (inlined into
+         * the outlined region it spills the kept-resident operands, -~10%). But
+         * the SERIAL path pays that helper's call overhead — two long-double args
+         * marshaled through memory + call/ret per column, ~10ns/col — for nothing:
+         * a plain serial loop is a clean register context, no outlining. At small
+         * N that fixed per-column tax is the whole gap (the references inline their
+         * column loop): par was flat ~18500ns at N=128 on BOTH uplos while netlib
+         * hit 17145 on Upper. Inline the loop for serial, keep the helper for OMP.
+         * Running base pointer (c += j+1 / base += n-j) also drops the per-column
+         * j*(j+1)/2 packed-offset recompute. Bit-exact (same op order as helper). */
+#ifdef _OPENMP
+        const bool use_omp = (n >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
+#else
+        const bool use_omp = false;
+#endif
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const bool use_omp = (n >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 8)
+            if (use_omp) {
+                #pragma omp parallel for schedule(static, 8)
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    if (x[j] != zero || y[j] != zero)
+                        espr2_col_upper(j, alpha * y[j], alpha * x[j], x, y, ap);
+                }
+            } else
 #endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                if (x[j] != zero || y[j] != zero)
-                    espr2_col_upper(j, alpha * y[j], alpha * x[j], x, y, ap);
+            {
+                TR *restrict c = ap;
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    if (x[j] != zero || y[j] != zero) {
+                        const TR t1 = alpha * y[j], t2 = alpha * x[j];
+                        for (ptrdiff_t i = 0; i <= j; ++i) c[i] += x[i] * t1 + y[i] * t2;
+                    }
+                    c += j + 1;
+                }
             }
         } else {
+            /* Lower keeps the noinline helper for BOTH serial and OMP: unlike
+             * Upper, inlining the Lower column loop into the j-loop regressed
+             * large-N ~9% (the isolated helper compile keeps the inner-loop
+             * operands x87-resident; inlined, the outer induction evicts them —
+             * the clean-regalloc benefit the helper was carved out for). Lower
+             * was never the flagged shape — it already beats netlib ~9% here. */
 #ifdef _OPENMP
-            const bool use_omp = (n >= ESPR2_OMP_MIN && blas_omp_max_threads() > 1);
             #pragma omp parallel for if(use_omp) schedule(static, 8)
 #endif
             for (ptrdiff_t j = 0; j < n; ++j) {
