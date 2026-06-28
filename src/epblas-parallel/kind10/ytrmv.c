@@ -145,13 +145,20 @@ static void ytrmv_core(
 #endif
         if (TRANS == 'N') {
             if (UPLO == 'L') {
-                /* Inner walks backward to match Fortran ytrmv.f
-                 * (DO 50 I = N,J+1,-1). Sub-class C / Rule 21. */
+                /* Inner walks FORWARD (i = j+1 .. n-1). Each x[i] is a distinct
+                 * output updated exactly once per column, so the inner order is
+                 * free — forward is bit-identical to the Fortran backward walk
+                 * (DO 50 I=N,J+1,-1) yet streams x[i]/aj[i] up in address (a
+                 * positive-stride run the HW prefetcher handles, vs the negative
+                 * stride of the backward walk). The Upper branch below already
+                 * walks forward and is at parity; the backward Lower walk was a
+                 * constant ~5.5% par/mig across N=128-512. Only the OUTER j must
+                 * stay backward for in-place correctness. */
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     const TC temp = x[j];
                     if (temp != ZERO) {
                         const TC *aj = &A_(0, j);
-                        for (ptrdiff_t i = n - 1; i > j; --i) x[i] += temp * aj[i];
+                        for (ptrdiff_t i = j + 1; i < n; ++i) x[i] += temp * aj[i];
                     }
                     if (nounit) x[j] *= A_(j, j);
                 }

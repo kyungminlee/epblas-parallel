@@ -73,7 +73,16 @@ TR espmv_axpydot_strided(ptrdiff_t cnt, TR t1, const TR *restrict ap,
 
 /* Serial stride-1 packed two-pass core (shared by the contiguous path and the
  * strided gather path). Bit-identical column-order accumulation to the direct
- * strided form. */
+ * strided form.
+ *
+ * The two-pass kernel is inlined directly here (NOT routed through
+ * espmv_axpydot) so the whole column nest compiles as a SINGLE function with no
+ * per-column call — matching the migrated gfortran reference. The noinline
+ * carve-out escapes the dispatcher's OMP/beta/strided register pressure; this
+ * dedicated core has none of it, so the inlined fp80 loop keeps ap[i]
+ * x87-resident (3 fldt/elt) on its own. The per-column call cost a fixed
+ * call/ret + fldz that at small N showed up as a ~1/N par/mig gap. espmv_axpydot
+ * is kept for the OMP path, where the call amortises over longer ranges. */
 __attribute__((noinline)) static
 void espmv_serial_core(char UPLO, ptrdiff_t n, TR alpha,
                        const TR *restrict ap, const TR *restrict x, TR *restrict y)
@@ -82,7 +91,13 @@ void espmv_serial_core(char UPLO, ptrdiff_t n, TR alpha,
     if (UPLO == 'U') {
         for (ptrdiff_t j = 0; j < n; ++j) {
             const TR t1 = alpha * x[j];
-            const TR t2 = espmv_axpydot(j, t1, &ap[kk], x, y);
+            const TR *restrict apc = &ap[kk];
+            TR t2 = 0.0L;
+            for (ptrdiff_t i = 0; i < j; ++i) {
+                const TR a = apc[i];
+                y[i] += t1 * a;
+                t2   += a * x[i];
+            }
             y[j] += t1 * ap[kk + j] + alpha * t2;
             kk += j + 1;
         }
@@ -90,7 +105,16 @@ void espmv_serial_core(char UPLO, ptrdiff_t n, TR alpha,
         for (ptrdiff_t j = 0; j < n; ++j) {
             const TR t1 = alpha * x[j];
             y[j] += t1 * ap[kk];
-            const TR t2 = espmv_axpydot(n - 1 - j, t1, &ap[kk + 1], &x[j + 1], &y[j + 1]);
+            const TR *restrict apc = &ap[kk + 1];
+            const TR *restrict xc = &x[j + 1];
+            TR *restrict yc = &y[j + 1];
+            const ptrdiff_t cnt = n - 1 - j;
+            TR t2 = 0.0L;
+            for (ptrdiff_t i = 0; i < cnt; ++i) {
+                const TR a = apc[i];
+                yc[i] += t1 * a;
+                t2    += a * xc[i];
+            }
             y[j] += alpha * t2;
             kk += n - j;
         }

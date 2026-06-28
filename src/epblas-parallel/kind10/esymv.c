@@ -68,7 +68,18 @@ TR esymv_axpydot_strided(ptrdiff_t cnt, TR temp1, const TR *restrict ak,
 
 /* Serial stride-1 two-pass core (shared by the contiguous path and the
  * strided gather path). Bit-identical column-order accumulation to the
- * direct strided form. */
+ * direct strided form.
+ *
+ * The two-pass kernel is inlined directly here (NOT routed through
+ * esymv_axpydot) so the whole column nest compiles as a SINGLE function with
+ * no per-column call — matching the migrated gfortran reference. The noinline
+ * carve-out exists only to escape the dispatcher's OMP/beta/strided register
+ * pressure; this dedicated core has none of that scaffolding, so the inlined
+ * fp80 loop keeps acol[k] x87-resident (3 fldt/elt) on its own. Calling
+ * esymv_axpydot per column instead cost a fixed call/ret + fldz per column,
+ * which at small N (the inner length ≈ N) showed up as a ~1/N par/mig gap
+ * (1.03 @ N=128 halving to 1.015 @ N=256). esymv_axpydot is kept for the OMP
+ * path, where the call is amortised across far longer ranges. */
 __attribute__((noinline)) static
 void esymv_serial_core(char UPLO, ptrdiff_t n, ptrdiff_t lda, TR alpha,
                        const TR *restrict a, const TR *restrict x, TR *restrict y)
@@ -76,16 +87,26 @@ void esymv_serial_core(char UPLO, ptrdiff_t n, ptrdiff_t lda, TR alpha,
     if (UPLO == 'L') {
         for (ptrdiff_t i = 0; i < n; ++i) {
             const TR temp1 = alpha * x[i];
-            const TR *ai = &A_(0, i);
+            const TR *restrict ai = &A_(0, i);
             y[i] += temp1 * ai[i];
-            const TR temp2 = esymv_axpydot(i + 1, n, temp1, ai, x, y);
+            TR temp2 = 0.0L;
+            for (ptrdiff_t k = i + 1; k < n; ++k) {
+                const TR a = ai[k];
+                y[k]  += temp1 * a;
+                temp2 += a * x[k];
+            }
             y[i] += alpha * temp2;
         }
     } else {
         for (ptrdiff_t i = 0; i < n; ++i) {
             const TR temp1 = alpha * x[i];
-            const TR *ai = &A_(0, i);
-            const TR temp2 = esymv_axpydot(0, i, temp1, ai, x, y);
+            const TR *restrict ai = &A_(0, i);
+            TR temp2 = 0.0L;
+            for (ptrdiff_t k = 0; k < i; ++k) {
+                const TR a = ai[k];
+                y[k]  += temp1 * a;
+                temp2 += a * x[k];
+            }
             y[i] += temp1 * ai[i] + alpha * temp2;
         }
     }
