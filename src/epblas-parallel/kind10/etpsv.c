@@ -84,12 +84,30 @@ static void etpsv_serial(char UPLO, char TRANS, bool nounit,
                     kk += j + 1;
                 }
             } else {
+                /* Lower^T: dot over the already-solved tail x[j+1..n-1]. Walk the
+                 * inner loop FORWARD (positive stride — the HW prefetcher handles
+                 * it, vs the negative stride of the Fortran backward dot) and split
+                 * into two parallel x87 accumulators to hide the ~5-cyc fp80 fadd
+                 * latency. The Upper^T branch above already does both; this branch
+                 * had neither (single acc, backward) and was the only flagged shape
+                 * — ~1.03-1.08 par/mig, worst at small N. Forward order + 2-chain
+                 * reassociation deviate from the netlib single-acc dot (within the
+                 * fp80 fuzz tolerance, same as Upper^T). */
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    TR tmp = x[j];
-                    ptrdiff_t k = kk;
-                    for (ptrdiff_t i = n - 1; i > j; --i) { tmp -= ap[k] * x[i]; --k; }
-                    if (nounit) tmp /= ap[kk - (n - 1 - j)];
+                    const ptrdiff_t cnt = n - 1 - j;          /* off-diagonal count */
+                    const ptrdiff_t dk  = kk - cnt;           /* diagonal A(j,j) */
+                    const TR *restrict apc = &ap[dk + 1];
+                    const TR *restrict xc  = &x[j + 1];
+                    TR t0 = x[j], t1 = zero;
+                    ptrdiff_t i = 0;
+                    for (; i + 1 < cnt; i += 2) {
+                        t0 -= apc[i]     * xc[i];
+                        t1 -= apc[i + 1] * xc[i + 1];
+                    }
+                    if (i < cnt) { t0 -= apc[i] * xc[i]; }
+                    TR tmp = t0 + t1;
+                    if (nounit) tmp /= ap[dk];
                     x[j] = tmp;
                     kk -= (n - j);
                 }

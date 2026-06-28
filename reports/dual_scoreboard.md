@@ -1,13 +1,13 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-28 20:39 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-28 20:54 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
-| e | 2218 | 94.3% | 97.9% |
+| e | 2218 | 94.6% | 97.9% |
 | q | 2218 | 98.2% | 99.5% |
 
 ## m — multifloats (double-double)
@@ -102,11 +102,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## e — kind10 (fp80)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 94.3% · omp4 97.9%.**  19 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 94.6% · omp4 97.9%.**  18 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| **etpsv** | 96 | 1.084 mig @LTU/128 | 1.016 | ⚠ |
 | **etbmv** | 96 | 1.039 mig @LTU/x2/1024 | 1.077 @UTN/512 | ⚠ |
 | **espr2** | 24 | 1.077 mig @U/128 | 1.002 | ⚠ |
 | **ytrsv** | 108 | 1.070 mig @UTU/256 | 1.011 | ⚠ |
@@ -129,6 +128,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | yher2 | 18 | 1.016 | 0.982 | ✅ |
 | erotmg | 1 | 1.015 | 1.015 | ✅ |
 | esyr2 | 24 | 1.015 | 1.005 | ✅ |
+| etpsv | 96 | 1.015 | 1.014 | ✅ |
 | espr | 24 | 1.014 | 1.005 | ✅ |
 | esyr | 24 | 1.007 | 1.014 | ✅ |
 | esymm | 16 | 1.014 | 0.992 | ✅ |
@@ -182,12 +182,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | eynrm2 | 2 | 0.330 | 0.326 | ✅ |
 | yrotg | 1 | 0.079 | 0.078 | ✅ |
 
-<details><summary>e: 146 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>e: 138 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| etpsv | LTU | 128 | 8,335 | 8,194 | 7,686 | 8,159 | 8,029 | 1.084 | 1.016 | mig |
-| etpsv | LTN | 128 | 8,426 | 8,387 | 7,800 | 8,207 | 8,129 | 1.080 | 1.010 | mig |
 | etbmv | UTN | 512 | 6,857 | 8,611 | 7,252 | 7,917 | 7,350 | 0.946 | 1.077 | mig |
 | espr2 | U | 128 | 18,335 | 17,240 | 17,025 | 11,015 | 17,649 | 1.077 | 0.624 | mig |
 | ytrsv | UTU | 256 | 84,111 | 94,763 | 78,613 | 46,042 | 94,865 | 1.070 | 0.485 | mig |
@@ -209,9 +207,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | ytpmv | LNU | 256 | 129,791 | 123,100 | 123,146 | 69,667 | 69,639 | 1.054 | 1.000 | ob1 |
 | ygbmv | T/x2 | 256 | 22,004 | 22,172 | 20,874 | 9,006 | 23,837 | 1.054 | 0.378 | mig |
 | ytpmv | LNN | 256 | 130,785 | 124,069 | 124,069 | 70,156 | 70,170 | 1.054 | 1.000 | mig |
-| etpsv | LTN | 256 | 32,589 | 32,416 | 30,954 | 25,889 | 33,015 | 1.053 | 0.784 | mig |
 | ytbmv | UTU | 128 | 4,732 | 4,495 | 4,739 | 3,066 | 4,808 | 1.053 | 0.638 | ob1 |
-| etpsv | LTU | 256 | 32,471 | 32,295 | 30,853 | 25,355 | 33,470 | 1.052 | 0.758 | mig |
 | ytpmv | LTN | 128 | 20,220 | 19,219 | 19,279 | 12,188 | 12,326 | 1.052 | 0.989 | ob1 |
 | etrsm | LLNU | 64 | 114,485 | 108,838 | 279,065 | 100,496 | 98,617 | 1.052 | 1.019 | ob1 |
 | etrsm | RUTU | 64 | 114,253 | 108,620 | 233,916 | 103,906 | 101,548 | 1.052 | 1.023 | ob1 |
@@ -239,12 +235,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | ieamax | - | 65536 | 51,965 | 78,636 | 114,679 | 24,198 | 23,184 | 0.661 | 1.044 | ob1 |
 | etbmv | UTU | 512 | 6,880 | 8,682 | 7,230 | 7,566 | 7,260 | 0.952 | 1.042 | mig |
 | etrsm | LUNN | 64 | 113,254 | 108,687 | 255,296 | 103,510 | 101,794 | 1.042 | 1.017 | ob1 |
-| etpsv | LTN | 512 | 127,598 | 127,204 | 122,546 | 65,416 | 136,229 | 1.041 | 0.480 | mig |
 | ytpmv | LTN | 256 | 80,163 | 77,000 | 77,170 | 44,760 | 44,875 | 1.041 | 0.997 | ob1 |
 | ytpmv | LTN | 512 | 318,765 | 307,376 | 306,476 | 90,798 | 90,899 | 1.040 | 0.999 | mig |
 | ytbmv | UTU | 256 | 10,217 | 9,825 | 10,182 | 4,664 | 7,443 | 1.040 | 0.627 | ob1 |
 | ytbmv | LTN | 256 | 10,265 | 9,873 | 10,296 | 5,289 | 8,159 | 1.040 | 0.648 | ob1 |
-| etpsv | LTU | 512 | 127,232 | 126,818 | 122,384 | 65,772 | 136,002 | 1.040 | 0.484 | mig |
 | ytpmv | LTU | 512 | 318,627 | 307,648 | 306,520 | 90,567 | 90,559 | 1.039 | 1.000 | mig |
 | etbmv | LTU/x2 | 1024 | 15,612 | 15,282 | 15,033 | 8,531 | 16,195 | 1.039 | 0.527 | mig |
 | etbmv | LTU/x-1 | 256 | 3,652 | 3,569 | 3,518 | 3,836 | 5,096 | 1.038 | 0.753 | mig |
@@ -264,7 +258,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | espmv | U/x-1 | 128 | 17,733 | 20,697 | 17,134 | 17,619 | 20,698 | 1.035 | 0.851 | mig |
 | etrsm | RLTU | 128 | 778,957 | 757,773 | 1,873,031 | 423,242 | 409,128 | 1.028 | 1.034 | ob1 |
 | etbmv | LTU/x2 | 128 | 1,762 | 1,725 | 1,705 | 1,770 | 1,732 | 1.034 | 1.022 | mig |
-| etpsv | LTN | 1024 | 529,500 | 528,016 | 512,583 | 204,954 | 566,341 | 1.033 | 0.362 | mig |
 | espr2 | U | 256 | 69,474 | 67,714 | 67,261 | 29,802 | 32,855 | 1.033 | 0.907 | mig |
 | ysyrk | UT | 256 | 20,524,266 | 28,369,621 | 19,870,693 | 7,573,017 | 13,338,066 | 1.033 | 0.568 | mig |
 | etbmv | LTN/x2 | 256 | 3,692 | 3,581 | 3,575 | 3,948 | 5,077 | 1.033 | 0.778 | mig |
@@ -272,7 +265,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | etrsm | RUNU | 256 | 5,630,300 | 5,535,232 | 14,764,304 | 2,246,372 | 2,176,420 | 1.017 | 1.032 | ob1 |
 | etrsm | LUTN | 128 | 782,724 | 758,377 | 990,985 | 418,443 | 408,529 | 1.032 | 1.024 | ob1 |
 | ytbmv | LTU | 256 | 10,004 | 9,696 | 10,016 | 5,193 | 8,045 | 1.032 | 0.646 | ob1 |
-| etpsv | LTU | 1024 | 528,089 | 526,176 | 511,821 | 205,133 | 568,733 | 1.032 | 0.361 | mig |
 | ysyrk | UT | 128 | 2,598,330 | 3,642,787 | 2,518,424 | 963,586 | 1,725,964 | 1.032 | 0.558 | mig |
 | etrsm | LUTU | 128 | 781,396 | 757,445 | 985,186 | 423,612 | 414,026 | 1.032 | 1.023 | ob1 |
 | etrsm | LUNU | 128 | 775,821 | 752,056 | 1,941,732 | 424,354 | 414,079 | 1.032 | 1.025 | ob1 |
