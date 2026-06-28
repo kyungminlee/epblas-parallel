@@ -1,13 +1,13 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-28 22:01 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-28 22:07 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
-| e | 2218 | 95.4% | 98.1% |
+| e | 2218 | 95.5% | 98.1% |
 | q | 2218 | 98.2% | 99.5% |
 
 ## m — multifloats (double-double)
@@ -102,7 +102,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## e — kind10 (fp80)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 95.4% · omp4 98.1%.**  18 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 95.5% · omp4 98.1%.**  17 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
@@ -119,7 +119,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **etbmv** | 96 | 1.008 | 1.029 @UTN/512 | ⚠ |
 | **etrmm** | 64 | 1.011 | 1.028 @RUTU/128 | ⚠ |
 | **esymv** | 24 | 1.027 mig @U/x-1/128 | 0.989 | ⚠ |
-| **yhpr** | 18 | 1.025 ob1 @L/128 | 1.002 | ⚠ |
 | **ytbsv** | 108 | 1.020 | 1.023 @LTN/128 | ⚠ |
 | **etpmv** | 96 | 1.023 ob1 @UNN/128 | 1.005 | ⚠ |
 | **egemm** | 16 | 1.022 ob1 @TN/128 | 0.993 | ⚠ |
@@ -145,6 +144,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | esyrk | 16 | 1.002 | 1.006 | ✅ |
 | ytrsm | 72 | 1.006 | 0.876 | ✅ |
 | ygerc | 9 | 1.004 | 1.006 | ✅ |
+| yhpr | 18 | 1.006 | 1.005 | ✅ |
 | yhpmv | 18 | 1.005 | 1.005 | ✅ |
 | ydotu | 2 | 1.002 | 1.004 | ✅ |
 | easum | 3 | 1.003 | 1.000 | ✅ |
@@ -182,7 +182,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | eynrm2 | 2 | 0.330 | 0.326 | ✅ |
 | yrotg | 1 | 0.079 | 0.078 | ✅ |
 
-<details><summary>e: 120 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>e: 118 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
@@ -285,7 +285,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | ytpmv | UTU | 256 | 81,503 | 79,451 | 81,728 | 44,171 | 44,195 | 1.026 | 0.999 | ob1 |
 | esymv | U/x2 | 128 | 17,573 | 20,788 | 17,135 | 17,572 | 20,772 | 1.026 | 0.846 | mig |
 | etrsm | RLTU | 256 | 5,638,655 | 5,541,307 | 14,737,923 | 2,240,068 | 2,184,277 | 1.018 | 1.026 | ob1 |
-| yhpr | L | 128 | 33,223 | 32,418 | 32,485 | 16,055 | 32,334 | 1.025 | 0.497 | ob1 |
 | etrsm | LUTU | 256 | 5,674,972 | 5,562,452 | 8,073,864 | 1,901,995 | 1,856,263 | 1.020 | 1.025 | ob1 |
 | ytbmv | UTN | 512 | 21,219 | 20,716 | 21,239 | 8,220 | 14,526 | 1.024 | 0.566 | ob1 |
 | etrmm | RLNN | 256 | 5,333,847 | 5,317,005 | 14,753,623 | 2,129,155 | 2,078,877 | 1.003 | 1.024 | ob1 |
@@ -300,7 +299,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | egemm | TN | 128 | 1,370,493 | 1,341,380 | 1,903,761 | 392,470 | 395,208 | 1.022 | 0.993 | ob1 |
 | etpsv | LNU/x2 | 128 | 15,280 | 14,973 | 14,958 | 15,168 | 14,974 | 1.021 | 1.013 | mig |
 | etrmm | RLNU | 256 | 5,338,531 | 5,320,445 | 14,756,611 | 2,104,646 | 2,060,760 | 1.003 | 1.021 | ob1 |
-| yhpr | U | 128 | 32,884 | 32,216 | 32,208 | 16,119 | 32,296 | 1.021 | 0.499 | mig |
 | etrsm | RLNU | 256 | 5,625,051 | 5,533,534 | 14,742,665 | 2,207,044 | 2,161,874 | 1.017 | 1.021 | ob1 |
 | etbsv | LTN | 512 | 8,376 | 8,217 | 8,532 | 7,888 | 7,728 | 1.019 | 1.021 | ob1 |
 | ytbmv | UCU | 128 | 5,143 | 5,039 | 5,146 | 3,221 | 5,394 | 1.021 | 0.597 | ob1 |

@@ -49,34 +49,74 @@ static void yhpr_core(
          * if(use_omp) false) is already at parity with the reference — the
          * rank-1 loop body is small enough not to spill when outlined — so no
          * noinline carve-out is needed (unlike yhpr2). */
+        /* The `#pragma omp parallel for if(use_omp)` outlines the loop body even
+         * when use_omp is false, so the serial path pays the outlining tax AND
+         * recomputes the packed column base kk from j each column (Lower's
+         * j*n-j*(j-1)/2 is heavier than Upper's j*(j+1)/2 — Lower lost more at
+         * small N). Split source-level: OMP keeps kk-from-j (threads need it
+         * per-column); serial runs an un-outlined loop with a RUNNING kk
+         * (kk += j+1 / kk += n-j). Bit-identical (running kk == the closed form). */
+#ifdef _OPENMP
+        const bool use_omp = (n >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
+#else
+        const bool use_omp = false;
+#endif
         if (UPLO == 'U') {
 #ifdef _OPENMP
-            const bool use_omp = (n >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
+            if (use_omp) {
+                #pragma omp parallel for schedule(static, 1)
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    const ptrdiff_t kk = (j * (j + 1)) / 2;
+                    if (x[j] != czero) {
+                        const TC tmp = alpha * cconj(x[j]);
+                        for (ptrdiff_t i = 0; i < j; ++i) ap[kk + i] += x[i] * tmp;
+                        ap[kk + j] = (TR)__real__ ap[kk + j] + (TR)__real__ (x[j] * tmp);
+                    } else {
+                        ap[kk + j] = (TR)__real__ ap[kk + j];
+                    }
+                }
+            } else
 #endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                const ptrdiff_t kk = (j * (j + 1)) / 2;
-                if (x[j] != czero) {
-                    const TC tmp = alpha * cconj(x[j]);
-                    for (ptrdiff_t i = 0; i < j; ++i) ap[kk + i] += x[i] * tmp;
-                    ap[kk + j] = (TR)__real__ ap[kk + j] + (TR)__real__ (x[j] * tmp);
-                } else {
-                    ap[kk + j] = (TR)__real__ ap[kk + j];
+            {
+                ptrdiff_t kk = 0;
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    if (x[j] != czero) {
+                        const TC tmp = alpha * cconj(x[j]);
+                        for (ptrdiff_t i = 0; i < j; ++i) ap[kk + i] += x[i] * tmp;
+                        ap[kk + j] = (TR)__real__ ap[kk + j] + (TR)__real__ (x[j] * tmp);
+                    } else {
+                        ap[kk + j] = (TR)__real__ ap[kk + j];
+                    }
+                    kk += j + 1;
                 }
             }
         } else {
 #ifdef _OPENMP
-            const bool use_omp = (n >= YHPR_OMP_MIN && blas_omp_max_threads() > 1);
-            #pragma omp parallel for if(use_omp) schedule(static, 1)
+            if (use_omp) {
+                #pragma omp parallel for schedule(static, 1)
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
+                    if (x[j] != czero) {
+                        const TC tmp = alpha * cconj(x[j]);
+                        ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (tmp * x[j]);
+                        for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
+                    } else {
+                        ap[kk] = (TR)__real__ ap[kk];
+                    }
+                }
+            } else
 #endif
-            for (ptrdiff_t j = 0; j < n; ++j) {
-                const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
-                if (x[j] != czero) {
-                    const TC tmp = alpha * cconj(x[j]);
-                    ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (tmp * x[j]);
-                    for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
-                } else {
-                    ap[kk] = (TR)__real__ ap[kk];
+            {
+                ptrdiff_t kk = 0;
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    if (x[j] != czero) {
+                        const TC tmp = alpha * cconj(x[j]);
+                        ap[kk] = (TR)__real__ ap[kk] + (TR)__real__ (tmp * x[j]);
+                        for (ptrdiff_t i = j + 1; i < n; ++i) ap[kk + (i - j)] += x[i] * tmp;
+                    } else {
+                        ap[kk] = (TR)__real__ ap[kk];
+                    }
+                    kk += n - j;
                 }
             }
         }
