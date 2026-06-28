@@ -67,18 +67,21 @@ static void etpsv_serial(char UPLO, char TRANS, bool nounit,
             if (UPLO == 'U') {
                 ptrdiff_t kk = 0;
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    /* Single-acc x87 dot — split into two parallel chains
-                     * (Rule 22 / Addendum 21). */
-                    TR t0 = x[j], t1 = zero;
-                    ptrdiff_t k = kk;
+                    /* Single-acc x87 dot — split into FOUR parallel chains to
+                     * hide the ~3-cyc fp80 fadd latency (no SIMD/FMA on fp80;
+                     * chain count is the only latency lever, capped ~4 by the
+                     * 8-deep x87 stack — 4 real accumulators + temp fit). */
+                    const TR *restrict apc = &ap[kk];
+                    TR t0 = x[j], t1 = zero, t2 = zero, t3 = zero;
                     ptrdiff_t i = 0;
-                    for (; i + 1 < j; i += 2) {
-                        t0 -= ap[k]     * x[i];
-                        t1 -= ap[k + 1] * x[i + 1];
-                        k += 2;
+                    for (; i + 3 < j; i += 4) {
+                        t0 -= apc[i]     * x[i];
+                        t1 -= apc[i + 1] * x[i + 1];
+                        t2 -= apc[i + 2] * x[i + 2];
+                        t3 -= apc[i + 3] * x[i + 3];
                     }
-                    if (i < j) { t0 -= ap[k] * x[i]; }
-                    TR tmp = t0 + t1;
+                    for (; i < j; ++i) { t0 -= apc[i] * x[i]; }
+                    TR tmp = (t0 + t1) + (t2 + t3);
                     if (nounit) tmp /= ap[kk + j];
                     x[j] = tmp;
                     kk += j + 1;
@@ -99,6 +102,9 @@ static void etpsv_serial(char UPLO, char TRANS, bool nounit,
                     const ptrdiff_t dk  = kk - cnt;           /* diagonal A(j,j) */
                     const TR *restrict apc = &ap[dk + 1];
                     const TR *restrict xc  = &x[j + 1];
+                    /* TWO chains here, not four: 4-chain measured ~4% WORSE for
+                     * this Lower^T access pattern (apc/xc both offset) despite no
+                     * x87 spill, while Upper^T above prefers 4. Branch-specific. */
                     TR t0 = x[j], t1 = zero;
                     ptrdiff_t i = 0;
                     for (; i + 1 < cnt; i += 2) {

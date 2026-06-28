@@ -30,6 +30,29 @@
 
 typedef long double TR;
 
+/* Two-chain forward dot for the Trans serial paths: y[j] = dot(column, x). Two
+ * fp80 accumulators hide the ~5-cyc fadd latency (no SIMD/FMA on x87 — chain
+ * count is the only lever) and the forward walk is prefetch-friendly vs the
+ * netlib backward sweep. xinc lets the strided path reuse the same kernel.
+ * Reassociation within fp80 fuzz tol (kind10-serial=netlib rule removed
+ * 2026-06-10). NOINLINE so it does not perturb the x87 register allocation of
+ * the in-place NoTrans serial sweep in etpmv_core (inlining it regressed
+ * Lower-NoTrans large-N ~12%); the per-column call is amortised over the O(N)
+ * dot, same as etpmv_omp being carved out for the same reason. */
+__attribute__((noinline))
+static TR etpmv_dot2(const TR *restrict ap, const TR *restrict x,
+                     ptrdiff_t cnt, ptrdiff_t xinc) {
+    TR t0 = 0.0L, t1 = 0.0L;
+    ptrdiff_t i = 0, ix = 0;
+    for (; i + 1 < cnt; i += 2) {
+        t0 += ap[i]     * x[ix];
+        t1 += ap[i + 1] * x[ix + xinc];
+        ix += 2 * xinc;
+    }
+    if (i < cnt) t0 += ap[i] * x[ix];
+    return t0 + t1;
+}
+
 
 #ifdef _OPENMP
 static inline size_t col_start_U(ptrdiff_t j) { return (size_t)j * (size_t)(j + 1) / 2; }
@@ -245,8 +268,9 @@ static void etpmv_core(
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TR tmp = x[j];
                     if (nounit) tmp *= ap[kk];
-                    ptrdiff_t k = kk - 1;
-                    for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
+                    /* forward 2-chain over x[0..j-1]; ap[kk-j] pairs with x[0]
+                     * (was a single-acc BACKWARD sweep). */
+                    tmp += etpmv_dot2(&ap[kk - j], &x[0], j, 1);
                     x[j] = tmp;
                     kk -= j + 1;
                 }
@@ -255,8 +279,8 @@ static void etpmv_core(
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TR tmp = x[j];
                     if (nounit) tmp *= ap[kk];
-                    ptrdiff_t k = kk + 1;
-                    for (ptrdiff_t i = j + 1; i < n; ++i) { tmp += ap[k] * x[i]; ++k; }
+                    /* forward 2-chain over x[j+1..n-1]; ap[kk+1] pairs with x[j+1] */
+                    tmp += etpmv_dot2(&ap[kk + 1], &x[j + 1], n - 1 - j, 1);
                     x[j] = tmp;
                     kk += n - j;
                 }
@@ -305,12 +329,10 @@ static void etpmv_core(
                 ptrdiff_t jx = kx + (n - 1) * incx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TR tmp = x[jx];
-                    ptrdiff_t ix = jx;
                     if (nounit) tmp *= ap[kk];
-                    for (ptrdiff_t k = kk - 1; k >= kk - j; --k) {
-                        ix -= incx;
-                        tmp += ap[k] * x[ix];
-                    }
+                    /* forward 2-chain over rows 0..j-1 (x base kx, stride incx);
+                     * ap[kk-j] pairs with row 0 (was backward, the flagged UTU). */
+                    tmp += etpmv_dot2(&ap[kk - j], &x[kx], j, incx);
                     x[jx] = tmp;
                     jx -= incx;
                     kk -= j + 1;
@@ -320,12 +342,9 @@ static void etpmv_core(
                 ptrdiff_t jx = kx;
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     TR tmp = x[jx];
-                    ptrdiff_t ix = jx;
                     if (nounit) tmp *= ap[kk];
-                    for (ptrdiff_t k = kk + 1; k < kk + n - j; ++k) {
-                        ix += incx;
-                        tmp += ap[k] * x[ix];
-                    }
+                    /* forward 2-chain over rows j+1..n-1 (x base jx+incx) */
+                    tmp += etpmv_dot2(&ap[kk + 1], &x[jx + incx], n - 1 - j, incx);
                     x[jx] = tmp;
                     jx += incx;
                     kk += n - j;
