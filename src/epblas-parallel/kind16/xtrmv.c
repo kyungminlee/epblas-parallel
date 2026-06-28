@@ -19,6 +19,7 @@
 #include <quadmath.h>
 #ifdef _OPENMP
 #include <stdlib.h>
+#include <math.h>
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
@@ -35,7 +36,45 @@ static inline TC cconj(TC z) { return conjq(z); }
 #define XTRMV_OMP_MIN 128
 #endif
 
+/* See qtrmv.c: Upper NoTrans at large N switches from cyclic schedule(static,1)
+ * to a contiguous sqrt-balanced block partition so each thread streams one
+ * sequential column slab instead of cyclically scattered columns. */
+#ifndef XTRMV_BLOCK_MIN
+#define XTRMV_BLOCK_MIN 320
+#endif
+
 #ifdef _OPENMP
+/* Contiguous triangular block partition for Upper NoTrans — mirror of
+ * qtrmv_blkrange (port of the openblas trmv_thread sqrt-partition). Work per
+ * column j is proportional to j, so the narrow slab lands at the heavy high
+ * columns. range[0..nthreads] are column boundaries over [0,n). */
+static void xtrmv_blkrange(ptrdiff_t n, int nthreads, ptrdiff_t *range)
+{
+    const ptrdiff_t mask = 7;
+    const double dnum = (double)n * (double)n / (double)nthreads;
+    range[nthreads] = n;
+    ptrdiff_t i = 0;
+    int nc = 0;
+    while (i < n && nc < nthreads) {
+        ptrdiff_t width;
+        if (nthreads - nc > 1) {
+            const double di = (double)(n - i);
+            if (di * di - dnum > 0.0)
+                width = ((ptrdiff_t)(-sqrt(di * di - dnum) + di) + mask) & ~mask;
+            else
+                width = n - i;
+            if (width < 16) width = 16;
+            if (width > n - i) width = n - i;
+        } else {
+            width = n - i;
+        }
+        range[nthreads - nc - 1] = range[nthreads - nc] - width;
+        nc++;
+        i += width;
+    }
+    for (int t = 0; t < nthreads - nc; ++t) range[t] = range[nthreads - nc];
+}
+
 /* Threaded out-of-place path (incx==1). Returns 1 if handled, 0 to fall back to
  * the serial reference. noinline so the serial loops compile in a clean register
  * context. trans_t = (TRANS != 'N'), conj_a = (TRANS == 'C'). */
@@ -49,9 +88,17 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
     const TC one  = 1.0Q + 0.0Qi;
 
     if (!trans_t) {
-        /* TRANS='N': per-thread y_priv + reduction (cross-thread overlapping writes). */
+        /* TRANS='N': per-thread y_priv + reduction (cross-thread overlapping writes).
+         * Upper at large N uses a contiguous sqrt-balanced column-slab partition
+         * (xtrmv_blkrange); Lower and small N keep cyclic schedule(static,1). */
         TC *y_priv_all = (TC *)calloc((size_t)nthreads * (size_t)n, sizeof(TC));
         if (!y_priv_all) return 0;
+        ptrdiff_t *rng = NULL;
+        if (upper && n >= XTRMV_BLOCK_MIN) {
+            rng = (ptrdiff_t *)malloc(((size_t)nthreads + 1) * sizeof(ptrdiff_t));
+            if (rng) xtrmv_blkrange(n, (int)nthreads, rng);
+        }
+        const bool blk = (rng != NULL);
         #pragma omp parallel num_threads(nthreads)
         {
             const ptrdiff_t tid = omp_get_thread_num();
@@ -64,6 +111,13 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
                     y_priv[j] += xj * (nounit ? aj[j] : one);
                     for (ptrdiff_t i = j + 1; i < n; ++i) y_priv[i] += xj * aj[i];
                 }
+            } else if (blk) {
+                for (ptrdiff_t j = rng[tid]; j < rng[tid + 1]; ++j) {
+                    const TC xj = x[j];
+                    const TC *aj = &A_(0, j);
+                    for (ptrdiff_t i = 0; i < j; ++i) y_priv[i] += xj * aj[i];
+                    y_priv[j] += xj * (nounit ? aj[j] : one);
+                }
             } else {
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
@@ -73,6 +127,8 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
                     y_priv[j] += xj * (nounit ? aj[j] : one);
                 }
             }
+            /* blk path has no implicit omp-for barrier; sync before reduce. */
+            #pragma omp barrier
             #pragma omp for schedule(static)
             for (ptrdiff_t i = 0; i < n; ++i) {
                 TC s = zero;
@@ -80,6 +136,7 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
                 x[i] = s;
             }
         }
+        free(rng);
         free(y_priv_all);
         return 1;
     } else {
