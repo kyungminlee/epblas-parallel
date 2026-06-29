@@ -35,8 +35,8 @@
 #include <ctype.h>
 #include "../common/epblas_facade.h"
 #include "../common/blas_omp.h"
-#ifdef _OPENMP
 #include <stdlib.h>
+#ifdef _OPENMP
 #include <omp.h>
 #endif
 
@@ -58,6 +58,103 @@
 
 typedef _Complex long double TC;
 static inline TC cconj(TC z) { return ~z; }
+
+/* Trans/ConjTrans band dot: TEMP = Σ_{t<cnt} op(A[t])*x[t], op = id (T) or conj (C),
+ * over a complex A run (unit stride) and an x run of stride `xstep` complex elements.
+ *
+ * gcc's _Complex MAC front-loads x then A; gfortran's reference front-loads A then x,
+ * which lets its x87 stack layout do the imag combine with NO fxch (the reference's
+ * own contiguous loop still spends one). On the short band dot (KL=KU≈16 → ~17-33
+ * elts) that operand ordering was the ~5% par/mig gap on the Trans cells and ~3% on
+ * the ConjTrans cells (project_x87_accumulator_spill: x87 has no SIMD/FMA, so stack
+ * scheduling is the only lever). These hand-scheduled loops adopt the reference's
+ * A-first / zero-fxch layout; accumulators stay resident; each element is one complex
+ * product + one complex add — bit-identical to the s += op(A[t])*x[t] they replace.
+ * Strided x advances by xstep*sizeof(TC) bytes per element, so no gather pass is
+ * needed (a gather-to-contiguous copy costs ~as much as the dot it would feed). */
+#if defined(__GNUC__) && defined(__x86_64__)
+/* Shared body: 4 loads (A-first) + 4 products; the Re/Im combine differs only in two
+ * ops between T (Re=P1-P2, Im=P3+P4) and C (Re=P1+P2, Im=P3-P4). sre at st(6). */
+#define YGBMV_DOTLOADS                  \
+        "fldt (%[a])\n\t"              \
+        "fldt 16(%[a])\n\t"            \
+        "fldt (%[x])\n\t"             \
+        "fldt 16(%[x])\n\t"           \
+        "fld %%st(1)\n\t"             \
+        "fmul %%st(4),%%st\n\t"        \
+        "fld %%st(1)\n\t"             \
+        "fmul %%st(4),%%st\n\t"
+#define YGBMV_COMB_N                    \
+        "fsubrp %%st,%%st(1)\n\t"      \
+        "faddp %%st,%%st(6)\n\t"        \
+        "fmulp %%st,%%st(3)\n\t"        \
+        "fmulp %%st,%%st(1)\n\t"        \
+        "faddp %%st,%%st(1)\n\t"        \
+        "faddp %%st,%%st(1)\n\t"
+#define YGBMV_COMB_C                    \
+        "faddp %%st,%%st(1)\n\t"        \
+        "faddp %%st,%%st(6)\n\t"        \
+        "fmulp %%st,%%st(3)\n\t"        \
+        "fmulp %%st,%%st(1)\n\t"        \
+        "fsubrp %%st,%%st(1)\n\t"       \
+        "faddp %%st,%%st(1)\n\t"
+#define YGBMV_DOT(COMB, ADVX)           \
+        "fldz\n\t" "fldz\n\t"          \
+        "test %[i],%[i]\n\t" "jle 2f\n\t" \
+        "1:\n\t" YGBMV_DOTLOADS COMB    \
+        "add $32,%[a]\n\t" ADVX         \
+        "sub $1,%[i]\n\t" "jnz 1b\n\t"  \
+        "2:\n\t" "fstpt %[sim]\n\t" "fstpt %[sre]\n\t"
+#define YGBMV_DOT_OUT \
+        [a] "+r"(a), [x] "+r"(x), [i] "+r"(cnt), [sre] "=m"(sre), [sim] "=m"(sim)
+#define YGBMV_DOT_CLOB \
+        "st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)", "cc"
+
+#define YGBMV_DOT_FN(NAME, COMB)                                                \
+__attribute__((always_inline))                                                  \
+static inline TC NAME(const TC *restrict ap_, const TC *restrict xp_,           \
+                      ptrdiff_t cnt) {                                          \
+    const long double *a = (const long double *)ap_;                            \
+    const long double *x = (const long double *)xp_;                            \
+    long double sre, sim;                                                       \
+    __asm__ __volatile__ (YGBMV_DOT(COMB, "add $32,%[x]\n\t")                   \
+        : YGBMV_DOT_OUT : : YGBMV_DOT_CLOB);                                    \
+    return sre + sim * 1.0iL;                                                   \
+}
+#define YGBMV_DOT_FN_S(NAME, COMB)                                              \
+__attribute__((always_inline))                                                  \
+static inline TC NAME(const TC *restrict ap_, const TC *restrict xp_,           \
+                      ptrdiff_t cnt, ptrdiff_t xstep) {                         \
+    const long double *a = (const long double *)ap_;                            \
+    const long double *x = (const long double *)xp_;                            \
+    long double sre, sim;                                                       \
+    __asm__ __volatile__ (YGBMV_DOT(COMB, "add %[xs],%[x]\n\t")                 \
+        : YGBMV_DOT_OUT                                                         \
+        : [xs] "r"(xstep * (ptrdiff_t)sizeof(TC)) : YGBMV_DOT_CLOB);            \
+    return sre + sim * 1.0iL;                                                   \
+}
+YGBMV_DOT_FN(ygbmv_tdot_n, YGBMV_COMB_N)
+YGBMV_DOT_FN(ygbmv_tdot_c, YGBMV_COMB_C)
+YGBMV_DOT_FN_S(ygbmv_tdot_n_s, YGBMV_COMB_N)
+YGBMV_DOT_FN_S(ygbmv_tdot_c_s, YGBMV_COMB_C)
+#undef YGBMV_DOTLOADS
+#undef YGBMV_COMB_N
+#undef YGBMV_COMB_C
+#undef YGBMV_DOT
+#undef YGBMV_DOT_OUT
+#undef YGBMV_DOT_CLOB
+#undef YGBMV_DOT_FN
+#undef YGBMV_DOT_FN_S
+#else
+static inline TC ygbmv_tdot_n(const TC *restrict a, const TC *restrict x, ptrdiff_t cnt)
+{ TC s = 0.0L + 0.0Li; for (ptrdiff_t t = 0; t < cnt; ++t) s += a[t] * x[t]; return s; }
+static inline TC ygbmv_tdot_c(const TC *restrict a, const TC *restrict x, ptrdiff_t cnt)
+{ TC s = 0.0L + 0.0Li; for (ptrdiff_t t = 0; t < cnt; ++t) s += cconj(a[t]) * x[t]; return s; }
+static inline TC ygbmv_tdot_n_s(const TC *restrict a, const TC *restrict x, ptrdiff_t cnt, ptrdiff_t xstep)
+{ TC s = 0.0L + 0.0Li; for (ptrdiff_t t = 0; t < cnt; ++t) s += a[t] * x[t * xstep]; return s; }
+static inline TC ygbmv_tdot_c_s(const TC *restrict a, const TC *restrict x, ptrdiff_t cnt, ptrdiff_t xstep)
+{ TC s = 0.0L + 0.0Li; for (ptrdiff_t t = 0; t < cnt; ++t) s += cconj(a[t]) * x[t * xstep]; return s; }
+#endif
 
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
@@ -145,8 +242,8 @@ static void ygbmv_core(
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;                     \
             const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;             \
             const ptrdiff_t k = KU - j;                                            \
-            if (noconj) for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += A_(k + i, j) * x[i];        \
-            else        for (ptrdiff_t i = i_lo; i < i_hi; ++i) s += cconj(A_(k + i, j)) * x[i]; \
+            if (noconj) s = ygbmv_tdot_n(&A_(k + i_lo, j), &x[i_lo], i_hi - i_lo);  \
+            else        s = ygbmv_tdot_c(&A_(k + i_lo, j), &x[i_lo], i_hi - i_lo);  \
             y[j] += alpha * s;                                               \
         }
         if (use_omp) {
@@ -168,7 +265,10 @@ static void ygbmv_core(
             && ygbmv_t_omp(m, n, KL, KU, a, lda, x, incx, alpha, y, incy, noconj))
             return;
 #endif
-        /* Strided Trans/ConjTrans gather (serial). */
+        /* Strided Trans/ConjTrans gather (serial). noconj runs the strided 1-fxch
+         * asm core directly over x (no gather pass -- the strided dot was only ~7%
+         * off gfortran, so a gather-to-contiguous copy would cost more than it saves;
+         * the asm's stack layout alone closes it). ConjTrans keeps the inline dot. */
         ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
         ptrdiff_t jy = ky;
@@ -178,11 +278,8 @@ static void ygbmv_core(
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
             const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;
             const ptrdiff_t k = KU - j;
-            if (noconj) {
-                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += A_(k + i, j) * x[ix]; ix += incx; }
-            } else {
-                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += cconj(A_(k + i, j)) * x[ix]; ix += incx; }
-            }
+            if (noconj) s = ygbmv_tdot_n_s(&A_(k + i_lo, j), &x[ix], i_hi - i_lo, incx);
+            else        s = ygbmv_tdot_c_s(&A_(k + i_lo, j), &x[ix], i_hi - i_lo, incx);
             y[jy] += alpha * s;
             jy += incy;
             if (j >= KU) kx += incx;
