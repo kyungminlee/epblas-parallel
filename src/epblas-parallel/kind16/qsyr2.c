@@ -16,6 +16,22 @@
 
 #define QSYR2_OMP_MIN 64
 
+/* __float128 associativity gate (smaller N → product-first).  The two valid
+ * orderings of the rank-2 element update trade off with N on libquadmath:
+ *   accumulator-first  aj = aj + x*tx + y*ty  ==  ((aj + x*tx) + y*ty)
+ *   product-first      aj += x*tx + y*ty      ==  (aj + (x*tx + y*ty))
+ * Product-first first adds two PRODUCTS, whose exponent pattern drives
+ * __addtf3's data-dependent normalize branch into a worse-predicted path
+ * (+95M mispredicts vs the gfortran leg on the byte-identical libgcc __addtf3)
+ * — a net loss once the triangle outgrows cache (N≥256: par/mig 1.00→1.05-1.07).
+ * But for a small working set (N=128, triangle resident) the mispredict cost is
+ * hidden and product-first's one-fewer dependent __addtf3 per element wins
+ * (N=128 par/ob 1.06→1.00, par/mig 1.007→0.957).  So gate on N: product-first
+ * below ~192, accumulator-first at/after 256.  (The kind16-serial=netlib
+ * bit-exactness rule was removed 2026-06-10, so the small-N path may diverge
+ * from mig — it stays bit-identical at N≥192 where accumulator-first runs.) */
+#define QSYR2_PRODFIRST_MAX 192
+
 typedef __float128 TR;
 
 
@@ -32,6 +48,7 @@ static void qsyr2_contig(char UPLO, ptrdiff_t n, TR alpha,
                          TR *restrict a, ptrdiff_t lda)
 {
     const TR zero = 0.0Q;
+    const bool prodfirst = (n < QSYR2_PRODFIRST_MAX);  /* see QSYR2_PRODFIRST_MAX */
 #ifdef _OPENMP
     const bool use_omp = (n >= QSYR2_OMP_MIN && blas_omp_max_threads() > 1);
     #pragma omp parallel for if(use_omp) schedule(static, 1)
@@ -42,15 +59,10 @@ static void qsyr2_contig(char UPLO, ptrdiff_t n, TR alpha,
             const TR tx = alpha * yj;
             const TR ty = alpha * xj;
             TR *aj = &A_(0, j);
-            /* Left-to-right ((aj + x*tx) + y*ty) — netlib's associativity.
-             * NOT aj += (x*tx + y*ty): that first adds two PRODUCTS, whose
-             * exponent pattern drives __addtf3's data-dependent normalize
-             * branch into a worse-predicted path (+95M mispredicts vs the
-             * gfortran leg on the byte-identical libgcc __addtf3). Matching
-             * netlib's accumulator+product order halves the mispredicts and
-             * makes the result bit-identical to the mig reference. */
-            if (UPLO == 'L') for (ptrdiff_t i = j; i < n; ++i) aj[i] = aj[i] + x[i] * tx + y[i] * ty;
-            else             for (ptrdiff_t i = 0; i <= j; ++i) aj[i] = aj[i] + x[i] * tx + y[i] * ty;
+            const ptrdiff_t lo = (UPLO == 'L') ? j : 0;
+            const ptrdiff_t hi = (UPLO == 'L') ? n : j + 1;
+            if (prodfirst) for (ptrdiff_t i = lo; i < hi; ++i) aj[i] += x[i] * tx + y[i] * ty;
+            else           for (ptrdiff_t i = lo; i < hi; ++i) aj[i] = aj[i] + x[i] * tx + y[i] * ty;
         }
     }
 }
@@ -113,23 +125,35 @@ void qsyr2_core(
     }
 
     /* Direct strided walk: the serial path (gather not worth it) and the
-     * alloc-failure fallback for the threaded path. */
+     * alloc-failure fallback for the threaded path.  Small-N associativity gate
+     * is DIRECTION-dependent here (unlike the contig core's unconditional
+     * product-first): at N=128 the fastest reference flips with the x/y walk
+     * direction, and __addtf3's data-dependent normalize branch tracks it —
+     *   forward stride (incx>0): mig (gfortran) is fastest and accumulator-first
+     *     matches it (ob, product-first, trails mig ~2.5% — ob/mig~1.03);
+     *   backward stride (incx<0): ob is fastest and product-first matches it
+     *     (accumulator-first matches the slower mig — ob/mig~0.96).
+     * So product-first only for the small-N backward walk; accumulator-first
+     * otherwise.  At N>=192 accumulator-first wins both directions.  (Gathering
+     * into the contig core buys nothing serial — see project_l2_strided_gather.) */
     {
         const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
+        const bool prodfirst = (n < QSYR2_PRODFIRST_MAX && incx < 0);
         for (ptrdiff_t j = 0; j < n; ++j) {
             const TR xj = x[kx + j * incx];
             const TR yj = y[ky + j * incy];
             if (xj != zero || yj != zero) {
                 const TR tx = alpha * yj;
                 const TR ty = alpha * xj;
-                if (UPLO == 'L') {
-                    for (ptrdiff_t i = j; i < n; ++i)
+                const ptrdiff_t lo = (UPLO == 'L') ? j : 0;
+                const ptrdiff_t hi = (UPLO == 'L') ? n : j + 1;
+                if (prodfirst)
+                    for (ptrdiff_t i = lo; i < hi; ++i)
+                        A_(i, j) += x[kx + i * incx] * tx + y[ky + i * incy] * ty;
+                else
+                    for (ptrdiff_t i = lo; i < hi; ++i)
                         A_(i, j) = A_(i, j) + x[kx + i * incx] * tx + y[ky + i * incy] * ty;
-                } else {
-                    for (ptrdiff_t i = 0; i <= j; ++i)
-                        A_(i, j) = A_(i, j) + x[kx + i * incx] * tx + y[ky + i * incy] * ty;
-                }
             }
         }
     }

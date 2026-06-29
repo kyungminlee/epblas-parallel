@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-28 22:07 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-06-29 00:41 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -8,7 +8,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
 | e | 2218 | 95.5% | 98.1% |
-| q | 2218 | 98.2% | 99.5% |
+| q | 2218 | 98.6% | 99.5% |
 
 ## m — multifloats (double-double)
 
@@ -309,15 +309,13 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## q — kind16 (__float128)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 98.2% · omp4 99.5%.**  13 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 98.6% · omp4 99.5%.**  11 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
 | **xsyrk** | 12 | 1.082 ob1 @UN/64 | 0.797 | ⚠ |
 | **qgemm** | 16 | 1.078 mig @TT/64 | 1.004 | ⚠ |
 | **xherk** | 12 | 1.059 ob1 @UN/64 | 0.794 | ⚠ |
-| **qsyr2** | 24 | 1.058 ob1 @U/128 | 0.916 | ⚠ |
-| **qspr2** | 24 | 1.058 ob1 @U/128 | 0.962 | ⚠ |
 | **xqrot** | 2 | 1.044 ob1 @-/65536 | 1.036 @-/65536 | ⚠ |
 | **xtrsm** | 72 | 1.038 ob1 @LUTU/256 | 1.029 @LUTU/256 | ⚠ |
 | **qsymm** | 16 | 1.035 mig @LL/256 | 0.999 | ⚠ |
@@ -330,6 +328,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qdot | 3 | 0.986 | 1.019 | ✅ |
 | xdotu | 2 | 1.019 | 1.014 | ✅ |
 | xtrsv | 108 | 1.017 | 1.018 | ✅ |
+| qsyr2 | 24 | 1.018 | 0.926 | ✅ |
 | qgemmtr | 32 | 1.017 | 1.006 | ✅ |
 | xscal | 2 | 1.004 | 1.017 | ✅ |
 | xtrmm | 72 | 1.016 | 0.959 | ✅ |
@@ -348,6 +347,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xhemv | 18 | 1.011 | 1.006 | ✅ |
 | xtbsv | 108 | 1.010 | 1.010 | ✅ |
 | xhpr2 | 18 | 1.010 | 1.001 | ✅ |
+| qspr2 | 24 | 1.010 | 0.957 | ✅ |
 | xswap | 2 | 1.010 | 1.005 | ✅ |
 | qtbmv | 96 | 1.009 | 0.888 | ✅ |
 | qtrmv | 96 | 1.009 | 0.997 | ✅ |
@@ -389,7 +389,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qnrm2 | 3 | 0.770 | 0.276 | ✅ |
 | xrotg | 1 | 0.690 | 0.689 | ✅ |
 
-<details><summary>q: 42 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>q: 34 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
@@ -397,18 +397,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xsyrk | LN | 64 | 19,134,579 | 17,690,145 | 20,149,066 | 4,902,542 | 8,299,038 | 1.082 | 0.591 | ob1 |
 | qgemm | TT | 64 | 8,799,660 | 8,803,813 | 8,163,750 | 2,424,080 | 2,415,910 | 1.078 | 1.003 | mig |
 | xherk | UN | 64 | 17,623,064 | 16,647,806 | 19,104,678 | 6,090,084 | 7,672,285 | 1.059 | 0.794 | ob1 |
-| qsyr2 | U | 128 | 505,750 | 477,875 | 501,422 | 142,062 | 478,407 | 1.058 | 0.297 | ob1 |
-| qspr2 | U | 128 | 503,342 | 475,655 | 502,080 | 167,321 | 475,285 | 1.058 | 0.352 | ob1 |
-| qspr2 | L | 128 | 507,386 | 479,756 | 501,064 | 164,478 | 480,674 | 1.058 | 0.342 | ob1 |
 | xherk | LN | 64 | 17,588,123 | 16,707,645 | 19,079,540 | 4,506,720 | 7,732,117 | 1.053 | 0.583 | ob1 |
-| qspr2 | U/x-1 | 128 | 496,715 | 472,742 | 500,691 | 169,215 | 473,803 | 1.051 | 0.357 | ob1 |
 | xsyrk | UN | 128 | 143,730,548 | 137,224,604 | 156,693,020 | 44,461,455 | 62,884,403 | 1.047 | 0.707 | ob1 |
-| qspr2 | L/x-1 | 128 | 503,473 | 480,690 | 513,069 | 163,970 | 480,534 | 1.047 | 0.341 | ob1 |
-| qsyr2 | L/x-1 | 128 | 503,089 | 480,389 | 512,676 | 143,135 | 479,955 | 1.047 | 0.298 | ob1 |
-| qsyr2 | L | 128 | 502,342 | 480,823 | 503,741 | 139,251 | 482,274 | 1.045 | 0.289 | ob1 |
 | xsyrk | LN | 128 | 143,339,165 | 137,227,840 | 156,522,231 | 37,610,653 | 62,904,864 | 1.045 | 0.598 | ob1 |
 | xqrot | - | 65536 | 11,660,957 | 11,171,565 | 18,783,952 | 3,156,891 | 3,046,867 | 1.044 | 1.036 | ob1 |
-| qsyr2 | U/x-1 | 128 | 497,250 | 477,956 | 498,070 | 137,689 | 477,833 | 1.040 | 0.288 | ob1 |
 | qgemm | TT | 128 | 66,644,082 | 66,516,776 | 64,175,953 | 18,006,172 | 17,993,727 | 1.038 | 1.001 | mig |
 | xtrsm | LUTU | 256 | 1,376,186,490 | 1,325,256,992 | 1,361,748,750 | 365,567,621 | 355,391,756 | 1.038 | 1.029 | ob1 |
 | xtrsm | LUCU | 256 | 1,372,503,265 | 1,324,581,285 | 1,369,678,863 | 364,799,103 | 355,451,522 | 1.036 | 1.026 | ob1 |

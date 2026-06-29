@@ -16,6 +16,14 @@
 
 #define QSPR2_OMP_MIN 64
 
+/* __float128 associativity gate (smaller N → product-first); see qsyr2.c for the
+ * full rationale. Product-first (ap += x*t1 + y*t2) wins the small resident
+ * triangle (N=128 par/ob 1.06→1.00, par/mig 1.01→0.95) but its extra __addtf3
+ * normalize-branch mispredicts lose once the triangle outgrows cache (N≥256
+ * par/mig 1.00→1.05+); accumulator-first (ap = ap + x*t1 + y*t2, netlib's order)
+ * wins there and stays bit-identical to mig. Gate on N at ~192. */
+#define QSPR2_PRODFIRST_MAX 192
+
 typedef __float128 TR;
 
 
@@ -31,6 +39,7 @@ static void qspr2_contig(char UPLO, ptrdiff_t n, TR alpha,
                          TR *restrict ap)
 {
     const TR zero = 0.0Q;
+    const bool prodfirst = (n < QSPR2_PRODFIRST_MAX);  /* see QSPR2_PRODFIRST_MAX */
     if (UPLO == 'U') {
 #ifdef _OPENMP
         const bool use_omp = (n >= QSPR2_OMP_MIN && blas_omp_max_threads() > 1);
@@ -41,11 +50,8 @@ static void qspr2_contig(char UPLO, ptrdiff_t n, TR alpha,
                 const TR t1 = alpha * y[j];
                 const TR t2 = alpha * x[j];
                 const ptrdiff_t kk = (j * (j + 1)) / 2;
-                /* Left-to-right ((ap + x*t1) + y*t2) — netlib's order; NOT
-                 * ap += (x*t1 + y*t2). Adding two products first drives the
-                 * __addtf3 normalize branch into a worse-predicted path
-                 * (~+95M mispredicts vs the gfortran leg). See qsyr2.c. */
-                for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] = ap[kk + i] + x[i] * t1 + y[i] * t2;
+                if (prodfirst) for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] += x[i] * t1 + y[i] * t2;
+                else           for (ptrdiff_t i = 0; i <= j; ++i) ap[kk + i] = ap[kk + i] + x[i] * t1 + y[i] * t2;
             }
         }
     } else {
@@ -58,7 +64,8 @@ static void qspr2_contig(char UPLO, ptrdiff_t n, TR alpha,
                 const TR t1 = alpha * y[j];
                 const TR t2 = alpha * x[j];
                 const ptrdiff_t kk = j * n - (j * (j - 1)) / 2;
-                for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] = ap[kk + (i - j)] + x[i] * t1 + y[i] * t2;
+                if (prodfirst) for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] += x[i] * t1 + y[i] * t2;
+                else           for (ptrdiff_t i = j; i < n; ++i) ap[kk + (i - j)] = ap[kk + (i - j)] + x[i] * t1 + y[i] * t2;
             }
         }
     }
@@ -121,21 +128,32 @@ void qspr2_core(
         free(heap);
     }
 
+    /* Direct strided walk: DIRECTION-dependent small-N associativity gate (see
+     * qsyr2.c) — product-first only for the small-N backward walk (incx<0, where
+     * ob is the fastest ref and uses it); accumulator-first otherwise (forward
+     * stride, where mig is fastest, and all N>=192). */
     {
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t kk = 0;
         ptrdiff_t jx = kx, jy = ky;
+        const bool prodfirst = (n < QSPR2_PRODFIRST_MAX && incx < 0);
         if (UPLO == 'U') {
             for (ptrdiff_t j = 0; j < n; ++j) {
                 if (x[jx] != zero || y[jy] != zero) {
                     const TR t1 = alpha * y[jy];
                     const TR t2 = alpha * x[jx];
                     ptrdiff_t ix = kx, iy = ky;
-                    for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
-                        ap[k] = ap[k] + x[ix] * t1 + y[iy] * t2;
-                        ix += incx; iy += incy;
-                    }
+                    if (prodfirst)
+                        for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
+                            ap[k] += x[ix] * t1 + y[iy] * t2;
+                            ix += incx; iy += incy;
+                        }
+                    else
+                        for (ptrdiff_t k = kk; k < kk + j + 1; ++k) {
+                            ap[k] = ap[k] + x[ix] * t1 + y[iy] * t2;
+                            ix += incx; iy += incy;
+                        }
                 }
                 jx += incx; jy += incy;
                 kk += j + 1;
@@ -146,10 +164,16 @@ void qspr2_core(
                     const TR t1 = alpha * y[jy];
                     const TR t2 = alpha * x[jx];
                     ptrdiff_t ix = jx, iy = jy;
-                    for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
-                        ap[k] = ap[k] + x[ix] * t1 + y[iy] * t2;
-                        ix += incx; iy += incy;
-                    }
+                    if (prodfirst)
+                        for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
+                            ap[k] += x[ix] * t1 + y[iy] * t2;
+                            ix += incx; iy += incy;
+                        }
+                    else
+                        for (ptrdiff_t k = kk; k < kk + n - j; ++k) {
+                            ap[k] = ap[k] + x[ix] * t1 + y[iy] * t2;
+                            ix += incx; iy += incy;
+                        }
                 }
                 jx += incx; jy += incy;
                 kk += n - j;
