@@ -1321,3 +1321,287 @@ void qblas_xher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         }
     }
 }
+
+
+/* ── SYRK kernel: single-product diagonal-aware GEMM (complex) ───────
+ *
+ * Rank-K twin of qblas_xsyr2k_kernel_{u,l}: one product A·Bᵀ (with Bp packed
+ * from the same A) instead of the two-product A·Bᵀ+B·Aᵀ. The strict-triangle
+ * rectangular strips are plain GEMMs; the diagonal NR×NR block is GEMMed into
+ * a zeroed subbuffer and the UPLO triangle merged SINGLY (no symmetric
+ * mirror — a single product is already symmetric on the diagonal, so adding
+ * subbuf[j,i] would double it). Single-pass, no `flag`. Faithful complex port
+ * of the real qsyrk_kernel_{u,l} (OpenBLAS driver/level3/syrk_kernel.c). */
+void qblas_xsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                          TR alphar, TR alphai,
+                          const TR *a, const TR *b,
+                          TR *c, ptrdiff_t ldc, ptrdiff_t offset)
+{
+    TR subbuf[NR * (NR + 1) * 2];
+    const ptrdiff_t ldc2 = 2 * ldc;
+
+    if (m + offset < 0) {
+        qblas_xgemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
+        return;
+    }
+    if (n < offset) {
+        return;
+    }
+    if (offset > 0) {
+        b += offset * k * 2;
+        c += offset * ldc2;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        qblas_xgemm_kernel(m, n - m - offset, k, alphar, alphai,
+                           a, b + (m + offset) * k * 2,
+                           c + (m + offset) * ldc2, ldc);
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        qblas_xgemm_kernel(-offset, n, k, alphar, alphai, a, b, c, ldc);
+        a -= offset * k * 2;
+        c -= offset * 2;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        if (loop > 0) {
+            qblas_xgemm_kernel(loop, nn, k, alphar, alphai,
+                               a, b + loop * k * 2,
+                               c + loop * ldc2, ldc);
+        }
+
+        for (ptrdiff_t z = 0; z < nn * nn * 2; ++z) subbuf[z] = 0;
+        qblas_xgemm_kernel(nn, nn, k, alphar, alphai,
+                           a + loop * k * 2, b + loop * k * 2,
+                           subbuf, nn);
+
+        TR *cc = c + 2 * loop + loop * ldc2;
+        for (ptrdiff_t j = 0; j < nn; ++j) {
+            for (ptrdiff_t i = 0; i <= j; ++i) {
+                cc[2*i + 0 + j * ldc2] += subbuf[(i + j * nn) * 2 + 0];
+                cc[2*i + 1 + j * ldc2] += subbuf[(i + j * nn) * 2 + 1];
+            }
+        }
+    }
+}
+
+void qblas_xsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                          TR alphar, TR alphai,
+                          const TR *a, const TR *b,
+                          TR *c, ptrdiff_t ldc, ptrdiff_t offset)
+{
+    TR subbuf[NR * (NR + 1) * 2];
+    const ptrdiff_t ldc2 = 2 * ldc;
+
+    if (m + offset < 0) {
+        return;
+    }
+    if (n < offset) {
+        qblas_xgemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
+        return;
+    }
+    if (offset > 0) {
+        qblas_xgemm_kernel(m, offset, k, alphar, alphai, a, b, c, ldc);
+        b += offset * k * 2;
+        c += offset * ldc2;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        a -= offset * k * 2;
+        c -= offset * 2;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+    if (m > n - offset) {
+        qblas_xgemm_kernel(m - n + offset, n, k, alphar, alphai,
+                           a + (n - offset) * k * 2, b,
+                           c + (n - offset) * 2, ldc);
+        m = n + offset;
+        if (m <= 0) return;
+    }
+
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t mm = loop;
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        for (ptrdiff_t z = 0; z < nn * nn * 2; ++z) subbuf[z] = 0;
+        qblas_xgemm_kernel(nn, nn, k, alphar, alphai,
+                           a + loop * k * 2, b + loop * k * 2,
+                           subbuf, nn);
+
+        TR *cc = c + 2 * loop + loop * ldc2;
+        for (ptrdiff_t j = 0; j < nn; ++j) {
+            for (ptrdiff_t i = j; i < nn; ++i) {
+                cc[2*i + 0 + j * ldc2] += subbuf[(i + j * nn) * 2 + 0];
+                cc[2*i + 1 + j * ldc2] += subbuf[(i + j * nn) * 2 + 1];
+            }
+        }
+
+        if (m > mm + nn) {
+            qblas_xgemm_kernel(m - mm - nn, nn, k, alphar, alphai,
+                               a + (mm + nn) * k * 2, b + loop * k * 2,
+                               c + (mm + nn) * 2 + loop * ldc2, ldc);
+        }
+    }
+}
+
+
+/* ── HERK kernel: single-product diagonal-aware GEMM (complex Hermitian) ──
+ *
+ * Rank-K twin of qblas_xher2k_kernel_{u,l}: one product A·Bᴴ (Bp packed from
+ * the same A, conjugated by the caller's packer) instead of the two-product
+ * her2k fold. Strict strips are plain GEMMs; the diagonal NR×NR block merges
+ * SINGLY into the UPLO triangle — off-diagonal entries take subbuf[i,j]
+ * directly, and the true diagonal element is realified (imag forced 0, the
+ * Hermitian-C contract). Single-pass, no `flag`. Mirrors OpenBLAS
+ * driver/level3/zherk_kernel.c. */
+void qblas_xherk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                          TR alphar, TR alphai,
+                          const TR *a, const TR *b,
+                          TR *c, ptrdiff_t ldc, ptrdiff_t offset)
+{
+    TR subbuf[NR * (NR + 1) * 2];
+    const ptrdiff_t ldc2 = 2 * ldc;
+
+    if (m + offset < 0) {
+        qblas_xgemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
+        return;
+    }
+    if (n < offset) {
+        return;
+    }
+    if (offset > 0) {
+        b += offset * k * 2;
+        c += offset * ldc2;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        qblas_xgemm_kernel(m, n - m - offset, k, alphar, alphai,
+                           a, b + (m + offset) * k * 2,
+                           c + (m + offset) * ldc2, ldc);
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        qblas_xgemm_kernel(-offset, n, k, alphar, alphai, a, b, c, ldc);
+        a -= offset * k * 2;
+        c -= offset * 2;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        if (loop > 0) {
+            qblas_xgemm_kernel(loop, nn, k, alphar, alphai,
+                               a, b + loop * k * 2,
+                               c + loop * ldc2, ldc);
+        }
+
+        for (ptrdiff_t z = 0; z < nn * nn * 2; ++z) subbuf[z] = 0;
+        qblas_xgemm_kernel(nn, nn, k, alphar, alphai,
+                           a + loop * k * 2, b + loop * k * 2,
+                           subbuf, nn);
+
+        TR *cc = c + 2 * loop + loop * ldc2;
+        for (ptrdiff_t j = 0; j < nn; ++j) {
+            for (ptrdiff_t i = 0; i <= j; ++i) {
+                cc[2*i + 0 + j * ldc2] += subbuf[(i + j * nn) * 2 + 0];
+                if (i != j)
+                    cc[2*i + 1 + j * ldc2] += subbuf[(i + j * nn) * 2 + 1];
+                else
+                    cc[2*i + 1 + j * ldc2] = 0;
+            }
+        }
+    }
+}
+
+void qblas_xherk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                          TR alphar, TR alphai,
+                          const TR *a, const TR *b,
+                          TR *c, ptrdiff_t ldc, ptrdiff_t offset)
+{
+    TR subbuf[NR * (NR + 1) * 2];
+    const ptrdiff_t ldc2 = 2 * ldc;
+
+    if (m + offset < 0) {
+        return;
+    }
+    if (n < offset) {
+        qblas_xgemm_kernel(m, n, k, alphar, alphai, a, b, c, ldc);
+        return;
+    }
+    if (offset > 0) {
+        qblas_xgemm_kernel(m, offset, k, alphar, alphai, a, b, c, ldc);
+        b += offset * k * 2;
+        c += offset * ldc2;
+        n -= offset;
+        offset = 0;
+        if (n <= 0) return;
+    }
+    if (n > m + offset) {
+        n = m + offset;
+        if (n <= 0) return;
+    }
+    if (offset < 0) {
+        a -= offset * k * 2;
+        c -= offset * 2;
+        m += offset;
+        offset = 0;
+        if (m <= 0) return;
+    }
+    if (m > n - offset) {
+        qblas_xgemm_kernel(m - n + offset, n, k, alphar, alphai,
+                           a + (n - offset) * k * 2, b,
+                           c + (n - offset) * 2, ldc);
+        m = n + offset;
+        if (m <= 0) return;
+    }
+
+    for (ptrdiff_t loop = 0; loop < n; loop += NR) {
+        ptrdiff_t mm = loop;
+        ptrdiff_t nn = (n - loop < (ptrdiff_t)NR) ? (n - loop) : (ptrdiff_t)NR;
+
+        for (ptrdiff_t z = 0; z < nn * nn * 2; ++z) subbuf[z] = 0;
+        qblas_xgemm_kernel(nn, nn, k, alphar, alphai,
+                           a + loop * k * 2, b + loop * k * 2,
+                           subbuf, nn);
+
+        TR *cc = c + 2 * loop + loop * ldc2;
+        for (ptrdiff_t j = 0; j < nn; ++j) {
+            for (ptrdiff_t i = j; i < nn; ++i) {
+                cc[2*i + 0 + j * ldc2] += subbuf[(i + j * nn) * 2 + 0];
+                if (i != j)
+                    cc[2*i + 1 + j * ldc2] += subbuf[(i + j * nn) * 2 + 1];
+                else
+                    cc[2*i + 1 + j * ldc2] = 0;
+            }
+        }
+
+        if (m > mm + nn) {
+            qblas_xgemm_kernel(m - mm - nn, nn, k, alphar, alphai,
+                               a + (mm + nn) * k * 2, b + loop * k * 2,
+                               c + (mm + nn) * 2 + loop * ldc2, ldc);
+        }
+    }
+}

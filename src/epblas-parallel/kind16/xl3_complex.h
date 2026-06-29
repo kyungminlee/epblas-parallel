@@ -232,6 +232,26 @@ void qblas_xher2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                            __float128 *c, ptrdiff_t ldc,
                            ptrdiff_t offset, bool flag);
 
+/* Rank-k single-product twins of the rank-2k kernels above: one product
+ * A·Bᵀ (Bp packed from the same A), single-add diagonal merge (no `flag` —
+ * always process the diagonal block). herk realifies the true diagonal. */
+void qblas_xsyrk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                          __float128 alphar, __float128 alphai,
+                          const __float128 *a, const __float128 *b,
+                          __float128 *c, ptrdiff_t ldc, ptrdiff_t offset);
+void qblas_xsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                          __float128 alphar, __float128 alphai,
+                          const __float128 *a, const __float128 *b,
+                          __float128 *c, ptrdiff_t ldc, ptrdiff_t offset);
+void qblas_xherk_kernel_u(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                          __float128 alphar, __float128 alphai,
+                          const __float128 *a, const __float128 *b,
+                          __float128 *c, ptrdiff_t ldc, ptrdiff_t offset);
+void qblas_xherk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
+                          __float128 alphar, __float128 alphai,
+                          const __float128 *a, const __float128 *b,
+                          __float128 *c, ptrdiff_t ldc, ptrdiff_t offset);
+
 #ifdef __cplusplus
 }
 #endif

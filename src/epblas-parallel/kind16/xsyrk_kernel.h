@@ -1,26 +1,34 @@
 /*
- * xsyrk_kernel.h — internal shared declarations for the kind16 complex
- * (COMPLEX(KIND=16) / __complex128) symmetric rank-k overlay, split across
- * two translation units:
+ * xsyrk_kernel.h — internal surface shared by the two translation units the
+ * kind16 complex (__complex128 / interleaved __float128) xsyrk overlay is
+ * split across:
  *
- *   xsyrk_serial.c   — all the math: the per-diagonal-block worker
- *                      (xsyrk_block: beta pre-scale + scalar diagonal add +
- *                      xgemm_serial transpose trailing update), the
- *                      beta-only column scaler, and the pure-serial by-value
- *                      entry `xsyrk_serial`. No `#pragma omp`.
- *   xsyrk_parallel.c — the public Fortran entries (`xsyrk_` LP64 + `xsyrk_64_`
- *                      ILP64) over one `ptrdiff_t` core: threading only (one
- *                      `omp parallel for schedule(dynamic,1)` over the diagonal
- *                      blocks), with an `omp_in_parallel()` guard that delegates
- *                      to `xsyrk_serial` when called from inside another
- *                      routine's parallel region.
+ *   xsyrk_serial.c    The pure single-thread symmetric rank-k update (no
+ *                     OpenMP). Owns the fused serial packed-GEMM driver plus
+ *                     the internal serial entry `xsyrk_serial`. Called directly
+ *                     by xsyrk_ as its OOM fallback / nesting delegate.
  *
- * C is N×N symmetric (NOT Hermitian — no conjugate; see xherk). alpha and
- * beta are complex. The work is partitioned by diagonal block (jc);
- * triangular work is uneven so the parallel driver uses dynamic scheduling.
- * xsyrk_block runs its trailing update through xgemm_serial (NOT xgemm_) so
- * a panel worker never opens a region inside the team xsyrk_parallel.c
- * opened. Mirrors the kind10 ysyrk overlay.
+ *   xsyrk_parallel.c  The public Fortran entries (`xsyrk_` LP64 + `xsyrk_64_`
+ *                     ILP64) — threading only. Fans the same pieces across an
+ *                     OpenMP team (one shared B-pack under `omp single`, each
+ *                     thread an M-row slice of the output, UPLO-clipped per
+ *                     N-band). Delegates to xsyrk_serial when called from inside
+ *                     another routine's parallel region (the libgomp
+ *                     barrier-wedge guard).
+ *
+ * Faithful port of OpenBLAS ZSYRK as the SINGLE-PRODUCT special case of the
+ * xsyr2k packed-GEMM nest: one packed GEMM (Bp packed from the same A) clipped
+ * to the UPLO triangle, run ONCE per (is,js) tile. The diagonal NR×NR block is
+ * merged singly (no symmetric mirror — a single product is already symmetric on
+ * the diagonal). The triangular β pre-pass (qblas_xsyrk_beta_{u,l}) and the
+ * diagonal-aware kernel (qblas_xsyrk_kernel_{u,l}) both live in the shared
+ * complex L3 substrate (xl3_complex.h).
+ *
+ *   C := alpha·A·Aᵀ + beta·C   (trans='N', A is N×K)
+ *   C := alpha·Aᵀ·A + beta·C   (trans='T', A is K×N)
+ *
+ * Complex SYMMETRIC variant — no conjugation, A == Aᵀ (NOT Hermitian; see
+ * xherk). alpha and beta are complex. Only the UPLO triangle of C is touched.
  */
 #ifndef EPBLAS_PARALLEL_KIND16_XSYRK_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_XSYRK_KERNEL_H
@@ -28,29 +36,13 @@
 #include <stddef.h>
 #include <quadmath.h>
 
-typedef __complex128 xsyrk_TC;
-
-/* Decode a uplo char to upper-cased 'U'/'L'. */
-char xsyrk_uplo(char c);
-
-/* Decode a trans char to upper-cased 'N'/'T'. */
-char xsyrk_trans(char c);
-
-/* Env-tunable block size (XSYRK_NB; otherwise 32). */
-ptrdiff_t xsyrk_nb(void);
-
-/* One diagonal block [jc, jc+jb): beta pre-scale of the block's columns, the
- * scalar symmetric rank-k diagonal add, and the trailing xgemm_serial
- * transpose update against the rest of the panel. */
-void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k,
-                 xsyrk_TC alpha, xsyrk_TC beta,
-                 const xsyrk_TC *a, ptrdiff_t lda, xsyrk_TC *c, ptrdiff_t ldc,
-                 char UPLO, char TRANS);
-
-/* C := beta*C over the columns [j_start, j_end) — the alpha==0 / K==0 quick
- * path (and the per-block pre-scale). */
-void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, xsyrk_TC beta,
-                      xsyrk_TC *c, ptrdiff_t ldc, char UPLO);
+/* Public ABI is the genuine complex type, mirroring kind10 ysyrk: the complex
+ * matrices A/C and the complex scalars alpha/beta are all __complex128 (TC).
+ * Internally the math reinterprets the TC pointers as the interleaved (re,im)
+ * __float128 (TR) storage the OpenBLAS driver expects (×2 per complex element;
+ * ld* in COMPLEX elements). */
+typedef __complex128 xsyrk_TC;   /* complex operands: A, C, alpha, beta */
+typedef __float128   xsyrk_TR;   /* internal interleaved (re,im) storage */
 
 /* Pure-serial by-value entry (no OpenMP). Shares the ptrdiff_t core ABI so
  * callers already inside a parallel region can swap the symbol name only. */

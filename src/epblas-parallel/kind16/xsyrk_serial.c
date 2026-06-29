@@ -1,154 +1,127 @@
 /*
- * xsyrk_serial — kind16 complex (__complex128) symmetric rank-k,
- * single-thread. This TU owns ALL of the xsyrk math; xsyrk_parallel.c only
- * orchestrates the diagonal-block loop across a team.
+ * xsyrk_serial.c — kind16 complex (__complex128) symmetric rank-k update,
+ * single-thread. The fused serial packed-GEMM driver plus the internal serial
+ * entry `xsyrk_serial`, called by xsyrk_ as its OOM fallback / nesting
+ * delegate.
  *
- * TRANS ∈ {N, T}. Complex syrk does NOT conjugate (see xherk). Blocked:
- * scalar diagonal + xgemm trailing. The trailing update runs through
- * xgemm_serial (NOT xgemm_): when xsyrk_block runs inside the team
- * xsyrk_parallel.c opened, a nested xgemm team would open a region inside a
- * region. Mirrors the kind10 ysyrk overlay.
+ *   C := alpha·A·Aᵀ + beta·C   (trans='N', A is N×K)
+ *   C := alpha·Aᵀ·A + beta·C   (trans='T', A is K×N)
+ *
+ * Only the UPLO triangle of C is read or written.
+ *
+ * Faithful port of OpenBLAS ZSYRK, as the SINGLE-PRODUCT special case of the
+ * xsyr2k packed-GEMM nest: one packed GEMM whose output is clipped to the UPLO
+ * triangle, run ONCE per (is,js) tile (Bp packed from the same A). The
+ * diagonal-aware kernel (qblas_xsyrk_kernel_{u,l}) merges the diagonal NR×NR
+ * block SINGLY — a single product A·Aᵀ is already symmetric on the diagonal, so
+ * adding the transpose half (as syr2k does) would double it. The triangular β
+ * pre-pass (qblas_xsyrk_beta_{u,l}) and the diagonal kernel both live in the
+ * shared complex L3 substrate (xl3_complex.h); no conjugation, so the packers
+ * are called with conj = 0.
+ *
+ * Arrays are interleaved (re,im) __float128; ld-args, k, n and offset are in
+ * COMPLEX elements, so every pointer step is ×2. Calling only the *serial*
+ * substrate primitives keeps this path free of any nested OpenMP team, so it is
+ * safe inside another routine's parallel region.
  */
 
 #include "xsyrk_kernel.h"
 #include "../common/blas_char.h"
-#include "xgemm_kernel.h"
+#include "../common/blas_math.h"
+#include "xl3_complex.h"
+#include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
-#include <stddef.h>
 
 typedef xsyrk_TC TC;
+typedef xsyrk_TR TR;
 
-char xsyrk_uplo(char c) {
-    return blas_up(c);
-}
+#define MR QBLAS_XGEMM_MR
+#define NR QBLAS_XGEMM_NR
 
-char xsyrk_trans(char c) {
-    return blas_up(c);
-}
-
-ptrdiff_t xsyrk_nb(void) { return 32; }
-
-#define A_(i, j)  a[(size_t)(j) * lda + (i)]
-#define C_(i, j)  c[(size_t)(j) * ldc + (i)]
-
-static const TC ZERO = 0.0Q + 0.0Qi;
-static const TC ONE  = 1.0Q + 0.0Qi;
-
-static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TC alpha,
-                          const TC *restrict a, ptrdiff_t lda,
-                          TC *restrict c, ptrdiff_t ldc,
-                          char UPLO, char TRANS)
-{
-    if (TRANS == 'N') {
-        for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-            const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
-            const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
-            TC *cj = c + (size_t)j * ldc;
-            for (ptrdiff_t l = 0; l < k; ++l) {
-                const TC ajl = A_(j, l);
-                if (ajl != ZERO) {
-                    const TC t = alpha * ajl;
-                    for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] += t * A_(i, l);
-                }
-            }
-        }
-    } else {
-        for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-            const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
-            const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
-            TC *cj = c + (size_t)j * ldc;
-            const TC *Aj = a + (size_t)j * lda;
-            for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                const TC *Ai = a + (size_t)i * lda;
-                TC s = ZERO;
-                for (ptrdiff_t l = 0; l < k; ++l) s += Ai[l] * Aj[l];
-                cj[i] += alpha * s;
-            }
-        }
-    }
-}
-
-void xsyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TC beta,
-                      TC *c, ptrdiff_t ldc, char UPLO)
-{
-    for (ptrdiff_t j = j_start; j < j_end; ++j) {
-        const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
-        TC *cj = c + (size_t)j * ldc;
-        if (beta == ZERO) for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = ZERO;
-        else              for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-    }
-}
-
-void xsyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha, TC beta,
-                 const TC *a, ptrdiff_t lda, TC *c, ptrdiff_t ldc, char UPLO, char TRANS)
-{
-    for (ptrdiff_t j = jc; j < jc + jb; ++j) {
-        const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
-        const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
-        TC *cj = c + (size_t)j * ldc;
-        if (beta == ZERO)      for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i]  = ZERO;
-        else if (beta != ONE)  for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] *= beta;
-    }
-
-    syrk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
-
-    if (UPLO == 'L') {
-        const ptrdiff_t trailing = n - jc - jb;
-        if (trailing > 0) {
-            const ptrdiff_t j0 = jc + jb;
-            if (TRANS == 'N') {
-                xgemm_serial('N', 'T', trailing, jb, k, &alpha,
-                             &A_(j0, 0), lda, &A_(jc, 0), lda,
-                             &ONE, &C_(j0, jc), ldc);
-            } else {
-                xgemm_serial('T', 'N', trailing, jb, k, &alpha,
-                             &A_(0, j0), lda, &A_(0, jc), lda,
-                             &ONE, &C_(j0, jc), ldc);
-            }
-        }
-    } else {
-        if (jc > 0) {
-            if (TRANS == 'N') {
-                xgemm_serial('N', 'T', jc, jb, k, &alpha,
-                             &A_(0, 0), lda, &A_(jc, 0), lda,
-                             &ONE, &C_(0, jc), ldc);
-            } else {
-                xgemm_serial('T', 'N', jc, jb, k, &alpha,
-                             &A_(0, 0), lda, &A_(0, jc), lda,
-                             &ONE, &C_(0, jc), ldc);
-            }
-        }
-    }
-}
 
 void xsyrk_serial(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const TC *alpha_,
-    const TC *a, ptrdiff_t lda,
-    const TC *beta_,
-    TC *c, ptrdiff_t ldc)
+    const TC *alpha_c,
+    const TC *a_c, ptrdiff_t lda,
+    const TC *beta_c,
+    TC *c_c, ptrdiff_t ldc)
 {
-    const TC alpha = *alpha_, beta = *beta_;
-    const char UPLO = blas_up(uplo);
-    const char TRANS   = blas_up(trans);
+    /* Reinterpret the complex ABI as interleaved (re,im) __float128 storage. */
+    const TR *alpha_ = (const TR *)alpha_c;
+    const TR *a = (const TR *)a_c;
+    const TR *beta_ = (const TR *)beta_c;
+    TR *c = (TR *)c_c;
+    const TR alphar = alpha_[0], alphai = alpha_[1];
+    const TR beta_r = beta_[0],  beta_i = beta_[1];
+    const char UPLO  = blas_up(uplo);
+    const char TRANS = blas_up(trans);
 
-    if (n == 0) return;
+    if (n <= 0) return;
 
-    if (alpha == ZERO || k == 0) {
-        if (beta == ONE) return;
-        xsyrk_beta_scale(0, n, n, beta, c, ldc, UPLO);
-        return;
+    if (UPLO == 'U') qblas_xsyrk_beta_u(n, beta_r, beta_i, c, ldc);
+    else             qblas_xsyrk_beta_l(n, beta_r, beta_i, c, ldc);
+
+    if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
+
+    ptrdiff_t MC0, KC0, NC0;
+    qblas_xgemm_blocks(&MC0, &KC0, &NC0);
+    ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
+
+    /* Grow MC toward an L2-sized panel when K is small (complex doubles the
+     * per-element footprint), capped at 4×MC0 and rounded to MR. */
+    if (k <= KC) {
+        const long L2_TARGET_BYTES = 256L * 1024L;
+        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(TR));
+        if (target_mc > MC) {
+            if (target_mc > 4L * MC0) target_mc = 4L * MC0;
+            MC = blas_round_up((ptrdiff_t)target_mc, MR);
+            if (MC < MC0) MC = MC0;
+        }
     }
 
-    const ptrdiff_t nb = xsyrk_nb();
-    for (ptrdiff_t jc = 0; jc < n; jc += nb) {
-        const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        xsyrk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TRANS);
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * 2 * sizeof(TR);
+    TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    if (Ap && Bp) {
+        for (ptrdiff_t js = 0; js < n; js += NC) {
+            const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
+
+            /* UPLO clip of the [0, N] row range for this js-band. */
+            ptrdiff_t m_lo_eff = (UPLO == 'L') ? js : 0;
+            ptrdiff_t m_hi_eff = (UPLO == 'U' && n > js + jb) ? (js + jb) : n;
+            if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
+
+            for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
+
+                if (TRANS == 'N')
+                    qblas_xgemm_tcopy(pb, jb, 0, &a[((size_t)ls * lda + js) * 2], lda, Bp);
+                else
+                    qblas_xgemm_ncopy(pb, jb, 0, &a[((size_t)js * lda + ls) * 2], lda, Bp);
+
+                for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
+                    const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+
+                    if (TRANS == 'N')
+                        qblas_xgemm_tcopy(pb, min_i, 0, &a[((size_t)ls * lda + is) * 2], lda, Ap);
+                    else
+                        qblas_xgemm_ncopy(pb, min_i, 0, &a[((size_t)is * lda + ls) * 2], lda, Ap);
+
+                    TR *cij = &c[((size_t)js * ldc + is) * 2];
+                    const ptrdiff_t off = is - js;
+
+                    /* Single pass: alpha·A·Aᵀ + single-add diagonal merge. */
+                    if (UPLO == 'U')
+                        qblas_xsyrk_kernel_u(min_i, jb, pb, alphar, alphai, Ap, Bp, cij, ldc, off);
+                    else
+                        qblas_xsyrk_kernel_l(min_i, jb, pb, alphar, alphai, Ap, Bp, cij, ldc, off);
+                }
+            }
+        }
     }
+    free(Ap);
+    free(Bp);
 }
-
-#undef A_
-#undef C_

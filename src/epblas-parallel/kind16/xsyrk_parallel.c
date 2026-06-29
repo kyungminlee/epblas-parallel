@@ -1,97 +1,188 @@
 /*
- * xsyrk_ — kind16 complex (__complex128) symmetric rank-k, the public
- * Fortran entry and threading-orchestration half of the xsyrk overlay (see
- * xsyrk_kernel.h; all the math lives in xsyrk_serial.c).
+ * xsyrk_ — kind16 complex (__complex128) symmetric rank-k update: the public
+ * Fortran entry and threading-orchestration half of the xsyrk overlay (all the
+ * math lives in xsyrk_serial.c + the shared xl3_complex.c substrate). Faithful
+ * port of OpenBLAS ZSYRK interface/syrk.c → level3_syrk.c threading, run as the
+ * SINGLE-PRODUCT special case of the xsyr2k packed-GEMM nest.
  *
- * Parallel shape: one `omp parallel for schedule(dynamic,1)` over the
- * diagonal blocks (jc). Triangular work per block is uneven, so dynamic
- * scheduling balances better than static. The scalar diagonal and the xgemm
- * trailing update run single-thread inside each block worker.
+ *   C := alpha·A·Aᵀ + beta·C   (trans='N', A is N×K)
+ *   C := alpha·Aᵀ·A + beta·C   (trans='T', A is K×N)
  *
- * Nesting guard: when xsyrk_ is itself called from inside another routine's
- * parallel region, it delegates to xsyrk_serial and opens no region of its
- * own. Mirrors the kind10 ysyrk overlay.
+ * Threading: one outer `omp parallel`. The single right operand (Bp = A in
+ * B-shape) is packed once per (js, ls) band under `omp single` and shared; each
+ * thread owns a CONTIGUOUS slice of the M axis (the N output rows, m_chunk =
+ * ceil(N/nth) rounded to MR) and runs the MC-blocked is loop within it, packing
+ * its own Ap and doing one kernel pass. The per-band UPLO clip trims each
+ * thread's row range, but every thread still executes every js/ls iteration so
+ * the `single`/`barrier` pair stays collective.
+ *
+ * Nesting guard: when xsyrk_ is called from inside another routine's parallel
+ * region, delegate to xsyrk_serial and open no team of our own.
+ *
+ * Arrays are interleaved (re,im) __float128; ld-args, k, n and offset are in
+ * COMPLEX elements, so every pointer step is ×2.
  */
 
-#include <stddef.h>
+#include "xsyrk_kernel.h"
 #include "../common/blas_char.h"
+#include "../common/blas_math.h"
+#include "xl3_complex.h"
+#include "../common/epblas_facade.h"
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
-#include "../common/blas_omp.h"
 #endif
 
-#include "xsyrk_kernel.h"
-#include "../common/epblas_facade.h"
-
 typedef xsyrk_TC TC;
+typedef xsyrk_TR TR;
 
-#define XSYRK_OMP_MIN 32
-#define XSYRK_OMP_NB  8   /* fine panel for triangular dynamic balance */
+#define MR QBLAS_XGEMM_MR
+#define NR QBLAS_XGEMM_NR
 
-static const TC ZERO = 0.0Q + 0.0Qi;
-static const TC ONE  = 1.0Q + 0.0Qi;
 
 static void xsyrk_core(
     char uplo, char trans,
     ptrdiff_t n, ptrdiff_t k,
-    const TC *alpha_,
-    const TC *restrict a, ptrdiff_t lda,
-    const TC *beta_,
-    TC *restrict c, ptrdiff_t ldc)
+    const TC *alpha_c,
+    const TC *a_c, ptrdiff_t lda,
+    const TC *beta_c,
+    TC *c_c, ptrdiff_t ldc)
 {
 #ifdef _OPENMP
-    /* Called from inside another routine's parallel region: run fully
-     * serial, opening no team of our own. */
+    /* Inside another team → run serial, open no region of our own. */
     if (omp_in_parallel()) {
-        xsyrk_serial(uplo, trans, n, k, alpha_, a, lda, beta_, c, ldc);
+        xsyrk_serial(uplo, trans, n, k, alpha_c, a_c, lda, beta_c, c_c, ldc);
         return;
     }
 #endif
-    const TC alpha = *alpha_, beta = *beta_;
-    const char UPLO = blas_up(uplo);
-    const char TRANS   = blas_up(trans);
+    /* Reinterpret the complex ABI as interleaved (re,im) __float128 storage. */
+    const TR *alpha_ = (const TR *)alpha_c;
+    const TR *a = (const TR *)a_c;
+    const TR *beta_ = (const TR *)beta_c;
+    TR *c = (TR *)c_c;
+    const TR alphar = alpha_[0], alphai = alpha_[1];
+    const TR beta_r = beta_[0],  beta_i = beta_[1];
+    const char UPLO  = blas_up(uplo);
+    const char TRANS = blas_up(trans);
 
-    if (n == 0) return;
+    if (n <= 0) return;
 
-    if (alpha == ZERO || k == 0) {
-        if (beta == ONE) return;
-#ifdef _OPENMP
-        const bool use_omp = (n >= XSYRK_OMP_MIN && blas_omp_max_threads() > 1);
-        #pragma omp parallel for if(use_omp) schedule(static)
-#endif
-        for (ptrdiff_t j = 0; j < n; ++j)
-            xsyrk_beta_scale(j, j + 1, n, beta, c, ldc, UPLO);
-        return;
-    }
+    if (UPLO == 'U') qblas_xsyrk_beta_u(n, beta_r, beta_i, c, ldc);
+    else             qblas_xsyrk_beta_l(n, beta_r, beta_i, c, ldc);
 
-    ptrdiff_t nb = xsyrk_nb();
+    if (k == 0 || (alphar == 0.0Q && alphai == 0.0Q)) return;
 
-#ifdef _OPENMP
-    const bool use_omp = (n >= XSYRK_OMP_MIN && blas_omp_max_threads() > 1);
-    if (use_omp) {
-        /* Use a fine OMP panel so dynamic scheduling can balance the
-         * triangular per-block work: the trailing GEMM shrinks from N-jc
-         * down to 0 across the diagonal, so few coarse panels (the serial
-         * nb=32 gives only 2 at N=64) leave threads idle on the cheap tail.
-         * Measured optimum is a small fixed block (~8) across N∈[64,256] —
-         * the packed trailing GEMM amortizes packing even at jb=8, and the
-         * balance win dominates at every size. The serial path keeps nb=32
-         * (no balance concern, better amortization). Floor to >=1 panel per
-         * thread for tiny N. */
-        const ptrdiff_t nthr = blas_omp_max_threads();
-        nb = XSYRK_OMP_NB;
-        if (nb * nthr > n) {
-            ptrdiff_t want = (n + nthr - 1) / nthr;
-            nb = (want < 2) ? 2 : ((want + 1) / 2) * 2;   /* round up to MR */
+    ptrdiff_t MC0, KC0, NC0;
+    qblas_xgemm_blocks(&MC0, &KC0, &NC0);
+    ptrdiff_t MC = MC0, KC = KC0, NC = NC0;
+
+    if (k <= KC) {
+        const long L2_TARGET_BYTES = 256L * 1024L;
+        long target_mc = L2_TARGET_BYTES / ((long)k * 2L * (long)sizeof(TR));
+        if (target_mc > MC) {
+            if (target_mc > 4L * MC0) target_mc = 4L * MC0;
+            MC = blas_round_up((ptrdiff_t)target_mc, MR);
+            if (MC < MC0) MC = MC0;
         }
     }
-    #pragma omp parallel for if(use_omp) schedule(dynamic, 1)
+
+    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * 2 * sizeof(TR);
+    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * 2 * sizeof(TR);
+
+#ifdef _OPENMP
+    ptrdiff_t nthreads = omp_get_max_threads();
+    if (nthreads < 1) nthreads = 1;
+#else
+    ptrdiff_t nthreads = 1;
 #endif
-    for (ptrdiff_t jc = 0; jc < n; jc += nb) {
-        const ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
-        xsyrk_block(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO, TRANS);
+
+    long nnk = (long)n * (long)n * (long)k;
+    if (nnk < 64L * 64L * 64L) nthreads = 1;
+
+    /* One shared B-pack, one private A-pack per thread, all allocated BEFORE
+     * the region: a thread that skipped the loop on a failed in-region alloc
+     * would deadlock the others at the Bp barrier. */
+    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    TR **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
+    bool alloc_ok = (Bp && Ap_arr);
+    for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
+        Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        if (!Ap_arr[t]) alloc_ok = 0;
     }
+    if (alloc_ok) {
+#ifdef _OPENMP
+        #pragma omp parallel num_threads(nthreads)
+#endif
+        {
+#ifdef _OPENMP
+            const ptrdiff_t tid = omp_get_thread_num();
+            const ptrdiff_t nth = omp_get_num_threads();
+#else
+            const ptrdiff_t tid = 0, nth = 1;
+#endif
+            TR *Ap = Ap_arr[tid];
+
+            /* M-axis (= N output rows) partition into per-thread chunks. */
+            const ptrdiff_t m_chunk = blas_round_up((n + nth - 1) / nth, MR);
+            const ptrdiff_t m_lo = tid * m_chunk;
+            ptrdiff_t m_hi = m_lo + m_chunk;
+            if (m_hi > n) m_hi = n;
+
+            for (ptrdiff_t js = 0; js < n; js += NC) {
+                const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
+
+                ptrdiff_t m_lo_eff = (UPLO == 'L' && m_lo < js) ? js : m_lo;
+                ptrdiff_t m_hi_eff = (UPLO == 'U' && m_hi > js + jb) ? (js + jb) : m_hi;
+                if (m_lo_eff & (MR - 1)) m_lo_eff &= ~(MR - 1);
+                if (m_lo_eff < m_lo) m_lo_eff = m_lo;
+
+                for (ptrdiff_t ls = 0; ls < k; ls += KC) {
+                    const ptrdiff_t pb = (k - ls < KC) ? (k - ls) : KC;
+
+#ifdef _OPENMP
+                    #pragma omp barrier
+                    #pragma omp single
+#endif
+                    {
+                        if (TRANS == 'N')
+                            qblas_xgemm_tcopy(pb, jb, 0, &a[((size_t)ls * lda + js) * 2], lda, Bp);
+                        else
+                            qblas_xgemm_ncopy(pb, jb, 0, &a[((size_t)js * lda + ls) * 2], lda, Bp);
+                    }
+                    /* implicit barrier at end of `single` → Bp safe to read */
+
+                    for (ptrdiff_t is = m_lo_eff; is < m_hi_eff; is += MC) {
+                        const ptrdiff_t min_i = (m_hi_eff - is < MC) ? (m_hi_eff - is) : MC;
+
+                        if (TRANS == 'N')
+                            qblas_xgemm_tcopy(pb, min_i, 0, &a[((size_t)ls * lda + is) * 2], lda, Ap);
+                        else
+                            qblas_xgemm_ncopy(pb, min_i, 0, &a[((size_t)is * lda + ls) * 2], lda, Ap);
+
+                        TR *cij = &c[((size_t)js * ldc + is) * 2];
+                        const ptrdiff_t off = is - js;
+
+                        /* Single pass: alpha·A·Aᵀ + single-add diagonal merge. */
+                        if (UPLO == 'U')
+                            qblas_xsyrk_kernel_u(min_i, jb, pb, alphar, alphai, Ap, Bp, cij, ldc, off);
+                        else
+                            qblas_xsyrk_kernel_l(min_i, jb, pb, alphar, alphai, Ap, Bp, cij, ldc, off);
+                    }
+                }
+            }
+        }
+    }
+
+    for (ptrdiff_t t = 0; t < nthreads && Ap_arr; ++t) free(Ap_arr[t]);
+    free(Ap_arr);
+    free(Bp);
 }
 
+/* Emit xsyrk_ (LP64) + xsyrk_64_ (ILP64) around the shared ptrdiff_t core.
+ * alpha/beta/matrices are all complex (TC=__complex128) — SYRK is symmetric,
+ * so both scalars are complex; mirrors kind10 ysyrk's
+ * EPBLAS_FACADE_SYRK(ysyrk, TC, TC). */
 EPBLAS_FACADE_SYRK(xsyrk, TC, TC)

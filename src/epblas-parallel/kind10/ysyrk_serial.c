@@ -69,6 +69,43 @@ static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TC alpha,
     }
 }
 
+/* Off-diagonal trailing block of the TRANS update as netlib's unpacked
+ * stride-1 column dot — C(i,j) += alpha·Σ_l A(l,i)·A(l,j) — instead of a
+ * blocked ygemm_serial. Both A columns are contiguous (Trans ⇒ A is K×N), so
+ * the dot is cache-friendly and skips the pack/microkernel scaffolding.
+ *
+ * The complex MAC is decomposed into scalar real/imag long-double accumulators
+ * over A reinterpreted as 2·K interleaved reals (the yerot/ygemv x87 trick,
+ * trigger 8): a `_Complex` `s += Ai[l]*Aj[l]` makes gcc-15 reload each operand
+ * for both the real and imag sub-products (it can't prove Ai≠Aj≠cj don't
+ * alias), spilling the fp80 stack and losing ~5% to gfortran's naive loop on
+ * Upper-Trans. Hoisting air/aii/ajr/aji into locals forces one load each and
+ * keeps the two accumulators (sr, si — the natural re/im parts a complex MAC
+ * already computes, NOT a latency-hiding 2nd chain, so no trigger-6 spill)
+ * register-resident, matching gfortran. Upper: rows [0,jc); Lower: rows [jc+jb, n). */
+static void syrk_trans_offdiag(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k,
+                               TC alpha, const TC *restrict a, ptrdiff_t lda,
+                               TC *restrict c, ptrdiff_t ldc, char UPLO)
+{
+    const ptrdiff_t i_lo = (UPLO == 'L') ? (jc + jb) : 0;
+    const ptrdiff_t i_hi = (UPLO == 'L') ? n         : jc;
+    for (ptrdiff_t j = jc; j < jc + jb; ++j) {
+        TC *cj = c + (size_t)j * ldc;
+        const long double *Ajr = (const long double *)(a + (size_t)j * lda);
+        for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
+            const long double *Air = (const long double *)(a + (size_t)i * lda);
+            long double sr = 0.0L, si = 0.0L;
+            for (ptrdiff_t l = 0; l < k; ++l) {
+                const long double air = Air[2*l + 0], aii = Air[2*l + 1];
+                const long double ajr = Ajr[2*l + 0], aji = Ajr[2*l + 1];
+                sr += air * ajr - aii * aji;
+                si += air * aji + aii * ajr;
+            }
+            cj[i] += alpha * __builtin_complex(sr, si);
+        }
+    }
+}
+
 void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TC beta,
                       TC *c, ptrdiff_t ldc, char UPLO)
 {
@@ -103,9 +140,7 @@ void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha,
                              &A_(j0, 0), lda, &A_(jc, 0), lda,
                              &ONE, &C_(j0, jc), ldc);
             } else {
-                ygemm_serial('T', 'N', trailing, jb, k, &alpha,
-                             &A_(0, j0), lda, &A_(0, jc), lda,
-                             &ONE, &C_(j0, jc), ldc);
+                syrk_trans_offdiag(jc, jb, n, k, alpha, a, lda, c, ldc, UPLO);
             }
         }
     } else {
@@ -115,9 +150,7 @@ void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha,
                              &A_(0, 0), lda, &A_(jc, 0), lda,
                              &ONE, &C_(0, jc), ldc);
             } else {
-                ygemm_serial('T', 'N', jc, jb, k, &alpha,
-                             &A_(0, 0), lda, &A_(0, jc), lda,
-                             &ONE, &C_(0, jc), ldc);
+                syrk_trans_offdiag(jc, jb, n, k, alpha, a, lda, c, ldc, UPLO);
             }
         }
     }
