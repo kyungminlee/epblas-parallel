@@ -193,6 +193,133 @@ static ptrdiff_t ytpmv_omp(bool upper, bool is_t, bool conj, bool nounit, ptrdif
 }
 #endif /* _OPENMP */
 
+/* Forward complex AXPY  y[0..m) += t * a[0..m). t is decomposed into scalar
+ * re/im long-double locals (keeps the loop-invariant multiplier off the x87
+ * stack) and the body is 4x unrolled — the iterations are independent (no
+ * loop-carried accumulator), so unrolling amortises loop overhead and exposes
+ * ILP the way gfortran's single-wide loop cannot. Kept noinline so it compiles
+ * in a clean x87 register context, isolated from the column-sweep scaffolding
+ * (in-place inline here costs ~6% from register pressure). Bit-identical to the
+ * _Complex form: same products, same association. */
+__attribute__((noinline))
+static void ytpmv_axpy_col(TC *restrict y_, const TC *restrict a_, TC t, ptrdiff_t m)
+{
+    const long double tr = __real__ t, ti = __imag__ t;
+    long double *restrict y = (long double *)y_;
+    const long double *restrict a = (const long double *)a_;
+    ptrdiff_t i = 0;
+    for (; i + 3 < m; i += 4) {
+        for (int u = 0; u < 4; ++u) {
+            const long double ar = a[2 * (i + u)], ai = a[2 * (i + u) + 1];
+            y[2 * (i + u)]     += tr * ar - ti * ai;
+            y[2 * (i + u) + 1] += tr * ai + ti * ar;
+        }
+    }
+    for (; i < m; ++i) {
+        const long double ar = a[2 * i], ai = a[2 * i + 1];
+        y[2 * i]     += tr * ar - ti * ai;
+        y[2 * i + 1] += tr * ai + ti * ar;
+    }
+}
+
+/* Non-conj Trans row value: dst = init + Σ_{k} ap[k]·x[k], where `init` is the
+ * diagonal-scaled x[j] (gfortran's TEMP preload). The running (re,im) pair is
+ * held resident on the x87 stack across the whole loop (4 loads + 2 dups, no
+ * operand reloads). The pure-C single-acc form is instruction-identical to
+ * gfortran but loses ~4-7% on Lower-Trans to gfortran's tighter fp80
+ * accumulator-stack ordering; gcc won't reproduce it (a fxch-free C loop carved
+ * into its own single-body function still measured ~1.04-1.05, A/B'd 2026-06-29),
+ * and a 2nd C chain spills the 8-deep stack (trigger 6). Body transcribed from
+ * the proven ytrsv U-T asm MAC, accumulator preloaded with `init` and the two
+ * combines flipped subtract→add (dot, not solve); ai/x as interleaved re/im.
+ * Folding `init` into the accumulator and storing the result STRAIGHT into dst
+ * (= x[j]) removes the per-column store-to-local + reload + complex-reconstruct
+ * round trip that left small N at ~1.05; that fixed cost is the binding overhead
+ * vs OpenBLAS at small N. always_inline: the asm owns the x87 stack (full
+ * clobber) so it inlines into the column loop without a trigger-3 spill and with
+ * no per-column call. __volatile__: the result leaves only via the [d] memory
+ * store, so a non-volatile asm would be eliminated despite the memory clobber. */
+#if defined(__GNUC__) && defined(__x86_64__)
+__attribute__((always_inline))
+static inline void ytpmv_dot(TC *restrict dst, const TC *restrict ap_,
+                             const TC *restrict x_, ptrdiff_t cnt, TC init)
+{
+    const long double *a = (const long double *)ap_;
+    const long double *x = (const long double *)x_;
+    const long double *ip = (const long double *)&init;
+    long double *d = (long double *)dst;
+    if (cnt <= 0) { *dst = init; return; }
+    __asm__ __volatile__ (
+        "fldt (%[ini])\n\t"        /* st0 = sre = init.re */
+        "fldt 16(%[ini])\n\t"      /* st0 = sim = init.im, st1 = sre */
+        "1:\n\t"
+        "fldt (%[x])\n\t"
+        "fldt 16(%[x])\n\t"
+        "fldt (%[a])\n\t"
+        "fldt 16(%[a])\n\t"
+        "fld %%st(1)\n\t"          /* dup a.re */
+        "fmul %%st(4),%%st\n\t"    /* a.re*x.re */
+        "fld %%st(1)\n\t"          /* dup a.im */
+        "fmul %%st(4),%%st\n\t"    /* a.im*x.im */
+        "fsubrp %%st,%%st(1)\n\t"  /* Re = a.re*x.re - a.im*x.im */
+        "faddp %%st,%%st(6)\n\t"   /* sre += Re */
+        "fxch %%st(1)\n\t"
+        "fmulp %%st,%%st(2)\n\t"
+        "fmulp %%st,%%st(2)\n\t"
+        "faddp %%st,%%st(1)\n\t"   /* Im = a.re*x.im + a.im*x.re */
+        "faddp %%st,%%st(1)\n\t"   /* sim += Im */
+        "add $32,%[a]\n\t"
+        "add $32,%[x]\n\t"
+        "sub $1,%[i]\n\t"
+        "jnz 1b\n\t"
+        "fstpt 16(%[d])\n\t"       /* sim -> dst.im */
+        "fstpt (%[d])\n\t"         /* sre -> dst.re */
+        : [a] "+r"(a), [x] "+r"(x), [i] "+r"(cnt)
+        : [ini] "r"(ip), [d] "r"(d)
+        : "st", "st(1)", "st(2)", "st(3)", "st(4)",
+          "st(5)", "st(6)", "st(7)", "memory", "cc");
+}
+#else
+__attribute__((noinline))
+static void ytpmv_dot(TC *restrict dst, const TC *restrict ap_,
+                      const TC *restrict x_, ptrdiff_t cnt, TC init)
+{
+    const long double *restrict a = (const long double *)ap_;
+    const long double *restrict x = (const long double *)x_;
+    long double sr = __real__ init, si = __imag__ init;
+    for (ptrdiff_t i = 0; i < cnt; ++i) {
+        const long double ar = a[0], ai = a[1];
+        const long double xr = x[0], xs = x[1];
+        sr += ar * xr - ai * xs;
+        si += ar * xs + ai * xr;
+        a += 2; x += 2;
+    }
+    *dst = sr + si * 1.0iL;
+}
+#endif
+
+/* Conjugate Trans dot: returns sum_{i<cnt} conj(ap[i]) * x[i]. Single complex
+ * accumulator decomposed to scalar re/im (a 2nd chain spills the 8-deep x87
+ * stack for complex — trigger 6 — and measured ~5% slower). Forward walk is
+ * prefetch-friendly vs the netlib backward sweep; reassociation is within fp80
+ * fuzz tol. NOINLINE so it compiles in a clean x87 context, isolated from the
+ * NoTrans sweep's register allocation — inlined in-context the dot loses ~4%. */
+__attribute__((noinline))
+static TC ytpmv_dotc(const TC *restrict ap_, const TC *restrict x_, ptrdiff_t cnt)
+{
+    const long double *restrict a = (const long double *)ap_;
+    const long double *restrict x = (const long double *)x_;
+    long double sr = 0.0L, si = 0.0L;
+    for (ptrdiff_t i = 0; i < cnt; ++i) {
+        const long double ar = a[0], ai = a[1];
+        const long double xr = x[0], xs = x[1];
+        sr += ar * xr + ai * xs;
+        si += ar * xs - ai * xr;
+        a += 2; x += 2;
+    }
+    return sr + si * 1.0iL;
+}
+
 static void ytpmv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
@@ -218,8 +345,7 @@ static void ytpmv_core(
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     if (x[j] != zero) {
                         const TC tmp = x[j];
-                        ptrdiff_t k = kk;
-                        for (ptrdiff_t i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
+                        ytpmv_axpy_col(x, &ap[kk], tmp, j);  /* x[0..j) += tmp*ap[kk..) */
                         if (nounit) x[j] *= ap[kk + j];
                     }
                     kk += j + 1;
@@ -229,9 +355,12 @@ static void ytpmv_core(
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     if (x[j] != zero) {
                         const TC tmp = x[j];
-                        ptrdiff_t k = kk;
-                        for (ptrdiff_t i = n - 1; i > j; --i) { x[i] += tmp * ap[k]; --k; }
-                        if (nounit) x[j] *= ap[kk - (n - 1 - j)];
+                        const ptrdiff_t diag = kk - (n - 1 - j);  /* ap[diag] = A(j,j) */
+                        /* run x[j+1..n) forward over ap[diag+1..]; iterations are
+                         * independent so forward order is bit-identical to the
+                         * original descending walk and avoids the neg-stride stall */
+                        ytpmv_axpy_col(&x[j + 1], &ap[diag + 1], tmp, n - 1 - j);
+                        if (nounit) x[j] *= ap[diag];
                     }
                     kk -= (n - j);
                 }
@@ -240,23 +369,31 @@ static void ytpmv_core(
             if (UPLO == 'U') {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    TC tmp = x[j];
-                    if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
-                    ptrdiff_t k = kk - 1;
-                    if (noconj) for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += ap[k] * x[i]; --k; }
-                    else        for (ptrdiff_t i = j - 1; i >= 0; --i) { tmp += cconj(ap[k]) * x[i]; --k; }
-                    x[j] = tmp;
+                    /* forward dot over x[0..j); ap[kk-j] pairs with x[0] */
+                    if (noconj) {
+                        TC init = nounit ? x[j] * ap[kk] : x[j];
+                        ytpmv_dot(&x[j], &ap[kk - j], &x[0], j, init);
+                    } else {
+                        TC tmp = x[j];
+                        if (nounit) tmp *= cconj(ap[kk]);
+                        tmp += ytpmv_dotc(&ap[kk - j], &x[0], j);
+                        x[j] = tmp;
+                    }
                     kk -= j + 1;
                 }
             } else {
                 ptrdiff_t kk = 0;
                 for (ptrdiff_t j = 0; j < n; ++j) {
-                    TC tmp = x[j];
-                    if (nounit) tmp *= (noconj ? ap[kk] : cconj(ap[kk]));
-                    ptrdiff_t k = kk + 1;
-                    if (noconj) for (ptrdiff_t i = j + 1; i < n; ++i) { tmp += ap[k] * x[i]; ++k; }
-                    else        for (ptrdiff_t i = j + 1; i < n; ++i) { tmp += cconj(ap[k]) * x[i]; ++k; }
-                    x[j] = tmp;
+                    /* forward dot over x[j+1..n); ap[kk+1] pairs with x[j+1] */
+                    if (noconj) {
+                        TC init = nounit ? x[j] * ap[kk] : x[j];
+                        ytpmv_dot(&x[j], &ap[kk + 1], &x[j + 1], n - 1 - j, init);
+                    } else {
+                        TC tmp = x[j];
+                        if (nounit) tmp *= cconj(ap[kk]);
+                        tmp += ytpmv_dotc(&ap[kk + 1], &x[j + 1], n - 1 - j);
+                        x[j] = tmp;
+                    }
                     kk += n - j;
                 }
             }
