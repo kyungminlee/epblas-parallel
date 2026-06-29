@@ -230,62 +230,128 @@ static void ytpmv_axpy_col(TC *restrict y_, const TC *restrict a_, TC t, ptrdiff
  * accumulator-stack ordering; gcc won't reproduce it (a fxch-free C loop carved
  * into its own single-body function still measured ~1.04-1.05, A/B'd 2026-06-29),
  * and a 2nd C chain spills the 8-deep stack (trigger 6). Body transcribed from
- * the proven ytrsv U-T asm MAC, accumulator preloaded with `init` and the two
- * combines flipped subtract→add (dot, not solve); ai/x as interleaved re/im.
- * Folding `init` into the accumulator and storing the result STRAIGHT into dst
- * (= x[j]) removes the per-column store-to-local + reload + complex-reconstruct
- * round trip that left small N at ~1.05; that fixed cost is the binding overhead
- * vs OpenBLAS at small N. always_inline: the asm owns the x87 stack (full
- * clobber) so it inlines into the column loop without a trigger-3 spill and with
- * no per-column call. __volatile__: the result leaves only via the [d] memory
- * store, so a non-volatile asm would be eliminated despite the memory clobber. */
+ * the proven ytrsv U-T asm MAC, the two combines flipped subtract→add (dot, not
+ * solve); ai/x as interleaved re/im. The result is stored STRAIGHT into dst
+ * (= x[j]) and `init` is computed INSIDE the asm — for unit diag it is just
+ * x[j] (loaded from dst); for non-unit it is x[j]·A(j,j), done as one extra MAC
+ * into a zeroed accumulator. This removes BOTH the per-column store-to-local +
+ * reload of init AND (non-unit) the C-side _Complex multiply, the fixed cost
+ * that left small N at ~1.03 vs OpenBLAS. always_inline: the asm owns the x87
+ * stack (full clobber) so it inlines into the column loop without a trigger-3
+ * spill and with no per-column call. __volatile__: the result leaves only via
+ * the [d] memory store, so a non-volatile asm would be elided despite "memory".
+ *
+ * MAC: with stack [a.im, a.re, x.im, x.re, sim, sre] (st0..st5) on entry, adds
+ * Re(a·x) into sre / Im(a·x) into sim and pops the 4 operands → [sim', sre']. */
 #if defined(__GNUC__) && defined(__x86_64__)
+#define YTPMV_MAC                      \
+        "fld %%st(1)\n\t"              \
+        "fmul %%st(4),%%st\n\t"        \
+        "fld %%st(1)\n\t"              \
+        "fmul %%st(4),%%st\n\t"        \
+        "fsubrp %%st,%%st(1)\n\t"      \
+        "faddp %%st,%%st(6)\n\t"       \
+        "fxch %%st(1)\n\t"             \
+        "fmulp %%st,%%st(2)\n\t"       \
+        "fmulp %%st,%%st(2)\n\t"       \
+        "faddp %%st,%%st(1)\n\t"       \
+        "faddp %%st,%%st(1)\n\t"
+/* unit diagonal: init = x[j], read directly from dst (no init slot/copy) */
 __attribute__((always_inline))
-static inline void ytpmv_dot(TC *restrict dst, const TC *restrict ap_,
-                             const TC *restrict x_, ptrdiff_t cnt, TC init)
+static inline void ytpmv_dot_u(TC *restrict dst, const TC *restrict ap_,
+                               const TC *restrict x_, ptrdiff_t cnt)
 {
     const long double *a = (const long double *)ap_;
     const long double *x = (const long double *)x_;
-    const long double *ip = (const long double *)&init;
     long double *d = (long double *)dst;
-    if (cnt <= 0) { *dst = init; return; }
     __asm__ __volatile__ (
-        "fldt (%[ini])\n\t"        /* st0 = sre = init.re */
-        "fldt 16(%[ini])\n\t"      /* st0 = sim = init.im, st1 = sre */
+        "fldt (%[d])\n\t"          /* sre = x[j].re */
+        "fldt 16(%[d])\n\t"        /* sim = x[j].im, st1 = sre */
+        "test %[i],%[i]\n\t"
+        "jle 2f\n\t"
         "1:\n\t"
         "fldt (%[x])\n\t"
         "fldt 16(%[x])\n\t"
         "fldt (%[a])\n\t"
         "fldt 16(%[a])\n\t"
-        "fld %%st(1)\n\t"          /* dup a.re */
-        "fmul %%st(4),%%st\n\t"    /* a.re*x.re */
-        "fld %%st(1)\n\t"          /* dup a.im */
-        "fmul %%st(4),%%st\n\t"    /* a.im*x.im */
-        "fsubrp %%st,%%st(1)\n\t"  /* Re = a.re*x.re - a.im*x.im */
-        "faddp %%st,%%st(6)\n\t"   /* sre += Re */
-        "fxch %%st(1)\n\t"
-        "fmulp %%st,%%st(2)\n\t"
-        "fmulp %%st,%%st(2)\n\t"
-        "faddp %%st,%%st(1)\n\t"   /* Im = a.re*x.im + a.im*x.re */
-        "faddp %%st,%%st(1)\n\t"   /* sim += Im */
+        YTPMV_MAC
         "add $32,%[a]\n\t"
         "add $32,%[x]\n\t"
         "sub $1,%[i]\n\t"
         "jnz 1b\n\t"
+        "2:\n\t"
         "fstpt 16(%[d])\n\t"       /* sim -> dst.im */
         "fstpt (%[d])\n\t"         /* sre -> dst.re */
         : [a] "+r"(a), [x] "+r"(x), [i] "+r"(cnt)
-        : [ini] "r"(ip), [d] "r"(d)
+        : [d] "r"(d)
         : "st", "st(1)", "st(2)", "st(3)", "st(4)",
           "st(5)", "st(6)", "st(7)", "memory", "cc");
 }
+/* non-unit diagonal: init = x[j]·A(j,j); the diagonal A(j,j) is at *dg_, x[j]
+ * at *dst. The accumulator is zeroed and one MAC over (dg, x[j]) seeds it. */
+__attribute__((always_inline))
+static inline void ytpmv_dot_nu(TC *restrict dst, const TC *restrict ap_,
+                                const TC *restrict x_, ptrdiff_t cnt,
+                                const TC *restrict dg_)
+{
+    const long double *a = (const long double *)ap_;
+    const long double *x = (const long double *)x_;
+    const long double *g = (const long double *)dg_;
+    long double *d = (long double *)dst;
+    __asm__ __volatile__ (
+        "fldz\n\t"                 /* sre = 0 */
+        "fldz\n\t"                 /* sim = 0, st1 = sre */
+        "fldt (%[d])\n\t"          /* x[j].re */
+        "fldt 16(%[d])\n\t"        /* x[j].im */
+        "fldt (%[g])\n\t"          /* A(j,j).re */
+        "fldt 16(%[g])\n\t"        /* A(j,j).im */
+        YTPMV_MAC                  /* sre,sim = Re/Im(A(j,j)·x[j]) */
+        "test %[i],%[i]\n\t"
+        "jle 2f\n\t"
+        "1:\n\t"
+        "fldt (%[x])\n\t"
+        "fldt 16(%[x])\n\t"
+        "fldt (%[a])\n\t"
+        "fldt 16(%[a])\n\t"
+        YTPMV_MAC
+        "add $32,%[a]\n\t"
+        "add $32,%[x]\n\t"
+        "sub $1,%[i]\n\t"
+        "jnz 1b\n\t"
+        "2:\n\t"
+        "fstpt 16(%[d])\n\t"       /* sim -> dst.im */
+        "fstpt (%[d])\n\t"         /* sre -> dst.re */
+        : [a] "+r"(a), [x] "+r"(x), [i] "+r"(cnt)
+        : [d] "r"(d), [g] "r"(g)
+        : "st", "st(1)", "st(2)", "st(3)", "st(4)",
+          "st(5)", "st(6)", "st(7)", "memory", "cc");
+}
+#undef YTPMV_MAC
 #else
 __attribute__((noinline))
-static void ytpmv_dot(TC *restrict dst, const TC *restrict ap_,
-                      const TC *restrict x_, ptrdiff_t cnt, TC init)
+static void ytpmv_dot_u(TC *restrict dst, const TC *restrict ap_,
+                        const TC *restrict x_, ptrdiff_t cnt)
 {
     const long double *restrict a = (const long double *)ap_;
     const long double *restrict x = (const long double *)x_;
+    long double sr = __real__ *dst, si = __imag__ *dst;
+    for (ptrdiff_t i = 0; i < cnt; ++i) {
+        const long double ar = a[0], ai = a[1];
+        const long double xr = x[0], xs = x[1];
+        sr += ar * xr - ai * xs;
+        si += ar * xs + ai * xr;
+        a += 2; x += 2;
+    }
+    *dst = sr + si * 1.0iL;
+}
+__attribute__((noinline))
+static void ytpmv_dot_nu(TC *restrict dst, const TC *restrict ap_,
+                         const TC *restrict x_, ptrdiff_t cnt,
+                         const TC *restrict dg_)
+{
+    const long double *restrict a = (const long double *)ap_;
+    const long double *restrict x = (const long double *)x_;
+    const TC init = (*dst) * (*dg_);
     long double sr = __real__ init, si = __imag__ init;
     for (ptrdiff_t i = 0; i < cnt; ++i) {
         const long double ar = a[0], ai = a[1];
@@ -371,8 +437,8 @@ static void ytpmv_core(
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     /* forward dot over x[0..j); ap[kk-j] pairs with x[0] */
                     if (noconj) {
-                        TC init = nounit ? x[j] * ap[kk] : x[j];
-                        ytpmv_dot(&x[j], &ap[kk - j], &x[0], j, init);
+                        if (nounit) ytpmv_dot_nu(&x[j], &ap[kk - j], &x[0], j, &ap[kk]);
+                        else        ytpmv_dot_u(&x[j], &ap[kk - j], &x[0], j);
                     } else {
                         TC tmp = x[j];
                         if (nounit) tmp *= cconj(ap[kk]);
@@ -386,8 +452,8 @@ static void ytpmv_core(
                 for (ptrdiff_t j = 0; j < n; ++j) {
                     /* forward dot over x[j+1..n); ap[kk+1] pairs with x[j+1] */
                     if (noconj) {
-                        TC init = nounit ? x[j] * ap[kk] : x[j];
-                        ytpmv_dot(&x[j], &ap[kk + 1], &x[j + 1], n - 1 - j, init);
+                        if (nounit) ytpmv_dot_nu(&x[j], &ap[kk + 1], &x[j + 1], n - 1 - j, &ap[kk]);
+                        else        ytpmv_dot_u(&x[j], &ap[kk + 1], &x[j + 1], n - 1 - j);
                     } else {
                         TC tmp = x[j];
                         if (nounit) tmp *= cconj(ap[kk]);
