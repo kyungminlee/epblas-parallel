@@ -40,6 +40,69 @@ typedef _Complex long double TC;
 static const TC ZERO = 0.0L + 0.0Li;
 static inline TC cconj(TC z) { return ~z; }
 
+/* Upper-Trans non-conj inner solve, x87 inline asm: returns
+ * *xi − Σ_{k=0}^{m-1} ai[k]·x[k] (the pre-divide row value) with the running
+ * re/im accumulator pair held resident on the x87 stack across the whole
+ * k-loop, initialised from *xi (mirrors gfortran's t=x[i] preload — no extra
+ * C-side complex add per row). Body transcribed from gfortran/netlib's ytrsv
+ * U-T loop (single t.re/t.im pair, 4 loads + 2 dups, peaks 8-deep, no operand
+ * reloads). The C `_Complex` 2-chain this replaces spills operands inside
+ * ytrsv_serial_'s scaffolding (x87 register-residency antipattern, trigger 7),
+ * leaving ~6% to gfortran on U-T; this matches gfortran's schedule. Verified
+ * bit-close to a naive single-running sum. ai/x reinterpreted as interleaved
+ * re/im. */
+#if defined(__GNUC__) && defined(__x86_64__)
+static inline TC ytrsv_ut_solve(const TC *ai_, const TC *x_, const TC *xi,
+                                ptrdiff_t m) {
+    if (m <= 0) return *xi;
+    const long double *a = (const long double *)ai_;
+    const long double *x = (const long double *)x_;
+    const long double *xip = (const long double *)xi;
+    long double tre, tim;
+    __asm__ (
+        "fldt (%[xi])\n\t"         /* st0 = tre = xi.re        */
+        "fldt 16(%[xi])\n\t"       /* st0 = tim = xi.im, st1 = tre */
+        "1:\n\t"
+        "fldt (%[x])\n\t"
+        "fldt 16(%[x])\n\t"
+        "fldt (%[a])\n\t"
+        "fldt 16(%[a])\n\t"
+        "fld %%st(1)\n\t"
+        "fmul %%st(4),%%st\n\t"
+        "fld %%st(1)\n\t"
+        "fmul %%st(4),%%st\n\t"
+        "fsubrp %%st,%%st(1)\n\t"
+        "fsubrp %%st,%%st(6)\n\t"
+        "fxch %%st(1)\n\t"
+        "fmulp %%st,%%st(2)\n\t"
+        "fmulp %%st,%%st(2)\n\t"
+        "faddp %%st,%%st(1)\n\t"
+        "fsubrp %%st,%%st(1)\n\t"
+        "add $32,%[a]\n\t"
+        "add $32,%[x]\n\t"
+        "sub $1,%[i]\n\t"
+        "jnz 1b\n\t"
+        "fstpt %[tim]\n\t"
+        "fstpt %[tre]\n\t"
+        : [tre] "=m"(tre), [tim] "=m"(tim),
+          [a] "+r"(a), [x] "+r"(x), [i] "+r"(m)
+        : [xi] "r"(xip)
+        : "st", "st(1)", "st(2)", "st(3)", "st(4)",
+          "st(5)", "st(6)", "st(7)", "memory", "cc");
+    return tre + tim * 1.0iL;
+}
+#else
+/* Portable fallback: two-chain K-unroll (the prior HEAD inner loop). */
+static inline TC ytrsv_ut_solve(const TC *ai, const TC *x, const TC *xi,
+                                ptrdiff_t m) {
+    TC t0 = *xi, t1 = ZERO;
+    ptrdiff_t k = 0;
+    for (; k + 1 < m; k += 2) { t0 -= ai[k] * x[k]; t1 -= ai[k + 1] * x[k + 1]; }
+    if (k < m) t0 -= ai[k] * x[k];
+    return t0 + t1;
+}
+#endif
+
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
@@ -196,15 +259,8 @@ void ytrsv_serial_(
                     }
                 } else {
                     for (ptrdiff_t i = 0; i < n; ++i) {
-                        TC t0 = x[i], t1 = ZERO;
                         const TC *ai = &A_(0, i);
-                        ptrdiff_t k = 0;
-                        for (; k + 1 < i; k += 2) {
-                            t0 -= ai[k]     * x[k];
-                            t1 -= ai[k + 1] * x[k + 1];
-                        }
-                        if (k < i) t0 -= ai[k] * x[k];
-                        TC t = t0 + t1;
+                        TC t = ytrsv_ut_solve(ai, x, &x[i], i);
                         if (nounit) t /= ai[i];
                         x[i] = t;
                     }
