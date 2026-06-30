@@ -73,6 +73,22 @@ void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, qgemm_TR alpha,
                     const qgemm_TR *a, ptrdiff_t lda, const qgemm_TR *b, ptrdiff_t ldb,
                     qgemm_TR *c, ptrdiff_t ldc);
 
+/* TA='T',TB='T' path: unblocked plain dot over the [j_start,j_end) column band
+ * (one __float128 accumulator per C element, no packing/alloc). At small N the
+ * dot is short, so the soft-float fadd latency a 2×2 tile's four chains would
+ * hide is a non-issue, while the tile's extra loads + wider strided-B footprint
+ * cost more than they buy — the plain dot wins. Beats the blocked packed path
+ * below the qgemm_tt_small gate; threaded over the j-axis in qgemm_ parallel. */
+void qgemm_tt_unblocked(ptrdiff_t j_start, ptrdiff_t j_end,
+                        ptrdiff_t m, ptrdiff_t k, qgemm_TR alpha,
+                        const qgemm_TR *a, ptrdiff_t lda,
+                        const qgemm_TR *b, ptrdiff_t ldb,
+                        qgemm_TR *c, ptrdiff_t ldc);
+
+/* True when a TT problem is small enough that the unblocked plain dot beats the
+ * blocked packed path (packing's fixed alloc+sweep can't amortize). */
+int qgemm_tt_small(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k);
+
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
  * invoke from inside another function's `#pragma omp parallel` region. Shares
  * the ptrdiff_t core ABI of qgemm_core so callers already inside a parallel

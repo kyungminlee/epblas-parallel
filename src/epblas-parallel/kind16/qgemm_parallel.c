@@ -79,6 +79,30 @@ static void qgemm_core(
         return;
     }
 
+    /* TA='T',TB='T', small problems: unblocked plain dot — no packing, no
+     * alloc. Beats the blocked packed path where the alloc+pack fixed cost (the
+     * gfortran reference doesn't pay it) can't amortize; large TT falls through
+     * to the packed path below. Threaded by splitting the j-axis into per-thread
+     * contiguous bands (the kernel handles its own odd-j tail, so bands need no
+     * alignment). */
+    if (ta == 'T' && tb == 'T' && qgemm_tt_small(m, n, k)) {
+#ifdef _OPENMP
+        #pragma omp parallel
+        {
+            const ptrdiff_t nt  = omp_get_num_threads();
+            const ptrdiff_t tid = omp_get_thread_num();
+            const ptrdiff_t base = n / nt, rem = n % nt;
+            const ptrdiff_t j0 = tid * base + (tid < rem ? tid : rem);
+            const ptrdiff_t j1 = j0 + base + (tid < rem ? 1 : 0);
+            if (j1 > j0)
+                qgemm_tt_unblocked(j0, j1, m, k, alpha, a, lda, b, ldb, c, ldc);
+        }
+#else
+        qgemm_tt_unblocked(0, n, m, k, alpha, a, lda, b, ldb, c, ldc);
+#endif
+        return;
+    }
+
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
 #ifdef _OPENMP

@@ -238,6 +238,59 @@ void qgemm_macro_kernel(ptrdiff_t ib, ptrdiff_t jb, ptrdiff_t pb, TR alpha,
     }
 }
 
+/* ── Small-N path: TA='T' (≡'C'), TB='T' (≡'C') — unblocked plain dot ──
+ *
+ * C[i,j] = alpha * sum_l A^op[i,l] B^op[l,j], with A^op[i,l] = a[i*lda+l]
+ * (stride-1 along the contraction l) and B^op[l,j] = b[l*ldb+j] (strided by
+ * ldb along l). A plain single-accumulator dot per (i,j) — NO aligned_alloc,
+ * NO packing pass.
+ *
+ * Used ONLY for small problems (see QGEMM_TT_UNBLOCK_FLOPS in qgemm_serial /
+ * qgemm_core). There the blocked packed path's fixed cost — a multi-MB
+ * aligned_alloc of Bp plus a packing sweep — cannot amortize over the few
+ * flops, and it loses the TT cells to the gfortran reference (par/mig was
+ * ~1.04-1.08 at N=64/128). This kernel has neither cost and matches the
+ * reference (par/mig ~1.00-1.015), beating ob too.
+ *
+ * Why a single accumulator and not a 2×2 register tile: the dot here is
+ * SHORT (small k), so the soft-float fadd-latency the packed kernel's four
+ * chains hide is a non-issue, while a 2×2 tile's extra loads + wider strided-B
+ * footprint measurably REGRESS it (par/mig 1.04 vs the plain dot's 1.005 at
+ * N=64). Once k grows the four-chain ILP does pay — that is exactly the large-N
+ * regime the gate hands back to the packed path. Mirrors ygemm's unblocked
+ * tt_plain core: for compute-bound arithmetic with no SIMD, the reference-
+ * shaped dot wins at the small sizes where packing is pure overhead.
+ *
+ * (TN takes qgemm_fast_col instead: there BOTH operands are stride-1 along l,
+ * so a single-column dot already streams perfectly — TT cannot, B is strided.) */
+void qgemm_tt_unblocked(ptrdiff_t j_start, ptrdiff_t j_end,
+                        ptrdiff_t m, ptrdiff_t k, TR alpha,
+                        const TR *a, ptrdiff_t lda,
+                        const TR *b, ptrdiff_t ldb,
+                        TR *c, ptrdiff_t ldc)
+{
+    for (ptrdiff_t j = j_start; j < j_end; ++j) {
+        TR *cj = &c[(size_t)j * ldc];
+        for (ptrdiff_t i = 0; i < m; ++i) {
+            const TR *ai = &a[(size_t)i * lda];
+            TR acc = 0.0Q;
+            for (ptrdiff_t l = 0; l < k; ++l) acc += ai[l] * b[(size_t)l * ldb + j];
+            cj[i] += alpha * acc;
+        }
+    }
+}
+
+/* Gate: use the unblocked plain dot for small TT problems, the blocked packed
+ * path otherwise. The packed path's fixed overhead (multi-MB Bp alloc + pack)
+ * only amortizes once the flop count is large; below the threshold the plain
+ * dot wins (and its single-accumulator latency is hidden by the short k). The
+ * threshold sits between the N=128 cube (plain wins) and the N=256 cube
+ * (packed wins). */
+#define QGEMM_TT_UNBLOCK_FLOPS 8000000.0  /* m*n*k product (not 2*flops) */
+int qgemm_tt_small(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k) {
+    return (double)m * (double)n * (double)k < QGEMM_TT_UNBLOCK_FLOPS;
+}
+
 /* ── Fast path: TA = 'T' (≡ 'C' for real), TB = 'N', one C-column ── */
 void qgemm_fast_col(ptrdiff_t j2, ptrdiff_t m, ptrdiff_t k, TR alpha,
                     const TR *a, ptrdiff_t lda, const TR *b, ptrdiff_t ldb,
@@ -279,6 +332,14 @@ void qgemm_serial(
     if (ta == 'T' && tb == 'N') {
         for (ptrdiff_t j2 = 0; j2 < n; ++j2)
             qgemm_fast_col(j2, m, k, alpha, a, lda, b, ldb, c, ldc);
+        return;
+    }
+
+    /* TT small problems: unblocked plain dot — no alloc, no packing. Beats the
+     * blocked packed path where its alloc+pack fixed cost can't amortize and
+     * the gfortran reference wins; large TT falls through to the packed path. */
+    if (ta == 'T' && tb == 'T' && qgemm_tt_small(m, n, k)) {
+        qgemm_tt_unblocked(0, n, m, k, alpha, a, lda, b, ldb, c, ldc);
         return;
     }
 
