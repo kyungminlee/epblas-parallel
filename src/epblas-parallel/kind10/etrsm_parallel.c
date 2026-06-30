@@ -50,8 +50,6 @@ static void etrsm_core(
         return;
     }
 #endif
-    const TR alpha = *alpha_;
-
     const bool lside = (blas_up(side)   == 'L');
     const bool upper = (blas_up(uplo)   == 'U');
     const char TRANS  = blas_up(transa);
@@ -60,16 +58,7 @@ static void etrsm_core(
 
     if (m == 0 || n == 0) return;
 
-    /* α pre-scale of B (mirrors trsm_{L,R}.c GEMM_BETA pass). */
-    if (alpha != 1.0L) egemm_beta_prepass(m, n, alpha, b, ldb);
-    if (alpha == 0.0L) return;
-
     const ptrdiff_t K_eff = lside ? m : n;
-    ptrdiff_t MC, KC, NC;
-    egemm_choose_blocks(K_eff, &MC, &KC, &NC);
-
-    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
 
 #ifdef _OPENMP
     ptrdiff_t nthreads = omp_get_max_threads();
@@ -86,6 +75,43 @@ static void etrsm_core(
     const ptrdiff_t partition_axis = lside ? n : m;
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
+
+    /* Serial: run the single-band worker directly, opening no parallel
+     * region. The num_threads(1) team fork/join is pure per-call overhead
+     * here — uniform ~5% at N=64, shrinking with N — and ob (no OpenMP) pays
+     * none of it. etrsm_serial does its own α pre-scale, so delegate the
+     * whole call (α included) before we touch B, else B would be scaled
+     * twice. */
+    if (nthreads == 1) {
+        etrsm_serial(side, uplo, transa, diag, m, n, alpha_, a, lda, b, ldb);
+        return;
+    }
+
+    const TR alpha = *alpha_;
+    /* α pre-scale of B (mirrors trsm_{L,R}.c GEMM_BETA pass). */
+    if (alpha != 1.0L) egemm_beta_prepass(m, n, alpha, b, ldb);
+    if (alpha == 0.0L) return;
+
+    ptrdiff_t MC, KC, NC;
+    egemm_choose_blocks(K_eff, &MC, &KC, &NC);
+
+    /* Bound the per-thread pack buffers to what one band actually packs, not
+     * the full cache-block params. The band steps by MC/KC over the triangular
+     * axis (K_eff) and by NC over its free slice, every block capped by the
+     * remaining extent — so a thread never packs more than min(block, dim).
+     * Bp holds a single NC-block at a time (the band reuses it across its
+     * js+=NC sweep), so it need only cover min(NC, free_axis) — bound by the
+     * whole partition axis, NOT the per-thread chunk: num_threads() is a
+     * request and a short team would make each band (hence a single NC-block)
+     * wider than chunk, overflowing Bp. At N=64 the unbounded sizes were ~1MB
+     * Ap + ~2MB Bp (both past glibc's 128KB mmap threshold → a per-call
+     * mmap/munmap + page-zeroing, ×nthreads) for a 64×64 corner; bounding keeps
+     * them in the malloc arena and is a no-op once the dims exceed the blocks. */
+    const ptrdiff_t mc_eff = (MC < K_eff) ? MC : K_eff;
+    const ptrdiff_t kc_eff = (KC < K_eff) ? KC : K_eff;
+    const ptrdiff_t nc_eff = (NC < partition_axis) ? NC : partition_axis;
+    const size_t ap_bytes = (size_t)blas_round_up(mc_eff, MR) * (size_t)kc_eff * sizeof(TR);
+    const size_t bp_bytes = (size_t)kc_eff * (size_t)blas_round_up(nc_eff, NR) * sizeof(TR);
 
     /* Per-thread Ap/Bp scratch, allocated BEFORE the region: an in-region
      * alloc failure that skips a thread's loop body would deadlock the

@@ -34,6 +34,15 @@ void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etri_TR alpha,
                       const etri_TR *Ap, const etri_TR *Bp,
                       etri_TR *C, ptrdiff_t ldc);
 
+/* C -= Ap·Bp over one packed tile — the alpha = -1 trailing update the
+ * triangular solve/trmm drivers issue. Negate-specialized: the per-element
+ * store is a bare subtract (no alpha multiply), matching OpenBLAS's
+ * constant-propagated kernel. Use this instead of etri_gemm_kernel(...,-1,...)
+ * on the hot trailing-GEMM path. */
+void etri_gemm_kernel_msub(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+                           const etri_TR *Ap, const etri_TR *Bp,
+                           etri_TR *C, ptrdiff_t ldc);
+
 /* C := alpha·Ap·Bp over one packed tile (overwrite): zero C then accumulate.
  * Mirrors OpenBLAS's GEMM_KERNEL(beta=0) call inside the TRMM driver. */
 void etri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etri_TR alpha,

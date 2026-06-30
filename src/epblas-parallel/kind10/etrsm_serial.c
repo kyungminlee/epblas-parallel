@@ -100,7 +100,6 @@ void etrsm_L_band(bool upper, bool trans, bool unit,
                         TR *b, ptrdiff_t ldb,
                         TR *Ap, TR *Bp)
 {
-    const TR dm1 = -1.0L;
     /* Pick which (uplo, trans) branch (forward vs backward ls). Forward
      * = !UPPER+!TRANS || UPPER+TRANS (ls walks 0..m). */
     const ptrdiff_t forward = (!upper && !trans) || (upper && trans);
@@ -172,7 +171,7 @@ void etrsm_L_band(bool upper, bool trans, bool unit,
                         etri_ncopy(min_l, min_i,
                                           &a[(size_t)ls + (size_t)is * lda], lda, Ap);
                     }
-                    etri_gemm_kernel(min_i, min_j, min_l, dm1,
+                    etri_gemm_kernel_msub(min_i, min_j, min_l,
                                        Ap, Bp,
                                        &b[(size_t)is + (size_t)js * ldb], ldb);
                 }
@@ -241,7 +240,7 @@ void etrsm_L_band(bool upper, bool trans, bool unit,
                         etri_ncopy(min_l, min_i,
                                           &a[(size_t)(ls - min_l) + (size_t)is * lda], lda, Ap);
                     }
-                    etri_gemm_kernel(min_i, min_j, min_l, dm1,
+                    etri_gemm_kernel_msub(min_i, min_j, min_l,
                                        Ap, Bp,
                                        &b[(size_t)is + (size_t)js * ldb], ldb);
                 }
@@ -258,7 +257,6 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                         TR *b, ptrdiff_t ldb,
                         TR *Ap, TR *Bp)
 {
-    const TR dm1 = -1.0L;
     const ptrdiff_t m_band = m_hi - m_lo;
     if (m_band <= 0) return;
     /* SIDE=R forward direction = UPPER+!TRANS || !UPPER+TRANS (js walks
@@ -301,7 +299,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                                           &a[(size_t)jjs + (size_t)ls * lda], lda,
                                           sb + (size_t)min_l * (jjs - js));
                     }
-                    etri_gemm_kernel(min_i, min_jj, min_l, dm1,
+                    etri_gemm_kernel_msub(min_i, min_jj, min_l,
                                        sa, sb + (size_t)min_l * (jjs - js),
                                        &b[(size_t)m_lo + (size_t)jjs * ldb], ldb);
                 }
@@ -311,7 +309,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                     if (min_i > MC) min_i = MC;
                     etri_tcopy(min_l, min_i,
                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
-                    etri_gemm_kernel(min_i, min_j, min_l, dm1,
+                    etri_gemm_kernel_msub(min_i, min_j, min_l,
                                        sa, sb,
                                        &b[(size_t)(m_lo + is) + (size_t)js * ldb], ldb);
                 }
@@ -353,7 +351,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                                           &a[(size_t)(ls + min_l + jjs) + (size_t)ls * lda], lda,
                                           sb + (size_t)min_l * (min_l + jjs));
                     }
-                    etri_gemm_kernel(min_i, min_jj, min_l, dm1,
+                    etri_gemm_kernel_msub(min_i, min_jj, min_l,
                                        sa, sb + (size_t)min_l * (min_l + jjs),
                                        &b[(size_t)m_lo + (size_t)(min_l + ls + jjs) * ldb], ldb);
                 }
@@ -370,7 +368,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                                        &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb,
                                        /*offset=*/0);
                     if (min_j - min_l + js - ls > 0) {
-                        etri_gemm_kernel(min_i, min_j - min_l + js - ls, min_l, dm1,
+                        etri_gemm_kernel_msub(min_i, min_j - min_l + js - ls, min_l,
                                            sa, sb + (size_t)min_l * min_l,
                                            &b[(size_t)(m_lo + is) + (size_t)(min_l + ls) * ldb], ldb);
                     }
@@ -406,7 +404,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                                           &a[(size_t)(jjs - min_j) + (size_t)ls * lda], lda,
                                           sb + (size_t)min_l * (jjs - js));
                     }
-                    etri_gemm_kernel(min_i, min_jj, min_l, dm1,
+                    etri_gemm_kernel_msub(min_i, min_jj, min_l,
                                        sa, sb + (size_t)min_l * (jjs - js),
                                        &b[(size_t)m_lo + (size_t)(jjs - min_j) * ldb], ldb);
                 }
@@ -416,7 +414,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                     if (min_i > MC) min_i = MC;
                     etri_tcopy(min_l, min_i,
                                       &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb, sa);
-                    etri_gemm_kernel(min_i, min_j, min_l, dm1,
+                    etri_gemm_kernel_msub(min_i, min_j, min_l,
                                        sa, sb,
                                        &b[(size_t)(m_lo + is) + (size_t)(js - min_j) * ldb], ldb);
                 }
@@ -466,7 +464,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                                           &a[(size_t)(js - min_j + jjs) + (size_t)ls * lda], lda,
                                           sb + (size_t)min_l * jjs);
                     }
-                    etri_gemm_kernel(min_i, min_jj, min_l, dm1,
+                    etri_gemm_kernel_msub(min_i, min_jj, min_l,
                                        sa, sb + (size_t)min_l * jjs,
                                        &b[(size_t)m_lo + (size_t)(js - min_j + jjs) * ldb], ldb);
                 }
@@ -483,7 +481,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                                        &b[(size_t)(m_lo + is) + (size_t)ls * ldb], ldb,
                                        /*offset=*/0);
                     if (min_j - js + ls > 0) {
-                        etri_gemm_kernel(min_i, min_j - js + ls, min_l, dm1,
+                        etri_gemm_kernel_msub(min_i, min_j - js + ls, min_l,
                                            sa, sb,
                                            &b[(size_t)(m_lo + is) + (size_t)(js - min_j) * ldb], ldb);
                     }
@@ -522,11 +520,23 @@ void etrsm_serial(
     if (alpha == 0.0L) return;
 
     const ptrdiff_t K_eff = lside ? m : n;
+    const ptrdiff_t free_dim = lside ? n : m;
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
+    /* Bound the pack buffers to the actual problem, not the full cache-block
+     * params. The band drivers step by MC/KC over the triangular axis (K_eff)
+     * and by NC over the free axis, with every block capped by the remaining
+     * extent — so a small matrix never packs more than min(block, dim). At
+     * N=64 the unbounded sizes were ~1MB Ap + ~2MB Bp (both past glibc's
+     * 128KB mmap threshold → a per-call mmap/munmap + page-zeroing) for a
+     * 64×64 corner; bounding keeps them in the malloc arena (no syscall, no
+     * fault) and is a no-op once the dims exceed the blocks (N≥256). */
+    const ptrdiff_t mc_eff = (MC < K_eff)    ? MC : K_eff;
+    const ptrdiff_t kc_eff = (KC < K_eff)    ? KC : K_eff;
+    const ptrdiff_t nc_eff = (NC < free_dim) ? NC : free_dim;
+    const size_t ap_bytes = (size_t)blas_round_up(mc_eff, MR) * (size_t)kc_eff * sizeof(TR);
+    const size_t bp_bytes = (size_t)kc_eff * (size_t)blas_round_up(nc_eff, NR) * sizeof(TR);
     TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
     TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     if (Ap && Bp) {

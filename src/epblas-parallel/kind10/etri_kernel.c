@@ -27,11 +27,21 @@ typedef etri_TR TR;
 #define MR 2
 #define NR 2
 
-void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
-                        TR alpha,
-                        const TR *Ap,
-                        const TR *Bp,
-                        TR *C, ptrdiff_t ldc)
+/* Shared body for both the general (C += alpha·Ap·Bp) and the negate-
+ * specialized (C -= Ap·Bp) kernels. `negate` is a compile-time constant at
+ * each instantiation, so GCC folds the store: the negate=1 clone drops the
+ * per-element `alpha *` multiply (and its alpha reload) to a bare `fsubp`,
+ * matching what OpenBLAS gets for free from IPA constant-propagation when its
+ * solve and GEMM live in one TU (the alpha = dm1 = -1 callers). `C += (-1)·r`
+ * and `C -= r` are bit-identical — negation is exact in fp80, so subtraction
+ * carries the single identical rounding. The multiply elided here is amortized
+ * over bk, so it is the small-N (shallow trailing-GEMM) cost that closes the
+ * uniform ~4% par/ob gap at N=64. */
+static inline __attribute__((always_inline)) void
+etri_gemm_body(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+               TR alpha, int negate,
+               const TR *Ap, const TR *Bp,
+               TR *C, ptrdiff_t ldc)
 {
     /* Walk B in NR=2-col panels. */
     const TR *ptrba_base = Ap;
@@ -79,10 +89,12 @@ void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                 ptrbb_loc += 2;
             }
 
-            C0[0] += alpha * r0;
-            C0[1] += alpha * r1;
-            C1[0] += alpha * r2;
-            C1[1] += alpha * r3;
+            if (negate) {
+                C0[0] -= r0; C0[1] -= r1; C1[0] -= r2; C1[1] -= r3;
+            } else {
+                C0[0] += alpha * r0; C0[1] += alpha * r1;
+                C1[0] += alpha * r2; C1[1] += alpha * r3;
+            }
             C0 += 2;
             C1 += 2;
         }
@@ -99,8 +111,8 @@ void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                 ptrba += 1;
                 ptrbb_loc += 2;
             }
-            C0[0] += alpha * r0;
-            C1[0] += alpha * r1;
+            if (negate) { C0[0] -= r0; C1[0] -= r1; }
+            else        { C0[0] += alpha * r0; C1[0] += alpha * r1; }
             C0 += 1;
             C1 += 1;
         }
@@ -125,8 +137,8 @@ void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                 ptrba += 2;
                 ptrbb_loc += 1;
             }
-            C0[0] += alpha * r0;
-            C0[1] += alpha * r1;
+            if (negate) { C0[0] -= r0; C0[1] -= r1; }
+            else        { C0[0] += alpha * r0; C0[1] += alpha * r1; }
             C0 += 2;
         }
         for (ptrdiff_t i = 0; i < (bm & 1); ++i) {
@@ -137,12 +149,42 @@ void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                 ptrba += 1;
                 ptrbb_loc += 1;
             }
-            C0[0] += alpha * r0;
+            if (negate) C0[0] -= r0;
+            else        C0[0] += alpha * r0;
             C0 += 1;
         }
         ptrbb += bk;           /* advance over single-col B panel */
         Cj += ldc;
     }
+}
+
+/* General C += alpha·Ap·Bp. Instantiates the body with negate=0, so the
+ * subtract path folds away — this function is byte-for-byte the original
+ * (etrmm and any non-(-1) alpha caller land here, unchanged). */
+void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+                        TR alpha,
+                        const TR *Ap,
+                        const TR *Bp,
+                        TR *C, ptrdiff_t ldc)
+{
+    etri_gemm_body(bm, bn, bk, alpha, 0, Ap, Bp, C, ldc);
+}
+
+/* C -= Ap·Bp — the alpha = -1 trailing update every triangular solve/trmm
+ * driver issues. A SEPARATE function (not a branch inside etri_gemm_kernel):
+ * instantiating the body with the compile-time negate=1 folds the per-element
+ * `alpha *` multiply and its alpha reload down to a bare `fsubp`, so this
+ * function is no larger than the original. Routing the solve's calls here
+ * (rather than dispatching on `alpha == -1` inside one fattened kernel) keeps
+ * each kernel compact — carrying both store paths in one function bloats it
+ * and regressed the icache-bound small-N cells. This is what OpenBLAS gets
+ * for free via IPA constant-propagation (its solve and GEMM share a TU); we
+ * do it explicitly across the etri_kernel.c boundary. */
+void etri_gemm_kernel_msub(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+                           const TR *Ap, const TR *Bp,
+                           TR *C, ptrdiff_t ldc)
+{
+    etri_gemm_body(bm, bn, bk, -1.0L, 1, Ap, Bp, C, ldc);
 }
 
 void etri_ncopy(ptrdiff_t m, ptrdiff_t n,
