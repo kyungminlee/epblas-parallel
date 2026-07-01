@@ -91,6 +91,51 @@ static inline TC ytrsv_ut_solve(const TC *ai_, const TC *x_, const TC *xi,
           "st(5)", "st(6)", "st(7)", "memory", "cc");
     return tre + tim * 1.0iL;
 }
+/* Strided-x twin of ytrsv_ut_solve: same gfortran-tight single-accumulator
+ * x87 schedule, but x walks by a runtime byte step (incx·sizeof(TC)) instead of
+ * the fixed +32. Single running forward sum initialised from *xi, so the result
+ * is BIT-IDENTICAL to the prior strided single-accumulator U-T loop — this only
+ * tightens the instruction schedule (the strided walk was leaving ~5% to
+ * gfortran, the exact trigger-7 gap the incx==1 asm already closed). */
+static inline TC ytrsv_ut_solve_str(const TC *ai_, const TC *x_, const TC *xi,
+                                    ptrdiff_t m, ptrdiff_t xstep) {
+    if (m <= 0) return *xi;
+    const long double *a = (const long double *)ai_;
+    const long double *x = (const long double *)x_;
+    const long double *xip = (const long double *)xi;
+    long double tre, tim;
+    __asm__ (
+        "fldt (%[xi])\n\t"         /* st0 = tre = xi.re        */
+        "fldt 16(%[xi])\n\t"       /* st0 = tim = xi.im, st1 = tre */
+        "1:\n\t"
+        "fldt (%[x])\n\t"
+        "fldt 16(%[x])\n\t"
+        "fldt (%[a])\n\t"
+        "fldt 16(%[a])\n\t"
+        "fld %%st(1)\n\t"
+        "fmul %%st(4),%%st\n\t"
+        "fld %%st(1)\n\t"
+        "fmul %%st(4),%%st\n\t"
+        "fsubrp %%st,%%st(1)\n\t"
+        "fsubrp %%st,%%st(6)\n\t"
+        "fxch %%st(1)\n\t"
+        "fmulp %%st,%%st(2)\n\t"
+        "fmulp %%st,%%st(2)\n\t"
+        "faddp %%st,%%st(1)\n\t"
+        "fsubrp %%st,%%st(1)\n\t"
+        "add $32,%[a]\n\t"
+        "add %[xs],%[x]\n\t"
+        "sub $1,%[i]\n\t"
+        "jnz 1b\n\t"
+        "fstpt %[tim]\n\t"
+        "fstpt %[tre]\n\t"
+        : [tre] "=m"(tre), [tim] "=m"(tim),
+          [a] "+r"(a), [x] "+r"(x), [i] "+r"(m)
+        : [xi] "r"(xip), [xs] "r"(xstep * 32)
+        : "st", "st(1)", "st(2)", "st(3)", "st(4)",
+          "st(5)", "st(6)", "st(7)", "memory", "cc");
+    return tre + tim * 1.0iL;
+}
 #else
 /* Portable fallback: two-chain K-unroll (the prior HEAD inner loop). */
 static inline TC ytrsv_ut_solve(const TC *ai, const TC *x, const TC *xi,
@@ -100,6 +145,14 @@ static inline TC ytrsv_ut_solve(const TC *ai, const TC *x, const TC *xi,
     for (; k + 1 < m; k += 2) { t0 -= ai[k] * x[k]; t1 -= ai[k + 1] * x[k + 1]; }
     if (k < m) t0 -= ai[k] * x[k];
     return t0 + t1;
+}
+/* Portable strided twin: single running forward sum (bit-identical order). */
+static inline TC ytrsv_ut_solve_str(const TC *ai, const TC *x, const TC *xi,
+                                    ptrdiff_t m, ptrdiff_t xstep) {
+    TC t = *xi;
+    ptrdiff_t xk = 0;
+    for (ptrdiff_t k = 0; k < m; ++k) { t -= ai[k] * x[xk]; xk += xstep; }
+    return t;
 }
 #endif
 
@@ -221,10 +274,19 @@ void ytrsv_serial_(
         } else {
             const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
-                /* Inner walk backward to match the outer's descent — under
-                 * memory pressure the forward variant collapses to ~0.3×
-                 * because x falls out of L1 between outer iters. See
-                 * etrsv LTN / Addendum 18. */
+                /* L-T non-conj: walk the subdiagonal FORWARD (k=i+1..n-1) via
+                 * the same tight register-resident x87 helper the U-T path
+                 * uses. The complex vector fits L1 at these sizes
+                 * (N·32B ≤ 16KB < 32KB), so the "forward collapses under memory
+                 * pressure" concern (etrsv LTN / Addendum 18, a large-N real
+                 * case) doesn't apply, and forward wins on prefetch — this
+                 * matches gfortran's forward Trans loop and beats both refs at
+                 * N≥256, ~1.01 at N=128 (was a single-accumulator backward C
+                 * loop losing ~3-5% to gfortran, trigger 7). Backward C asm was
+                 * measured ~3% WORSE, confirming direction (not the schedule)
+                 * was the gap. The conj path (L-C) keeps the backward
+                 * single-accumulator loop — its extra fchs disrupts scheduling
+                 * (same reason U-C is not unrolled below). */
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     TC t = x[i];
                     const TC *ai = &A_(0, i);
@@ -232,7 +294,7 @@ void ytrsv_serial_(
                         for (ptrdiff_t k = n - 1; k > i; --k) t -= cconj(ai[k]) * x[k];
                         if (nounit) t /= cconj(ai[i]);
                     } else {
-                        for (ptrdiff_t k = n - 1; k > i; --k) t -= ai[k] * x[k];
+                        t = ytrsv_ut_solve(&ai[i + 1], &x[i + 1], &x[i], n - 1 - i);
                         if (nounit) t /= ai[i];
                     }
                     x[i] = t;
@@ -323,18 +385,28 @@ void ytrsv_serial_(
                     x[ix] = t;
                     ix -= incx;
                 }
-            } else {
+            } else if (conj_a) {
                 ptrdiff_t ix = kx;
                 for (ptrdiff_t i = 0; i < n; ++i) {
                     const TC *ai = &A_(0, i);
                     TC t = x[ix];
                     ptrdiff_t xk = kx;
                     for (ptrdiff_t k = 0; k < i; ++k) {
-                        const TC aki = conj_a ? cconj(ai[k]) : ai[k];
-                        t -= aki * x[xk];
+                        t -= cconj(ai[k]) * x[xk];
                         xk += incx;
                     }
-                    if (nounit) t /= (conj_a ? cconj(ai[i]) : ai[i]);
+                    if (nounit) t /= cconj(ai[i]);
+                    x[ix] = t;
+                    ix += incx;
+                }
+            } else {
+                /* U-T non-conj: strided twin of the incx==1 x87 helper —
+                 * bit-identical forward single sum, tighter schedule. */
+                ptrdiff_t ix = kx;
+                for (ptrdiff_t i = 0; i < n; ++i) {
+                    const TC *ai = &A_(0, i);
+                    TC t = ytrsv_ut_solve_str(ai, &x[kx], &x[ix], i, incx);
+                    if (nounit) t /= ai[i];
                     x[ix] = t;
                     ix += incx;
                 }
