@@ -54,6 +54,151 @@ static TR etpmv_dot2(const TR *restrict ap, const TR *restrict x,
 }
 
 
+/* NoTrans serial handler — a byte-faithful copy of the OpenBLAS reference serial
+ * body (both NoTrans AND Trans arms present). Only ever invoked for NoTrans, but
+ * the Trans arm is retained VERBATIM because the whole-function instruction
+ * layout is what lands the hot UNN/LNN axpy loops in the CPU's DSB (uop-cache)
+ * rather than the legacy decoders (MITE) on Coffee Lake — any deviation (delete
+ * the Trans arm, swap in a 2-chain, or a helper call) reverts UNN to MITE and
+ * costs ~11% at small N. noinline+noclone pin the standalone codegen and block
+ * IPA from specialising away the dead Trans arm (verified DSB-resident with the
+ * literal-'N' call site under -O3 -march=native, gcc-15). See task notes. */
+__attribute__((noinline, noclone))
+static void epblas_etpmv_notrans_dsb(char uplo_c, char trans_c, char diag_c,
+                                     ptrdiff_t n, const TR *ap, TR *x, ptrdiff_t incx)
+{
+    int upper  = (blas_up(uplo_c) == 'U');
+    char trc   = blas_up(trans_c);
+    int trans  = (trc == 'T' || trc == 'C') ? 1 : 0;
+    int nounit = (blas_up(diag_c) == 'N');
+
+    if (n == 0) return;
+    if (incx < 0) x -= (n - 1) * incx;
+    ptrdiff_t kx = 0;
+
+    if (!trans) {
+        if (upper) {
+            ptrdiff_t kk = 0;
+            if (incx == 1) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    if (x[j] != 0.0L) {
+                        TR temp = x[j];
+                        ptrdiff_t k = kk;
+                        for (ptrdiff_t i = 0; i < j; ++i) { x[i] += temp * ap[k]; ++k; }
+                        if (nounit) x[j] *= ap[kk + j];
+                    }
+                    kk += j + 1;
+                }
+            } else {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    if (x[jx] != 0.0L) {
+                        TR temp = x[jx];
+                        ptrdiff_t ix = kx;
+                        for (ptrdiff_t k = kk; k < kk + j; ++k) {
+                            x[ix] += temp * ap[k];
+                            ix += incx;
+                        }
+                        if (nounit) x[jx] *= ap[kk + j];
+                    }
+                    jx += incx;
+                    kk += j + 1;
+                }
+            }
+        } else {
+            ptrdiff_t kk = n * (n + 1) / 2 - 1;
+            if (incx == 1) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
+                    if (x[j] != 0.0L) {
+                        TR temp = x[j];
+                        ptrdiff_t k = kk;
+                        for (ptrdiff_t i = n - 1; i > j; --i) { x[i] += temp * ap[k]; --k; }
+                        if (nounit) x[j] *= ap[kk - (n - 1 - j)];
+                    }
+                    kk -= (n - j);
+                }
+            } else {
+                kx += (n - 1) * incx;
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
+                    if (x[jx] != 0.0L) {
+                        TR temp = x[jx];
+                        ptrdiff_t ix = kx;
+                        ptrdiff_t k = kk;
+                        for (ptrdiff_t i = n - 1; i > j; --i) {
+                            x[ix] += temp * ap[k];
+                            ix -= incx;
+                            --k;
+                        }
+                        if (nounit) x[jx] *= ap[kk - (n - 1 - j)];
+                    }
+                    jx -= incx;
+                    kk -= (n - j);
+                }
+            }
+        }
+    } else {
+        if (upper) {
+            ptrdiff_t kk = n * (n + 1) / 2 - 1;
+            if (incx == 1) {
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
+                    TR temp = x[j];
+                    if (nounit) temp *= ap[kk];
+                    ptrdiff_t k = kk - 1;
+                    for (ptrdiff_t i = j - 1; i >= 0; --i) { temp += ap[k] * x[i]; --k; }
+                    x[j] = temp;
+                    kk -= j + 1;
+                }
+            } else {
+                ptrdiff_t jx = kx + (n - 1) * incx;
+                for (ptrdiff_t j = n - 1; j >= 0; --j) {
+                    TR temp = x[jx];
+                    ptrdiff_t ix = jx;
+                    if (nounit) temp *= ap[kk];
+                    ptrdiff_t k = kk - 1;
+                    for (ptrdiff_t i = j - 1; i >= 0; --i) {
+                        ix -= incx;
+                        temp += ap[k] * x[ix];
+                        --k;
+                    }
+                    x[jx] = temp;
+                    jx -= incx;
+                    kk -= j + 1;
+                }
+            }
+        } else {
+            ptrdiff_t kk = 0;
+            if (incx == 1) {
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    TR temp = x[j];
+                    if (nounit) temp *= ap[kk];
+                    ptrdiff_t k = kk + 1;
+                    for (ptrdiff_t i = j + 1; i < n; ++i) { temp += ap[k] * x[i]; ++k; }
+                    x[j] = temp;
+                    kk += (n - j);
+                }
+            } else {
+                ptrdiff_t jx = kx;
+                for (ptrdiff_t j = 0; j < n; ++j) {
+                    TR temp = x[jx];
+                    ptrdiff_t ix = jx;
+                    if (nounit) temp *= ap[kk];
+                    ptrdiff_t k = kk + 1;
+                    for (ptrdiff_t i = j + 1; i < n; ++i) {
+                        ix += incx;
+                        temp += ap[k] * x[ix];
+                        ++k;
+                    }
+                    x[jx] = temp;
+                    jx += incx;
+                    kk += (n - j);
+                }
+            }
+        }
+    }
+}
+
+
 #ifdef _OPENMP
 static inline size_t col_start_U(ptrdiff_t j) { return (size_t)j * (size_t)(j + 1) / 2; }
 static inline size_t col_start_L(ptrdiff_t j, ptrdiff_t n) {
@@ -237,19 +382,18 @@ static void etpmv_core(
     if (etpmv_omp(UPLO == 'U', TRANS == 'T', nounit, n, incx, ap, x)) return;
 #endif
 
+    /* Serial dispatch mirrors par's original nested (incx==1 / strided) x
+     * (NoTrans / Trans) x (Upper / Lower) shape — kept intact so a layout
+     * perturbation doesn't shuffle the jittery small-N strided leaves. The ONLY
+     * change vs the original is the contiguous Upper-NoTrans leaf: it now calls
+     * the byte-faithful ob-reference serial (epblas_etpmv_notrans_dsb), which is
+     * DSB-resident on Coffee Lake (par's own in-place UNN sweep decoded via MITE
+     * and lost ~2% at small N; par now ~parity/under ob there). Trans keeps par's
+     * 2-chain forward dot (the ~15-20% win over ob's single-acc backward sweep). */
     if (incx == 1) {
         if (TRANS == 'N') {
             if (UPLO == 'U') {
-                ptrdiff_t kk = 0;
-                for (ptrdiff_t j = 0; j < n; ++j) {
-                    if (x[j] != zero) {
-                        const TR tmp = x[j];
-                        ptrdiff_t k = kk;
-                        for (ptrdiff_t i = 0; i < j; ++i) { x[i] += tmp * ap[k]; ++k; }
-                        if (nounit) x[j] *= ap[kk + j];
-                    }
-                    kk += j + 1;
-                }
+                epblas_etpmv_notrans_dsb(uplo, 'N', diag, n, ap, x, incx);
             } else {
                 ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
