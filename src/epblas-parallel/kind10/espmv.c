@@ -173,7 +173,13 @@ static void espmv_core(
 
     if (n == 0 || (alpha == zero && beta == one)) return;
 
-    if (beta != one) {
+    const bool contiguous = (incx == 1 && incy == 1);
+    /* Scale y := beta*y up front for the contiguous path and for the alpha==0
+     * early-out. The strided path (below) instead folds beta into the y-gather,
+     * which saves a whole extra strided pass over y — the beta pre-scale and the
+     * gather-read otherwise touch y strided twice. Bit-identical: same beta*y
+     * rounding, just applied while copying into the contiguous scratch. */
+    if (beta != one && (contiguous || alpha == zero)) {
         ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
         if (beta == zero) {
             for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = zero; iy += incy; }
@@ -184,7 +190,7 @@ static void espmv_core(
     if (alpha == zero) return;
 
     ptrdiff_t kk = 0;
-    if (incx == 1 && incy == 1) {
+    if (contiguous) {
 #ifdef _OPENMP
         if ((size_t)n * (size_t)n > ESPMV_OMP_MIN
             && blas_omp_should_thread()) {
@@ -247,13 +253,15 @@ static void espmv_core(
 #endif
         espmv_serial_core(UPLO, n, alpha, ap, x, y);
     } else {
-        /* General-stride: gather x and the (already beta-scaled) y into
-         * contiguous scratch, run the stride-1 packed core — which beats both
-         * the OpenBLAS clone and the gfortran reference, neither of which
-         * gathers — then scatter y back. O(N) gather/scatter against O(N^2)
-         * work, so free past tiny N. Same column-order accumulation as the
-         * direct strided walk, so bit-identical. Falls back to the direct
-         * strided helper if the scratch allocation fails. */
+        /* General-stride: gather x and y into contiguous scratch, run the
+         * stride-1 packed core — which beats both the OpenBLAS clone and the
+         * gfortran reference, neither of which gathers — then scatter y back.
+         * O(N) gather/scatter against O(N^2) work, so free past tiny N. The
+         * y := beta*y scale is FOLDED into the gather (y not pre-scaled for the
+         * strided path), avoiding a second strided pass over y. Same column-order
+         * accumulation and same beta*y rounding as the direct strided walk, so
+         * bit-identical. Falls back to the direct strided helper if the scratch
+         * allocation fails. */
         const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         /* Stack scratch for the common small-N case avoids malloc latency;
@@ -269,9 +277,21 @@ static void espmv_core(
         }
         if (xc && yc) {
             ptrdiff_t ix = kx, iy = ky;
-            for (ptrdiff_t k = 0; k < n; ++k) {
-                xc[k] = x[ix]; yc[k] = y[iy];
-                ix += incx; iy += incy;
+            if (beta == one) {
+                for (ptrdiff_t k = 0; k < n; ++k) {
+                    xc[k] = x[ix]; yc[k] = y[iy];
+                    ix += incx; iy += incy;
+                }
+            } else if (beta == zero) {
+                for (ptrdiff_t k = 0; k < n; ++k) {
+                    xc[k] = x[ix]; yc[k] = zero;
+                    ix += incx; iy += incy;
+                }
+            } else {
+                for (ptrdiff_t k = 0; k < n; ++k) {
+                    xc[k] = x[ix]; yc[k] = beta * y[iy];
+                    ix += incx; iy += incy;
+                }
             }
             espmv_serial_core(UPLO, n, alpha, ap, xc, yc);
             iy = ky;
@@ -280,6 +300,15 @@ static void espmv_core(
             return;
         }
         free(heap);
+        /* Fallback (alloc failed): the strided path skipped the beta pre-scale,
+         * so apply it now before the direct in-place strided RMW. */
+        if (beta != one) {
+            ptrdiff_t iy = ky;
+            if (beta == zero)
+                for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = zero; iy += incy; }
+            else
+                for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = beta * y[iy]; iy += incy; }
+        }
         if (UPLO == 'U') {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t j = 0; j < n; ++j) {
