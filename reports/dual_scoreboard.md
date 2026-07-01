@@ -1,13 +1,13 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-01 19:41 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-01 20:55 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
-| e | 2218 | 98.6% | 99.5% |
+| e | 2218 | 98.7% | 99.5% |
 | q | 2218 | 99.5% | 99.8% |
 
 ## m — multifloats (double-double)
@@ -102,7 +102,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## e — kind10 (fp80)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 98.6% · omp4 99.5%.**  11 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 98.7% · omp4 99.5%.**  10 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
@@ -113,7 +113,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **etrmm** | 64 | 1.011 | 1.028 @RUTU/128 | ⚠ |
 | **ytrsv** | 108 | 1.026 mig @UTN/x2/128 | 1.021 @UTN/x2/128 | ⚠ |
 | **ytbsv** | 108 | 1.020 | 1.023 @LTN/128 | ⚠ |
-| **etpmv** | 96 | 1.023 ob1 @UNN/128 | 1.005 | ⚠ |
 | **etrsm** | 64 | 1.023 ob1 @RUNU/64 | 1.017 | ⚠ |
 | **egemm** | 16 | 1.022 ob1 @TN/128 | 0.993 | ⚠ |
 | **egbmv** | 24 | 1.020 mig @T/x2/1024 | 1.007 | ⚠ |
@@ -131,6 +130,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | esymm | 16 | 1.014 | 0.992 | ✅ |
 | yherk | 12 | 1.014 | 0.710 | ✅ |
 | ytrmv | 108 | 1.013 | 0.998 | ✅ |
+| etpmv | 96 | 1.012 | 1.010 | ✅ |
 | etrsv | 96 | 1.011 | 1.011 | ✅ |
 | esyr2k | 16 | 1.011 | 1.003 | ✅ |
 | egemv | 24 | 1.007 | 1.011 | ✅ |
@@ -182,7 +182,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | eynrm2 | 2 | 0.330 | 0.326 | ✅ |
 | yrotg | 1 | 0.079 | 0.078 | ✅ |
 
-<details><summary>e: 39 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>e: 38 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
@@ -212,7 +212,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | etrmm | RLNN | 256 | 5,333,847 | 5,317,005 | 14,753,623 | 2,129,155 | 2,078,877 | 1.003 | 1.024 | ob1 |
 | ytbmv | UTN | 512 | 22,748 | 22,219 | 22,756 | 8,224 | 14,505 | 1.024 | 0.567 | ob1 |
 | ytbsv | LTN | 128 | 5,431 | 5,367 | 5,612 | 5,313 | 5,192 | 1.012 | 1.023 | ob1 |
-| etpmv | UNN | 128 | 15,371 | 15,023 | 15,147 | 9,698 | 9,704 | 1.023 | 0.999 | ob1 |
 | etrsm | RUNU | 64 | 112,039 | 109,547 | 233,994 | 41,238 | 100,914 | 1.023 | 0.409 | ob1 |
 | ytrsv | UTN/x-1 | 128 | 20,510 | 20,150 | 20,054 | 20,544 | 20,170 | 1.023 | 1.019 | mig |
 | ytbmv | UTU/x-1 | 512 | 20,358 | 19,906 | 20,416 | 9,318 | 15,967 | 1.023 | 0.584 | ob1 |
