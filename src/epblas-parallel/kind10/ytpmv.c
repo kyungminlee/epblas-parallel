@@ -32,6 +32,11 @@ static inline TC cconj(TC z) { return ~z; }
 
 
 #ifdef _OPENMP
+/* Defined below (also used by the serial NoTrans sweep). The threaded column
+ * kernel reuses it so per-thread AXPY gets the same 4x-unrolled re/im-decomposed
+ * codegen that makes the serial path beat OpenBLAS. */
+static void ytpmv_axpy_col(TC *restrict y_, const TC *restrict a_, TC t, ptrdiff_t m);
+
 static inline size_t col_start_U(ptrdiff_t j) { return (size_t)j * (size_t)(j + 1) / 2; }
 static inline size_t col_start_L(ptrdiff_t j, ptrdiff_t n) {
     return (size_t)j * (size_t)(2 * n - j + 1) / 2;
@@ -88,7 +93,7 @@ static void tpmv_kernel_N(bool upper, bool nounit, ptrdiff_t n,
         for (ptrdiff_t j = m_from; j < m_to; ++j) {
             size_t cs = col_start_U(j);
             TC xj = x[j];
-            for (ptrdiff_t i = 0; i < j; ++i) y[i] += ap[cs + (size_t)i] * xj;
+            ytpmv_axpy_col(y, &ap[cs], xj, j);            /* y[0..j) += ap[cs..]*xj */
             y[j] += nounit ? ap[cs + (size_t)j] * xj : xj;
         }
     } else {
@@ -96,7 +101,7 @@ static void tpmv_kernel_N(bool upper, bool nounit, ptrdiff_t n,
             size_t cs = col_start_L(j, n);
             TC xj = x[j];
             y[j] += nounit ? ap[cs] * xj : xj;
-            for (ptrdiff_t i = j + 1; i < n; ++i) y[i] += ap[cs + (size_t)(i - j)] * xj;
+            ytpmv_axpy_col(&y[j + 1], &ap[cs + 1], xj, n - 1 - j);  /* y[j+1..n) += ap[cs+1..]*xj */
         }
     }
 }
