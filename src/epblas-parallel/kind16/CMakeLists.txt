@@ -106,6 +106,7 @@ set(_split_sources
     qtrsm_serial.c
     xtrsm_parallel.c
     xtrsm_serial.c
+    xtri_driver.c
     qtrmm_parallel.c
     qtrmm_serial.c
     xtrmm_parallel.c

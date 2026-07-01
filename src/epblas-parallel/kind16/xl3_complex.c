@@ -1605,3 +1605,1038 @@ void qblas_xherk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
         }
     }
 }
+
+
+/* ══════════════════════════════════════════════════════════════════
+ * TRSM packed substrate — faithful complex-quad port of the ytrsm
+ * pieces in src/epblas-openblas/common/qblas_l3_complex.c
+ * (qblas_ytrsm_* -> qblas_xtrsm_*, qblas_ygemm_kernel -> qblas_xgemm_kernel).
+ * compinv_ld + zsolve_{LN,LT,RN,RT} are the diagonal micro-solves;
+ * the i{ln,lt,un,ut}copy pack the triangular A panel (conjugation
+ * absorbed at pack time); qblas_xtrsm_kernel drives the blocked solve
+ * against the already-packed panels, reusing qblas_xgemm_kernel for
+ * the trailing GEMM update. Interleaved-complex storage: lda*=2, two
+ * __float128 per element. Used by the SIDE=L/R blocked xtrsm driver. */
+typedef __float128 T;
+
+static inline void compinv_ld(T *b, T ar, T ai, int unit) {
+    if (unit) {
+        b[0] = 1.0Q;
+        b[1] = 0.0Q;
+        return;
+    }
+    T ratio, den;
+    if (__builtin_fabsf128(ar) >= __builtin_fabsf128(ai)) {
+        ratio = ai / ar;
+        den   = 1.0Q / (ar * (1.0Q + ratio * ratio));
+        b[0] =  den;
+        b[1] = -ratio * den;
+    } else {
+        ratio = ar / ai;
+        den   = 1.0Q / (ai * (1.0Q + ratio * ratio));
+        b[0] =  ratio * den;
+        b[1] = -den;
+    }
+}
+
+
+void qblas_xtrsm_ilncopy(ptrdiff_t m, ptrdiff_t n,
+                         const T *a, ptrdiff_t lda,
+                         ptrdiff_t offset, T *b, int unit, int conj)
+{
+    ptrdiff_t i, ii, j, jj;
+    T data01 = 0.0Q, data02 = 0.0Q, data03, data04;
+    T data05, data06, data07 = 0.0Q, data08 = 0.0Q;
+    const T *a1, *a2;
+
+    lda *= 2;
+    jj = offset;
+
+    j = (n >> 1);
+    while (j > 0) {
+        a1 = a + 0 * lda;
+        a2 = a + 1 * lda;
+
+        i = (m >> 1);
+        ii = 0;
+        while (i > 0) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                if (!unit) {
+                    data07 = *(a2 + 2);
+                    data08 = *(a2 + 3);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+                b[4] = data03;
+                b[5] = conj ? -data04 : data04;
+                compinv_ld(b + 6, data07, conj ? -data08 : data08, unit);
+            }
+            if (ii > jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                data05 = *(a2 + 0);
+                data06 = *(a2 + 1);
+                data07 = *(a2 + 2);
+                data08 = *(a2 + 3);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+                b[2] = data05;
+                b[3] = conj ? -data06 : data06;
+                b[4] = data03;
+                b[5] = conj ? -data04 : data04;
+                b[6] = data07;
+                b[7] = conj ? -data08 : data08;
+            }
+            a1 += 4;
+            a2 += 4;
+            b += 8;
+            i--;
+            ii += 2;
+        }
+
+        if (m & 1) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+            }
+            if (ii > jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                data05 = *(a2 + 0);
+                data06 = *(a2 + 1);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+                b[2] = data05;
+                b[3] = conj ? -data06 : data06;
+            }
+            b += 4;
+        }
+
+        a += 2 * lda;
+        jj += 2;
+        j--;
+    }
+
+    if (n & 1) {
+        a1 = a + 0 * lda;
+        i = m;
+        ii = 0;
+        while (i > 0) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+            }
+            if (ii > jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+            }
+            a1 += 2;
+            b += 2;
+            i--;
+            ii += 1;
+        }
+    }
+}
+
+
+void qblas_xtrsm_iltcopy(ptrdiff_t m, ptrdiff_t n,
+                         const T *a, ptrdiff_t lda,
+                         ptrdiff_t offset, T *b, int unit, int conj)
+{
+    ptrdiff_t i, ii, j, jj;
+    T data01 = 0.0Q, data02 = 0.0Q, data03, data04;
+    T data05, data06, data07 = 0.0Q, data08 = 0.0Q;
+    const T *a1, *a2;
+
+    lda *= 2;
+    jj = offset;
+
+    j = (n >> 1);
+    while (j > 0) {
+        a1 = a + 0 * lda;
+        a2 = a + 1 * lda;
+
+        i = (m >> 1);
+        ii = 0;
+        while (i > 0) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                if (!unit) {
+                    data07 = *(a2 + 2);
+                    data08 = *(a2 + 3);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+                b[2] = data03;
+                b[3] = conj ? -data04 : data04;
+                compinv_ld(b + 6, data07, conj ? -data08 : data08, unit);
+            }
+            if (ii < jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                data05 = *(a2 + 0);
+                data06 = *(a2 + 1);
+                data07 = *(a2 + 2);
+                data08 = *(a2 + 3);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+                b[2] = data03;
+                b[3] = conj ? -data04 : data04;
+                b[4] = data05;
+                b[5] = conj ? -data06 : data06;
+                b[6] = data07;
+                b[7] = conj ? -data08 : data08;
+            }
+            a1 += 2 * lda;
+            a2 += 2 * lda;
+            b += 8;
+            i--;
+            ii += 2;
+        }
+
+        if (m & 1) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+                b[2] = data03;
+                b[3] = conj ? -data04 : data04;
+            }
+            if (ii < jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+                b[2] = data03;
+                b[3] = conj ? -data04 : data04;
+            }
+            b += 4;
+        }
+
+        a += 4;
+        jj += 2;
+        j--;
+    }
+
+    if (n & 1) {
+        a1 = a + 0 * lda;
+        i = m;
+        ii = 0;
+        while (i > 0) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+            }
+            if (ii < jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+            }
+            a1 += lda;
+            b += 2;
+            i--;
+            ii += 1;
+        }
+    }
+}
+
+
+void qblas_xtrsm_iuncopy(ptrdiff_t m, ptrdiff_t n,
+                         const T *a, ptrdiff_t lda,
+                         ptrdiff_t offset, T *b, int unit, int conj)
+{
+    ptrdiff_t i, ii, j, jj;
+    T data01 = 0.0Q, data02 = 0.0Q, data03, data04;
+    T data05, data06, data07 = 0.0Q, data08 = 0.0Q;
+    const T *a1, *a2;
+
+    lda *= 2;
+    jj = offset;
+
+    j = (n >> 1);
+    while (j > 0) {
+        a1 = a + 0 * lda;
+        a2 = a + 1 * lda;
+
+        i = (m >> 1);
+        ii = 0;
+        while (i > 0) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                data05 = *(a2 + 0);
+                data06 = *(a2 + 1);
+                if (!unit) {
+                    data07 = *(a2 + 2);
+                    data08 = *(a2 + 3);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+                b[2] = data05;
+                b[3] = conj ? -data06 : data06;
+                compinv_ld(b + 6, data07, conj ? -data08 : data08, unit);
+            }
+            if (ii < jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                data05 = *(a2 + 0);
+                data06 = *(a2 + 1);
+                data07 = *(a2 + 2);
+                data08 = *(a2 + 3);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+                b[2] = data05;
+                b[3] = conj ? -data06 : data06;
+                b[4] = data03;
+                b[5] = conj ? -data04 : data04;
+                b[6] = data07;
+                b[7] = conj ? -data08 : data08;
+            }
+            a1 += 4;
+            a2 += 4;
+            b += 8;
+            i--;
+            ii += 2;
+        }
+
+        if (m & 1) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                data05 = *(a2 + 0);
+                data06 = *(a2 + 1);
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+                b[2] = data05;
+                b[3] = conj ? -data06 : data06;
+            }
+            if (ii < jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                data03 = *(a2 + 0);
+                data04 = *(a2 + 1);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+                b[2] = data03;
+                b[3] = conj ? -data04 : data04;
+            }
+            b += 4;
+        }
+
+        a += 2 * lda;
+        jj += 2;
+        j--;
+    }
+
+    if (n & 1) {
+        a1 = a + 0 * lda;
+        i = m;
+        ii = 0;
+        while (i > 0) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+            }
+            if (ii < jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+            }
+            a1 += 2;
+            b += 2;
+            i--;
+            ii += 1;
+        }
+    }
+}
+
+
+void qblas_xtrsm_iutcopy(ptrdiff_t m, ptrdiff_t n,
+                         const T *a, ptrdiff_t lda,
+                         ptrdiff_t offset, T *b, int unit, int conj)
+{
+    ptrdiff_t i, ii, j, jj;
+    T data01 = 0.0Q, data02 = 0.0Q, data03, data04;
+    T data05, data06, data07 = 0.0Q, data08 = 0.0Q;
+    const T *a1, *a2;
+
+    lda *= 2;
+    jj = offset;
+
+    j = (n >> 1);
+    while (j > 0) {
+        a1 = a + 0 * lda;
+        a2 = a + 1 * lda;
+
+        i = (m >> 1);
+        ii = 0;
+        while (i > 0) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                data05 = *(a2 + 0);
+                data06 = *(a2 + 1);
+                if (!unit) {
+                    data07 = *(a2 + 2);
+                    data08 = *(a2 + 3);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+                b[4] = data05;
+                b[5] = conj ? -data06 : data06;
+                compinv_ld(b + 6, data07, conj ? -data08 : data08, unit);
+            }
+            if (ii > jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                data05 = *(a2 + 0);
+                data06 = *(a2 + 1);
+                data07 = *(a2 + 2);
+                data08 = *(a2 + 3);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+                b[2] = data03;
+                b[3] = conj ? -data04 : data04;
+                b[4] = data05;
+                b[5] = conj ? -data06 : data06;
+                b[6] = data07;
+                b[7] = conj ? -data08 : data08;
+            }
+            a1 += 2 * lda;
+            a2 += 2 * lda;
+            b += 8;
+            i--;
+            ii += 2;
+        }
+
+        if (m & 1) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+            }
+            if (ii > jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                data03 = *(a1 + 2);
+                data04 = *(a1 + 3);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+                b[2] = data03;
+                b[3] = conj ? -data04 : data04;
+            }
+            b += 4;
+        }
+
+        a += 4;
+        jj += 2;
+        j--;
+    }
+
+    if (n & 1) {
+        a1 = a + 0 * lda;
+        i = m;
+        ii = 0;
+        while (i > 0) {
+            if (ii == jj) {
+                if (!unit) {
+                    data01 = *(a1 + 0);
+                    data02 = *(a1 + 1);
+                }
+                compinv_ld(b + 0, data01, conj ? -data02 : data02, unit);
+            }
+            if (ii > jj) {
+                data01 = *(a1 + 0);
+                data02 = *(a1 + 1);
+                b[0] = data01;
+                b[1] = conj ? -data02 : data02;
+            }
+            a1 += lda;
+            b += 2;
+            i--;
+            ii += 1;
+        }
+    }
+}
+
+
+/* ── TRSM diagonal-aware microkernel (complex) ───────────────────────
+ *
+ * Faithful port of OpenBLAS kernel/generic/trsm_kernel_{LN,LT,RN,RT}.c
+ * (Z-variant, unconjugated branch — `conj` is absorbed at pack time so
+ * the kernel always runs the NN form of the per-element complex
+ * multiply).
+ *
+ * solve() in the complex variant uses 2 __float128s per element
+ * (re,im); each "scalar" multiplication becomes a 2x2 outer-product
+ * `(aa1, aa2) * (bb1, bb2) = (aa1*bb1 - aa2*bb2, aa1*bb2 + aa2*bb1)`.
+ */
+
+static inline void zsolve_LN(ptrdiff_t m, ptrdiff_t n,
+                             T *a, T *b, T *c, ptrdiff_t ldc)
+{
+    T aa1, aa2, bb1, bb2, cc1, cc2;
+    ptrdiff_t i, j, k;
+    ldc *= 2;
+    a += (m - 1) * m * 2;
+    b += (m - 1) * n * 2;
+    for (i = m - 1; i >= 0; i--) {
+        aa1 = *(a + i * 2 + 0);
+        aa2 = *(a + i * 2 + 1);
+        for (j = 0; j < n; j++) {
+            bb1 = *(c + i * 2 + 0 + j * ldc);
+            bb2 = *(c + i * 2 + 1 + j * ldc);
+            cc1 = aa1 * bb1 - aa2 * bb2;
+            cc2 = aa1 * bb2 + aa2 * bb1;
+            *(b + 0) = cc1;
+            *(b + 1) = cc2;
+            *(c + i * 2 + 0 + j * ldc) = cc1;
+            *(c + i * 2 + 1 + j * ldc) = cc2;
+            b += 2;
+            for (k = 0; k < i; k++) {
+                *(c + k * 2 + 0 + j * ldc) -= cc1 * *(a + k * 2 + 0) - cc2 * *(a + k * 2 + 1);
+                *(c + k * 2 + 1 + j * ldc) -= cc1 * *(a + k * 2 + 1) + cc2 * *(a + k * 2 + 0);
+            }
+        }
+        a -= m * 2;
+        b -= 4 * n;
+    }
+}
+
+static inline void zsolve_LT(ptrdiff_t m, ptrdiff_t n,
+                             T *a, T *b, T *c, ptrdiff_t ldc)
+{
+    T aa1, aa2, bb1, bb2, cc1, cc2;
+    ptrdiff_t i, j, k;
+    ldc *= 2;
+    for (i = 0; i < m; i++) {
+        aa1 = *(a + i * 2 + 0);
+        aa2 = *(a + i * 2 + 1);
+        for (j = 0; j < n; j++) {
+            bb1 = *(c + i * 2 + 0 + j * ldc);
+            bb2 = *(c + i * 2 + 1 + j * ldc);
+            cc1 = aa1 * bb1 - aa2 * bb2;
+            cc2 = aa1 * bb2 + aa2 * bb1;
+            *(b + 0) = cc1;
+            *(b + 1) = cc2;
+            *(c + i * 2 + 0 + j * ldc) = cc1;
+            *(c + i * 2 + 1 + j * ldc) = cc2;
+            b += 2;
+            for (k = i + 1; k < m; k++) {
+                *(c + k * 2 + 0 + j * ldc) -= cc1 * *(a + k * 2 + 0) - cc2 * *(a + k * 2 + 1);
+                *(c + k * 2 + 1 + j * ldc) -= cc1 * *(a + k * 2 + 1) + cc2 * *(a + k * 2 + 0);
+            }
+        }
+        a += m * 2;
+    }
+}
+
+static inline void zsolve_RN(ptrdiff_t m, ptrdiff_t n,
+                             T *a, T *b, T *c, ptrdiff_t ldc)
+{
+    T aa1, aa2, bb1, bb2, cc1, cc2;
+    ptrdiff_t i, j, k;
+    ldc *= 2;
+    for (i = 0; i < n; i++) {
+        bb1 = *(b + i * 2 + 0);
+        bb2 = *(b + i * 2 + 1);
+        for (j = 0; j < m; j++) {
+            aa1 = *(c + j * 2 + 0 + i * ldc);
+            aa2 = *(c + j * 2 + 1 + i * ldc);
+            cc1 = aa1 * bb1 - aa2 * bb2;
+            cc2 = aa1 * bb2 + aa2 * bb1;
+            *(a + 0) = cc1;
+            *(a + 1) = cc2;
+            *(c + j * 2 + 0 + i * ldc) = cc1;
+            *(c + j * 2 + 1 + i * ldc) = cc2;
+            a += 2;
+            for (k = i + 1; k < n; k++) {
+                *(c + j * 2 + 0 + k * ldc) -= cc1 * *(b + k * 2 + 0) - cc2 * *(b + k * 2 + 1);
+                *(c + j * 2 + 1 + k * ldc) -= cc1 * *(b + k * 2 + 1) + cc2 * *(b + k * 2 + 0);
+            }
+        }
+        b += n * 2;
+    }
+}
+
+static inline void zsolve_RT(ptrdiff_t m, ptrdiff_t n,
+                             T *a, T *b, T *c, ptrdiff_t ldc)
+{
+    T aa1, aa2, bb1, bb2, cc1, cc2;
+    ptrdiff_t i, j, k;
+    ldc *= 2;
+    a += (n - 1) * m * 2;
+    b += (n - 1) * n * 2;
+    for (i = n - 1; i >= 0; i--) {
+        bb1 = *(b + i * 2 + 0);
+        bb2 = *(b + i * 2 + 1);
+        for (j = 0; j < m; j++) {
+            aa1 = *(c + j * 2 + 0 + i * ldc);
+            aa2 = *(c + j * 2 + 1 + i * ldc);
+            cc1 = aa1 * bb1 - aa2 * bb2;
+            cc2 = aa1 * bb2 + aa2 * bb1;
+            *(a + 0) = cc1;
+            *(a + 1) = cc2;
+            *(c + j * 2 + 0 + i * ldc) = cc1;
+            *(c + j * 2 + 1 + i * ldc) = cc2;
+            a += 2;
+            for (k = 0; k < i; k++) {
+                *(c + j * 2 + 0 + k * ldc) -= cc1 * *(b + k * 2 + 0) - cc2 * *(b + k * 2 + 1);
+                *(c + j * 2 + 1 + k * ldc) -= cc1 * *(b + k * 2 + 1) + cc2 * *(b + k * 2 + 0);
+            }
+        }
+        b -= n * 2;
+        a -= 4 * m;
+    }
+}
+
+
+void qblas_xtrsm_kernel(int left, int trans,
+                        ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+                        const T *ba, const T *bb,
+                        T *C, ptrdiff_t ldc,
+                        ptrdiff_t offset)
+{
+    const T dm1r = -1.0Q;
+    const T dm1i = 0.0Q;
+    const ptrdiff_t UR = MR;
+    const ptrdiff_t UN = NR;
+
+    T *a_buf = (T *)ba;
+    T *b_buf = (T *)bb;
+
+    if (left && !trans) {
+        ptrdiff_t i, j;
+        T *aa, *cc;
+        ptrdiff_t kk;
+
+        j = (bn / UN);
+        while (j > 0) {
+            kk = bm + offset;
+
+            if (bm & (UR - 1)) {
+                for (i = 1; i < UR; i *= 2) {
+                    if (bm & i) {
+                        aa = a_buf + ((bm & ~(i - 1)) - i) * bk * 2;
+                        cc = C + ((bm & ~(i - 1)) - i) * 2;
+                        if (bk - kk > 0) {
+                            qblas_xgemm_kernel(i, UN, bk - kk, dm1r, dm1i,
+                                               aa + i * kk * 2,
+                                               b_buf + UN * kk * 2, cc, ldc);
+                        }
+                        zsolve_LN(i, UN,
+                                  aa + (kk - i) * i * 2,
+                                  b_buf + (kk - i) * UN * 2,
+                                  cc, ldc);
+                        kk -= i;
+                    }
+                }
+            }
+
+            i = (bm / UR);
+            if (i > 0) {
+                aa = a_buf + ((bm & ~(UR - 1)) - UR) * bk * 2;
+                cc = C + ((bm & ~(UR - 1)) - UR) * 2;
+                do {
+                    if (bk - kk > 0) {
+                        qblas_xgemm_kernel(UR, UN, bk - kk, dm1r, dm1i,
+                                           aa + UR * kk * 2,
+                                           b_buf + UN * kk * 2, cc, ldc);
+                    }
+                    zsolve_LN(UR, UN,
+                              aa + (kk - UR) * UR * 2,
+                              b_buf + (kk - UR) * UN * 2,
+                              cc, ldc);
+                    aa -= UR * bk * 2;
+                    cc -= UR * 2;
+                    kk -= UR;
+                    i--;
+                } while (i > 0);
+            }
+
+            b_buf += UN * bk * 2;
+            C += UN * ldc * 2;
+            j--;
+        }
+
+        if (bn & (UN - 1)) {
+            j = (UN >> 1);
+            while (j > 0) {
+                if (bn & j) {
+                    kk = bm + offset;
+                    if (bm & (UR - 1)) {
+                        for (i = 1; i < UR; i *= 2) {
+                            if (bm & i) {
+                                aa = a_buf + ((bm & ~(i - 1)) - i) * bk * 2;
+                                cc = C + ((bm & ~(i - 1)) - i) * 2;
+                                if (bk - kk > 0) {
+                                    qblas_xgemm_kernel(i, j, bk - kk, dm1r, dm1i,
+                                                       aa + i * kk * 2,
+                                                       b_buf + j * kk * 2, cc, ldc);
+                                }
+                                zsolve_LN(i, j,
+                                          aa + (kk - i) * i * 2,
+                                          b_buf + (kk - i) * j * 2,
+                                          cc, ldc);
+                                kk -= i;
+                            }
+                        }
+                    }
+                    i = (bm / UR);
+                    if (i > 0) {
+                        aa = a_buf + ((bm & ~(UR - 1)) - UR) * bk * 2;
+                        cc = C + ((bm & ~(UR - 1)) - UR) * 2;
+                        do {
+                            if (bk - kk > 0) {
+                                qblas_xgemm_kernel(UR, j, bk - kk, dm1r, dm1i,
+                                                   aa + UR * kk * 2,
+                                                   b_buf + j * kk * 2, cc, ldc);
+                            }
+                            zsolve_LN(UR, j,
+                                      aa + (kk - UR) * UR * 2,
+                                      b_buf + (kk - UR) * j * 2,
+                                      cc, ldc);
+                            aa -= UR * bk * 2;
+                            cc -= UR * 2;
+                            kk -= UR;
+                            i--;
+                        } while (i > 0);
+                    }
+                    b_buf += j * bk * 2;
+                    C += j * ldc * 2;
+                }
+                j >>= 1;
+            }
+        }
+    } else if (left && trans) {
+        ptrdiff_t i, j;
+        T *aa, *cc;
+        ptrdiff_t kk;
+
+        j = (bn / UN);
+        while (j > 0) {
+            kk = offset;
+            aa = a_buf;
+            cc = C;
+            i = (bm / UR);
+            while (i > 0) {
+                if (kk > 0) {
+                    qblas_xgemm_kernel(UR, UN, kk, dm1r, dm1i, aa, b_buf, cc, ldc);
+                }
+                zsolve_LT(UR, UN,
+                          aa + kk * UR * 2,
+                          b_buf + kk * UN * 2,
+                          cc, ldc);
+                aa += UR * bk * 2;
+                cc += UR * 2;
+                kk += UR;
+                i--;
+            }
+            if (bm & (UR - 1)) {
+                i = (UR >> 1);
+                while (i > 0) {
+                    if (bm & i) {
+                        if (kk > 0) {
+                            qblas_xgemm_kernel(i, UN, kk, dm1r, dm1i, aa, b_buf, cc, ldc);
+                        }
+                        zsolve_LT(i, UN,
+                                  aa + kk * i * 2,
+                                  b_buf + kk * UN * 2,
+                                  cc, ldc);
+                        aa += i * bk * 2;
+                        cc += i * 2;
+                        kk += i;
+                    }
+                    i >>= 1;
+                }
+            }
+            b_buf += UN * bk * 2;
+            C += UN * ldc * 2;
+            j--;
+        }
+
+        if (bn & (UN - 1)) {
+            j = (UN >> 1);
+            while (j > 0) {
+                if (bn & j) {
+                    kk = offset;
+                    aa = a_buf;
+                    cc = C;
+                    i = (bm / UR);
+                    while (i > 0) {
+                        if (kk > 0) {
+                            qblas_xgemm_kernel(UR, j, kk, dm1r, dm1i, aa, b_buf, cc, ldc);
+                        }
+                        zsolve_LT(UR, j,
+                                  aa + kk * UR * 2,
+                                  b_buf + kk * j * 2,
+                                  cc, ldc);
+                        aa += UR * bk * 2;
+                        cc += UR * 2;
+                        kk += UR;
+                        i--;
+                    }
+                    if (bm & (UR - 1)) {
+                        i = (UR >> 1);
+                        while (i > 0) {
+                            if (bm & i) {
+                                if (kk > 0) {
+                                    qblas_xgemm_kernel(i, j, kk, dm1r, dm1i, aa, b_buf, cc, ldc);
+                                }
+                                zsolve_LT(i, j,
+                                          aa + kk * i * 2,
+                                          b_buf + kk * j * 2,
+                                          cc, ldc);
+                                aa += i * bk * 2;
+                                cc += i * 2;
+                                kk += i;
+                            }
+                            i >>= 1;
+                        }
+                    }
+                    b_buf += j * bk * 2;
+                    C += j * ldc * 2;
+                }
+                j >>= 1;
+            }
+        }
+    } else if (!left && !trans) {
+        ptrdiff_t i, j;
+        T *aa, *cc;
+        ptrdiff_t kk = -offset;
+
+        j = (bn / UN);
+        while (j > 0) {
+            aa = a_buf;
+            cc = C;
+            i = (bm / UR);
+            if (i > 0) {
+                do {
+                    if (kk > 0) {
+                        qblas_xgemm_kernel(UR, UN, kk, dm1r, dm1i, aa, b_buf, cc, ldc);
+                    }
+                    zsolve_RN(UR, UN,
+                              aa + kk * UR * 2,
+                              b_buf + kk * UN * 2,
+                              cc, ldc);
+                    aa += UR * bk * 2;
+                    cc += UR * 2;
+                    i--;
+                } while (i > 0);
+            }
+            if (bm & (UR - 1)) {
+                i = (UR >> 1);
+                while (i > 0) {
+                    if (bm & i) {
+                        if (kk > 0) {
+                            qblas_xgemm_kernel(i, UN, kk, dm1r, dm1i, aa, b_buf, cc, ldc);
+                        }
+                        zsolve_RN(i, UN,
+                                  aa + kk * i * 2,
+                                  b_buf + kk * UN * 2,
+                                  cc, ldc);
+                        aa += i * bk * 2;
+                        cc += i * 2;
+                    }
+                    i >>= 1;
+                }
+            }
+            kk += UN;
+            b_buf += UN * bk * 2;
+            C += UN * ldc * 2;
+            j--;
+        }
+
+        if (bn & (UN - 1)) {
+            j = (UN >> 1);
+            while (j > 0) {
+                if (bn & j) {
+                    aa = a_buf;
+                    cc = C;
+                    i = (bm / UR);
+                    while (i > 0) {
+                        if (kk > 0) {
+                            qblas_xgemm_kernel(UR, j, kk, dm1r, dm1i, aa, b_buf, cc, ldc);
+                        }
+                        zsolve_RN(UR, j,
+                                  aa + kk * UR * 2,
+                                  b_buf + kk * j * 2,
+                                  cc, ldc);
+                        aa += UR * bk * 2;
+                        cc += UR * 2;
+                        i--;
+                    }
+                    if (bm & (UR - 1)) {
+                        i = (UR >> 1);
+                        while (i > 0) {
+                            if (bm & i) {
+                                if (kk > 0) {
+                                    qblas_xgemm_kernel(i, j, kk, dm1r, dm1i, aa, b_buf, cc, ldc);
+                                }
+                                zsolve_RN(i, j,
+                                          aa + kk * i * 2,
+                                          b_buf + kk * j * 2,
+                                          cc, ldc);
+                                aa += i * bk * 2;
+                                cc += i * 2;
+                            }
+                            i >>= 1;
+                        }
+                    }
+                    b_buf += j * bk * 2;
+                    C += j * ldc * 2;
+                    kk += j;
+                }
+                j >>= 1;
+            }
+        }
+    } else {
+        ptrdiff_t i, j;
+        T *aa, *cc;
+        ptrdiff_t kk = bn - offset;
+        C += bn * ldc * 2;
+        b_buf += bn * bk * 2;
+
+        if (bn & (UN - 1)) {
+            j = 1;
+            while (j < UN) {
+                if (bn & j) {
+                    aa = a_buf;
+                    b_buf -= j * bk * 2;
+                    C -= j * ldc * 2;
+                    cc = C;
+                    i = (bm / UR);
+                    if (i > 0) {
+                        do {
+                            if (bk - kk > 0) {
+                                qblas_xgemm_kernel(UR, j, bk - kk, dm1r, dm1i,
+                                                   aa + UR * kk * 2,
+                                                   b_buf + j * kk * 2, cc, ldc);
+                            }
+                            zsolve_RT(UR, j,
+                                      aa + (kk - j) * UR * 2,
+                                      b_buf + (kk - j) * j * 2,
+                                      cc, ldc);
+                            aa += UR * bk * 2;
+                            cc += UR * 2;
+                            i--;
+                        } while (i > 0);
+                    }
+                    if (bm & (UR - 1)) {
+                        i = (UR >> 1);
+                        do {
+                            if (bm & i) {
+                                if (bk - kk > 0) {
+                                    qblas_xgemm_kernel(i, j, bk - kk, dm1r, dm1i,
+                                                       aa + i * kk * 2,
+                                                       b_buf + j * kk * 2, cc, ldc);
+                                }
+                                zsolve_RT(i, j,
+                                          aa + (kk - j) * i * 2,
+                                          b_buf + (kk - j) * j * 2,
+                                          cc, ldc);
+                                aa += i * bk * 2;
+                                cc += i * 2;
+                            }
+                            i >>= 1;
+                        } while (i > 0);
+                    }
+                    kk -= j;
+                }
+                j <<= 1;
+            }
+        }
+
+        j = (bn / UN);
+        if (j > 0) {
+            do {
+                aa = a_buf;
+                b_buf -= UN * bk * 2;
+                C -= UN * ldc * 2;
+                cc = C;
+                i = (bm / UR);
+                if (i > 0) {
+                    do {
+                        if (bk - kk > 0) {
+                            qblas_xgemm_kernel(UR, UN, bk - kk, dm1r, dm1i,
+                                               aa + UR * kk * 2,
+                                               b_buf + UN * kk * 2, cc, ldc);
+                        }
+                        zsolve_RT(UR, UN,
+                                  aa + (kk - UN) * UR * 2,
+                                  b_buf + (kk - UN) * UN * 2,
+                                  cc, ldc);
+                        aa += UR * bk * 2;
+                        cc += UR * 2;
+                        i--;
+                    } while (i > 0);
+                }
+                if (bm & (UR - 1)) {
+                    i = (UR >> 1);
+                    do {
+                        if (bm & i) {
+                            if (bk - kk > 0) {
+                                qblas_xgemm_kernel(i, UN, bk - kk, dm1r, dm1i,
+                                                   aa + i * kk * 2,
+                                                   b_buf + UN * kk * 2, cc, ldc);
+                            }
+                            zsolve_RT(i, UN,
+                                      aa + (kk - UN) * i * 2,
+                                      b_buf + (kk - UN) * UN * 2,
+                                      cc, ldc);
+                            aa += i * bk * 2;
+                            cc += i * 2;
+                        }
+                        i >>= 1;
+                    } while (i > 0);
+                }
+                kk -= UN;
+                j--;
+            } while (j > 0);
+        }
+    }
+}

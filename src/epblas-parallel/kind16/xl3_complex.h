@@ -252,6 +252,35 @@ void qblas_xherk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
                           const __float128 *a, const __float128 *b,
                           __float128 *c, ptrdiff_t ldc, ptrdiff_t offset);
 
+/* ── TRSM packed substrate (complex-quad twin of the ytrsm pieces in
+ *    src/epblas-openblas/common/qblas_l3_complex.{c,h}). The i*copy pack a
+ *    triangular A panel (conjugation absorbed at pack time via `conj`);
+ *    qblas_xtrsm_kernel drives the blocked diagonal solve, reusing
+ *    qblas_xgemm_kernel for trailing GEMM updates. Interleaved-complex
+ *    storage: 2 __float128 per element. */
+void qblas_xtrsm_iutcopy(ptrdiff_t m, ptrdiff_t n,
+                         const __float128 *a, ptrdiff_t lda,
+                         ptrdiff_t offset, __float128 *b,
+                         int unit, int conj);
+void qblas_xtrsm_iuncopy(ptrdiff_t m, ptrdiff_t n,
+                         const __float128 *a, ptrdiff_t lda,
+                         ptrdiff_t offset, __float128 *b,
+                         int unit, int conj);
+void qblas_xtrsm_iltcopy(ptrdiff_t m, ptrdiff_t n,
+                         const __float128 *a, ptrdiff_t lda,
+                         ptrdiff_t offset, __float128 *b,
+                         int unit, int conj);
+void qblas_xtrsm_ilncopy(ptrdiff_t m, ptrdiff_t n,
+                         const __float128 *a, ptrdiff_t lda,
+                         ptrdiff_t offset, __float128 *b,
+                         int unit, int conj);
+void qblas_xtrsm_kernel(int left, int trans,
+                        ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+                        const __float128 *ba,
+                        const __float128 *bb,
+                        __float128 *C, ptrdiff_t ldc,
+                        ptrdiff_t offset);
+
 #ifdef __cplusplus
 }
 #endif

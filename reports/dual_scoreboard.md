@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-06-30 17:55 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-01 04:16 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -8,7 +8,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
 | e | 2218 | 98.4% | 99.4% |
-| q | 2218 | 99.1% | 99.5% |
+| q | 2218 | 99.5% | 99.7% |
 
 ## m — multifloats (double-double)
 
@@ -240,12 +240,11 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## q — kind16 (__float128)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 99.1% · omp4 99.5%.**  9 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 99.5% · omp4 99.7%.**  8 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
 | **xqrot** | 2 | 1.044 ob1 @-/65536 | 1.036 @-/65536 | ⚠ |
-| **xtrsm** | 72 | 1.038 ob1 @LUTU/256 | 1.029 @LUTU/256 | ⚠ |
 | **qsymm** | 16 | 1.035 mig @LL/256 | 0.999 | ⚠ |
 | **qtrsv** | 96 | 1.030 mig @LTU/x-1/128 | 1.028 @LTU/x-1/128 | ⚠ |
 | **qscal** | 3 | 1.004 | 1.030 @-/65536 | ⚠ |
@@ -282,6 +281,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xswap | 2 | 1.010 | 1.005 | ✅ |
 | qtbmv | 96 | 1.009 | 0.888 | ✅ |
 | qtrmv | 96 | 1.009 | 0.997 | ✅ |
+| xtrsm | 72 | 1.009 | 1.002 | ✅ |
 | qswap | 3 | 1.009 | 1.002 | ✅ |
 | qsyr | 24 | 1.005 | 1.009 | ✅ |
 | qtpsv | 96 | 1.008 | 1.008 | ✅ |
@@ -320,29 +320,20 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qnrm2 | 3 | 0.770 | 0.276 | ✅ |
 | xrotg | 1 | 0.690 | 0.689 | ✅ |
 
-<details><summary>q: 23 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>q: 14 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
 | xqrot | - | 65536 | 11,660,957 | 11,171,565 | 18,783,952 | 3,156,891 | 3,046,867 | 1.044 | 1.036 | ob1 |
-| xtrsm | LUTU | 256 | 1,376,186,490 | 1,325,256,992 | 1,361,748,750 | 365,567,621 | 355,391,756 | 1.038 | 1.029 | ob1 |
-| xtrsm | LUCU | 256 | 1,372,503,265 | 1,324,581,285 | 1,369,678,863 | 364,799,103 | 355,451,522 | 1.036 | 1.026 | ob1 |
 | qsymm | LL | 256 | 508,578,537 | 509,119,603 | 491,327,808 | 139,875,045 | 140,212,445 | 1.035 | 0.998 | mig |
-| xtrsm | LUTU | 128 | 171,437,435 | 166,301,324 | 169,356,714 | 45,600,787 | 45,338,089 | 1.031 | 1.006 | ob1 |
-| xtrsm | LLCU | 256 | 1,349,382,988 | 1,309,091,799 | 1,365,766,612 | 357,937,910 | 350,581,214 | 1.031 | 1.021 | ob1 |
-| xtrsm | LLTU | 256 | 1,350,238,409 | 1,310,229,456 | 1,360,829,273 | 358,237,258 | 350,641,018 | 1.031 | 1.022 | ob1 |
-| xtrsm | LUCU | 128 | 171,375,476 | 166,413,260 | 170,311,240 | 45,476,774 | 45,350,276 | 1.030 | 1.003 | ob1 |
 | qtrsv | LTU/x-1 | 128 | 309,554 | 302,167 | 300,622 | 310,056 | 301,680 | 1.030 | 1.028 | mig |
 | qscal | - | 65536 | 806,196 | 802,730 | 804,690 | 242,544 | 235,592 | 1.004 | 1.030 | ob1 |
 | qtrmm | RLTN | 512 | 1,846,383,162 | 2,501,634,143 | 1,794,819,657 | 504,042,770 | 668,960,442 | 1.029 | 0.753 | mig |
 | xqrot | - | 1024 | 168,275 | 163,820 | 282,105 | 46,425 | 164,437 | 1.027 | 0.282 | ob1 |
-| xtrsm | LUTN | 256 | 1,234,189,733 | 1,203,347,454 | 1,217,882,765 | 327,295,009 | 323,154,710 | 1.026 | 1.013 | ob1 |
 | qscal | - | 1048576 | 13,136,445 | 13,128,932 | 13,173,258 | 3,681,756 | 3,589,776 | 1.001 | 1.026 | ob1 |
-| xtrsm | LUCN | 256 | 1,232,150,572 | 1,202,532,908 | 1,225,292,237 | 326,350,538 | 323,330,784 | 1.025 | 1.009 | ob1 |
 | qtbsv | UTU | 128 | 69,777 | 68,101 | 68,105 | 69,776 | 68,149 | 1.025 | 1.024 | ob1 |
 | qtbsv | UTU | 256 | 148,958 | 145,503 | 146,014 | 148,548 | 145,433 | 1.024 | 1.021 | ob1 |
 | xdotc | - | 65536 | 8,381,865 | 8,279,242 | 8,192,811 | 2,216,799 | 2,186,371 | 1.023 | 1.014 | mig |
-| xtrsm | LLTU | 128 | 169,131,884 | 165,403,085 | 170,114,558 | 44,866,479 | 45,025,035 | 1.023 | 0.996 | ob1 |
 | qgemm | TN | 256 | 439,875,320 | 468,784,754 | 430,535,956 | 113,097,914 | 123,062,370 | 1.022 | 0.919 | mig |
 | qtrmm | RLTU | 512 | 1,992,281,360 | 2,517,929,223 | 1,950,389,028 | 588,062,403 | 669,209,306 | 1.021 | 0.879 | mig |
 | qtrmm | RLTN | 256 | 231,614,779 | 310,500,613 | 227,011,210 | 65,696,087 | 84,102,616 | 1.020 | 0.781 | mig |

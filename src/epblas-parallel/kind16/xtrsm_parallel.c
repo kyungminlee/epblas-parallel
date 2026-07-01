@@ -42,6 +42,13 @@
  * ~5 µs OpenMP fork-join cost. */
 #define XTRSM_OMP_MIN 2
 
+/* L-side Trans/ConjTrans packed-path gate. Below this triangular dimension
+ * M, the naive dot cores beat both ob and gfortran (blocking overhead is
+ * not amortized); at or above it, OpenBLAS's blocked packed GEMM wins ~2-4%
+ * so we route through xtrsm_packed to match it. Measured crossover: par's
+ * naive path wins at M=64, the packed path wins from M=128 up. */
+#define XTRSM_PACKED_MIN_M 128
+
 /* xtrsv-loop fast path: at SIDE='L', stride-1, M large enough that
  * xtrsv_ routes into its block-parallel variant, and nrhs small enough
  * that column-parallel xtrsm can't fill the thread pool, we decompose
@@ -62,6 +69,16 @@ extern void xtrsv_core(
     ptrdiff_t n,
     const TC *restrict a, ptrdiff_t lda,
     TC *restrict x, ptrdiff_t incx);
+
+/* Packed/blocked driver (xtri_driver.c). Routed ONLY for the L-side
+ * Trans/ConjTrans cells — the sole cluster where OpenBLAS's blocked
+ * packed quad-complex GEMM beats par's naive dot cores (~2-4%). Every
+ * other cell keeps the naive cores, where par already wins big. */
+extern void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
+                         int M, int N,
+                         __float128 alpha_r, __float128 alpha_i,
+                         const __float128 *a, int lda,
+                         __float128 *b, int ldb);
 
 /* Maximum nrhs at which the xtrsv-loop fast path beats column-parallel
  * xtrsm. Derived from xtrsv_blocked's effective scaling factor:
@@ -185,6 +202,9 @@ static const TC ONE  = 1.0Q + 0.0Qi;
 
 XTRSM_OMP_WRAP_L   (xtrsm_lln, xtrsm_lln_core)
 XTRSM_OMP_WRAP_L   (xtrsm_lun, xtrsm_lun_core)
+/* L-side Trans/ConjTrans: naive cores win at small M (blocking overhead
+ * not amortized); the packed driver (xtri_driver.c) wins at large M. The
+ * dispatch gates on M — see XTRSM_PACKED_MIN_M below. */
 XTRSM_OMP_WRAP_L_TC(xtrsm_llt, xtrsm_lltc_core, 0)
 XTRSM_OMP_WRAP_L_TC(xtrsm_lut, xtrsm_lutc_core, 0)
 XTRSM_OMP_WRAP_L_TC(xtrsm_llc, xtrsm_lltc_core, 1)
@@ -247,12 +267,26 @@ static void xtrsm_core(
         if (TRANS == 'N') {
             if (UPLO == 'L') xtrsm_lln(m, n, alpha, a, lda, b, ldb, nounit);
             else             xtrsm_lun(m, n, alpha, a, lda, b, ldb, nounit);
-        } else if (TRANS == 'T') {
-            if (UPLO == 'L') xtrsm_llt(m, n, alpha, a, lda, b, ldb, nounit);
-            else             xtrsm_lut(m, n, alpha, a, lda, b, ldb, nounit);
-        } else { /* 'C' */
-            if (UPLO == 'L') xtrsm_llc(m, n, alpha, a, lda, b, ldb, nounit);
-            else             xtrsm_luc(m, n, alpha, a, lda, b, ldb, nounit);
+        } else {
+            /* L-side Trans ('T') / ConjTrans ('C'). At small M the naive
+             * dot cores win (they already beat ob AND gfortran); at large
+             * M OpenBLAS's blocked packed GEMM pulls ~2-4% ahead, so route
+             * through the packed driver there (xtri_driver.c) to match it. */
+            if (m >= XTRSM_PACKED_MIN_M) {
+                xtrsm_packed(/*lside=*/1, /*upper=*/(UPLO == 'U'),
+                             /*trans=*/1, /*conj=*/(TRANS == 'C'),
+                             /*unit=*/!nounit,
+                             (int)m, (int)n,
+                             __real__ alpha, __imag__ alpha,
+                             (const __float128 *)a, (int)lda,
+                             (__float128 *)b, (int)ldb);
+            } else if (TRANS == 'T') {
+                if (UPLO == 'L') xtrsm_llt(m, n, alpha, a, lda, b, ldb, nounit);
+                else             xtrsm_lut(m, n, alpha, a, lda, b, ldb, nounit);
+            } else { /* 'C' */
+                if (UPLO == 'L') xtrsm_llc(m, n, alpha, a, lda, b, ldb, nounit);
+                else             xtrsm_luc(m, n, alpha, a, lda, b, ldb, nounit);
+            }
         }
     } else {
         if (TRANS == 'N') {
