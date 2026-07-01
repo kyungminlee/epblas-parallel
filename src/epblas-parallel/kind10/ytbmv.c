@@ -70,76 +70,91 @@ static ptrdiff_t ytbmv_omp(bool upper, bool trans, bool conj, bool nounit,
 #endif
 
 /* Contiguous (incx==1) Trans/ConjTrans band dot, carved out of ytbmv_core.
- * Two levers stacked: (1) noinline extraction frees the inner loop from the
- * big core's register-pressure context; (2) the complex accumulator and the
- * A/x loads are decomposed into scalar long-double real/imag locals over a
- * 2n-real reinterpretation of the complex buffers (the yerot/ygemv trick),
- * so GCC schedules the fp80 MAC explicitly instead of through _Complex
- * codegen. ConjTrans flips the sign of A's imaginary part (cconj). Bit-exact
- * with the _Complex form under -fcx-fortran-rules (same op order). */
+ * noinline extraction frees the inner loop from the big core's register-pressure
+ * context. The accumulator is a native _Complex long double and the MAC uses the
+ * _Complex `*`/`+` operators (-fcx-fortran-rules → the naive Fortran formula, no
+ * NaN rescue), a byte-faithful port of the ob reference: an earlier real/imag
+ * scalar decomposition (the yerot/ygemv trick) inflated the per-column fixed
+ * overhead here and lost ~3-5% to ob on contiguous Trans (par tied netlib; ob's
+ * native-_Complex form was the fast leg). ConjTrans conjugates A's entries. */
 __attribute__((noinline))
 static void ytbmv_trans_contig(bool upper, bool noconj, bool nounit,
                                ptrdiff_t n, ptrdiff_t k,
                                const TC *restrict a, ptrdiff_t lda,
                                TC *restrict x)
 {
-    const long double *restrict ar = (const long double *)a;
-    long double *restrict xr = (long double *)x;
+#define CONJIF(z) (noconj ? (z) : cconj(z))
     if (upper) {
         for (ptrdiff_t j = n - 1; j >= 0; --j) {
-            long double tr = xr[2 * j], ti = xr[2 * j + 1];
-            const long double *dcol = ar + 2 * (j * lda);
-            if (nounit) {
-                long double dr = dcol[2 * k], di = dcol[2 * k + 1];
-                if (!noconj) di = -di;
-                long double nr = tr * dr - ti * di, ni = tr * di + ti * dr;
-                tr = nr; ti = ni;
-            }
-            const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
-            const long double *acol = dcol + 2 * (k - j);
-            if (noconj)
-                for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
-                    long double are = acol[2 * i], aim = acol[2 * i + 1];
-                    long double xre = xr[2 * i], xim = xr[2 * i + 1];
-                    tr += are * xre - aim * xim;
-                    ti += are * xim + aim * xre;
-                }
-            else
-                for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
-                    long double are = acol[2 * i], aim = acol[2 * i + 1];
-                    long double xre = xr[2 * i], xim = xr[2 * i + 1];
-                    tr += are * xre + aim * xim;
-                    ti += are * xim - aim * xre;
-                }
-            xr[2 * j] = tr; xr[2 * j + 1] = ti;
+            TC temp = x[j];
+            const TC *col = a + j * lda;
+            const ptrdiff_t off = k - j;
+            if (nounit) temp *= CONJIF(col[k]);
+            const ptrdiff_t i_lo = (j > k) ? j - k : 0;
+            for (ptrdiff_t i = j - 1; i >= i_lo; --i)
+                temp += CONJIF(col[off + i]) * x[i];
+            x[j] = temp;
         }
     } else {
         for (ptrdiff_t j = 0; j < n; ++j) {
-            long double tr = xr[2 * j], ti = xr[2 * j + 1];
-            const long double *dcol = ar + 2 * (j * lda);
-            if (nounit) {
-                long double dr = dcol[0], di = dcol[1];
-                if (!noconj) di = -di;
-                long double nr = tr * dr - ti * di, ni = tr * di + ti * dr;
-                tr = nr; ti = ni;
+            TC temp = x[j];
+            const TC *col = a + j * lda;
+            const ptrdiff_t off = -j;
+            if (nounit) temp *= CONJIF(col[0]);
+            const ptrdiff_t i_hi = (j + k < n - 1) ? j + k : n - 1;
+            for (ptrdiff_t i = j + 1; i <= i_hi; ++i)
+                temp += CONJIF(col[off + i]) * x[i];
+            x[j] = temp;
+        }
+    }
+#undef CONJIF
+}
+
+/* Strided (incx!=1) Trans/ConjTrans band dot, carved out of ytbmv_core for the
+ * same reason as the contiguous helper: inline in the big core it shared the
+ * register file with the NoTrans row-gather paths and lost ~2-3% to ob on the
+ * strided Trans cells; noinline extraction gives the fp80 MAC its own regalloc.
+ * Native _Complex accumulator; ConjTrans conjugates A's entries. */
+__attribute__((noinline))
+static void ytbmv_trans_strided(bool upper, bool noconj, bool nounit,
+                                ptrdiff_t n, ptrdiff_t k,
+                                const TC *restrict a, ptrdiff_t lda,
+                                TC *restrict x, ptrdiff_t incx)
+{
+    ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
+    if (upper) {
+        kx += (n - 1) * incx;
+        ptrdiff_t jx = kx;
+        for (ptrdiff_t j = n - 1; j >= 0; --j) {
+            TC tmp = x[jx];
+            kx -= incx;
+            ptrdiff_t ix = kx;
+            const ptrdiff_t L = k - j;
+            if (nounit) tmp *= (noconj ? A_(k, j) : cconj(A_(k, j)));
+            const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
+            for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
+                const TC aij = noconj ? A_(L + i, j) : cconj(A_(L + i, j));
+                tmp += aij * x[ix];
+                ix -= incx;
             }
+            x[jx] = tmp;
+            jx -= incx;
+        }
+    } else {
+        ptrdiff_t jx = kx;
+        for (ptrdiff_t j = 0; j < n; ++j) {
+            TC tmp = x[jx];
+            kx += incx;
+            ptrdiff_t ix = kx;
+            if (nounit) tmp *= (noconj ? A_(0, j) : cconj(A_(0, j)));
             const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
-            const long double *acol = dcol - 2 * j;
-            if (noconj)
-                for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
-                    long double are = acol[2 * i], aim = acol[2 * i + 1];
-                    long double xre = xr[2 * i], xim = xr[2 * i + 1];
-                    tr += are * xre - aim * xim;
-                    ti += are * xim + aim * xre;
-                }
-            else
-                for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
-                    long double are = acol[2 * i], aim = acol[2 * i + 1];
-                    long double xre = xr[2 * i], xim = xr[2 * i + 1];
-                    tr += are * xre + aim * xim;
-                    ti += are * xim - aim * xre;
-                }
-            xr[2 * j] = tr; xr[2 * j + 1] = ti;
+            for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
+                const TC aij = noconj ? A_(i - j, j) : cconj(A_(i - j, j));
+                tmp += aij * x[ix];
+                ix += incx;
+            }
+            x[jx] = tmp;
+            jx += incx;
         }
     }
 }
@@ -225,42 +240,7 @@ static void ytbmv_core(
                 }
             }
         } else {
-            ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
-            if (UPLO == 'U') {
-                kx += (n - 1) * incx;
-                ptrdiff_t jx = kx;
-                for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    TC tmp = x[jx];
-                    kx -= incx;
-                    ptrdiff_t ix = kx;
-                    const ptrdiff_t L = k - j;
-                    if (nounit) tmp *= (noconj ? A_(k, j) : cconj(A_(k, j)));
-                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
-                    for (ptrdiff_t i = j - 1; i >= i_lo; --i) {
-                        const TC aij = noconj ? A_(L + i, j) : cconj(A_(L + i, j));
-                        tmp += aij * x[ix];
-                        ix -= incx;
-                    }
-                    x[jx] = tmp;
-                    jx -= incx;
-                }
-            } else {
-                ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < n; ++j) {
-                    TC tmp = x[jx];
-                    kx += incx;
-                    ptrdiff_t ix = kx;
-                    if (nounit) tmp *= (noconj ? A_(0, j) : cconj(A_(0, j)));
-                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
-                    for (ptrdiff_t i = j + 1; i < i_hi; ++i) {
-                        const TC aij = noconj ? A_(i - j, j) : cconj(A_(i - j, j));
-                        tmp += aij * x[ix];
-                        ix += incx;
-                    }
-                    x[jx] = tmp;
-                    jx += incx;
-                }
-            }
+            ytbmv_trans_strided(UPLO == 'U', noconj, nounit, n, k, a, lda, x, incx);
         }
     }
 }

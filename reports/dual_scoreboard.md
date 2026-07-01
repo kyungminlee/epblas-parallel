@@ -1,13 +1,13 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-01 20:55 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-01 21:07 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
 | family | cells | serial pass@1.02 | omp4 pass@1.02 |
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
-| e | 2218 | 98.7% | 99.5% |
+| e | 2218 | 99.4% | 99.5% |
 | q | 2218 | 99.5% | 99.8% |
 
 ## m — multifloats (double-double)
@@ -102,11 +102,11 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## e — kind10 (fp80)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 98.7% · omp4 99.5%.**  10 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 99.4% · omp4 99.5%.**  10 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| **ytbmv** | 108 | 1.054 ob1 @UTU/128 | 0.818 | ⚠ |
+| **ytbmv** | 108 | 1.040 ob1 @LTU/x2/128 | 0.826 | ⚠ |
 | **ysyrk** | 12 | 1.034 mig @UT/64 | 0.702 | ⚠ |
 | **etbsv** | 96 | 1.022 ob1 @LTN/256 | 1.029 @LNN/x2/512 | ⚠ |
 | **ytpmv** | 108 | 1.029 ob1 @LTN/128 | 1.024 @UTU/128 | ⚠ |
@@ -182,41 +182,26 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | eynrm2 | 2 | 0.330 | 0.326 | ✅ |
 | yrotg | 1 | 0.079 | 0.078 | ✅ |
 
-<details><summary>e: 38 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>e: 23 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| ytbmv | UTU | 128 | 4,838 | 4,591 | 4,838 | 3,095 | 4,808 | 1.054 | 0.644 | ob1 |
-| ytbmv | UTU | 256 | 10,047 | 9,569 | 10,101 | 4,671 | 7,478 | 1.050 | 0.625 | ob1 |
-| ytbmv | UTU/x2 | 512 | 21,829 | 20,891 | 21,816 | 9,877 | 15,963 | 1.045 | 0.619 | ob1 |
-| ytbmv | LTN | 128 | 4,989 | 4,778 | 4,998 | 3,516 | 5,100 | 1.044 | 0.689 | ob1 |
-| ytbmv | LTN | 256 | 10,258 | 9,849 | 10,275 | 5,318 | 8,193 | 1.042 | 0.649 | ob1 |
-| ytbmv | UTN | 128 | 5,210 | 5,012 | 5,209 | 3,158 | 5,130 | 1.039 | 0.616 | ob1 |
-| ytbmv | UCU/x2 | 256 | 11,336 | 10,937 | 11,154 | 5,989 | 8,706 | 1.036 | 0.688 | ob1 |
-| ytbmv | LTN | 512 | 21,814 | 21,079 | 21,822 | 8,600 | 14,958 | 1.035 | 0.575 | ob1 |
-| ytbmv | LTU | 128 | 4,747 | 4,590 | 4,757 | 3,428 | 4,891 | 1.034 | 0.701 | ob1 |
+| ytbmv | LTU/x2 | 128 | 4,920 | 4,731 | 5,114 | 4,061 | 4,916 | 1.040 | 0.826 | ob1 |
 | ysyrk | UT | 64 | 327,679 | 482,685 | 316,885 | 124,742 | 266,107 | 1.034 | 0.469 | mig |
-| ytbmv | LTU | 256 | 9,763 | 9,460 | 9,782 | 5,187 | 8,102 | 1.032 | 0.640 | ob1 |
 | ysyrk | UT | 128 | 2,616,194 | 3,642,864 | 2,535,989 | 962,235 | 1,723,287 | 1.032 | 0.558 | mig |
 | etbsv | LNN/x2 | 512 | 16,936 | 16,924 | 16,843 | 17,059 | 16,571 | 1.006 | 1.029 | mig |
 | ytpmv | LTN | 128 | 20,024 | 19,453 | 19,726 | 12,301 | 12,344 | 1.029 | 0.996 | ob1 |
-| ytbmv | UTU | 512 | 21,729 | 21,110 | 21,764 | 7,964 | 14,315 | 1.029 | 0.556 | ob1 |
 | ysyrk | UT | 256 | 20,627,783 | 28,389,878 | 20,047,183 | 7,583,982 | 13,340,452 | 1.029 | 0.568 | mig |
 | etrmm | RUTU | 128 | 718,173 | 712,483 | 1,867,708 | 402,323 | 391,443 | 1.008 | 1.028 | ob1 |
-| ytbmv | UTN | 256 | 10,837 | 10,552 | 10,748 | 4,825 | 7,545 | 1.027 | 0.640 | ob1 |
 | ytrsv | UTN/x2 | 128 | 20,626 | 20,116 | 20,102 | 20,526 | 20,104 | 1.026 | 1.021 | mig |
-| ytbmv | LTU | 512 | 20,319 | 19,806 | 20,350 | 8,391 | 14,832 | 1.026 | 0.566 | ob1 |
 | ytpmv | LTN | 512 | 313,932 | 306,136 | 306,529 | 90,800 | 90,800 | 1.025 | 1.000 | ob1 |
 | ytpmv | LNU/x2 | 512 | 471,602 | 489,368 | 460,408 | 128,298 | 148,321 | 1.024 | 0.865 | mig |
 | ytpmv | UTU | 128 | 19,700 | 20,032 | 20,278 | 12,580 | 12,282 | 0.983 | 1.024 | ob1 |
 | etrmm | RLNN | 256 | 5,333,847 | 5,317,005 | 14,753,623 | 2,129,155 | 2,078,877 | 1.003 | 1.024 | ob1 |
-| ytbmv | UTN | 512 | 22,748 | 22,219 | 22,756 | 8,224 | 14,505 | 1.024 | 0.567 | ob1 |
 | ytbsv | LTN | 128 | 5,431 | 5,367 | 5,612 | 5,313 | 5,192 | 1.012 | 1.023 | ob1 |
 | etrsm | RUNU | 64 | 112,039 | 109,547 | 233,994 | 41,238 | 100,914 | 1.023 | 0.409 | ob1 |
 | ytrsv | UTN/x-1 | 128 | 20,510 | 20,150 | 20,054 | 20,544 | 20,170 | 1.023 | 1.019 | mig |
-| ytbmv | UTU/x-1 | 512 | 20,358 | 19,906 | 20,416 | 9,318 | 15,967 | 1.023 | 0.584 | ob1 |
 | etbsv | LTN | 256 | 4,076 | 3,989 | 4,148 | 3,979 | 3,897 | 1.022 | 1.021 | ob1 |
-| ytbmv | UTN/x2 | 256 | 10,838 | 10,607 | 10,904 | 5,841 | 8,554 | 1.022 | 0.683 | ob1 |
 | ytbsv | LTN | 256 | 10,958 | 10,924 | 11,392 | 10,990 | 10,756 | 1.003 | 1.022 | ob1 |
 | egemm | TN | 128 | 1,370,493 | 1,341,380 | 1,903,761 | 392,470 | 395,208 | 1.022 | 0.993 | ob1 |
 | etrmm | RLNU | 256 | 5,338,531 | 5,320,445 | 14,756,611 | 2,104,646 | 2,060,760 | 1.003 | 1.021 | ob1 |
