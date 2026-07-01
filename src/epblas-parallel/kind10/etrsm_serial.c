@@ -527,24 +527,44 @@ void etrsm_serial(
     /* Bound the pack buffers to the actual problem, not the full cache-block
      * params. The band drivers step by MC/KC over the triangular axis (K_eff)
      * and by NC over the free axis, with every block capped by the remaining
-     * extent — so a small matrix never packs more than min(block, dim). At
-     * N=64 the unbounded sizes were ~1MB Ap + ~2MB Bp (both past glibc's
-     * 128KB mmap threshold → a per-call mmap/munmap + page-zeroing) for a
-     * 64×64 corner; bounding keeps them in the malloc arena (no syscall, no
-     * fault) and is a no-op once the dims exceed the blocks (N≥256). */
+     * extent — so a small matrix never packs more than min(block, dim). */
     const ptrdiff_t mc_eff = (MC < K_eff)    ? MC : K_eff;
     const ptrdiff_t kc_eff = (KC < K_eff)    ? KC : K_eff;
     const ptrdiff_t nc_eff = (NC < free_dim) ? NC : free_dim;
     const size_t ap_bytes = (size_t)blas_round_up(mc_eff, MR) * (size_t)kc_eff * sizeof(TR);
     const size_t bp_bytes = (size_t)kc_eff * (size_t)blas_round_up(nc_eff, NR) * sizeof(TR);
-    TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (Ap && Bp) {
+
+    /* Persistent, grow-only, thread-local pack scratch (Ap|Bp in one block).
+     *
+     * A per-call aligned_alloc+free of these 256KB–2MB buffers is NOT free:
+     * both exceed glibc's mmap threshold, and freeing them raises the arena's
+     * *trim* threshold only to ~2×block, so freeing both Ap+Bp each call trips
+     * malloc_trim → the arena is handed back to the OS and re-grown next call,
+     * re-faulting every touched page. Measured 96 minor faults/call at N=128
+     * (perf: 1.9M faults over 20k calls) vs ~0 for the openblas reference,
+     * which allocates UNBOUNDED (larger) buffers whose bigger trim threshold
+     * keeps the arena resident — a ~3% wall gap at N≤128 that is pure page-
+     * fault kernel time, not compute. Keeping one grow-only buffer per thread
+     * (never freed; released at thread/exit) sidesteps the heuristic entirely
+     * and matches what a real HPC library's per-thread memory pool does. */
+    static __thread TR *g_pack = NULL;
+    static __thread size_t g_pack_cap = 0;
+    const size_t ap_al = (ap_bytes + 63) & ~(size_t)63;
+    const size_t bp_al = (bp_bytes + 63) & ~(size_t)63;
+    const size_t need  = ap_al + bp_al;
+    if (need > g_pack_cap) {
+        free(g_pack);
+        size_t cap = need + (need >> 1);            /* 1.5× headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_pack = aligned_alloc(64, cap);
+        g_pack_cap = g_pack ? cap : 0;
+    }
+    if (g_pack) {
+        TR *Ap = g_pack;
+        TR *Bp = (TR *)(void *)((char *)g_pack + ap_al);
         if (lside) etrsm_L_band(upper, trans, unit, m, 0, n,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
         else       etrsm_R_band(upper, trans, unit, n, 0, m,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
     }
-    free(Ap);
-    free(Bp);
 }
