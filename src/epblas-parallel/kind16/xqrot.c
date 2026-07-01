@@ -9,27 +9,46 @@
 typedef __complex128 TC;
 typedef __float128 R;
 
+/* Real coefficients on complex data: treat each complex element as two
+ * independent reals and run the plain real rotation over them.  The
+ * contiguous case becomes one flat 2n real loop (the epblas-openblas shape) —
+ * load-first, no __complex128 member juggling.  Same ops in the same order —
+ * bit-identical.  n is the COMPLEX count; the kernel walks 2n reals.
+ *
+ * NOT unrolled — deliberately.  quad has no SIMD: every mul/add is an opaque
+ * libquadmath call (__mulkf3/__addkf3) that clobbers all caller-saved xmm
+ * regs.  Loop overhead (1 add/cmp/jne per element) is negligible against 6
+ * such calls, so unrolling buys nothing and instead keeps several elements
+ * live across the call boundaries, forcing extra stack spills (~3.4 vs ~2.3
+ * vmovdqa/call, measured) → the opposite of the fp80 yerot case where inline
+ * x87 ops make loop overhead the lever.  A simple 1-element loop matches the
+ * ob kernel's spill count and closes the serial par/ob gap. */
+static void xqrot_unit(ptrdiff_t n, R c, R s, R *px, R *py)
+{
+    const long two_n = 2L * n;
+    for (long i = 0; i < two_n; ++i) {
+        R xi = px[i], yi = py[i];
+        px[i] = c * xi + s * yi;
+        py[i] = c * yi - s * xi;
+    }
+}
+
 #ifdef _OPENMP
 /* Threaded complex Givens (real c, s) — quad is compute-bound, so it threads
- * (see qaxpy.c). Each iteration is independent; index-from-i covers all strides. */
+ * (see qaxpy.c).  Each iteration is independent; partition the flat real
+ * kernel over disjoint element ranges. */
 #define XQROT_OMP_MIN 128
-__attribute__((noinline)) static bool xqrot_omp(ptrdiff_t n, TC *x, ptrdiff_t incx,
-                                               TC *y, ptrdiff_t incy, R c, R s)
+static bool xqrot_omp(ptrdiff_t n, R c, R s, R *px, R *py)
 {
     if (n <= XQROT_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
-    ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
-    ptrdiff_t iy0 = (incy < 0) ? (-n + 1) * incy : 0;
-    #pragma omp parallel for schedule(static) num_threads(nthreads)
-    for (ptrdiff_t i = 0; i < n; ++i) {
-        ptrdiff_t ix = ix0 + i * incx, iy = iy0 + i * incy;
-        TC tx;
-        __real__ tx = c * __real__ x[ix] + s * __real__ y[iy];
-        __imag__ tx = c * __imag__ x[ix] + s * __imag__ y[iy];
-        __real__ y[iy] = c * __real__ y[iy] - s * __real__ x[ix];
-        __imag__ y[iy] = c * __imag__ y[iy] - s * __imag__ x[ix];
-        x[ix] = tx;
+    #pragma omp parallel num_threads(nthreads)
+    {
+        ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
+        ptrdiff_t lo = blas_part_bound(n, tid, nth);
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
+        if (lo < hi) xqrot_unit(hi - lo, c, s, px + 2 * lo, py + 2 * lo);
     }
     return 1;
 }
@@ -40,28 +59,20 @@ static void xqrot_core(ptrdiff_t n, TC *x, ptrdiff_t incx, TC *y, ptrdiff_t incy
 {
     const R c = *c_, s = *s_;
     if (n <= 0) return;
-#ifdef _OPENMP
-    if (xqrot_omp(n, x, incx, y, incy, c, s)) return;
-#endif
     if (incx == 1 && incy == 1) {
-        for (ptrdiff_t i = 0; i < n; ++i) {
-            TC tx;
-            __real__ tx = c * __real__ x[i] + s * __real__ y[i];
-            __imag__ tx = c * __imag__ x[i] + s * __imag__ y[i];
-            __real__ y[i] = c * __real__ y[i] - s * __real__ x[i];
-            __imag__ y[i] = c * __imag__ y[i] - s * __imag__ x[i];
-            x[i] = tx;
-        }
+        R *px = (R *)x, *py = (R *)y;
+#ifdef _OPENMP
+        if (xqrot_omp(n, c, s, px, py)) return;
+#endif
+        xqrot_unit(n, c, s, px, py);
     } else {
         ptrdiff_t ix = (incx < 0) ? (-n + 1) * incx : 0;
         ptrdiff_t iy = (incy < 0) ? (-n + 1) * incy : 0;
         for (ptrdiff_t i = 0; i < n; ++i) {
-            TC tx;
-            __real__ tx = c * __real__ x[ix] + s * __real__ y[iy];
-            __imag__ tx = c * __imag__ x[ix] + s * __imag__ y[iy];
-            __real__ y[iy] = c * __real__ y[iy] - s * __real__ x[ix];
-            __imag__ y[iy] = c * __imag__ y[iy] - s * __imag__ x[ix];
-            x[ix] = tx;
+            R *px = (R *)&x[ix], *py = (R *)&y[iy];
+            R xr = px[0], xi = px[1], yr = py[0], yi = py[1];
+            px[0] = c * xr + s * yr; px[1] = c * xi + s * yi;
+            py[0] = c * yr - s * xr; py[1] = c * yi - s * xi;
             ix += incx; iy += incy;
         }
     }
