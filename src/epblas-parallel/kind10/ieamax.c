@@ -15,8 +15,15 @@ static ptrdiff_t ieamax_kernel(ptrdiff_t n, const TR *x, TR *bv_out)
 {
     ptrdiff_t best = 0;
     TR bv = fabsl(x[0]);
+    /* Walk a separate load pointer instead of x[i]: if the load address shares
+     * the index i with `best = i`, GCC ties them to one IV and recomputes i*16
+     * (mov+shl) per element (1.76x slower). A distinct pointer lets GCC
+     * strength-reduce the load to a pure pointer increment — matching the
+     * serial core loop's codegen. Bit-identical (same scan, same tie-break). */
+    const TR *p = x;
     for (ptrdiff_t i = 1; i < n; ++i) {
-        TR v = fabsl(x[i]);
+        ++p;
+        TR v = fabsl(*p);
         if (v > bv) { bv = v; best = i; }
     }
     *bv_out = bv;

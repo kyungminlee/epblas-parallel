@@ -18,8 +18,13 @@ static ptrdiff_t iqamax_kernel(ptrdiff_t n, const TR *x, TR *bv_out)
 {
     ptrdiff_t best = 0;
     TR bv = fabsq(x[0]);
+    /* Separate load pointer so GCC strength-reduces the load to a pointer
+     * increment instead of recomputing i*sizeof per element (i is otherwise
+     * tied to `best = i`). Bit-identical. See ieamax for the disasm rationale. */
+    const TR *p = x;
     for (ptrdiff_t i = 1; i < n; ++i) {
-        TR v = fabsq(x[i]);
+        ++p;
+        TR v = fabsq(*p);
         if (v > bv) { bv = v; best = i; }
     }
     *bv_out = bv;

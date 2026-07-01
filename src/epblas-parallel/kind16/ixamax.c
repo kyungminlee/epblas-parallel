@@ -19,8 +19,13 @@ static ptrdiff_t ixamax_kernel(ptrdiff_t n, const TC *x, R *bv_out)
 {
     ptrdiff_t best = 0;
     R bv = fabsq(__real__ x[0]) + fabsq(__imag__ x[0]);
+    /* Separate load pointer so GCC strength-reduces the load to a pointer
+     * increment instead of recomputing i*sizeof per element (i is otherwise
+     * tied to `best = i`). Bit-identical. See ieamax for the disasm rationale. */
+    const TC *p = x;
     for (ptrdiff_t i = 1; i < n; ++i) {
-        R v = fabsq(__real__ x[i]) + fabsq(__imag__ x[i]);
+        ++p;
+        R v = fabsq(__real__ *p) + fabsq(__imag__ *p);
         if (v > bv) { bv = v; best = i; }
     }
     *bv_out = bv;
