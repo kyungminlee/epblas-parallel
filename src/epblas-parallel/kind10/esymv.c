@@ -127,8 +127,12 @@ static void esymv_core(
     if (n == 0) return;
 
     const TR zero = 0.0L, one = 1.0L;
+    const bool contiguous = (incx == 1 && incy == 1);
 
-    if (beta != one) {
+    /* Scale y := beta*y up front only for the contiguous path and the alpha==0
+     * early-out. The strided path folds beta into the y-gather below (one
+     * strided pass over y instead of two). Bit-identical either way. */
+    if (beta != one && (contiguous || alpha == zero)) {
         if (incy == 1) {
             if (beta == zero) for (ptrdiff_t i = 0; i < n; ++i) y[i] = zero;
             else              for (ptrdiff_t i = 0; i < n; ++i) y[i] *= beta;
@@ -145,7 +149,7 @@ static void esymv_core(
     if (alpha == zero) return;
 
     /* The unit-stride path: stride-1 column walks of A. */
-    if (incx == 1 && incy == 1) {
+    if (contiguous) {
         const ptrdiff_t nthreads = blas_omp_max_threads();
         const bool use_omp = (n >= ESYMV_OMP_MIN && blas_omp_should_thread());
         if (use_omp) {
@@ -229,9 +233,13 @@ static void esymv_core(
         }
         if (xc && yc) {
             ptrdiff_t ix = kx, iy = ky;
-            for (ptrdiff_t k = 0; k < n; ++k) {
-                xc[k] = x[ix]; yc[k] = y[iy];
-                ix += incx; iy += incy;
+            /* Fold beta into the gather: yc := beta*y, one strided y-pass. */
+            if (beta == one) {
+                for (ptrdiff_t k = 0; k < n; ++k) { xc[k] = x[ix]; yc[k] = y[iy]; ix += incx; iy += incy; }
+            } else if (beta == zero) {
+                for (ptrdiff_t k = 0; k < n; ++k) { xc[k] = x[ix]; yc[k] = zero; ix += incx; iy += incy; }
+            } else {
+                for (ptrdiff_t k = 0; k < n; ++k) { xc[k] = x[ix]; yc[k] = beta * y[iy]; ix += incx; iy += incy; }
             }
             esymv_serial_core(UPLO, n, lda, alpha, a, xc, yc);
             iy = ky;
@@ -240,6 +248,13 @@ static void esymv_core(
             return;
         }
         free(heap);
+        /* Fallback (alloc failed): the strided path skipped the up-front beta
+         * pre-scale, so apply it now before the direct strided walk. */
+        if (beta != one) {
+            ptrdiff_t iy = ky;
+            if (beta == zero) for (ptrdiff_t i = 0; i < n; ++i) { y[iy] = zero; iy += incy; }
+            else              for (ptrdiff_t i = 0; i < n; ++i) { y[iy] *= beta; iy += incy; }
+        }
         if (UPLO == 'L') {
             ptrdiff_t jx = kx, jy = ky;
             for (ptrdiff_t i = 0; i < n; ++i) {
