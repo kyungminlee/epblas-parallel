@@ -81,7 +81,15 @@ static void etbmv_contig_trans(char UPLO, bool nounit, ptrdiff_t n, ptrdiff_t k,
  * break-even up near Trans's (it was 512 back when serial NoTrans was the slower
  * column scatter). Calibrated at K=16. */
 #define ETBMV_OMP_MIN_N 768   /* NoTrans/ConjNoTrans: break-even ~N=700 */
-#define ETBMV_OMP_MIN_T 1024  /* Trans: break-even ~N=800 */
+#define ETBMV_OMP_MIN_T 1024  /* Trans strided: break-even ~N=800 (2nd xbuf malloc) */
+/* Contiguous Trans breaks even lower under OMP=4: the serial fallback there is
+ * NOT free -- it runs in a process with a live 4-thread hot team whose 3 idle
+ * spinners draw package power and clip core-2 turbo, inflating the serial path
+ * ~10% (par1 6915 -> par4 7654 at N=512) even though it never enters a parallel
+ * region. Threading at 512 reclaims those cores; the fork/malloc/barrier tax is
+ * repaid by running on 4 non-throttled cores instead of 1 throttled one. Only
+ * the contiguous path (single malloc(n)) qualifies; strided keeps 1024. K=16. */
+#define ETBMV_OMP_MIN_TC 512  /* Trans, incx==1: break-even under OMP=4 hot team */
 #define ETBMV_MAX_CPUS 256
 
 #ifdef _OPENMP
@@ -105,7 +113,9 @@ static void etbmv_core(
 #ifdef _OPENMP
     /* Cheap inline gate first: at OMP=1 (or below threshold) short-circuit
      * before the noinline call's argument marshalling (outlining tax). */
-    const ptrdiff_t omp_min = (TRANS == 'T') ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
+    const ptrdiff_t omp_min = (TRANS == 'T')
+        ? (incx == 1 ? ETBMV_OMP_MIN_TC : ETBMV_OMP_MIN_T)
+        : ETBMV_OMP_MIN_N;
     if (n >= omp_min && blas_omp_max_threads() > 1
         && etbmv_omp(UPLO == 'U', TRANS == 'T', nounit, n, k, a, lda, x, incx))
         return;
@@ -278,7 +288,8 @@ __attribute__((noinline)) static ptrdiff_t etbmv_omp(
     bool upper, bool trans, bool nounit, ptrdiff_t n, ptrdiff_t k,
     const TR *restrict a, ptrdiff_t lda, TR *restrict x, ptrdiff_t incx)
 {
-    ptrdiff_t omp_min = trans ? ETBMV_OMP_MIN_T : ETBMV_OMP_MIN_N;
+    ptrdiff_t omp_min = trans ? (incx == 1 ? ETBMV_OMP_MIN_TC : ETBMV_OMP_MIN_T)
+                              : ETBMV_OMP_MIN_N;
     if (n < omp_min || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
