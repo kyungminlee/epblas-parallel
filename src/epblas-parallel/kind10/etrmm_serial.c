@@ -615,16 +615,46 @@ void etrmm_serial(
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
-    const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
-    const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
-    TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (Ap && Bp) {
+    /* Bound the pack buffers to the actual problem, not the full cache-block
+     * params — every block is capped by the remaining extent, so a small
+     * matrix never packs more than min(block, dim). The per-axis dims are the
+     * SAME for both sides: Ap's MR-panel row axis is m (SIDE='L' packs op(A)
+     * tiles of ≤min(MC,m) rows; SIDE='R' packs B-row strips of ≤min(MC,m)
+     * rows — bounded by m, NOT by K_eff: with m≫n the adaptive MC grown for
+     * small K exceeds n and a K_eff bound overflows Ap into Bp), the KC axis
+     * is the triangular dim K_eff, and the NC sweep walks B's columns n on
+     * both sides. */
+    const ptrdiff_t mc_eff = (MC < m)     ? MC : m;
+    const ptrdiff_t kc_eff = (KC < K_eff) ? KC : K_eff;
+    const ptrdiff_t nc_eff = (NC < n)     ? NC : n;
+    const size_t ap_bytes = (size_t)blas_round_up(mc_eff, MR) * (size_t)kc_eff * sizeof(TR);
+    const size_t bp_bytes = (size_t)kc_eff * (size_t)blas_round_up(nc_eff, NR) * sizeof(TR);
+
+    /* Persistent, grow-only, thread-local pack scratch (Ap|Bp in one block).
+     * A per-call aligned_alloc+free of these 256KB–2MB buffers is NOT free:
+     * both exceed glibc's mmap threshold, and freeing both each call trips
+     * malloc_trim → the arena is handed back to the OS and re-faulted next
+     * call, pure page-fault kernel time (see etrsm_serial.c for the measured
+     * fault counts). One grow-only buffer per thread (never freed; released
+     * at thread/exit) sidesteps the heuristic entirely. */
+    static __thread TR *g_pack = NULL;
+    static __thread size_t g_pack_cap = 0;
+    const size_t ap_al = (ap_bytes + 63) & ~(size_t)63;
+    const size_t bp_al = (bp_bytes + 63) & ~(size_t)63;
+    const size_t need  = ap_al + bp_al;
+    if (need > g_pack_cap) {
+        free(g_pack);
+        size_t cap = need + (need >> 1);            /* 1.5× headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_pack = aligned_alloc(64, cap);
+        g_pack_cap = g_pack ? cap : 0;
+    }
+    if (g_pack) {
+        TR *Ap = g_pack;
+        TR *Bp = (TR *)(void *)((char *)g_pack + ap_al);
         if (lside) etrmm_L_band(upper, trans, unit, m, 0, n,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
         else       etrmm_R_band(upper, trans, unit, n, 0, m,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
     }
-    free(Ap);
-    free(Bp);
 }
