@@ -639,8 +639,8 @@ void etrmm_serial(
      * at thread/exit) sidesteps the heuristic entirely. */
     static __thread TR *g_pack = NULL;
     static __thread size_t g_pack_cap = 0;
-    const size_t ap_al = (ap_bytes + 63) & ~(size_t)63;
-    const size_t bp_al = (bp_bytes + 63) & ~(size_t)63;
+    const size_t ap_al = ((ap_bytes + 63) & ~(size_t)63) + ETRI_PACK_GUARD;
+    const size_t bp_al = ((bp_bytes + 63) & ~(size_t)63) + ETRI_PACK_GUARD;
     const size_t need  = ap_al + bp_al;
     if (need > g_pack_cap) {
         free(g_pack);
@@ -652,9 +652,13 @@ void etrmm_serial(
     if (g_pack) {
         TR *Ap = g_pack;
         TR *Bp = (TR *)(void *)((char *)g_pack + ap_al);
+        etri_pack_guard_poison(Ap, ap_bytes, ap_al);
+        etri_pack_guard_poison(Bp, bp_bytes, bp_al);
         if (lside) etrmm_L_band(upper, trans, unit, m, 0, n,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
         else       etrmm_R_band(upper, trans, unit, n, 0, m,
                                 MC, KC, NC, a, lda, b, ldb, Ap, Bp);
+        etri_pack_guard_check(Ap, ap_bytes, ap_al, "etrmm_serial Ap");
+        etri_pack_guard_check(Bp, bp_bytes, bp_al, "etrmm_serial Bp");
     }
 }

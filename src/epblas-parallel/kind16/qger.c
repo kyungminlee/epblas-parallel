@@ -65,10 +65,16 @@ void qger_core(
     {
         const ptrdiff_t ix0 = (incx < 0) ? -(m - 1) * incx : 0;
         const ptrdiff_t jy0 = (incy < 0) ? -(n - 1) * incy : 0;
-        TR stackbuf[512];
+        /* Exact fit: the gather writes xc[0..m-1] and yc[0..n-1] with
+         * yc = stackbuf + m (max offset m+n-1), so the threshold and the
+         * array length must move together. */
+        enum { QGER_STACK_MN = 512 };
+        TR stackbuf[QGER_STACK_MN];
+        _Static_assert(QGER_STACK_MN * sizeof(TR) <= sizeof(stackbuf),
+                       "qger stack-gather threshold exceeds stackbuf");
         TR *heap = NULL;
         TR *xc, *yc;
-        if (m + n <= 512) {
+        if (m + n <= QGER_STACK_MN) {
             xc = stackbuf; yc = stackbuf + m;
         } else {
             heap = (TR *)malloc((size_t)(m + n) * sizeof(TR));

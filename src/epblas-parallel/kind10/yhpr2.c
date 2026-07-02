@@ -205,10 +205,16 @@ static void yhpr2_core(
     {
         const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
-        TC stackbuf[2 * 256];
+        /* Exact fit: the gather writes xc[0..n-1] and yc[0..n-1] with
+         * yc = stackbuf + n (max offset 2n-1), so the threshold and the
+         * array length must move together. */
+        enum { YHPR2_STACK_N = 256 };
+        TC stackbuf[2 * YHPR2_STACK_N];
+        _Static_assert(2 * YHPR2_STACK_N * sizeof(TC) <= sizeof(stackbuf),
+                       "yhpr2 stack-gather threshold exceeds stackbuf");
         TC *heap = NULL;
         TC *xc, *yc;
-        if (n <= 256) {
+        if (n <= YHPR2_STACK_N) {
             xc = stackbuf; yc = stackbuf + n;
         } else {
             heap = (TC *)malloc((size_t)2 * n * sizeof(TC));

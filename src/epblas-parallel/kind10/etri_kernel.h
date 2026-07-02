@@ -55,4 +55,35 @@ void etri_ncopy(ptrdiff_t m, ptrdiff_t n, const etri_TR *a, ptrdiff_t lda,
 void etri_tcopy(ptrdiff_t m, ptrdiff_t n, const etri_TR *a, ptrdiff_t lda,
                 etri_TR *b);
 
+/* Pack-scratch overrun guards. The trsm/trmm drivers place Ap and Bp in one
+ * allocation (or in adjacent heap blocks), so a pack that overruns its
+ * segment corrupts the neighbouring data SILENTLY — wrong results with no
+ * fault, which square-shape benches and fuzz cannot catch (the 9ff020a
+ * R-side mc_eff bug shipped exactly this way). Each segment therefore ends
+ * in a poisoned region (its size slack plus one dedicated ETRI_PACK_GUARD
+ * line) written before the block nest runs and verified after it returns:
+ * pack writes are contiguous streams, so any overrun crosses the poison and
+ * aborts loudly. Always on — the cost is a ~128-byte write + readback per
+ * top-level call, nothing per panel (and NDEBUG would compile assert() out
+ * of the Release library that every test binary links). */
+enum { ETRI_PACK_GUARD = 64 };
+#define ETRI_PACK_POISON 0x5A
+
+void etri_pack_guard_fail(const char *where);
+
+/* Poison bytes [used, end) of the segment starting at seg. */
+static inline void etri_pack_guard_poison(void *seg, size_t used, size_t end)
+{
+    unsigned char *p = (unsigned char *)seg;
+    for (size_t i = used; i < end; ++i) p[i] = ETRI_PACK_POISON;
+}
+
+static inline void etri_pack_guard_check(const void *seg, size_t used, size_t end,
+                                         const char *where)
+{
+    const unsigned char *p = (const unsigned char *)seg;
+    for (size_t i = used; i < end; ++i)
+        if (p[i] != ETRI_PACK_POISON) etri_pack_guard_fail(where);
+}
+
 #endif /* EPBLAS_PARALLEL_KIND10_ETRI_KERNEL_H */

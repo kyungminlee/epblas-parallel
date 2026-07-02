@@ -28,6 +28,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <quadmath.h>
 #include "../common/blas_omp.h"
 #ifdef _OPENMP
@@ -271,8 +272,12 @@ static void xtrsm_core(
             /* L-side Trans ('T') / ConjTrans ('C'). At small M the naive
              * dot cores win (they already beat ob AND gfortran); at large
              * M OpenBLAS's blocked packed GEMM pulls ~2-4% ahead, so route
-             * through the packed driver there (xtri_driver.c) to match it. */
-            if (m >= XTRSM_PACKED_MIN_M) {
+             * through the packed driver there (xtri_driver.c) to match it.
+             * xtrsm_packed takes int dims (ob kernel ABI) — dims past
+             * INT_MAX stay on the naive ptrdiff_t cores instead of being
+             * truncated by the (int) casts below. */
+            if (m >= XTRSM_PACKED_MIN_M &&
+                m <= INT_MAX && n <= INT_MAX && lda <= INT_MAX && ldb <= INT_MAX) {
                 xtrsm_packed(/*lside=*/1, /*upper=*/(UPLO == 'U'),
                              /*trans=*/1, /*conj=*/(TRANS == 'C'),
                              /*unit=*/!nounit,

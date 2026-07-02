@@ -18,10 +18,22 @@
  */
 
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "etri_kernel.h"
 
 typedef etri_TR TR;
+
+/* Cold abort path for the pack-scratch overrun guards (etri_kernel.h) —
+ * out of line so the inline check carries only a compare and a call. */
+void etri_pack_guard_fail(const char *where)
+{
+    fprintf(stderr,
+            "epblas-parallel: %s: pack scratch overrun detected "
+            "(poisoned segment tail was overwritten)\n", where);
+    abort();
+}
 
 /* Register-tile dims — must match the triangular packers' packed layout. */
 #define MR 2

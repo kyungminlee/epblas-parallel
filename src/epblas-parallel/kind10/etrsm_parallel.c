@@ -27,6 +27,7 @@
 #endif
 
 #include "etrsm_kernel.h"
+#include "etri_kernel.h"    /* etri_pack_guard_{poison,check} */
 #include "egemm_kernel.h"   /* egemm_choose_blocks / egemm_beta_prepass / blas_round_up */
 #include "../common/epblas_facade.h"
 
@@ -122,11 +123,15 @@ static void etrsm_core(
     TR **Ap_arr = calloc((size_t)nthreads, sizeof(TR *));
     TR **Bp_arr = calloc((size_t)nthreads, sizeof(TR *));
     if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    const size_t ap_al = ((ap_bytes + 63) & ~(size_t)63) + ETRI_PACK_GUARD;
+    const size_t bp_al = ((bp_bytes + 63) & ~(size_t)63) + ETRI_PACK_GUARD;
     ptrdiff_t alloc_ok = 1;
     for (ptrdiff_t t = 0; t < nthreads; ++t) {
-        Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-        Bp_arr[t] = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+        Ap_arr[t] = aligned_alloc(64, ap_al);
+        Bp_arr[t] = aligned_alloc(64, bp_al);
         if (!Ap_arr[t] || !Bp_arr[t]) { alloc_ok = 0; break; }
+        etri_pack_guard_poison(Ap_arr[t], ap_bytes, ap_al);
+        etri_pack_guard_poison(Bp_arr[t], bp_bytes, bp_al);
     }
     if (!alloc_ok) {
         for (ptrdiff_t t = 0; t < nthreads; ++t) {
@@ -172,6 +177,8 @@ static void etrsm_core(
     }
 
     for (ptrdiff_t t = 0; t < nthreads; ++t) {
+        etri_pack_guard_check(Ap_arr[t], ap_bytes, ap_al, "etrsm_parallel Ap");
+        etri_pack_guard_check(Bp_arr[t], bp_bytes, bp_al, "etrsm_parallel Bp");
         free(Ap_arr[t]);
         free(Bp_arr[t]);
     }

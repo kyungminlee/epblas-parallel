@@ -266,10 +266,16 @@ static void espmv_core(
         const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         /* Stack scratch for the common small-N case avoids malloc latency;
          * spill to the heap for large N. */
-        TR stackbuf[2 * 512];
+        /* Exact fit: the gather writes xc[0..n-1] and yc[0..n-1] with
+         * yc = stackbuf + n (max offset 2n-1), so the threshold and the
+         * array length must move together. */
+        enum { ESPMV_STACK_N = 512 };
+        TR stackbuf[2 * ESPMV_STACK_N];
+        _Static_assert(2 * ESPMV_STACK_N * sizeof(TR) <= sizeof(stackbuf),
+                       "espmv stack-gather threshold exceeds stackbuf");
         TR *heap = NULL;
         TR *xc, *yc;
-        if (n <= 512) {
+        if (n <= ESPMV_STACK_N) {
             xc = stackbuf; yc = stackbuf + n;
         } else {
             heap = (TR *)malloc((size_t)2 * n * sizeof(TR));

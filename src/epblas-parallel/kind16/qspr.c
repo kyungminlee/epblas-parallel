@@ -80,10 +80,15 @@ void qspr_core(
      * See project_l2_strided_gather. */
     {
         const ptrdiff_t kx0 = (incx < 0) ? -(n - 1) * incx : 0;
-        TR stackbuf[256];
+        /* Exact fit: the gather writes xc[0..n-1], so the threshold and
+         * the array length must move together. */
+        enum { QSPR_STACK_N = 256 };
+        TR stackbuf[QSPR_STACK_N];
+        _Static_assert(QSPR_STACK_N * sizeof(TR) <= sizeof(stackbuf),
+                       "qspr stack-gather threshold exceeds stackbuf");
         TR *heap = NULL;
         TR *xc;
-        if (n <= 256) {
+        if (n <= QSPR_STACK_N) {
             xc = stackbuf;
         } else {
             heap = (TR *)malloc((size_t)n * sizeof(TR));

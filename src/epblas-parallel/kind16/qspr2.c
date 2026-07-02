@@ -106,10 +106,16 @@ void qspr2_core(
     if (would_thread) {
         const ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         const ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
-        TR stackbuf[2 * 256];
+        /* Exact fit: the gather writes xc[0..n-1] and yc[0..n-1] with
+         * yc = stackbuf + n (max offset 2n-1), so the threshold and the
+         * array length must move together. */
+        enum { QSPR2_STACK_N = 256 };
+        TR stackbuf[2 * QSPR2_STACK_N];
+        _Static_assert(2 * QSPR2_STACK_N * sizeof(TR) <= sizeof(stackbuf),
+                       "qspr2 stack-gather threshold exceeds stackbuf");
         TR *heap = NULL;
         TR *xc, *yc;
-        if (n <= 256) {
+        if (n <= QSPR2_STACK_N) {
             xc = stackbuf; yc = stackbuf + n;
         } else {
             heap = (TR *)malloc((size_t)2 * n * sizeof(TR));
