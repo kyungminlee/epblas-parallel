@@ -73,6 +73,25 @@ def build_gemm(name, is_c):
 # ---------------------------------------------------------------------------
 def build_symm_hemm(name, is_c):
     p7, p3 = (CL7, CL3) if is_c else (RL7, RL3)
+    # SYMM/HEMM read a symmetric (resp. Hermitian) A; the routine references only
+    # ONE triangle and assumes the mirror matches. Fill A dense, then mirror the
+    # upper triangle into the lower so both triangles are consistent — otherwise
+    # the U-vs-L legs operate on different effective matrices, which (for the
+    # soft-float __float128 kind16 twins) surfaces as a spurious data-dependent
+    # per-uplo timing skew in libgcc's quad multiply/add exception handling.
+    is_h = 'hemm' in name
+    if is_h:
+        symm = ('''    for (int j = 0; j < Asz; ++j) {
+        for (int i = j + 1; i < Asz; ++i) {
+            __real__ A[(size_t)i + (size_t)j * Asz] =  __real__ A[(size_t)j + (size_t)i * Asz];
+            __imag__ A[(size_t)i + (size_t)j * Asz] = -__imag__ A[(size_t)j + (size_t)i * Asz];
+        }
+        __imag__ A[(size_t)j + (size_t)j * Asz] = 0;
+    }''')
+    else:
+        symm = ('''    for (int j = 0; j < Asz; ++j)
+        for (int i = j + 1; i < Asz; ++i)
+            A[(size_t)i + (size_t)j * Asz] = A[(size_t)j + (size_t)i * Asz];''')
     sig = ('const char *, const char *, const int *, const int *, '
            'const T *, const T *, const int *, const T *, const int *, '
            'const T *, T *, const int *, size_t, size_t')
@@ -85,6 +104,7 @@ def build_symm_hemm(name, is_c):
     T *C = (T *)aligned_alloc(64, MNelt * sizeof(T));
     T *Ci = (T *)aligned_alloc(64, MNelt * sizeof(T));
     {fill('A', 'AAelt', is_c, 0)}
+{symm}
     {fill('B', 'MNelt', is_c, 2)}
     {fill('Ci', 'MNelt', is_c, 4)}
     memcpy(C, Ci, MNelt * sizeof(T));

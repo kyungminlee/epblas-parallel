@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-01 21:07 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-02 02:51 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -8,7 +8,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
 | e | 2218 | 99.4% | 99.5% |
-| q | 2218 | 99.5% | 99.8% |
+| q | 2218 | 99.6% | 99.8% |
 
 ## m — multifloats (double-double)
 
@@ -214,12 +214,11 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## q — kind16 (__float128)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 99.5% · omp4 99.8%.**  7 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 99.6% · omp4 99.8%.**  6 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
 | **qtrsv** | 96 | 1.038 mig @LTU/x-1/128 | 1.029 @LTU/x-1/128 | ⚠ |
-| **qsymm** | 16 | 1.035 mig @LL/256 | 0.999 | ⚠ |
 | **qscal** | 3 | 1.004 | 1.030 @-/65536 | ⚠ |
 | **qtrmm** | 64 | 1.029 mig @RLTN/512 | 0.934 | ⚠ |
 | **qtbsv** | 96 | 1.025 ob1 @UTU/128 | 1.024 @UTU/128 | ⚠ |
@@ -263,6 +262,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xgemv | 27 | 1.008 | 1.002 | ✅ |
 | qspr | 24 | 1.007 | 0.978 | ✅ |
 | qger | 12 | 1.007 | 0.999 | ✅ |
+| xsymm | 12 | 1.007 | 1.001 | ✅ |
 | xgbmv | 27 | 1.007 | 0.919 | ✅ |
 | xhbmv | 18 | 1.006 | 0.894 | ✅ |
 | xgemmtr | 54 | 1.006 | 0.980 | ✅ |
@@ -275,9 +275,9 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xsyr2k | 12 | 1.003 | 1.005 | ✅ |
 | qsyrk | 16 | 1.005 | 0.665 | ✅ |
 | xgemm | 18 | 1.005 | 1.003 | ✅ |
-| xsymm | 12 | 1.004 | 1.002 | ✅ |
-| xher | 18 | 1.004 | 1.004 | ✅ |
+| qsymm | 16 | 1.004 | 0.996 | ✅ |
 | xhemm | 12 | 1.004 | 1.001 | ✅ |
+| xher | 18 | 1.004 | 1.004 | ✅ |
 | xhpmv | 18 | 1.003 | 1.002 | ✅ |
 | xhpr | 18 | 1.002 | 1.001 | ✅ |
 | qrotmg | 1 | 1.000 | 0.977 | ✅ |
@@ -294,12 +294,11 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qnrm2 | 3 | 0.770 | 0.276 | ✅ |
 | xrotg | 1 | 0.690 | 0.689 | ✅ |
 
-<details><summary>q: 13 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>q: 11 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
 | qtrsv | LTU/x-1 | 128 | 322,755 | 313,271 | 311,084 | 317,254 | 308,168 | 1.038 | 1.029 | mig |
-| qsymm | LL | 256 | 508,578,537 | 509,119,603 | 491,327,808 | 139,875,045 | 140,212,445 | 1.035 | 0.998 | mig |
 | qscal | - | 65536 | 806,196 | 802,730 | 804,690 | 242,544 | 235,592 | 1.004 | 1.030 | ob1 |
 | qtrmm | RLTN | 512 | 1,846,383,162 | 2,501,634,143 | 1,794,819,657 | 504,042,770 | 668,960,442 | 1.029 | 0.753 | mig |
 | qscal | - | 1048576 | 13,136,445 | 13,128,932 | 13,173,258 | 3,681,756 | 3,589,776 | 1.001 | 1.026 | ob1 |
@@ -310,7 +309,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qgemm | TN | 256 | 439,875,320 | 468,784,754 | 430,535,956 | 113,097,914 | 123,062,370 | 1.022 | 0.919 | mig |
 | qtrmm | RLTU | 512 | 1,992,281,360 | 2,517,929,223 | 1,950,389,028 | 588,062,403 | 669,209,306 | 1.021 | 0.879 | mig |
 | qtrmm | RLTN | 256 | 231,614,779 | 310,500,613 | 227,011,210 | 65,696,087 | 84,102,616 | 1.020 | 0.781 | mig |
-| qsymm | LL | 512 | 3,926,111,243 | 3,931,078,331 | 3,848,109,034 | 1,065,886,885 | 1,066,791,063 | 1.020 | 0.999 | mig |
 
 </details>
 
