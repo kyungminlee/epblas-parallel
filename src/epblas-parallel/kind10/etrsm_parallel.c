@@ -96,20 +96,22 @@ static void etrsm_core(
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
     /* Bound the per-thread pack buffers to what one band actually packs, not
-     * the full cache-block params. The band steps by MC/KC over the triangular
-     * axis (K_eff) and by NC over its free slice, every block capped by the
-     * remaining extent — so a thread never packs more than min(block, dim).
-     * Bp holds a single NC-block at a time (the band reuses it across its
-     * js+=NC sweep), so it need only cover min(NC, free_axis) — bound by the
-     * whole partition axis, NOT the per-thread chunk: num_threads() is a
-     * request and a short team would make each band (hence a single NC-block)
-     * wider than chunk, overflowing Bp. At N=64 the unbounded sizes were ~1MB
-     * Ap + ~2MB Bp (both past glibc's 128KB mmap threshold → a per-call
-     * mmap/munmap + page-zeroing, ×nthreads) for a 64×64 corner; bounding keeps
-     * them in the malloc arena and is a no-op once the dims exceed the blocks. */
-    const ptrdiff_t mc_eff = (MC < K_eff) ? MC : K_eff;
+     * the full cache-block params — every block is capped by the remaining
+     * extent, so a thread never packs more than min(block, dim). The per-axis
+     * dims are the SAME for both sides: Ap's MR-panel row axis is m (SIDE='L'
+     * packs A tiles of ≤min(MC,m) rows; SIDE='R' packs B-row strips of
+     * ≤min(MC,m_band) rows — bounded by m, NOT by K_eff: with m≫n the adaptive
+     * MC grown for small K exceeds n and a K_eff bound overflows Ap), the KC
+     * axis is the triangular dim K_eff, and the NC sweep walks B's columns n
+     * on both sides. Bound by whole dims, never the per-thread chunk:
+     * num_threads() is a request and a short team makes each band wider than
+     * chunk. At N=64 the unbounded sizes were ~1MB Ap + ~2MB Bp (both past
+     * glibc's 128KB mmap threshold → a per-call mmap/munmap + page-zeroing,
+     * ×nthreads) for a 64×64 corner; bounding keeps them in the malloc arena
+     * and is a no-op once the dims exceed the blocks. */
+    const ptrdiff_t mc_eff = (MC < m)     ? MC : m;
     const ptrdiff_t kc_eff = (KC < K_eff) ? KC : K_eff;
-    const ptrdiff_t nc_eff = (NC < partition_axis) ? NC : partition_axis;
+    const ptrdiff_t nc_eff = (NC < n)     ? NC : n;
     const size_t ap_bytes = (size_t)blas_round_up(mc_eff, MR) * (size_t)kc_eff * sizeof(TR);
     const size_t bp_bytes = (size_t)kc_eff * (size_t)blas_round_up(nc_eff, NR) * sizeof(TR);
 

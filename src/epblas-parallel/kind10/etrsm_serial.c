@@ -520,17 +520,21 @@ void etrsm_serial(
     if (alpha == 0.0L) return;
 
     const ptrdiff_t K_eff = lside ? m : n;
-    const ptrdiff_t free_dim = lside ? n : m;
     ptrdiff_t MC, KC, NC;
     egemm_choose_blocks(K_eff, &MC, &KC, &NC);
 
     /* Bound the pack buffers to the actual problem, not the full cache-block
-     * params. The band drivers step by MC/KC over the triangular axis (K_eff)
-     * and by NC over the free axis, with every block capped by the remaining
-     * extent — so a small matrix never packs more than min(block, dim). */
-    const ptrdiff_t mc_eff = (MC < K_eff)    ? MC : K_eff;
-    const ptrdiff_t kc_eff = (KC < K_eff)    ? KC : K_eff;
-    const ptrdiff_t nc_eff = (NC < free_dim) ? NC : free_dim;
+     * params — every block is capped by the remaining extent, so a small
+     * matrix never packs more than min(block, dim). The per-axis dims are the
+     * SAME for both sides: Ap's MR-panel row axis is m (SIDE='L' packs A tiles
+     * of ≤min(MC,m) rows; SIDE='R' packs B-row strips of ≤min(MC,m) rows —
+     * bounded by m, NOT by K_eff: with m≫n the adaptive MC grown for small K
+     * exceeds n and a K_eff bound overflows Ap into Bp), the KC axis is the
+     * triangular dim K_eff, and the NC sweep walks B's columns n on both
+     * sides. */
+    const ptrdiff_t mc_eff = (MC < m)     ? MC : m;
+    const ptrdiff_t kc_eff = (KC < K_eff) ? KC : K_eff;
+    const ptrdiff_t nc_eff = (NC < n)     ? NC : n;
     const size_t ap_bytes = (size_t)blas_round_up(mc_eff, MR) * (size_t)kc_eff * sizeof(TR);
     const size_t bp_bytes = (size_t)kc_eff * (size_t)blas_round_up(nc_eff, NR) * sizeof(TR);
 
