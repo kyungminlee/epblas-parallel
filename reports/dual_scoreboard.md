@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-02 05:50 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-02 05:54 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -102,12 +102,11 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## e — kind10 (fp80)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 99.5% · omp4 99.7%.**  10 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 99.5% · omp4 99.7%.**  9 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
 | **ysyrk** | 12 | 1.056 mig @UT/64 | 0.704 | ⚠ |
-| **ytbmv** | 108 | 1.031 ob1 @LCU/x2/128 | 0.827 | ⚠ |
 | **etbsv** | 96 | 1.022 ob1 @LTN/256 | 1.029 @LNN/x2/512 | ⚠ |
 | **ytrsv** | 108 | 1.026 mig @UTN/x2/128 | 1.021 @UTN/x2/128 | ⚠ |
 | **ytbsv** | 108 | 1.020 | 1.023 @LTN/128 | ⚠ |
@@ -129,6 +128,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | espr | 24 | 1.014 | 1.005 | ✅ |
 | esyr | 24 | 1.007 | 1.014 | ✅ |
 | yherk | 12 | 1.014 | 0.710 | ✅ |
+| ytbmv | 108 | 1.013 | 0.810 | ✅ |
 | ytrmv | 108 | 1.013 | 0.998 | ✅ |
 | etpmv | 96 | 1.012 | 1.010 | ✅ |
 | etrsv | 96 | 1.011 | 1.011 | ✅ |
@@ -182,14 +182,13 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | eynrm2 | 2 | 0.330 | 0.326 | ✅ |
 | yrotg | 1 | 0.079 | 0.078 | ✅ |
 
-<details><summary>e: 16 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>e: 15 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
 | ysyrk | UT | 64 | 337,468 | 484,098 | 319,715 | 124,230 | 264,540 | 1.056 | 0.470 | mig |
 | ysyrk | UT | 128 | 2,628,440 | 3,650,704 | 2,544,857 | 957,551 | 1,724,024 | 1.033 | 0.555 | mig |
 | ysyrk | UT | 256 | 20,747,412 | 28,530,274 | 20,099,493 | 7,575,702 | 13,325,137 | 1.032 | 0.569 | mig |
-| ytbmv | LCU/x2 | 128 | 5,353 | 5,194 | 5,404 | 4,200 | 5,430 | 1.031 | 0.774 | ob1 |
 | etbsv | LNN/x2 | 512 | 16,936 | 16,924 | 16,843 | 17,059 | 16,571 | 1.006 | 1.029 | mig |
 | ytrsv | UTN/x2 | 128 | 20,626 | 20,116 | 20,102 | 20,526 | 20,104 | 1.026 | 1.021 | mig |
 | ytbsv | LTN | 128 | 5,431 | 5,367 | 5,612 | 5,313 | 5,192 | 1.012 | 1.023 | ob1 |
