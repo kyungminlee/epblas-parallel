@@ -69,27 +69,47 @@ static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TC alpha,
     }
 }
 
-/* Off-diagonal trailing block of the TRANS update as netlib's unpacked
- * stride-1 column dot — C(i,j) += alpha·Σ_l A(l,i)·A(l,j) — instead of a
- * blocked ygemm_serial. Both A columns are contiguous (Trans ⇒ A is K×N), so
- * the dot is cache-friendly and skips the pack/microkernel scaffolding.
+/* Full TRANS column update — netlib's single-pass unpacked stride-1 column dot
+ * C(i,j) += alpha·Σ_l A(l,i)·A(l,j) over the WHOLE uplo range of each column,
+ * diagonal and off-diagonal together (Upper: i∈[0,j]; Lower: i∈[j,n)). Both A
+ * columns are contiguous (Trans ⇒ A is K×N), so the dot is cache-friendly and
+ * skips the pack/microkernel scaffolding.
+ *
+ * Merging the diagonal triangle into this pass (vs. a separate syrk_diag_add
+ * call over [jc,j] plus an off-diagonal call over the rest) is what matches
+ * netlib's memory pattern: Aj = A(:,j) is read ONCE per column and streamed
+ * across the full i-range, instead of the K-long Aj vector being re-read by two
+ * sub-passes. That redundant Aj re-read was the entire Upper-Trans par/mig ~1.03
+ * gap — netlib's single-pass Upper streams each Aj once and beat par's split;
+ * par's per-dot was already optimal (decomposed, register-resident) so U≈L in
+ * absolute terms (par/ob ties), the flag was purely netlib-U being faster than
+ * netlib-L while par was uniform. Bit-identical to the old split: each C(i,j) is
+ * still written exactly once and the per-element += is order-independent.
  *
  * The complex MAC is decomposed into scalar real/imag long-double accumulators
  * over A reinterpreted as 2·K interleaved reals (the yerot/ygemv x87 trick,
  * trigger 8): a `_Complex` `s += Ai[l]*Aj[l]` makes gcc-15 reload each operand
  * for both the real and imag sub-products (it can't prove Ai≠Aj≠cj don't
- * alias), spilling the fp80 stack and losing ~5% to gfortran's naive loop on
- * Upper-Trans. Hoisting air/aii/ajr/aji into locals forces one load each and
- * keeps the two accumulators (sr, si — the natural re/im parts a complex MAC
- * already computes, NOT a latency-hiding 2nd chain, so no trigger-6 spill)
- * register-resident, matching gfortran. Upper: rows [0,jc); Lower: rows [jc+jb, n). */
-static void syrk_trans_offdiag(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k,
-                               TC alpha, const TC *restrict a, ptrdiff_t lda,
-                               TC *restrict c, ptrdiff_t ldc, char UPLO)
+ * alias), spilling the fp80 stack. Hoisting air/aii/ajr/aji into locals forces
+ * one load each and keeps the two accumulators (sr, si — the natural re/im parts
+ * a complex MAC already computes, NOT a latency-hiding 2nd chain, so no
+ * trigger-6 spill) register-resident, matching gfortran.
+ *
+ * beta is FUSED into the store — C(i,j) = alpha·s + beta·C(i,j) in a single
+ * pass — exactly as netlib does, instead of a separate beta prescale pass over
+ * C followed by a += here. That prescale (only live for beta∉{0,1}, and the
+ * bench uses beta=0.3) was par's fixed per-call overhead: it re-reads and
+ * re-writes the whole output triangle, cheap per element but a measurable
+ * small-N tax netlib never pays (its Upper-Trans is a few % faster purely from
+ * this single-pass fusion). Bit-identical to prescale-then-add: beta·C(i,j) is
+ * rounded to fp80 either way (stored vs. register), and IEEE add commutes. */
+static void syrk_trans_full(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k,
+                            TC alpha, TC beta, const TC *restrict a, ptrdiff_t lda,
+                            TC *restrict c, ptrdiff_t ldc, char UPLO)
 {
-    const ptrdiff_t i_lo = (UPLO == 'L') ? (jc + jb) : 0;
-    const ptrdiff_t i_hi = (UPLO == 'L') ? n         : jc;
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
+        const ptrdiff_t i_lo = (UPLO == 'L') ? j     : 0;
+        const ptrdiff_t i_hi = (UPLO == 'L') ? n     : j + 1;
         TC *cj = c + (size_t)j * ldc;
         const long double *Ajr = (const long double *)(a + (size_t)j * lda);
         for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
@@ -101,7 +121,8 @@ static void syrk_trans_offdiag(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_
                 sr += air * ajr - aii * aji;
                 si += air * aji + aii * ajr;
             }
-            cj[i] += alpha * __builtin_complex(sr, si);
+            const TC s = alpha * __builtin_complex(sr, si);
+            cj[i] = (beta == ZERO) ? s : s + beta * cj[i];
         }
     }
 }
@@ -121,6 +142,16 @@ void ysyrk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TC beta,
 void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha, TC beta,
                  const TC *a, ptrdiff_t lda, TC *c, ptrdiff_t ldc, char UPLO, char TRANS)
 {
+    /* TRANS='T': syrk_trans_full does the WHOLE column (diagonal + trailing) in
+     * one Aj-streaming pass with beta FUSED into the store — no separate beta
+     * prescale, and do NOT call syrk_diag_add (the diagonal is already in the
+     * full column, adding it again would double-count). TRANS='N' keeps the
+     * beta-prescale + scalar-diagonal + ygemm-trailing split (blocked NoTrans). */
+    if (TRANS != 'N') {
+        syrk_trans_full(jc, jb, n, k, alpha, beta, a, lda, c, ldc, UPLO);
+        return;
+    }
+
     for (ptrdiff_t j = jc; j < jc + jb; ++j) {
         const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
         const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
@@ -135,23 +166,15 @@ void ysyrk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TC alpha,
         const ptrdiff_t trailing = n - jc - jb;
         if (trailing > 0) {
             const ptrdiff_t j0 = jc + jb;
-            if (TRANS == 'N') {
-                ygemm_serial('N', 'T', trailing, jb, k, &alpha,
-                             &A_(j0, 0), lda, &A_(jc, 0), lda,
-                             &ONE, &C_(j0, jc), ldc);
-            } else {
-                syrk_trans_offdiag(jc, jb, n, k, alpha, a, lda, c, ldc, UPLO);
-            }
+            ygemm_serial('N', 'T', trailing, jb, k, &alpha,
+                         &A_(j0, 0), lda, &A_(jc, 0), lda,
+                         &ONE, &C_(j0, jc), ldc);
         }
     } else {
         if (jc > 0) {
-            if (TRANS == 'N') {
-                ygemm_serial('N', 'T', jc, jb, k, &alpha,
-                             &A_(0, 0), lda, &A_(jc, 0), lda,
-                             &ONE, &C_(0, jc), ldc);
-            } else {
-                syrk_trans_offdiag(jc, jb, n, k, alpha, a, lda, c, ldc, UPLO);
-            }
+            ygemm_serial('N', 'T', jc, jb, k, &alpha,
+                         &A_(0, 0), lda, &A_(jc, 0), lda,
+                         &ONE, &C_(0, jc), ldc);
         }
     }
 }
