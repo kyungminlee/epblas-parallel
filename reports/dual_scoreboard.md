@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-02 09:03 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-02 11:35 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -209,7 +209,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## q — kind16 (__float128)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 99.6% · omp4 99.9%.**  5 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 99.6% · omp4 99.9%.**  4 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
@@ -217,7 +217,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **qtrmm** | 64 | 1.029 mig @RLTN/512 | 0.934 | ⚠ |
 | **qtbsv** | 96 | 1.025 ob1 @UTU/128 | 1.024 @UTU/128 | ⚠ |
 | **xdotc** | 2 | 1.023 mig @-/65536 | 1.014 | ⚠ |
-| **qgemm** | 16 | 1.022 mig @TN/256 | 1.003 | ⚠ |
 | qsbmv | 24 | 1.020 | 0.826 | ✅ |
 | qdot | 3 | 0.986 | 1.019 | ✅ |
 | xdotu | 2 | 1.019 | 1.014 | ✅ |
@@ -263,6 +262,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xqscal | 2 | 1.006 | 0.990 | ✅ |
 | qtpmv | 96 | 1.006 | 1.001 | ✅ |
 | qsyr2k | 16 | 1.005 | 0.665 | ✅ |
+| qgemm | 16 | 1.004 | 1.005 | ✅ |
 | qrotm | 3 | 1.005 | 1.002 | ✅ |
 | qgbmv | 24 | 1.005 | 1.002 | ✅ |
 | xher2k | 12 | 1.002 | 1.005 | ✅ |
@@ -289,7 +289,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qnrm2 | 3 | 0.770 | 0.276 | ✅ |
 | xrotg | 1 | 0.690 | 0.689 | ✅ |
 
-<details><summary>q: 9 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>q: 8 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
@@ -299,7 +299,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qtrsv | LTU/x2 | 128 | 318,795 | 314,787 | 311,380 | 312,181 | 307,906 | 1.024 | 1.014 | mig |
 | qtbsv | UTU | 256 | 148,958 | 145,503 | 146,014 | 148,548 | 145,433 | 1.024 | 1.021 | ob1 |
 | xdotc | - | 65536 | 8,381,865 | 8,279,242 | 8,192,811 | 2,216,799 | 2,186,371 | 1.023 | 1.014 | mig |
-| qgemm | TN | 256 | 439,875,320 | 468,784,754 | 430,535,956 | 113,097,914 | 123,062,370 | 1.022 | 0.919 | mig |
 | qtrmm | RLTU | 512 | 1,992,281,360 | 2,517,929,223 | 1,950,389,028 | 588,062,403 | 669,209,306 | 1.021 | 0.879 | mig |
 | qtrmm | RLTN | 256 | 231,614,779 | 310,500,613 | 227,011,210 | 65,696,087 | 84,102,616 | 1.020 | 0.781 | mig |
 
