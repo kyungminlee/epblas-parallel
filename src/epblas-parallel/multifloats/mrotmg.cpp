@@ -16,6 +16,8 @@ namespace {
 using mf_pred::lt0;
 using mf_pred::eq0;
 using mf_pred::gt0;
+using mf_pred::lt;
+using mf_pred::gt;
 using mf_pred::mag;
 using mf_pred::abs_gt;
 }
@@ -67,27 +69,33 @@ extern "C" void mrotmg_(TR *d1_, TR *d2_, TR *x1_, const TR *y1_, TR *dparam)
                 x1 = y1 * u;
             }
         }
-        /* SCALE-CHECK */
+        /* SCALE-CHECK — reference DROTMG loop shape: single-evaluation
+         * `while (d <= rgamsq || d >= gamsq)` (d1 >= 0 here; d2 via a
+         * hoisted magnitude refreshed after each rescale).  The old shape
+         * re-evaluated the whole condition in a trailing
+         * `if (...) continue; else break;` and re-took mag(d2) up to three
+         * times per iteration.  gam is 2^12 so every rescale is exact —
+         * predicates and values match the reference bit-for-bit. */
         if (!eq0(d1)) {
-            while ((abs_gt(rgamsq, d1) || !abs_gt(gamsq, d1))) {
+            while (!gt(d1, rgamsq) || !lt(d1, gamsq)) {
                 if (eq0(flag)) { h11 = one; h22 = one; flag = TR{-1.0, 0.0}; }
                 else              { h21 = TR{-1.0, 0.0}; h12 = one; flag = TR{-1.0, 0.0}; }
-                if (abs_gt(rgamsq, d1)) { d1 = d1 * gam * gam; x1 = x1 / gam;
+                if (!gt(d1, rgamsq)) { d1 = d1 * gam * gam; x1 = x1 / gam;
                     h11 = h11 / gam; h12 = h12 / gam; }
-                else                       { d1 = d1 / (gam * gam); x1 = x1 * gam;
+                else                    { d1 = d1 / (gam * gam); x1 = x1 * gam;
                     h11 = h11 * gam; h12 = h12 * gam; }
-                if (abs_gt(rgamsq, d1) || !abs_gt(gamsq, d1)) continue; else break;
             }
         }
         if (!eq0(d2)) {
-            while (abs_gt(rgamsq, mag(d2)) || !abs_gt(gamsq, mag(d2))) {
+            TR ad2 = mag(d2);
+            while (!gt(ad2, rgamsq) || !lt(ad2, gamsq)) {
                 if (eq0(flag)) { h11 = one; h22 = one; flag = TR{-1.0, 0.0}; }
                 else              { h21 = TR{-1.0, 0.0}; h12 = one; flag = TR{-1.0, 0.0}; }
-                if (abs_gt(rgamsq, mag(d2))) { d2 = d2 * gam * gam;
+                if (!gt(ad2, rgamsq)) { d2 = d2 * gam * gam;
                     h21 = h21 / gam; h22 = h22 / gam; }
-                else                                { d2 = d2 / (gam * gam);
+                else                     { d2 = d2 / (gam * gam);
                     h21 = h21 * gam; h22 = h22 * gam; }
-                if (abs_gt(rgamsq, mag(d2)) || !abs_gt(gamsq, mag(d2))) continue; else break;
+                ad2 = mag(d2);
             }
         }
     }
