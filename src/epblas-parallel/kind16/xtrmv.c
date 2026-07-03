@@ -158,11 +158,13 @@ static bool xtrmv_omp(bool upper, bool trans_t, bool conj_a, bool nounit, ptrdif
             } else {
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
+                    /* Descending accumulation, matching the serial arm and
+                     * netlib ZTRMV (keeps OMP bit-consistent). */
                     TC temp = x[j];
                     if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
                     const TC *aj = &A_(0, j);
-                    if (conj_a) for (ptrdiff_t i = 0; i < j; ++i) temp += cconj(aj[i]) * x[i];
-                    else        for (ptrdiff_t i = 0; i < j; ++i) temp += aj[i] * x[i];
+                    if (conj_a) for (ptrdiff_t i = j - 1; i >= 0; --i) temp += cconj(aj[i]) * x[i];
+                    else        for (ptrdiff_t i = j - 1; i >= 0; --i) temp += aj[i] * x[i];
                     y_buf[j] = temp;
                 }
             }
@@ -228,14 +230,17 @@ void xtrmv_core(
                     x[j] = temp;
                 }
             } else {
+                /* Descending dot = netlib ZTRMV's order: fewer soft-float
+                 * branch misses (same mechanism as qtrsv) and bit-exact
+                 * vs netlib. */
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TC temp = x[j];
                     if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
                     const TC *aj = &A_(0, j);
                     if (conj_a) {
-                        for (ptrdiff_t i = 0; i < j; ++i) temp += cconj(aj[i]) * x[i];
+                        for (ptrdiff_t i = j - 1; i >= 0; --i) temp += cconj(aj[i]) * x[i];
                     } else {
-                        for (ptrdiff_t i = 0; i < j; ++i) temp += aj[i] * x[i];
+                        for (ptrdiff_t i = j - 1; i >= 0; --i) temp += aj[i] * x[i];
                     }
                     x[j] = temp;
                 }
@@ -290,14 +295,20 @@ void xtrmv_core(
                     x[kx + j * incx] = temp;
                 }
             } else {
+                /* Netlib ZTRMV's descending jx/ix walk (see the contiguous
+                 * arm above). */
+                ptrdiff_t jx = kx + (n - 1) * incx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    TC temp = x[kx + j * incx];
+                    TC temp = x[jx];
                     if (nounit) temp *= (conj_a ? cconj(A_(j, j)) : A_(j, j));
-                    for (ptrdiff_t i = 0; i < j; ++i) {
+                    ptrdiff_t ix = jx;
+                    for (ptrdiff_t i = j - 1; i >= 0; --i) {
+                        ix -= incx;
                         const TC aij = conj_a ? cconj(A_(i, j)) : A_(i, j);
-                        temp += aij * x[kx + i * incx];
+                        temp += aij * x[ix];
                     }
-                    x[kx + j * incx] = temp;
+                    x[jx] = temp;
+                    jx -= incx;
                 }
             }
         }

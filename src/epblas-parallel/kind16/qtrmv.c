@@ -97,20 +97,22 @@ static bool qtrmv_omp(bool upper, bool trans_t, bool nounit, ptrdiff_t n, ptrdif
             if (!upper) {
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
+                    /* Accumulate onto temp directly, matching the serial
+                     * arm and netlib DTRMV (keeps OMP bit-consistent). */
                     TR temp = nounit ? (x[j] * A_(j, j)) : x[j];
                     const TR *aj = &A_(0, j);
-                    TR s = zero;
-                    for (ptrdiff_t i = j + 1; i < n; ++i) s += aj[i] * x[i];
-                    y_buf[j] = temp + s;
+                    for (ptrdiff_t i = j + 1; i < n; ++i) temp += aj[i] * x[i];
+                    y_buf[j] = temp;
                 }
             } else {
                 #pragma omp for schedule(static, 1)
                 for (ptrdiff_t j = 0; j < n; ++j) {
+                    /* Descending accumulation onto temp, matching the serial
+                     * arm and netlib DTRMV (keeps OMP bit-consistent). */
                     TR temp = nounit ? (x[j] * A_(j, j)) : x[j];
                     const TR *aj = &A_(0, j);
-                    TR s = zero;
-                    for (ptrdiff_t i = 0; i < j; ++i) s += aj[i] * x[i];
-                    y_buf[j] = temp + s;
+                    for (ptrdiff_t i = j - 1; i >= 0; --i) temp += aj[i] * x[i];
+                    y_buf[j] = temp;
                 }
             }
             #pragma omp for schedule(static)
@@ -225,11 +227,14 @@ void qtrmv_core(
                     x[j] = temp;
                 }
             } else {
+                /* Descending dot = netlib DTRMV's order: fewer soft-float
+                 * branch misses (same mechanism as qtrsv) and bit-exact
+                 * vs netlib. */
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TR temp = x[j];
                     if (nounit) temp *= A_(j, j);
                     const TR *aj = &A_(0, j);
-                    for (ptrdiff_t i = 0; i < j; ++i) temp += aj[i] * x[i];
+                    for (ptrdiff_t i = j - 1; i >= 0; --i) temp += aj[i] * x[i];
                     x[j] = temp;
                 }
             }
@@ -279,11 +284,19 @@ void qtrmv_core(
                     x[kx + j * incx] = temp;
                 }
             } else {
+                /* Netlib DTRMV's descending jx/ix walk (see the contiguous
+                 * arm above). */
+                ptrdiff_t jx = kx + (n - 1) * incx;
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    TR temp = x[kx + j * incx];
+                    TR temp = x[jx];
                     if (nounit) temp *= A_(j, j);
-                    for (ptrdiff_t i = 0; i < j; ++i) temp += A_(i, j) * x[kx + i * incx];
-                    x[kx + j * incx] = temp;
+                    ptrdiff_t ix = jx;
+                    for (ptrdiff_t i = j - 1; i >= 0; --i) {
+                        ix -= incx;
+                        temp += A_(i, j) * x[ix];
+                    }
+                    x[jx] = temp;
+                    jx -= incx;
                 }
             }
         }
