@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-03 06:32 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-03 07:50 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -217,12 +217,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xtpsv | 108 | 1.015 | 1.011 | ✅ |
 | xherk | 12 | 1.014 | 1.001 | ✅ |
 | xher2 | 18 | 1.014 | 0.957 | ✅ |
-| qaxpy | 3 | 1.014 | 0.960 | ✅ |
 | qspmv | 24 | 1.014 | 1.011 | ✅ |
 | qtbsv | 96 | 1.014 | 1.014 | ✅ |
 | qsymv | 24 | 1.014 | 1.012 | ✅ |
 | xgeru | 9 | 1.013 | 1.006 | ✅ |
-| qrot | 3 | 1.004 | 1.012 | ✅ |
 | xtbmv | 108 | 1.012 | 0.922 | ✅ |
 | xgerc | 9 | 1.011 | 1.002 | ✅ |
 | xhemv | 18 | 1.011 | 1.006 | ✅ |
@@ -243,6 +241,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xgemv | 27 | 1.008 | 1.002 | ✅ |
 | qspr | 24 | 1.007 | 0.978 | ✅ |
 | qger | 12 | 1.007 | 0.999 | ✅ |
+| qaxpy | 3 | 1.007 | 0.980 | ✅ |
 | xsymm | 12 | 1.007 | 1.001 | ✅ |
 | xgbmv | 27 | 1.007 | 0.919 | ✅ |
 | xhbmv | 18 | 1.006 | 0.894 | ✅ |
@@ -251,7 +250,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qtpmv | 96 | 1.006 | 1.001 | ✅ |
 | qsyr2k | 16 | 1.005 | 0.665 | ✅ |
 | qgemm | 16 | 1.004 | 1.005 | ✅ |
-| qrotm | 3 | 1.005 | 1.002 | ✅ |
 | qgbmv | 24 | 1.005 | 1.002 | ✅ |
 | xher2k | 12 | 1.002 | 1.005 | ✅ |
 | xsyr2k | 12 | 1.003 | 1.005 | ✅ |
@@ -261,12 +259,14 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xhemm | 12 | 1.004 | 1.001 | ✅ |
 | xher | 18 | 1.004 | 1.004 | ✅ |
 | qscal | 3 | 1.004 | 1.002 | ✅ |
+| qrot | 3 | 1.002 | 1.003 | ✅ |
 | xhpmv | 18 | 1.003 | 1.002 | ✅ |
+| qrotm | 3 | 1.003 | 0.999 | ✅ |
 | xhpr | 18 | 1.002 | 1.001 | ✅ |
 | qrotmg | 1 | 1.000 | 0.977 | ✅ |
 | xaxpy | 2 | 0.999 | 1.000 | ✅ |
 | qcabs1 | 1 | 1.000 | 0.620 | ✅ |
-| qcopy | 3 | 0.794 | 1.000 | ✅ |
+| qcopy | 3 | 0.785 | 1.000 | ✅ |
 | xcopy | 2 | 0.794 | 1.000 | ✅ |
 | xqrot | 2 | 0.997 | 0.997 | ✅ |
 | qxasum | 2 | 0.974 | 0.797 | ✅ |

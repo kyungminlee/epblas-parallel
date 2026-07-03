@@ -16,16 +16,34 @@ typedef __float128 TR;
  * schedule(static) gives each thread a contiguous block (sequential stores).
  * Real-quad copy only wins past L2 (crossover ~8K; n=4096 still washes). */
 #define QCOPY_OMP_MIN 8192
+#define QCOPY_MEMCPY_SLAB_MIN 262144
 __attribute__((noinline)) static bool qcopy_omp(ptrdiff_t n, const TR *x, ptrdiff_t incx,
                                                TR *y, ptrdiff_t incy)
 {
     if (n <= QCOPY_OMP_MIN || !blas_omp_should_thread())
         return 0;
     ptrdiff_t nthreads = blas_omp_max_threads();
-    ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
-    ptrdiff_t iy0 = (incy < 0) ? (-n + 1) * incy : 0;
-    #pragma omp parallel for schedule(static) num_threads(nthreads)
-    for (ptrdiff_t i = 0; i < n; ++i) y[iy0 + i * incy] = x[ix0 + i * incx];
+    if (incx == 1 && incy == 1 && n >= QCOPY_MEMCPY_SLAB_MIN) {
+        /* Per-thread contiguous memcpy slab (qscal_omp's shape), large-n
+         * only: past L3 glibc memcpy's non-temporal stores skip the RFO
+         * traffic the elementwise loop pays (omp4 1M par/ob 1.00 -> 0.77
+         * measured), but in the cache-resident band memcpy LOSES ~2-4% to
+         * the rolled loop (omp4 64K 1.00 -> 1.02, repeatable), so that band
+         * falls through to the rolled form below. Pure data movement,
+         * trivially partition-invariant. */
+        #pragma omp parallel num_threads(nthreads)
+        {
+            ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
+            ptrdiff_t lo = blas_part_bound(n, tid, nth);
+            ptrdiff_t hi = blas_part_bound(n, tid + 1, nth);
+            if (lo < hi) memcpy(y + lo, x + lo, (size_t)(hi - lo) * sizeof(TR));
+        }
+    } else {
+        ptrdiff_t ix0 = (incx < 0) ? (-n + 1) * incx : 0;
+        ptrdiff_t iy0 = (incy < 0) ? (-n + 1) * incy : 0;
+        #pragma omp parallel for schedule(static) num_threads(nthreads)
+        for (ptrdiff_t i = 0; i < n; ++i) y[iy0 + i * incy] = x[ix0 + i * incx];
+    }
     return 1;
 }
 #endif
