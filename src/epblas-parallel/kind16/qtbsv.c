@@ -15,6 +15,68 @@ typedef __float128 TR;
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 
+/* Contiguous Trans/ConjTrans-Upper solve, phase-split: initial triangle
+ * (j <= k, dot always starts at x[0]) then steady band (fixed k-length
+ * dot), both pure pointer walks.  The band dot is only k iterations, so
+ * a generic column loop that recomputes max(j-k,0) and rebuilds both
+ * base pointers per column doesn't amortize (~2% vs ob at N=128).
+ * Ascending i order kept => bit-exact.  noinline keeps this leaf's
+ * layout independent of the dispatch body. */
+__attribute__((noinline, noclone))
+static void qtbsv_trans_upper_contig(
+    ptrdiff_t n, ptrdiff_t k, bool nounit,
+    const TR *restrict a, ptrdiff_t lda, TR *restrict x)
+{
+    const ptrdiff_t jt = (k + 1 < n) ? (k + 1) : n;
+    const TR *c = a + k;                 /* c[i] = A_(k-j+i, j); c[j] = diag */
+    for (ptrdiff_t j = 0; j < jt; ++j, c += lda - 1) {
+        TR tmp = x[j];
+        for (ptrdiff_t i = 0; i < j; ++i) tmp -= c[i] * x[i];
+        if (nounit) tmp /= c[j];
+        x[j] = tmp;
+    }
+    const TR *b = a + (size_t)jt * lda;  /* &A_(0, j) for j = k+1.. */
+    for (ptrdiff_t j = jt; j < n; ++j, b += lda) {
+        const TR *xi = x + (j - k);
+        TR tmp = x[j];
+        for (ptrdiff_t i = 0; i < k; ++i) tmp -= b[i] * xi[i];
+        if (nounit) tmp /= b[k];
+        x[j] = tmp;
+    }
+}
+
+/* Contiguous NoTrans-Lower solve, same phase-split treatment: steady band
+ * (fixed k-length AXPY off the column pointer) then final triangle
+ * (shrinking AXPY), both pure pointer walks.  Ascending i order kept =>
+ * bit-exact.  noinline keeps this leaf's layout independent of the
+ * dispatch body. */
+__attribute__((noinline, noclone))
+static void qtbsv_notrans_lower_contig(
+    ptrdiff_t n, ptrdiff_t k, bool nounit,
+    const TR *restrict a, ptrdiff_t lda, TR *restrict x)
+{
+    const ptrdiff_t js = (n - k > 0) ? (n - k) : 0;  /* j < js: full k-length AXPY */
+    const TR *col = a;                               /* col[t] = A_(t, j); col[0] = diag */
+    ptrdiff_t j = 0;
+    for (; j < js; ++j, col += lda) {
+        if (x[j] != 0.0Q) {
+            if (nounit) x[j] /= col[0];
+            const TR tmp = x[j];
+            TR *xj = x + j;
+            for (ptrdiff_t t = 1; t <= k; ++t) xj[t] -= tmp * col[t];
+        }
+    }
+    for (; j < n; ++j, col += lda) {
+        if (x[j] != 0.0Q) {
+            if (nounit) x[j] /= col[0];
+            const TR tmp = x[j];
+            TR *xj = x + j;
+            const ptrdiff_t len = n - 1 - j;
+            for (ptrdiff_t t = 1; t <= len; ++t) xj[t] -= tmp * col[t];
+        }
+    }
+}
+
 void qtbsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n, ptrdiff_t k,
@@ -42,25 +104,11 @@ void qtbsv_core(
                     }
                 }
             } else {
-                for (ptrdiff_t j = 0; j < n; ++j) {
-                    if (x[j] != zero) {
-                        if (nounit) x[j] /= A_(0, j);
-                        const TR tmp = x[j];
-                        const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
-                        for (ptrdiff_t i = j + 1; i < i_hi; ++i) x[i] -= tmp * A_(i - j, j);
-                    }
-                }
+                qtbsv_notrans_lower_contig(n, k, nounit, a, lda, x);
             }
         } else {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = 0; j < n; ++j) {
-                    TR tmp = x[j];
-                    const ptrdiff_t L = k - j;
-                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
-                    for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= A_(L + i, j) * x[i];
-                    if (nounit) tmp /= A_(k, j);
-                    x[j] = tmp;
-                }
+                qtbsv_trans_upper_contig(n, k, nounit, a, lda, x);
             } else {
                 for (ptrdiff_t j = n - 1; j >= 0; --j) {
                     TR tmp = x[j];

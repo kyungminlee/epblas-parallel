@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-03 02:08 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-03 02:28 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -8,7 +8,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
 | e | 2218 | 99.5% | 99.7% |
-| q | 2218 | 99.6% | 99.9% |
+| q | 2218 | 99.9% | 100.0% |
 
 ## m — multifloats (double-double)
 
@@ -207,14 +207,14 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## q — kind16 (__float128)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 99.6% · omp4 99.9%.**  2 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 99.9% · omp4 100.0%.**  1 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
 | **qtrmm** | 64 | 1.029 mig @RLTN/512 | 0.934 | ⚠ |
-| **qtbsv** | 96 | 1.024 ob1 @UTU/128 | 1.025 @UTU/128 | ⚠ |
 | qsbmv | 24 | 1.020 | 0.826 | ✅ |
 | xdotc | 2 | 1.020 | 1.014 | ✅ |
+| qtbsv | 96 | 1.019 | 1.017 | ✅ |
 | qdot | 3 | 0.986 | 1.019 | ✅ |
 | xdotu | 2 | 1.019 | 1.014 | ✅ |
 | qsyr2 | 24 | 1.018 | 0.926 | ✅ |
@@ -287,17 +287,12 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qnrm2 | 3 | 0.770 | 0.276 | ✅ |
 | xrotg | 1 | 0.690 | 0.689 | ✅ |
 
-<details><summary>q: 8 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>q: 3 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
 | qtrmm | RLTN | 512 | 1,846,383,162 | 2,501,634,143 | 1,794,819,657 | 504,042,770 | 668,960,442 | 1.029 | 0.753 | mig |
-| qtbsv | UTU | 128 | 69,530 | 67,903 | 68,143 | 69,612 | 67,888 | 1.024 | 1.025 | ob1 |
-| qtbsv | LNU/x2 | 256 | 138,728 | 135,666 | 135,503 | 137,712 | 135,671 | 1.024 | 1.015 | mig |
-| qtbsv | UTU | 256 | 148,656 | 145,402 | 145,696 | 148,566 | 145,383 | 1.022 | 1.022 | ob1 |
-| qtbsv | UNU/x-1 | 256 | 136,995 | 136,870 | 134,114 | 133,891 | 135,052 | 1.021 | 0.991 | mig |
 | qtrmm | RLTU | 512 | 1,992,281,360 | 2,517,929,223 | 1,950,389,028 | 588,062,403 | 669,209,306 | 1.021 | 0.879 | mig |
-| qtbsv | UTU | 512 | 304,211 | 297,971 | 298,827 | 304,144 | 298,270 | 1.021 | 1.020 | ob1 |
 | qtrmm | RLTN | 256 | 231,614,779 | 310,500,613 | 227,011,210 | 65,696,087 | 84,102,616 | 1.020 | 0.781 | mig |
 
 </details>
