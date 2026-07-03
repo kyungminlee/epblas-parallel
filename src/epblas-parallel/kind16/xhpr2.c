@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include <quadmath.h>
@@ -45,27 +46,19 @@ xhpr2_run(ptrdiff_t cnt, TR t1r, TR t1i, TR t2r, TR t2i,
 }
 
 
-void xhpr2_core(
-    char uplo,
-    ptrdiff_t n,
-    const TC *alpha_,
-    const TC *restrict x, ptrdiff_t incx,
-    const TC *restrict y, ptrdiff_t incy,
-    TC *restrict ap)
+/* Contiguous (incx=incy=1) packed Hermitian rank-2 core over all columns.
+ * schedule(static,1): column j touches j (upper) or N-1-j (lower)
+ * off-diagonal packed elements, so a contiguous static block hands one
+ * thread the heavy triangle end and starves the rest (par caps at ~2x
+ * on 4 cores). Cyclic static,1 interleaves short and long columns across
+ * the team, balancing the skew symmetrically for both UPLO. Mirrors the
+ * kind10 yhpr2 twin. */
+static void xhpr2_contig(char UPLO, ptrdiff_t n, TC alpha,
+                         const TC *restrict x, const TC *restrict y,
+                         TC *restrict ap)
 {
-    const TC alpha = *alpha_;
     const TC zero = 0.0Q + 0.0Qi;
-    const char UPLO = blas_up(uplo);
-
-    if (n == 0 || alpha == zero) return;
-
-    if (incx == 1 && incy == 1) {
-        /* schedule(static,1): column j touches j (upper) or N-1-j (lower)
-         * off-diagonal packed elements, so a contiguous static block hands one
-         * thread the heavy triangle end and starves the rest (par caps at ~2x
-         * on 4 cores). Cyclic static,1 interleaves short and long columns across
-         * the team, balancing the skew symmetrically for both UPLO. Mirrors the
-         * kind10 yhpr2 twin. */
+    {
         if (UPLO == 'U') {
 #ifdef _OPENMP
             const bool use_omp = (n >= XHPR2_OMP_MIN && blas_omp_max_threads() > 1);
@@ -100,7 +93,67 @@ void xhpr2_core(
                 }
             }
         }
+    }
+}
+
+void xhpr2_core(
+    char uplo,
+    ptrdiff_t n,
+    const TC *alpha_,
+    const TC *restrict x, ptrdiff_t incx,
+    const TC *restrict y, ptrdiff_t incy,
+    TC *restrict ap)
+{
+    const TC alpha = *alpha_;
+    const TC zero = 0.0Q + 0.0Qi;
+    const char UPLO = blas_up(uplo);
+
+    if (n == 0 || alpha == zero) return;
+
+    if (incx == 1 && incy == 1) {
+        xhpr2_contig(UPLO, n, alpha, x, y, ap);
     } else {
+        /* Threaded strided only: gather x/y into contiguous scratch and run
+         * the stride-1 core (which threads).  x/y read-only (only AP written)
+         * so no scatter-back; the O(N) gather is dwarfed by the O(N^2)
+         * threaded work and buys the contig core's omp scaling (the direct
+         * strided walk never threaded).  Serial strided falls through to the
+         * direct in-place loop (mirrors the kind10 yhpr2 / kind16 qspr2
+         * gates).  See project_l2_strided_gather. */
+#ifdef _OPENMP
+        const bool would_thread = (n >= XHPR2_OMP_MIN && blas_omp_max_threads() > 1);
+#else
+        const bool would_thread = false;
+#endif
+        if (would_thread) {
+            /* Exact fit: the gather writes xc[0..n-1] and yc[0..n-1] with
+             * yc = stackbuf + n (max offset 2n-1), so the threshold and the
+             * array length must move together. */
+            enum { XHPR2_STACK_N = 256 };
+            TC stackbuf[2 * XHPR2_STACK_N];
+            _Static_assert(2 * XHPR2_STACK_N * sizeof(TC) <= sizeof(stackbuf),
+                           "xhpr2 stack-gather threshold exceeds stackbuf");
+            TC *heap = NULL;
+            TC *xc, *yc;
+            if (n <= XHPR2_STACK_N) {
+                xc = stackbuf; yc = stackbuf + n;
+            } else {
+                heap = (TC *)malloc((size_t)2 * n * sizeof(TC));
+                xc = heap; yc = heap ? heap + n : NULL;
+            }
+            if (xc && yc) {
+                ptrdiff_t ix = (incx < 0) ? -(n - 1) * incx : 0;
+                ptrdiff_t iy = (incy < 0) ? -(n - 1) * incy : 0;
+                for (ptrdiff_t k = 0; k < n; ++k) {
+                    xc[k] = x[ix]; yc[k] = y[iy];
+                    ix += incx; iy += incy;
+                }
+                xhpr2_contig(UPLO, n, alpha, xc, yc, ap);
+                free(heap);
+                return;
+            }
+            free(heap);
+        }
         ptrdiff_t kx = (incx < 0) ? -(n - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(n - 1) * incy : 0;
         ptrdiff_t kk = 0;
