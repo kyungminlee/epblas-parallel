@@ -13,10 +13,11 @@
  * col=&a[j*lda] once per column (so col[L+i] rides one band-diagonal induction)
  * and folding the conj into CONJIF brings UTN/UTU/LTU/LCU back to parity without
  * disturbing the fast NoTrans or the (already-passing) strided Trans paths.
- * LTN contiguous still trails ob ~1.022: the hot dot loop is byte-identical to
- * ob (fldt=6/fmul=4/fsub=3, both 16-aligned) and par beats netlib there
- * (par/mig ~0.97), so the residual is a whole-function layout artifact, not a
- * loop-body deficit -- the same alignment floor the real twin etbsv sits at.
+ * The Lower-Trans contiguous leaf is additionally phase-split (final triangle
+ * + steady fixed-k band, pure pointer walks) in a noinline helper: the band
+ * dot is only ~k iterations, so the generic column loop's min(j+k+1,n) clamp
+ * and per-column base-pointer rebuild never amortize (LTN trailed ob ~1.02
+ * with a byte-identical dot loop; same fix as the qtbsv contiguous arms).
  */
 
 #include <stddef.h>
@@ -31,6 +32,64 @@ static inline TC cconj(TC z) { return ~z; }
 
 #define A_(i, j)  a[(size_t)(j) * lda + (i)]
 #define CONJIF(z) (noconj ? (z) : cconj(z))
+
+/* Contiguous Lower Trans/ConjTrans solve, phase-split: final triangle
+ * (j > n-k-1, shrinking dot off the column base) then steady band (fixed
+ * k-length dot), both pure pointer walks.  Descending i order kept =>
+ * bit-exact.  noinline keeps this leaf's layout independent of the
+ * dispatch body. */
+__attribute__((noinline, noclone))
+static void ytbsv_trans_lower_contig(
+    ptrdiff_t n, ptrdiff_t k, bool noconj, bool nounit,
+    const TC *restrict a, ptrdiff_t lda, TC *restrict x)
+{
+    const ptrdiff_t jt = n - k - 1;              /* j <= jt: full k-length dot */
+    const ptrdiff_t tri_lo = (jt + 1 > 0) ? (jt + 1) : 0;
+    const TC *col = a + (size_t)(n - 1) * lda;   /* col[t] = A_(t, j); col[0] = diag */
+    ptrdiff_t j = n - 1;
+    for (; j >= tri_lo; --j, col -= lda) {
+        const ptrdiff_t len = n - 1 - j;
+        TC tmp = x[j];
+        const TC *xj = x + j;
+        for (ptrdiff_t t = len; t >= 1; --t) tmp -= CONJIF(col[t]) * xj[t];
+        if (nounit) tmp /= CONJIF(col[0]);
+        x[j] = tmp;
+    }
+    for (; j >= 0; --j, col -= lda) {
+        TC tmp = x[j];
+        const TC *xj = x + j;
+        for (ptrdiff_t t = k; t >= 1; --t) tmp -= CONJIF(col[t]) * xj[t];
+        if (nounit) tmp /= CONJIF(col[0]);
+        x[j] = tmp;
+    }
+}
+
+/* Strided Lower Trans/ConjTrans solve, body verbatim from the dispatch
+ * loop.  noinline quarantines its layout: inline it sat downstream of the
+ * contiguous arm and lost ~2-4% (LTU strided) whenever that code moved. */
+__attribute__((noinline, noclone))
+static void ytbsv_trans_lower_strided(
+    ptrdiff_t n, ptrdiff_t k, bool noconj, bool nounit,
+    const TC *restrict a, ptrdiff_t lda,
+    TC *restrict x, ptrdiff_t incx, ptrdiff_t kx)
+{
+    kx += (n - 1) * incx;
+    ptrdiff_t jx = kx;
+    for (ptrdiff_t j = n - 1; j >= 0; --j) {
+        TC tmp = x[jx];
+        ptrdiff_t ix = kx;
+        const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
+        for (ptrdiff_t i = i_hi - 1; i > j; --i) {
+            const TC aij = noconj ? A_(i - j, j) : cconj(A_(i - j, j));
+            tmp -= aij * x[ix];
+            ix -= incx;
+        }
+        if (nounit) tmp /= (noconj ? A_(0, j) : cconj(A_(0, j)));
+        x[jx] = tmp;
+        jx -= incx;
+        if ((n - 1 - j) >= k) kx -= incx;
+    }
+}
 
 static void ytbsv_core(
     char uplo, char trans, char diag,
@@ -80,15 +139,7 @@ static void ytbsv_core(
                     x[j] = tmp;
                 }
             } else {
-                for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    const TC *restrict col = &a[(size_t)j * lda];
-                    const ptrdiff_t off = -j;
-                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
-                    TC tmp = x[j];
-                    for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= CONJIF(col[off + i]) * x[i];
-                    if (nounit) tmp /= CONJIF(col[0]);
-                    x[j] = tmp;
-                }
+                ytbsv_trans_lower_contig(n, k, noconj, nounit, a, lda, x);
             }
         }
     } else {
@@ -148,22 +199,7 @@ static void ytbsv_core(
                     if (j >= k) kx += incx;
                 }
             } else {
-                kx += (n - 1) * incx;
-                ptrdiff_t jx = kx;
-                for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    TC tmp = x[jx];
-                    ptrdiff_t ix = kx;
-                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
-                    for (ptrdiff_t i = i_hi - 1; i > j; --i) {
-                        const TC aij = noconj ? A_(i - j, j) : cconj(A_(i - j, j));
-                        tmp -= aij * x[ix];
-                        ix -= incx;
-                    }
-                    if (nounit) tmp /= (noconj ? A_(0, j) : cconj(A_(0, j)));
-                    x[jx] = tmp;
-                    jx -= incx;
-                    if ((n - 1 - j) >= k) kx -= incx;
-                }
+                ytbsv_trans_lower_strided(n, k, noconj, nounit, a, lda, x, incx, kx);
             }
         }
     }
