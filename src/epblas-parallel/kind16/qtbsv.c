@@ -77,6 +77,97 @@ static void qtbsv_notrans_lower_contig(
     }
 }
 
+/* Contiguous NoTrans-Upper solve, phase-split like its NoTrans-Lower twin:
+ * steady band (fixed k-length AXPY walking backward from the diagonal at
+ * c[0] = A_(k,j)) for j >= k, then final triangle (shrinking AXPY) for
+ * j < k.  Element order matches the generic arm (t = j-i ascending 1..len,
+ * i.e. i descending from j-1) => bit-exact.  noinline+noclone keeps this
+ * leaf's layout independent of the dispatch body. */
+__attribute__((noinline, noclone))
+static void qtbsv_notrans_upper_contig(
+    ptrdiff_t n, ptrdiff_t k, bool nounit,
+    const TR *restrict a, ptrdiff_t lda, TR *restrict x)
+{
+    const ptrdiff_t jt = (k < n) ? k : n;          /* j < jt: shrinking AXPY */
+    const TR *c = a + (size_t)(n - 1) * lda + k;   /* c[0] = A_(k,j) diag; c[-t] = A_(k-t,j) */
+    ptrdiff_t j = n - 1;
+    for (; j >= jt; --j, c -= lda) {
+        if (x[j] != 0.0Q) {
+            if (nounit) x[j] /= c[0];
+            const TR tmp = x[j];
+            TR *xj = x + j;
+            for (ptrdiff_t t = 1; t <= k; ++t) xj[-t] -= tmp * c[-t];
+        }
+    }
+    for (; j >= 0; --j, c -= lda) {
+        if (x[j] != 0.0Q) {
+            if (nounit) x[j] /= c[0];
+            const TR tmp = x[j];
+            TR *xj = x + j;
+            for (ptrdiff_t t = 1; t <= j; ++t) xj[-t] -= tmp * c[-t];
+        }
+    }
+}
+
+/* Contiguous Trans/ConjTrans-Lower solve, phase-split like its Trans-Upper
+ * twin: initial triangle (shrinking dot, j walking down from n-1) then
+ * steady band (fixed k-length dot), both pure pointer walks off the column
+ * base c[0] = A_(0,j).  Element order matches the generic arm (t = i-j
+ * DESCENDING len..1, i.e. i descending from i_hi-1) => bit-exact. */
+__attribute__((noinline, noclone))
+static void qtbsv_trans_lower_contig(
+    ptrdiff_t n, ptrdiff_t k, bool nounit,
+    const TR *restrict a, ptrdiff_t lda, TR *restrict x)
+{
+    const ptrdiff_t js = (n - k > 0) ? (n - k) : 0;  /* j >= js: shortened dot */
+    const TR *c = a + (size_t)(n - 1) * lda;         /* c[t] = A_(t, j); c[0] = diag */
+    ptrdiff_t j = n - 1;
+    for (; j >= js; --j, c -= lda) {
+        TR tmp = x[j];
+        const TR *xj = x + j;
+        const ptrdiff_t len = n - 1 - j;
+        for (ptrdiff_t t = len; t >= 1; --t) tmp -= c[t] * xj[t];
+        if (nounit) tmp /= c[0];
+        x[j] = tmp;
+    }
+    for (; j >= 0; --j, c -= lda) {
+        TR tmp = x[j];
+        const TR *xj = x + j;
+        for (ptrdiff_t t = k; t >= 1; --t) tmp -= c[t] * xj[t];
+        if (nounit) tmp /= c[0];
+        x[j] = tmp;
+    }
+}
+
+/* Strided Trans/ConjTrans-Upper solve, quarantined VERBATIM from the
+ * dispatch body: shrinking the dispatch (contiguous arms became leaf
+ * calls) re-laid-out this untouched arm and cost it ~1% systematically
+ * (UTN/UTU strided, all sizes).  Its own noinline+noclone leaf pins the
+ * layout independent of future dispatch edits.  Body unchanged =>
+ * bit-exact. */
+__attribute__((noinline, noclone))
+static void qtbsv_trans_upper_strided(
+    ptrdiff_t n, ptrdiff_t k, bool nounit,
+    const TR *restrict a, ptrdiff_t lda,
+    TR *restrict x, ptrdiff_t incx, ptrdiff_t kx)
+{
+    ptrdiff_t jx = kx;
+    for (ptrdiff_t j = 0; j < n; ++j) {
+        TR tmp = x[jx];
+        ptrdiff_t ix = kx;
+        const ptrdiff_t L = k - j;
+        const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
+        for (ptrdiff_t i = i_lo; i < j; ++i) {
+            tmp -= A_(L + i, j) * x[ix];
+            ix += incx;
+        }
+        if (nounit) tmp /= A_(k, j);
+        x[jx] = tmp;
+        jx += incx;
+        if (j >= k) kx += incx;
+    }
+}
+
 void qtbsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n, ptrdiff_t k,
@@ -94,15 +185,7 @@ void qtbsv_core(
     if (incx == 1) {
         if (TRANS == 'N') {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    if (x[j] != zero) {
-                        const ptrdiff_t L = k - j;
-                        if (nounit) x[j] /= A_(k, j);
-                        const TR tmp = x[j];
-                        const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
-                        for (ptrdiff_t i = j - 1; i >= i_lo; --i) x[i] -= tmp * A_(L + i, j);
-                    }
-                }
+                qtbsv_notrans_upper_contig(n, k, nounit, a, lda, x);
             } else {
                 qtbsv_notrans_lower_contig(n, k, nounit, a, lda, x);
             }
@@ -110,13 +193,7 @@ void qtbsv_core(
             if (UPLO == 'U') {
                 qtbsv_trans_upper_contig(n, k, nounit, a, lda, x);
             } else {
-                for (ptrdiff_t j = n - 1; j >= 0; --j) {
-                    TR tmp = x[j];
-                    const ptrdiff_t i_hi = (j + k + 1 < n) ? (j + k + 1) : n;
-                    for (ptrdiff_t i = i_hi - 1; i > j; --i) tmp -= A_(i - j, j) * x[i];
-                    if (nounit) tmp /= A_(0, j);
-                    x[j] = tmp;
-                }
+                qtbsv_trans_lower_contig(n, k, nounit, a, lda, x);
             }
         }
     } else {
@@ -159,21 +236,7 @@ void qtbsv_core(
             }
         } else {
             if (UPLO == 'U') {
-                ptrdiff_t jx = kx;
-                for (ptrdiff_t j = 0; j < n; ++j) {
-                    TR tmp = x[jx];
-                    ptrdiff_t ix = kx;
-                    const ptrdiff_t L = k - j;
-                    const ptrdiff_t i_lo = (j - k > 0) ? (j - k) : 0;
-                    for (ptrdiff_t i = i_lo; i < j; ++i) {
-                        tmp -= A_(L + i, j) * x[ix];
-                        ix += incx;
-                    }
-                    if (nounit) tmp /= A_(k, j);
-                    x[jx] = tmp;
-                    jx += incx;
-                    if (j >= k) kx += incx;
-                }
+                qtbsv_trans_upper_strided(n, k, nounit, a, lda, x, incx, kx);
             } else {
                 kx += (n - 1) * incx;
                 ptrdiff_t jx = kx;

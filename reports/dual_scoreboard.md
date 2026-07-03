@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-03 03:12 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-03 04:11 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -212,7 +212,6 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | **qtrmm** | 64 | 1.029 mig @RLTN/512 | 0.934 | ⚠ |
 | qsbmv | 24 | 1.020 | 0.826 | ✅ |
 | xdotc | 2 | 1.020 | 1.014 | ✅ |
-| qtbsv | 96 | 1.019 | 1.017 | ✅ |
 | qdot | 3 | 0.986 | 1.019 | ✅ |
 | xdotu | 2 | 1.019 | 1.014 | ✅ |
 | qsyr2 | 24 | 1.018 | 0.926 | ✅ |
@@ -227,6 +226,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xherk | 12 | 1.014 | 1.001 | ✅ |
 | qaxpy | 3 | 1.014 | 0.960 | ✅ |
 | qspmv | 24 | 1.014 | 1.011 | ✅ |
+| qtbsv | 96 | 1.014 | 1.014 | ✅ |
 | qsymv | 24 | 1.014 | 1.012 | ✅ |
 | xgeru | 9 | 1.013 | 1.006 | ✅ |
 | qrot | 3 | 1.004 | 1.012 | ✅ |
