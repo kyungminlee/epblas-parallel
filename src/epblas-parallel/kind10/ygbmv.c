@@ -98,17 +98,24 @@ static inline TC cconj(TC z) { return ~z; }
         "fmulp %%st,%%st(1)\n\t"        \
         "fsubrp %%st,%%st(1)\n\t"       \
         "faddp %%st,%%st(1)\n\t"
+/* The accumulator pair exits in st(0)/st(1) ("=t"/"=u" outputs) rather than
+ * through fstpt/fldt memory slots: the band dot is short (~kl+ku+1 elts), so a
+ * per-column store-forward round-trip of both accumulators into the y-update
+ * was ~5 cyc/column — the whole ~1.7% par/mig gap on the strided-Trans cells
+ * (per-MAC cost already ties gfortran: widening the band to kl=ku=64 flips
+ * par ahead). gcc consumes st(0)/st(1) directly in the alpha*temp update. */
 #define YGBMV_DOT(COMB, ADVX)           \
         "fldz\n\t" "fldz\n\t"          \
         "test %[i],%[i]\n\t" "jle 2f\n\t" \
+        ".p2align 5\n\t"               \
         "1:\n\t" YGBMV_DOTLOADS COMB    \
         "add $32,%[a]\n\t" ADVX         \
         "sub $1,%[i]\n\t" "jnz 1b\n\t"  \
-        "2:\n\t" "fstpt %[sim]\n\t" "fstpt %[sre]\n\t"
+        "2:\n\t"
 #define YGBMV_DOT_OUT \
-        [a] "+r"(a), [x] "+r"(x), [i] "+r"(cnt), [sre] "=m"(sre), [sim] "=m"(sim)
+        [a] "+r"(a), [x] "+r"(x), [i] "+r"(cnt), [sim] "=t"(sim), [sre] "=u"(sre)
 #define YGBMV_DOT_CLOB \
-        "st", "st(1)", "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)", "cc"
+        "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)", "cc"
 
 #define YGBMV_DOT_FN(NAME, COMB)                                                \
 __attribute__((always_inline))                                                  \
