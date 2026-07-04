@@ -196,6 +196,18 @@ set_source_files_properties(enrm2.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32
 # FP/store-bound and indifferent to the wider padding.
 set_source_files_properties(egemm_serial.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
 
+# Placement-audit pin (objdump straddle scan over all dual harness binaries,
+# looking for sub-32-byte backward-jcc loop bodies that cross a 32-byte fetch
+# chunk at the archive-wide -falign-loops=16): esyr2k_serial.c had two
+# 24-byte inner loops at mod-32 = 24 / 18, both straddling; the packed
+# kernels were placement-identical to ob's twins, so only the serial small-N
+# path was exposed (the LT/64 serial cell sat at par/mig 1.021). With the pin
+# the row clears (worst 1.012/1.003 at REPS=80). ytrsv also showed a 31-byte
+# straddling solve loop, but its entry label is jump-only and gcc declines to
+# pad it under -falign-loops/-falign-jumps/-falign-functions=32 — not
+# flag-fixable, and its residual ~1.02 cluster wanders cell-to-cell (scatter).
+set_source_files_properties(esyr2k_serial.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
+
 # OpenMP comes in at step 4. Wire it now so the per-kernel #pragmas
 # compile from the start.
 if(OpenMP_C_FOUND)
