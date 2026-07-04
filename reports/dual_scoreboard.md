@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-04 19:02 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-04 19:29 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -94,12 +94,11 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## e — kind10 (fp80)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 99.9% · omp4 100.0%.**  2 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 99.9% · omp4 100.0%.**  1 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
 | **ysyrk** | 12 | 1.034 mig @UT/256 | 0.706 | ⚠ |
-| **etbsv** | 96 | 1.019 | 1.027 @UTN/128 | ⚠ |
 | ytrsv | 108 | 1.020 | 1.020 | ✅ |
 | espmv | 24 | 1.020 | 1.005 | ✅ |
 | esymv | 24 | 1.018 | 0.986 | ✅ |
@@ -110,6 +109,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | erotmg | 1 | 1.015 | 1.015 | ✅ |
 | ytpmv | 108 | 1.014 | 1.015 | ✅ |
 | esyr2 | 24 | 1.015 | 1.005 | ✅ |
+| etbsv | 96 | 1.012 | 1.014 | ✅ |
 | espr | 24 | 1.014 | 1.005 | ✅ |
 | esyr | 24 | 1.007 | 1.014 | ✅ |
 | espr2 | 24 | 1.014 | 0.985 | ✅ |
@@ -174,14 +174,13 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | eynrm2 | 2 | 0.330 | 0.326 | ✅ |
 | yrotg | 1 | 0.079 | 0.078 | ✅ |
 
-<details><summary>e: 4 flagged cells (par/ref > 1.02, smaller=faster)</summary>
+<details><summary>e: 3 flagged cells (par/ref > 1.02, smaller=faster)</summary>
 
 | routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
 | ysyrk | UT | 256 | 20,532,762 | 28,367,402 | 19,856,349 | 7,586,949 | 13,336,490 | 1.034 | 0.569 | mig |
 | ysyrk | UT | 128 | 2,601,837 | 3,644,702 | 2,519,672 | 958,631 | 1,723,387 | 1.033 | 0.556 | mig |
 | ysyrk | UT | 64 | 331,242 | 483,306 | 321,324 | 124,260 | 265,030 | 1.031 | 0.469 | mig |
-| etbsv | UTN | 128 | 1,764 | 1,731 | 1,885 | 1,776 | 1,730 | 1.019 | 1.027 | ob1 |
 
 </details>
 

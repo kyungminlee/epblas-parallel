@@ -85,20 +85,35 @@ static void etbsv_contig(
             }
         } else {
             if (UPLO == 'U') {
-                for (ptrdiff_t j = 0; j < n; ++j) {
+                /* Manual growing/steady phase split. Written as ONE loop with
+                 * i_lo = max(j-k, 0), gcc's -fsplit-loops materializes the two
+                 * phases itself — but its growing- and steady-phase dot loops
+                 * come out shape-identical (7 insns each) and, with the fixed
+                 * ~0x6f-byte inter-phase glue, their cmp+jne backedges land
+                 * EXACTLY 128 bytes apart at every -falign-loops setting. On
+                 * Coffee Lake the two backedges then alias in the branch
+                 * predictor's indexed tables: the constant-trip-k steady loop
+                 * trains over the variable-trip growing loop and the growing
+                 * exits mispredict (~5 extra misses/call ≈ the whole ~2% UTN
+                 * serial gap; PEBS 53% on the growing backedge; ob's phases sit
+                 * 0x260 apart and predict clean, as does a standalone twin).
+                 * Splitting at the SOURCE with differently-shaped bodies (the
+                 * steady dot drops the off bias and walks col from 0) breaks
+                 * the 128-byte congruence. Bit-exact: same MACs, same order. */
+                const ptrdiff_t jknee = (n < k) ? n : k;
+                for (ptrdiff_t j = 0; j < jknee; ++j) {
                     TR tmp = x[j];
                     const TR *restrict col = &a[(size_t)j * lda];
                     const ptrdiff_t off = k - j;
-                    /* (j > K), not the equivalent (j - K > 0): the unconditional
-                     * j-K subtraction spawns an extra induction variable that
-                     * blocks GCC from fusing &a[j*lda]+(K-j) into the single
-                     * stride-(lda-1) band-diagonal pointer ob walks, forcing a
-                     * per-column address recompute. The compare-only form lets
-                     * the fusion happen → UTN par/ob 1.05->1.01, UTU ->0.97.
-                     * (Opposite for the NoTrans store-loop above, which prefers
-                     * the subtraction form — measured per-shape, do not unify.) */
-                    const ptrdiff_t i_lo = (j > k) ? (j - k) : 0;
-                    for (ptrdiff_t i = i_lo; i < j; ++i) tmp -= col[off + i] * x[i];
+                    for (ptrdiff_t i = 0; i < j; ++i) tmp -= col[off + i] * x[i];
+                    if (nounit) tmp /= col[k];
+                    x[j] = tmp;
+                }
+                for (ptrdiff_t j = jknee; j < n; ++j) {
+                    TR tmp = x[j];
+                    const TR *restrict col = &a[(size_t)j * lda];
+                    const TR *restrict xp = &x[j - k];
+                    for (ptrdiff_t i = 0; i < k; ++i) tmp -= col[i] * xp[i];
                     if (nounit) tmp /= col[k];
                     x[j] = tmp;
                 }
