@@ -4,11 +4,18 @@
  * orchestrates the diagonal-block loop across a team.
  *
  * TRANS ∈ {N, C}. alpha/beta are REAL; the diagonal of C stays real.
- * Blocked: beta pre-scale + scalar Hermitian diagonal add + ygemm trailing
- * with conjugate transpose. The trailing update runs through ygemm_serial
- * (NOT ygemm_): when yherk_block runs inside the team yherk_parallel.c
- * opened, a nested ygemm team would trip the libgomp barrier wedge (memory
- * project-etrsm-omp4-wedge).
+ * Blocked: scalar Hermitian diagonal add + ygemm trailing with conjugate
+ * transpose. beta is FUSED into the block instead of a separate prescale
+ * pass over the whole output panel: herk_diag_add carries beta for the
+ * diagonal block (scale-per-column right before accumulating it, or folded
+ * into the 'C'-arm store), and the trailing strip's beta rides the ygemm
+ * call's own prepass. (A full-column scalar Trans pass — the ysyrk_block
+ * 553cc23 pattern — was tried and REGRESSED ~20-35%: packed ygemm reuses
+ * each A column across the panel; a per-(i,j) dot re-streams all of A per
+ * output column and blows L2 at N≥128. Complex ≠ real here.) The trailing
+ * update runs through ygemm_serial (NOT ygemm_): when yherk_block runs
+ * inside the team yherk_parallel.c opened, a nested ygemm team would trip
+ * the libgomp barrier wedge (memory project-etrsm-omp4-wedge).
  */
 
 #include "yherk_kernel.h"
@@ -40,8 +47,14 @@ static const TC czero = 0.0L + 0.0Li;
 static const TR rzero = 0.0L, rone = 1.0L;
 
 /* Diagonal jb×jb block rank-k add, keeping diagonal entries real.
- * No beta scaling (caller pre-scales). */
-static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TR alpha,
+ * beta is FUSED here (no separate caller prescale): the 'N' arm scales the
+ * column's block range once right before accumulating into it (same element
+ * order and case split as yherk_beta_scale restricted to [i_lo,i_hi), so
+ * bit-identical); the 'C' arm folds beta into the store — beta·C(i,j) is
+ * rounded to fp80 either way and IEEE add commutes, so bit-identical too.
+ * The i==j stores assign REAL values, keeping the diagonal exactly real
+ * for every beta (beta==0 → czero, beta≠1 → beta·Re, beta==1 → Re). */
+static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TR alpha, TR beta,
                           const TC *restrict a, ptrdiff_t lda,
                           TC *restrict c, ptrdiff_t ldc,
                           char UPLO, char TRANS)
@@ -51,6 +64,16 @@ static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TR alpha,
             const ptrdiff_t i_lo = (UPLO == 'L') ? j     : jc;
             const ptrdiff_t i_hi = (UPLO == 'L') ? jc+jb : j + 1;
             TC *cj = c + (size_t)j * ldc;
+            if (beta == rzero) {
+                for (ptrdiff_t i = i_lo; i < i_hi; ++i) cj[i] = czero;
+            } else if (beta != rone) {
+                for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
+                    if (i == j) cj[i] = beta * __real__ cj[i];
+                    else        cj[i] = beta * cj[i];
+                }
+            } else {
+                cj[j] = __real__ cj[j];
+            }
             for (ptrdiff_t l = 0; l < k; ++l) {
                 const TC ajl = A_(j, l);
                 if (ajl != czero) {
@@ -83,8 +106,13 @@ static void herk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TR alpha,
                     si += ar * bim - aim * br;
                 }
                 const TC s = sr + si * 1.0Li;
-                if (i == j) cj[i] += alpha * __real__ s;
-                else        cj[i] += alpha * s;
+                if (i == j) {
+                    const TR d = alpha * sr;
+                    cj[i] = (beta == rzero) ? d : d + beta * __real__ cj[i];
+                } else {
+                    const TC as = alpha * s;
+                    cj[i] = (beta == rzero) ? as : as + beta * cj[i];
+                }
             }
         }
     }
@@ -113,11 +141,14 @@ void yherk_beta_scale(ptrdiff_t j_start, ptrdiff_t j_end, ptrdiff_t n, TR beta,
 void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TR alpha, TR beta,
                  const TC *a, ptrdiff_t lda, TC *c, ptrdiff_t ldc, char UPLO, char TRANS)
 {
-    const TC cone    = 1.0L + 0.0Li;
     const TC alpha_c = alpha + 0.0Li;
-    yherk_beta_scale(jc, jc + jb, n, beta, c, ldc, UPLO);
+    const TC beta_c  = beta  + 0.0Li;
 
-    herk_diag_add(jc, jb, k, alpha, a, lda, c, ldc, UPLO, TRANS);
+    /* beta is fused: the diagonal block scales inside herk_diag_add, the
+     * trailing strip scales inside ygemm's own beta prepass — no separate
+     * whole-panel prescale pass. The strip has no diagonal elements, so
+     * the Hermitian real projection lives entirely in herk_diag_add. */
+    herk_diag_add(jc, jb, k, alpha, beta, a, lda, c, ldc, UPLO, TRANS);
 
     if (UPLO == 'L') {
         const ptrdiff_t trailing = n - jc - jb;
@@ -126,11 +157,11 @@ void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TR alpha,
             if (TRANS == 'N') {
                 ygemm_serial('N', 'C', trailing, jb, k, &alpha_c,
                              &A_(j0, 0), lda, &A_(jc, 0), lda,
-                             &cone, &C_(j0, jc), ldc);
+                             &beta_c, &C_(j0, jc), ldc);
             } else {
                 ygemm_serial('C', 'N', trailing, jb, k, &alpha_c,
                              &A_(0, j0), lda, &A_(0, jc), lda,
-                             &cone, &C_(j0, jc), ldc);
+                             &beta_c, &C_(j0, jc), ldc);
             }
         }
     } else {
@@ -138,11 +169,11 @@ void yherk_block(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k, TR alpha,
             if (TRANS == 'N') {
                 ygemm_serial('N', 'C', jc, jb, k, &alpha_c,
                              &A_(0, 0), lda, &A_(jc, 0), lda,
-                             &cone, &C_(0, jc), ldc);
+                             &beta_c, &C_(0, jc), ldc);
             } else {
                 ygemm_serial('C', 'N', jc, jb, k, &alpha_c,
                              &A_(0, 0), lda, &A_(0, jc), lda,
-                             &cone, &C_(0, jc), ldc);
+                             &beta_c, &C_(0, jc), ldc);
             }
         }
     }
