@@ -4,6 +4,7 @@
  */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
@@ -50,6 +51,37 @@ static void espr2_core(
     const char UPLO = blas_up(uplo);
 
     if (n == 0 || alpha == zero) return;
+
+    /* General stride: gather x and y into contiguous scratch and run the
+     * contiguous paths. Inputs only — packed A is the output and already
+     * contiguous, so there is no scatter-back. The strided walk reads x/y
+     * O(n^2) times at stride inc{x,y} (the references' strided form costs
+     * ~11% over their own contiguous form on both uplos, while par's
+     * contiguous cores tie-or-beat the references' contiguous form), so the
+     * O(n) gather nets ~9-10%. It also unlocks the balanced-schedule OMP
+     * path, which lives in the contiguous branch only. malloc failure falls
+     * through to the direct strided walk. */
+    if (incx != 1 || incy != 1) {
+        enum { ESPR2_STACK_N = 512 };
+        TR stackbuf[2 * ESPR2_STACK_N];
+        TR *heap = NULL;
+        TR *xc = (n <= ESPR2_STACK_N)
+            ? stackbuf
+            : (heap = (TR *)malloc(2 * (size_t)n * sizeof(TR)));
+        if (xc) {
+            TR *restrict yc = xc + n;
+            const ptrdiff_t kx0 = (incx < 0) ? -(n - 1) * incx : 0;
+            const ptrdiff_t ky0 = (incy < 0) ? -(n - 1) * incy : 0;
+            ptrdiff_t ix = kx0, iy = ky0;
+            for (ptrdiff_t i = 0; i < n; ++i) {
+                xc[i] = x[ix]; yc[i] = y[iy];
+                ix += incx; iy += incy;
+            }
+            espr2_core(uplo, n, alpha_, xc, 1, yc, 1, ap);
+            free(heap);
+            return;
+        }
+    }
 
     if (incx == 1 && incy == 1) {
         /* schedule(static, 8): column j touches j+1 (upper) or N-j (lower)
