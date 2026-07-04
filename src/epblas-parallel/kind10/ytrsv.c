@@ -94,12 +94,14 @@ static inline TC ytrsv_ut_solve(const TC *ai_, const TC *x_, const TC *xi,
         "faddp %%st,%%st(1)\n\t"
         "fsubrp %%st,%%st(1)\n\t"
         "jnz 1b\n\t"
-        "fstpt %[tim]\n\t"
-        "fstpt %[tre]\n\t"
-        : [tre] "=m"(tre), [tim] "=m"(tim),
+        /* Accumulators leave in st0/st1 via "=t"/"=u" register outputs — an
+         * fstpt/fldt round-trip here costs ~10 cyc/column (80-bit stores
+         * don't store-forward), the whole residual vs gfortran's inlined
+         * loop after the schedule port. */
+        : [tim] "=t"(tim), [tre] "=u"(tre),
           [a] "+r"(a), [x] "+r"(x), [i] "+r"(m)
         : [xi] "r"(xip)
-        : "st", "st(1)", "st(2)", "st(3)", "st(4)",
+        : "st(2)", "st(3)", "st(4)",
           "st(5)", "st(6)", "st(7)", "memory", "cc");
     return tre + tim * 1.0iL;
 }
@@ -144,12 +146,11 @@ static inline TC ytrsv_ut_solve_str(const TC *ai_, const TC *x_, const TC *xi,
         "faddp %%st,%%st(1)\n\t"
         "fsubrp %%st,%%st(1)\n\t"
         "jnz 1b\n\t"
-        "fstpt %[tim]\n\t"
-        "fstpt %[tre]\n\t"
-        : [tre] "=m"(tre), [tim] "=m"(tim),
+        /* st0/st1 register outputs — see ytrsv_ut_solve. */
+        : [tim] "=t"(tim), [tre] "=u"(tre),
           [a] "+r"(a), [x] "+r"(x), [i] "+r"(m)
         : [xi] "r"(xip), [xs] "r"(xstep * 32)
-        : "st", "st(1)", "st(2)", "st(3)", "st(4)",
+        : "st(2)", "st(3)", "st(4)",
           "st(5)", "st(6)", "st(7)", "memory", "cc");
     return tre + tim * 1.0iL;
 }
@@ -190,12 +191,11 @@ static inline TC ytrsv_lt_solve(const TC *ai_, const TC *x_, const TC *xi,
         "faddp %%st,%%st(1)\n\t"
         "fsubrp %%st,%%st(1)\n\t"
         "jnz 1b\n\t"
-        "fstpt %[tim]\n\t"
-        "fstpt %[tre]\n\t"
-        : [tre] "=m"(tre), [tim] "=m"(tim),
+        /* st0/st1 register outputs — see ytrsv_ut_solve. */
+        : [tim] "=t"(tim), [tre] "=u"(tre),
           [a] "+r"(a), [x] "+r"(x), [i] "+r"(m)
         : [xi] "r"(xip)
-        : "st", "st(1)", "st(2)", "st(3)", "st(4)",
+        : "st(2)", "st(3)", "st(4)",
           "st(5)", "st(6)", "st(7)", "memory", "cc");
     return tre + tim * 1.0iL;
 }
