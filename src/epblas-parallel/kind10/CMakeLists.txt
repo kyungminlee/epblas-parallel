@@ -208,6 +208,14 @@ set_source_files_properties(egemm_serial.c PROPERTIES COMPILE_OPTIONS "-falign-l
 # flag-fixable, and its residual ~1.02 cluster wanders cell-to-cell (scatter).
 set_source_files_properties(esyr2k_serial.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
 
+# egbmv: the contiguous-Trans band dot is an 18-byte loop; at the archive-wide
+# 16-byte granularity it can land at mod-32 = 16 and straddle a fetch chunk.
+# par ties mig (par/mig ~1.003) but the ob leg's byte-identical loop sits
+# 32-aligned and reads ~2% faster at N=128-256 (the T/128,256 serial cells).
+# Pin to 32 so placement is a non-factor; the strided-Trans and NoTrans loops
+# are latency-bound and indifferent to the wider padding.
+set_source_files_properties(egbmv.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
+
 # OpenMP comes in at step 4. Wire it now so the per-kernel #pragmas
 # compile from the start.
 if(OpenMP_C_FOUND)

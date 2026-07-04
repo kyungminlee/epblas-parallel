@@ -178,11 +178,19 @@ static void egbmv_core(
             /* Hoist column to a running pointer so the contiguous A read is one
              * `*col++` (single IV) instead of recomputing A_(k+i,j) each row,
              * which ptrdiff_t indexing strength-reduces into a redundant IV
-             * (project_ptrdiff_conversion_regressors, Class-B). */
+             * (project_ptrdiff_conversion_regressors, Class-B). Terminate on
+             * col==cend (pointer doubles as the counter) instead of an index
+             * i<i_hi: with the extra strided-x IV gcc otherwise keeps i live as
+             * a THIRD induction variable (inc+cmp), one uop/element over the
+             * gfortran reference's 2-IV loop — the whole deterministic ~2% on
+             * the strided-Trans cells (T/x2,x-1). Same ascending summation
+             * order, bit-identical. */
             const TR *col = &A_(k + i_lo, j);
-            for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
-                s += *col++ * x[ix];
-                ix += incx;
+            const TR *const cend = col + (i_hi - i_lo);
+            const TR *xp = &x[ix];
+            for (; col != cend; ++col) {
+                s += *col * *xp;
+                xp += incx;
             }
             y[jy] += alpha * s;
             jy += incy;
