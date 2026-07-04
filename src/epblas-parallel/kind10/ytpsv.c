@@ -20,6 +20,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
@@ -179,6 +180,30 @@ static void ytpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                 }
             }
         }
+    }
+}
+
+/* Quarantined contiguous Lower-plain-Trans solve: ytpsv_serial's verbatim
+ * netlib loop with noconj specialized to true (plain-Trans never conjugates)
+ * — same operations, same order, bit-identical. Carved into its own
+ * noinline+noclone function because the loop is placement-fragile inside
+ * ytpsv_serial: the 2026-07 gather edit relinked the TU and shifted it to an
+ * offset costing ~4.7% vs the gfortran reference (LTN/LTU serial
+ * 0.999 -> ~1.05) while the byte-identical strided arm kept full speed.
+ * Function-aligned entry decouples its placement from the rest of the TU
+ * (same quarantine pattern as etpmv's Upper-NoTrans DSB fix). */
+__attribute__((noinline, noclone))
+static void ytpsv_lt_contig(bool nounit, ptrdiff_t n,
+                            const TC *restrict ap, TC *restrict x)
+{
+    ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+    for (ptrdiff_t j = n - 1; j >= 0; --j) {
+        TC tmp = x[j];
+        ptrdiff_t k = kk;
+        for (ptrdiff_t i = n - 1; i > j; --i) { tmp -= ap[k] * x[i]; --k; }
+        if (nounit) tmp /= ap[kk - (n - 1 - j)];
+        x[j] = tmp;
+        kk -= (n - j);
     }
 }
 
@@ -439,6 +464,9 @@ __attribute__((noinline)) static bool ytpsv_omp(
 }
 #endif
 
+static bool ytpsv_gathered(char uplo, char trans, char diag, ptrdiff_t n,
+                           const TC *restrict ap, TC *restrict x, ptrdiff_t incx);
+
 static void ytpsv_core(
     char uplo, char trans, char diag,
     ptrdiff_t n,
@@ -452,6 +480,24 @@ static void ytpsv_core(
 
     if (n == 0) return;
 
+    /* General stride, NoTrans/ConjTrans only: gather x into contiguous
+     * scratch, solve on the incx==1 paths, scatter back (ytpsv_gathered).
+     * The strided walk touches x O(n^2) times at stride incx; the O(n)
+     * gather/scatter routes into the ytpsv_contig fast arms (~8-9% faster in
+     * absolute terms than the references' strided walk at N=512) and unlocks
+     * the blocked threaded solve, which is gated on incx==1. Plain-Trans is
+     * excluded — its contiguous form is the same verbatim netlib loop and
+     * ties the strided references (~0.5%, inside the gather tax), the same
+     * no-headroom shape as the contiguous dispatch below already documents.
+     * malloc failure (gathered returns false) falls through to the direct
+     * strided walk. The helper is noinline and lives after this function:
+     * inlining its 16KB stack buffer and loops here shifted the contiguous
+     * plain-Trans solve loop to an unlucky offset (LTN/LTU serial
+     * 0.999 -> ~1.047 vs the gfortran reference on an untouched path). */
+    if (incx != 1 && (TRANS == 'N' || !noconj)
+        && ytpsv_gathered(uplo, trans, diag, n, ap, x, incx))
+        return;
+
 #ifdef _OPENMP
     if (incx == 1 && n >= YTPSV_OMP_MIN && blas_omp_max_threads() > 1
         && ytpsv_omp(UPLO, TRANS, noconj, nounit, n, ap, x))
@@ -459,13 +505,39 @@ static void ytpsv_core(
 #endif
 
     /* Contiguous NoTrans/ConjTrans take the helper-routed arms; contiguous
-     * plain-Trans stays on ytpsv_serial's verbatim netlib loop (fastest form,
-     * see ytpsv_contig comment), as does every strided call. */
+     * plain-Trans stays on the verbatim netlib loop (fastest form, see
+     * ytpsv_contig comment) — Lower via the quarantined ytpsv_lt_contig,
+     * Upper still inside ytpsv_serial, as is every strided call. */
     if (incx == 1 && (TRANS == 'N' || !noconj)) {
         ytpsv_contig(UPLO, TRANS, noconj, nounit, n, ap, x);
         return;
     }
+    if (incx == 1 && TRANS == 'T' && UPLO == 'L') {
+        ytpsv_lt_contig(nounit, n, ap, x);
+        return;
+    }
     ytpsv_serial(UPLO, TRANS, noconj, nounit, n, ap, x, incx);
+}
+
+__attribute__((noinline, noclone))
+static bool ytpsv_gathered(char uplo, char trans, char diag, ptrdiff_t n,
+                           const TC *restrict ap, TC *restrict x, ptrdiff_t incx)
+{
+    enum { YTPSV_STACK_N = 512 };
+    TC stackbuf[YTPSV_STACK_N];
+    TC *heap = NULL;
+    TC *xc = (n <= YTPSV_STACK_N)
+        ? stackbuf
+        : (heap = (TC *)malloc((size_t)n * sizeof(TC)));
+    if (!xc) return false;
+    const ptrdiff_t kx0 = (incx < 0) ? -(n - 1) * incx : 0;
+    ptrdiff_t ix = kx0;
+    for (ptrdiff_t i = 0; i < n; ++i) { xc[i] = x[ix]; ix += incx; }
+    ytpsv_core(uplo, trans, diag, n, ap, xc, 1);
+    ix = kx0;
+    for (ptrdiff_t i = 0; i < n; ++i) { x[ix] = xc[i]; ix += incx; }
+    free(heap);
+    return true;
 }
 
 EPBLAS_FACADE_TPMV(ytpsv, TC)
