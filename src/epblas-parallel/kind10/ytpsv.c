@@ -1,6 +1,21 @@
 /*
  * ytpsv — kind10 complex triangular packed solve.
  *   x := inv(A)*x, inv(A^T)*x, or inv(A^H)*x
+ *
+ * Contiguous (incx==1) serial arms use the twins' proven fp80 machinery:
+ * NoTrans column updates go through a noinline 4x-unrolled re/im-decomposed
+ * subtract-AXPY (ytpmv_axpy_col's solve form — same products, same
+ * association, iterations independent, so the Upper arm's backward netlib
+ * walk is flipped forward bit-identically); ConjTrans row values come from a
+ * noinline single-accumulator re/im-decomposed solve dot seeded with x[j]
+ * (ytpmv_dotc's solve form) with the conjugation folded into the accumulate
+ * signs (no fchs on the critical path). Upper-ConjTrans keeps netlib's
+ * ascending order (bit-identical); Lower-ConjTrans walks the packed column
+ * FORWARD like ytrsv L-T (netlib is descending; x fits L1 at these sizes —
+ * reassociation within fp80 fuzz tol). Plain-Trans keeps ytpsv_serial's
+ * verbatim netlib loop — asm-MAC and decomposed-dot variants both measured
+ * slower there (no fchs to remove, no spill to fix). Strided calls stay on
+ * verbatim netlib.
  */
 
 #include <stddef.h>
@@ -37,8 +52,9 @@ static inline size_t cbU(ptrdiff_t j) {
 }
 #endif
 
-/* Bit-exact serial path (verbatim reference). Also reused as the <threshold /
- * incx!=1 fallback. noconj = (TRANS=='T'); NoTrans never conjugates. */
+/* Bit-exact serial path (verbatim reference). Live only for incx!=1 — the
+ * incx==1 arms are superseded by ytpsv_contig below (kept verbatim as the
+ * reference transcription). noconj = (TRANS=='T'); NoTrans never conjugates. */
 static void ytpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                          ptrdiff_t n, const TC *restrict ap, TC *restrict x, ptrdiff_t incx)
 {
@@ -161,6 +177,116 @@ static void ytpsv_serial(char UPLO, char TRANS, bool noconj, bool nounit,
                     jx -= incx;
                     kk -= (n - j);
                 }
+            }
+        }
+    }
+}
+
+/* ---- contiguous (incx==1) serial machinery — see header comment ---- */
+
+/* Forward complex subtract-AXPY  y[0..m) -= t * a[0..m)  (the solve twin of
+ * ytpmv_axpy_col). t is decomposed into scalar re/im long-double locals (keeps
+ * the loop-invariant multiplier off the x87 stack) and the body is 4x unrolled
+ * — iterations are independent (no loop-carried accumulator), so unrolling
+ * amortises loop overhead. Kept noinline so it compiles in a clean x87
+ * register context, isolated from the column-sweep scaffolding. Bit-identical
+ * to the _Complex form: same products, same association. */
+__attribute__((noinline))
+static void ytpsv_axpy_col(TC *restrict y_, const TC *restrict a_, TC t, ptrdiff_t m)
+{
+    const long double tr = __real__ t, ti = __imag__ t;
+    long double *restrict y = (long double *)y_;
+    const long double *restrict a = (const long double *)a_;
+    ptrdiff_t i = 0;
+    for (; i + 3 < m; i += 4) {
+        for (int u = 0; u < 4; ++u) {
+            const long double ar = a[2 * (i + u)], ai = a[2 * (i + u) + 1];
+            y[2 * (i + u)]     -= tr * ar - ti * ai;
+            y[2 * (i + u) + 1] -= tr * ai + ti * ar;
+        }
+    }
+    for (; i < m; ++i) {
+        const long double ar = a[2 * i], ai = a[2 * i + 1];
+        y[2 * i]     -= tr * ar - ti * ai;
+        y[2 * i + 1] -= tr * ai + ti * ar;
+    }
+}
+
+/* Conj Trans row value: returns *xi − Σ_{k=0}^{m-1} cconj(ai[k])·x[k], forward
+ * walk, conjugation folded into the accumulate signs (no fchs on the critical
+ * path — the fchs is what disrupts gcc's scheduling on the conj arms; cf.
+ * ytpmv_dotc). Single decomposed accumulator (a 2nd chain spills the 8-deep
+ * stack, x87 trigger 6). Bit-identical to the _Complex single-running-sum form
+ * over the same element order. */
+__attribute__((noinline))
+static TC ytpsv_uc_solve(const TC *restrict ai_, const TC *restrict x_,
+                         const TC *restrict xi, ptrdiff_t m)
+{
+    const long double *restrict a = (const long double *)ai_;
+    const long double *restrict x = (const long double *)x_;
+    long double sr = __real__ *xi, si = __imag__ *xi;
+    for (ptrdiff_t k = 0; k < m; ++k) {
+        const long double ar = a[2 * k], ac = a[2 * k + 1];
+        const long double xr = x[2 * k], xs = x[2 * k + 1];
+        sr -= ar * xr + ac * xs;
+        si -= ar * xs - ac * xr;
+    }
+    return sr + si * 1.0iL;
+}
+
+/* Contiguous serial solve for the NoTrans and ConjTrans arms. Same recurrence
+ * as ytpsv_serial's incx==1 half with the inner loops routed through the
+ * helpers above. NoTrans arms and Upper-ConjTrans are bit-identical to netlib;
+ * Lower-ConjTrans walks the packed column forward (netlib descends — ytrsv L-T
+ * precedent, reassociation within fp80 fuzz tol). Plain-Trans (noconj) is NOT
+ * routed here: its verbatim netlib loop in ytpsv_serial is already optimal —
+ * both the ytrsv_ut_solve x87 asm MAC (~1-2% worse) and this file's decomposed
+ * dot shape (~1-4% worse) were A/B'd and lost to gcc's schedule of the plain
+ * _Complex loop (no fchs to eliminate, no scaffolding spill to fix). */
+static void ytpsv_contig(char UPLO, char TRANS, bool noconj, bool nounit,
+                         ptrdiff_t n, const TC *restrict ap, TC *restrict x)
+{
+    const TC zero = 0.0L + 0.0Li;
+    (void)noconj;
+    if (TRANS == 'N') {
+        if (UPLO == 'U') {
+            ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+            for (ptrdiff_t j = n - 1; j >= 0; --j) {
+                if (x[j] != zero) {
+                    if (nounit) x[j] /= ap[kk];
+                    /* col j off-diag: x[i] ↔ ap[kk-j+i], i=0..j-1 (forward) */
+                    ytpsv_axpy_col(x, &ap[kk - j], x[j], j);
+                }
+                kk -= j + 1;
+            }
+        } else {
+            ptrdiff_t kk = 0;
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                if (x[j] != zero) {
+                    if (nounit) x[j] /= ap[kk];
+                    ytpsv_axpy_col(&x[j + 1], &ap[kk + 1], x[j], n - 1 - j);
+                }
+                kk += n - j;
+            }
+        }
+    } else {
+        if (UPLO == 'U') {
+            ptrdiff_t kk = 0;
+            for (ptrdiff_t j = 0; j < n; ++j) {
+                TC tmp = ytpsv_uc_solve(&ap[kk], x, &x[j], j);
+                if (nounit) tmp /= cconj(ap[kk + j]);
+                x[j] = tmp;
+                kk += j + 1;
+            }
+        } else {
+            ptrdiff_t kk = (n * (n + 1)) / 2 - 1;
+            for (ptrdiff_t j = n - 1; j >= 0; --j) {
+                /* diag at dg = kk-(n-1-j); x[i] ↔ ap[dg+i-j], i=j+1..n-1 */
+                const ptrdiff_t dg = kk - (n - 1 - j);
+                TC tmp = ytpsv_uc_solve(&ap[dg + 1], &x[j + 1], &x[j], n - 1 - j);
+                if (nounit) tmp /= cconj(ap[dg]);
+                x[j] = tmp;
+                kk -= (n - j);
             }
         }
     }
@@ -332,6 +458,13 @@ static void ytpsv_core(
         return;
 #endif
 
+    /* Contiguous NoTrans/ConjTrans take the helper-routed arms; contiguous
+     * plain-Trans stays on ytpsv_serial's verbatim netlib loop (fastest form,
+     * see ytpsv_contig comment), as does every strided call. */
+    if (incx == 1 && (TRANS == 'N' || !noconj)) {
+        ytpsv_contig(UPLO, TRANS, noconj, nounit, n, ap, x);
+        return;
+    }
     ytpsv_serial(UPLO, TRANS, noconj, nounit, n, ap, x, incx);
 }
 
