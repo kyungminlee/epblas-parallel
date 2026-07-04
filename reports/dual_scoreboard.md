@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-04 00:31 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-04 01:17 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -266,12 +266,12 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | xgeru | 9 | 1.013 | 1.006 | ✅ |
 | xtrsm | 72 | 1.012 | 1.000 | ✅ |
 | xtbmv | 108 | 1.012 | 0.922 | ✅ |
+| xtbsv | 108 | 1.012 | 1.011 | ✅ |
 | xgerc | 9 | 1.011 | 1.002 | ✅ |
 | xhemv | 18 | 1.011 | 1.006 | ✅ |
 | xhpr2 | 18 | 1.011 | 0.954 | ✅ |
 | xtrmv | 108 | 1.011 | 0.992 | ✅ |
 | qtrsv | 96 | 1.011 | 1.003 | ✅ |
-| xtbsv | 108 | 1.010 | 1.010 | ✅ |
 | qspr2 | 24 | 1.010 | 0.957 | ✅ |
 | xswap | 2 | 1.010 | 1.005 | ✅ |
 | qtbmv | 96 | 1.009 | 0.888 | ✅ |
