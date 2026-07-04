@@ -1,2 +1,1 @@
-#:set routine = 'qsyrk'
-#:include 'fuzz_syrk_real_body.fypp'
+#:include 'target_kind16/fuzz_qsyrk.fypp'

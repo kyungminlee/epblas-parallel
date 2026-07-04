@@ -1,2 +1,1 @@
-#:set routine = 'xtpsv'
-#:include 'fuzz_tpsv_complex_body.fypp'
+#:include 'target_kind16/fuzz_xtpsv.fypp'

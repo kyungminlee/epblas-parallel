@@ -1,2 +1,1 @@
-#:set routine = 'qrotg'
-#:include 'fuzz_rotg_real_body.fypp'
+#:include 'target_kind16/fuzz_qrotg.fypp'

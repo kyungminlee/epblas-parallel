@@ -15,8 +15,9 @@ as **separate CMake packages**:
   `epblas-parallel::{e,q,m}blas` as a drop-in replacement for
   `eplinalg::{e,q,m}blas`.
 - **`epblas-openblas`** — experimental reference library. OpenBLAS D/Z
-  port to extended precision, kind10 only. Used purely as an A/B
-  comparison subject against `epblas-parallel` and the migrated baseline.
+  port to extended precision, all three targets (`kind10`, `kind16`,
+  `multifloats`). Used purely as an A/B comparison subject against
+  `epblas-parallel` and the migrated baseline.
 
 ## Prerequisites
 
@@ -72,13 +73,12 @@ and pick the workflow preset matching the cadence you want.
 
 ### Workflow presets
 
-`CMakePresets.json` ships five `cmake --workflow` chains
+`CMakePresets.json` ships four `cmake --workflow` chains
 (configure → build → ctest with a label filter):
 
 | Preset     | Tests run                                            | Wall-clock                |
 |------------|------------------------------------------------------|---------------------------|
 | `fuzz`     | All fuzz / consistency drivers (the correctness gate) | ~15 s                     |
-| `bench`    | Fortran `bench_*` drivers (OMP=1, OMP=4)             | minutes                   |
 | `perf`     | C `perf_*` harnesses (jobs=1, 1800 s/test cap)       | tens of minutes per slice |
 | `sweep`    | `dual_sweep_{e,q,m}` in-process dual-link drivers    | hours                     |
 | `e2e`      | Everything above                                     | overnight                 |
@@ -149,7 +149,7 @@ To use the OpenBLAS-derived reference archive for A/B comparison:
 
 ```cmake
 find_package(epblas-openblas REQUIRED)
-target_link_libraries(bench PRIVATE epblas-openblas::eblas)  # kind10 only
+target_link_libraries(bench PRIVATE epblas-openblas::eblas)  # or ::qblas / ::mblas
 ```
 
 The reference package is independent — pull it in only if you need it.
@@ -181,12 +181,13 @@ cmake/
 └── epblas-openblasConfig.cmake.in
 src/
 ├── epblas-parallel/<target>/
-└── epblas-openblas/<target>/  ← kind10 only
+└── epblas-openblas/<target>/
 tests/
 ├── epblas-parallel/        ← consistency + fuzz
 └── epblas-openblas/        ← consistency + fuzz, reuses bodies from epblas-parallel
 bench/
 ├── drivers/target_<target>/  ← C/C++ perf drivers (shared by both suites)
-└── cmp5/                    ← 5-way comparison harness + verdict reports
-scripts/                  ← perf-sweep + report-generation utilities
+├── dual/                   ← in-process dual-link sweep harness + scoreboard tools
+└── cmp5/archive/           ← frozen historical cmp5 verdict reports
+scripts/                  ← dual-harness generator + report utilities
 ```

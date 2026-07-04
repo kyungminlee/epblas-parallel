@@ -1,2 +1,1 @@
-#:set routine = 'yhemm'
-#:include 'fuzz_hemm_body.fypp'
+#:include 'target_kind10/fuzz_yhemm.fypp'

@@ -4,7 +4,8 @@
 # OpenBLAS D and Z source ports, retyped to the multifloats double-double
 # type. Faithful hand-port of the kind10 tree (same algorithm, threading,
 # and thresholds — only the element type and its libm/literal surface
-# differ). See docs/adr/0002-openblas-kind16-faithful-handport.md.
+# differ); the port conventions are documented in
+# src/epblas-openblas/CHECKLIST.md.
 #
 # C++ (not C) because the double-double type is a C++ struct with operator
 # overloads; complex arithmetic runs on the layout-compatible

@@ -1,2 +1,1 @@
-#:set routine = 'eger'
-#:include 'fuzz_ger_real_body.fypp'
+#:include 'target_kind10/fuzz_eger.fypp'

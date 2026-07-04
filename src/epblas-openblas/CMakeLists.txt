@@ -7,8 +7,8 @@
 # for A/B comparisons against the migrated baseline (via
 # tests/epblas-openblas/).
 #
-# Initial target: kind10. kind16 / multifloats can be added later by
-# creating sibling target_<name>/ subdirs.
+# All three targets (kind10, kind16, multifloats) have kernel sets;
+# a target is picked up automatically once its <target>/ subdir exists.
 
 find_package(OpenMP COMPONENTS C)
 

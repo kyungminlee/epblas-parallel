@@ -111,7 +111,7 @@ program fuzz_mtrmm
         bad_mig = check_sentinels_real(B_mig, m, n, ldb)
 
         tol = max(real64x2(20.0_8), &
-                  real64x2(8.0_8 * real(na, 8)**2)) * eps
+                  real64x2(8.0_8 * real(na, 8))) * eps
 
         call err_stats_record(err%limbs(1))
 

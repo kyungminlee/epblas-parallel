@@ -1,2 +1,1 @@
-#:set routine = 'qspr2'
-#:include 'fuzz_spr2_body.fypp'
+#:include 'target_kind16/fuzz_qspr2.fypp'

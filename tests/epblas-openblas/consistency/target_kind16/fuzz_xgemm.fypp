@@ -1,2 +1,1 @@
-#:set routine = 'xgemm'
-#:include 'fuzz_gemm_complex_body.fypp'
+#:include 'target_kind16/fuzz_xgemm.fypp'

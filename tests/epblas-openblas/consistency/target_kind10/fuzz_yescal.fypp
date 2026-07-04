@@ -1,2 +1,1 @@
-#:set routine = 'yescal'
-#:include 'fuzz_scal_mixed_body.fypp'
+#:include 'target_kind10/fuzz_yescal.fypp'

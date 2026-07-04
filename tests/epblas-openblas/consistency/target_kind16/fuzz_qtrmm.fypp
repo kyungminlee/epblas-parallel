@@ -1,2 +1,1 @@
-#:set routine = 'qtrmm'
-#:include 'fuzz_trmm_real_body.fypp'
+#:include 'target_kind16/fuzz_qtrmm.fypp'

@@ -26,7 +26,6 @@
  *                          reports the count actually run (the migrated loop's,
  *                          since it is timed last), flagging budget-limited rows.
  *   BLAS_PERF_JSON         write JSON results to this path (append mode)
- *   BLAS_PERF_LABEL        extra label printed alongside routine name
  */
 #ifndef PERF_COMMON_H
 #define PERF_COMMON_H
@@ -137,7 +136,7 @@ static inline double perf_fill_double(size_t i, int salt) {
 
 static inline void perf_print_header(void) {
     /* Line-buffer stdout so every PERF_EMIT row is flushed on its newline.
-     * When run_cmp5.sh runs a binary under `timeout` and a slow routine is
+     * When a runner executes a binary under `timeout` and a slow routine is
      * SIGTERM-killed at the cap, block-buffered output would be discarded and
      * the partial-output salvage would lose rows that were already computed
      * (e.g. ytrsm: all completed configs vanished on kill). Line-buffering
@@ -219,8 +218,9 @@ static inline void *perf_aligned_alloc(size_t align, size_t bytes) {
 
 /* ---- generated-harness scaffolding ----------------------------------
  *
- * Macros used by the perf_*.{c,cpp} files emitted by
- * scripts/gen_perf_harnesses.py. Each generated harness ran 4–6 copies
+ * Macros used by the perf_*.{c,cpp} harness files (originally generated;
+ * the generator has been retired and the files are hand-maintained since).
+ * Each generated harness ran 4–6 copies
  * of the same alloc / fill / reset / time / emit boilerplate; lifting
  * the patterns here keeps each run_* body to the parts that actually
  * differ (BLAS call signature, flop count, key formatting).

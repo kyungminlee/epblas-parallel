@@ -1,2 +1,1 @@
-#:set routine = 'esyr2k'
-#:include 'fuzz_syr2k_real_body.fypp'
+#:include 'target_kind10/fuzz_esyr2k.fypp'

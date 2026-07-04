@@ -1,2 +1,1 @@
-#:set routine = 'yaxpy'
-#:include 'fuzz_axpy_complex_body.fypp'
+#:include 'target_kind10/fuzz_yaxpy.fypp'

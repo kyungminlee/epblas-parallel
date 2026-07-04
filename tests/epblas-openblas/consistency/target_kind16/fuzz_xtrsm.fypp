@@ -1,2 +1,1 @@
-#:set routine = 'xtrsm'
-#:include 'fuzz_trsm_complex_body.fypp'
+#:include 'target_kind16/fuzz_xtrsm.fypp'

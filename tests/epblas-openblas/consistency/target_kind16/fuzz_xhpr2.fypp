@@ -1,2 +1,1 @@
-#:set routine = 'xhpr2'
-#:include 'fuzz_hpr2_body.fypp'
+#:include 'target_kind16/fuzz_xhpr2.fypp'

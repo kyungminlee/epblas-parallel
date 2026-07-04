@@ -12,9 +12,9 @@
 #   common/target_<name>/fuzz_util.fypp
 #   consistency/target_<name>/fuzz_<routine>.fypp
 #
-# The legacy Fortran bench harness (bench/) has been archived under
-# archive/tests/ — the C perf harness is the supported timing path. See
-# archive/README.md.
+# The legacy Fortran bench harness (bench/) was retired (archived locally
+# under workspace/archive/tests/) — the C perf harness is the supported
+# timing path.
 
 set(_have_multifloats_f FALSE)
 if(TARGET multifloatsf)
@@ -97,8 +97,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
         endforeach()
     endif()
 
-    # (The legacy Fortran bench harness was removed here — see
-    # archive/tests/epblas-openblas/bench and archive/README.md.)
+    # (The legacy Fortran bench harness was removed here; archived locally
+    # under workspace/archive/tests/epblas-openblas/bench.)
 
     # C perf harnesses — reused from bench/drivers/target_<T>/, built only for
     # routines that are in the epblas-openblas overlay set so the link succeeds

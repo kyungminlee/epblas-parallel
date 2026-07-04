@@ -1,4 +1,6 @@
-# epblas-openblas — OpenBLAS D/Z port to kind10 (REAL/COMPLEX(KIND=10))
+# epblas-openblas — OpenBLAS D/Z port to extended precision
+(kind10 tree tracked below; kind16 and multifloats are faithful hand-port
+siblings of it)
 
 Direct ports of OpenBLAS double-precision (D) real and double-complex (Z)
 sources, retyped to 80-bit long double / `_Complex long double`. Builds a
@@ -17,9 +19,8 @@ against the migrated baseline via `tests/epblas-openblas/`.
 > ported and pass the consistency suite **75/75** against the
 > `eplinalg::qblas` migrated baseline (`ctest -R
 > 'epblas_openblas_fuzz_(q|x|iq|ix)'`). The two trees are kept in sync by
-> hand — see `docs/adr/0002-openblas-kind16-faithful-handport.md`. The
-> per-routine table below is kind10-specific (bench numbers not re-gathered
-> for kind16; the algorithm is identical at both precisions).
+> hand. The per-routine table below is kind10-specific (bench numbers not
+> re-gathered for kind16; the algorithm is identical at both precisions).
 
 Naming map (project convention, matches `blas/src/`):
 - `d*`  (double real)             → `e*`
@@ -40,7 +41,8 @@ Per row:
 - **status** — `todo` / `wip` / `done`
 - **smoke** — fuzz passes, bench builds: `n` / `y`
 - **bench-omp1**, **bench-omp4** — most recent GFLOPS overlay vs migrated
-- **par>ep (omp1/omp4)** — peak `epblas-parallel / epblas-openblas` overlay ratio at OMP=1 and OMP=4, from the 4-variant sweep in `reports/cmp5/cmp5.tsv`. `—` means within the 10% noise floor at that OMP level (epblas-parallel not meaningfully faster). A value like `1.51× / 2.15×` is the worst (key, size) row for that routine — i.e. the (key, size) at which epblas-parallel most outperforms this epblas-openblas port. `n/d` = no bench data (timed out). `n/a` = no comparable bench (algorithm diverges from OpenBLAS, e.g. Blue's nrm2, or scalar O(1)).
+  (historical; active reporting has since moved to bare ns/call)
+- **par>ep (omp1/omp4)** — peak `epblas-parallel / epblas-openblas` overlay ratio at OMP=1 and OMP=4, from the 4-variant cmp5 sweep (harness since replaced by `bench/dual/`; reports frozen in `bench/cmp5/archive/`). `—` means within the 10% noise floor at that OMP level (epblas-parallel not meaningfully faster). A value like `1.51× / 2.15×` is the worst (key, size) row for that routine — i.e. the (key, size) at which epblas-parallel most outperforms this epblas-openblas port. `n/d` = no bench data (timed out). `n/a` = no comparable bench (algorithm diverges from OpenBLAS, e.g. Blue's nrm2, or scalar O(1)).
 
 **`faithful` column:**
 - `yes` — algorithm + threading mirror OpenBLAS (interface + kernel + thread driver structure all ported; OMP replaces blas_queue but matches the partitioning/reduction shape).

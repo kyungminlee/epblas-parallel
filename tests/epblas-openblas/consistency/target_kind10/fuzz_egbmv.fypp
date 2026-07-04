@@ -1,2 +1,1 @@
-#:set routine = 'egbmv'
-#:include 'fuzz_gbmv_real_body.fypp'
+#:include 'target_kind10/fuzz_egbmv.fypp'

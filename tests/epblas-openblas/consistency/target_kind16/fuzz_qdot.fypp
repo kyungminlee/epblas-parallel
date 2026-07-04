@@ -1,2 +1,1 @@
-#:set routine = 'qdot'
-#:include 'fuzz_dot_real_body.fypp'
+#:include 'target_kind16/fuzz_qdot.fypp'

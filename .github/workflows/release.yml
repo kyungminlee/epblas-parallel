@@ -237,7 +237,7 @@ jobs:
             | Package | Imported targets | Role |
             |---------|-----------------|------|
             | `epblas-parallel` | `epblas-parallel::{e,q,m}blas` (composite, INTERFACE), `epblas-parallel::{e,q,m}blas_parallel` (raw STATIC) | Production OpenMP-parallel overlay. The composite WHOLE_ARCHIVE-wraps the overlay so its symbols win at link time over any chained reference BLAS. |
-            | `epblas-openblas` | `epblas-openblas::eblas` (STATIC, kind10 only) | OpenBLAS-derived reference archive. Never wired into the composite — A/B comparison surface only. |
+            | `epblas-openblas` | `epblas-openblas::{e,q,m}blas` (STATIC) | OpenBLAS-derived reference archives. Never wired into the composite — A/B comparison surface only. |
 
             ### Targets
 

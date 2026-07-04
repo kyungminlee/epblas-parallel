@@ -1,2 +1,1 @@
-#:set routine = 'xhemv'
-#:include 'fuzz_hemv_body.fypp'
+#:include 'target_kind16/fuzz_xhemv.fypp'

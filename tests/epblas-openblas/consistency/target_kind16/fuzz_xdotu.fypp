@@ -1,2 +1,1 @@
-#:set routine = 'xdotu'
-#:include 'fuzz_dot_complex_body.fypp'
+#:include 'target_kind16/fuzz_xdotu.fypp'

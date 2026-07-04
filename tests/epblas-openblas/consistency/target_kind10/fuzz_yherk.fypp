@@ -1,2 +1,1 @@
-#:set routine = 'yherk'
-#:include 'fuzz_herk_body.fypp'
+#:include 'target_kind10/fuzz_yherk.fypp'

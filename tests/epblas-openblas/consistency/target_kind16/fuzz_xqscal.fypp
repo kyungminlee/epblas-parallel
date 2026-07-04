@@ -1,2 +1,1 @@
-#:set routine = 'xqscal'
-#:include 'fuzz_scal_mixed_body.fypp'
+#:include 'target_kind16/fuzz_xqscal.fypp'

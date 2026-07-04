@@ -1,2 +1,1 @@
-#:set routine = 'xhpmv'
-#:include 'fuzz_hpmv_body.fypp'
+#:include 'target_kind16/fuzz_xhpmv.fypp'

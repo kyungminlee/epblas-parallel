@@ -1,2 +1,1 @@
-#:set routine = 'espr2'
-#:include 'fuzz_spr2_body.fypp'
+#:include 'target_kind10/fuzz_espr2.fypp'

@@ -2,8 +2,8 @@
 #
 # OpenBLAS D and Z source ports, retyped to __float128 / __complex128.
 # Faithful hand-port of the kind10 tree (same algorithm, threading, and
-# thresholds — only the type and its libm/literal surface differ). See
-# docs/adr/0002-openblas-kind16-faithful-handport.md.
+# thresholds — only the type and its libm/literal surface differ); the
+# substitution set is documented in src/epblas-openblas/CHECKLIST.md.
 #
 # Builds a STATIC archive `${LIB_PREFIX}blas_openblas` consumed only by
 # tests/epblas-openblas/. NOT wired into the public

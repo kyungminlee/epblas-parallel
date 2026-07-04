@@ -1,2 +1,1 @@
-#:set routine = 'qgemv'
-#:include 'fuzz_gemv_real_body.fypp'
+#:include 'target_kind16/fuzz_qgemv.fypp'

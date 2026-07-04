@@ -1,2 +1,1 @@
-#:set routine = 'xtrsv'
-#:include 'fuzz_trsv_complex_body.fypp'
+#:include 'target_kind16/fuzz_xtrsv.fypp'

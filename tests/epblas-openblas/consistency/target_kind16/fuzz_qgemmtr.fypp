@@ -1,2 +1,1 @@
-#:set routine = 'qgemmtr'
-#:include 'fuzz_gemmtr_real_body.fypp'
+#:include 'target_kind16/fuzz_qgemmtr.fypp'

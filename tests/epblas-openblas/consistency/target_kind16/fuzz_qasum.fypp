@@ -1,2 +1,1 @@
-#:set routine = 'qasum'
-#:include 'fuzz_norm_real_body.fypp'
+#:include 'target_kind16/fuzz_qasum.fypp'

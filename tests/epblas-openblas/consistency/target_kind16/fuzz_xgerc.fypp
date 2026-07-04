@@ -1,2 +1,1 @@
-#:set routine = 'xgerc'
-#:include 'fuzz_ger_complex_body.fypp'
+#:include 'target_kind16/fuzz_xgerc.fypp'

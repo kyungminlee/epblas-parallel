@@ -1,2 +1,1 @@
-#:set routine = 'qtrsv'
-#:include 'fuzz_trsv_real_body.fypp'
+#:include 'target_kind16/fuzz_qtrsv.fypp'

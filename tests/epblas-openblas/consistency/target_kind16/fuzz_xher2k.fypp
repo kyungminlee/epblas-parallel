@@ -1,2 +1,1 @@
-#:set routine = 'xher2k'
-#:include 'fuzz_her2k_body.fypp'
+#:include 'target_kind16/fuzz_xher2k.fypp'

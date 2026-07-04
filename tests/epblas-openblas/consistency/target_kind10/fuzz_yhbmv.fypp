@@ -1,2 +1,1 @@
-#:set routine = 'yhbmv'
-#:include 'fuzz_hbmv_body.fypp'
+#:include 'target_kind10/fuzz_yhbmv.fypp'

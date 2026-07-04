@@ -1,2 +1,1 @@
-#:set routine = 'qtbsv'
-#:include 'fuzz_tbsv_real_body.fypp'
+#:include 'target_kind16/fuzz_qtbsv.fypp'

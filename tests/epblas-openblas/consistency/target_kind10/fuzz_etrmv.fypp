@@ -1,2 +1,1 @@
-#:set routine = 'etrmv'
-#:include 'fuzz_trmv_real_body.fypp'
+#:include 'target_kind10/fuzz_etrmv.fypp'

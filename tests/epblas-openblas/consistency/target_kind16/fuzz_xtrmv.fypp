@@ -1,2 +1,1 @@
-#:set routine = 'xtrmv'
-#:include 'fuzz_trmv_complex_body.fypp'
+#:include 'target_kind16/fuzz_xtrmv.fypp'

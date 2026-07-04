@@ -1,2 +1,1 @@
-#:set routine = 'erotm'
-#:include 'fuzz_rotm_real_body.fypp'
+#:include 'target_kind10/fuzz_erotm.fypp'

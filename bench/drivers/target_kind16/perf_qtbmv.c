@@ -1,5 +1,4 @@
-/* GENERATED-BY-gen_perf_harnesses — do not edit by hand; regenerate via
- *   python3 scripts/gen_perf_harnesses.py
+/* Hand-maintained perf harness (originally generated; the generator was retired).
  *
  * Kernel-isolated C perf harness for qtbmv (overlay vs migrated).
  * Built per-executable with -ffunction-sections / --gc-sections.

@@ -19,20 +19,11 @@ compile_commands.json
 __pycache__/
 *.pyc
 
-# Local cmp5 run logs (transient stdout captures)
-bench/cmp5/run_cmp5.stdout.log
+# Transient run logs
 *.log
 
+# benchmark raw data + local working files live in workspace/, never in bench/
 workspace*
-
-# Performance-gap progress trackers — local working files, never committed
-docs/performance-gap-checklist-*.md
-
-# benchmark raw data lives in workspace/files/gap5, never in bench/
-bench/cmp5/*.tsv
-bench/cmp5/*_raw.*
-bench/cmp5/*.runlog
-bench/cmp5/__pycache__/
 
 # generated dual-link drivers (regenerable via scripts/gen_dual_harnesses.py)
 bench/dual/drivers/

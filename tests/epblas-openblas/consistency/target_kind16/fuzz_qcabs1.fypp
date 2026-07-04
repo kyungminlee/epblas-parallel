@@ -1,2 +1,1 @@
-#:set routine = 'qcabs1'
-#:include 'fuzz_cabs1_body.fypp'
+#:include 'target_kind16/fuzz_qcabs1.fypp'

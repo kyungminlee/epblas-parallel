@@ -1,2 +1,1 @@
-#:set routine = 'iqamax'
-#:include 'fuzz_iamax_real_body.fypp'
+#:include 'target_kind16/fuzz_iqamax.fypp'

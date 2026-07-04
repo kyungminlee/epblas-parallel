@@ -7,9 +7,9 @@
 # The C/C++ perf harnesses live in bench/drivers/target_<name>/perf_*.c|.cpp
 # (shared with the epblas-openblas suite); see _perf_target_dir below.
 #
-# The legacy Fortran bench harness (bench/target_<name>/bench_*.fypp) has been
-# archived under archive/tests/ — the C perf harness is the supported timing
-# path and reports bare wall time (ns/call). See archive/README.md.
+# The legacy Fortran bench harness (bench/target_<name>/bench_*.fypp) was
+# retired (archived locally under workspace/archive/tests/) — the C perf
+# harness is the supported timing path and reports bare wall time (ns/call).
 #
 # Each test binary links the composite `epblas-parallel::<prefix>blas`
 # (WHOLE_ARCHIVE-wrapped overlay) AND the renamed `_migrated` archive
@@ -95,8 +95,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
         endforeach()
     endif()
 
-    # (The legacy Fortran bench harness was removed here — see
-    # archive/tests/epblas-parallel/bench and archive/README.md.)
+    # (The legacy Fortran bench harness was removed here; archived locally
+    # under workspace/archive/tests/epblas-parallel/bench.)
 
     # C perf harnesses — kernel-isolated timing without the Fortran
     # bench's per-iter realloc/copy asymmetry. The
