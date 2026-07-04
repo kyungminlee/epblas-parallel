@@ -59,16 +59,18 @@ void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyrk_TR alpha,
                     const qsyrk_TR *a, const qsyrk_TR *b,
                     qsyrk_TR *c, ptrdiff_t ldc, ptrdiff_t offset);
 
-/* Transpose path (trans='T'): accumulate the UPLO triangle of output column j
- * of C := alpha·A^T·A + C via the netlib-style stride-1 register inner product.
- * A is K×N so both dot operands stream contiguously over the K axis; unlike the
- * NoTrans outer product (which RMW-streams each C column K times), this writes
- * each C(i,j) once, so there is nothing for packing to amortise and the clean
- * dot loop ties/beats the reference. β is assumed already applied to C (by
- * qsyrk_beta_{u,l}). Per-column so the parallel entry can `omp for` over j
+/* Transpose path (trans='T'): compute the UPLO triangle of output column j
+ * of C := alpha·A^T·A + beta·C via the netlib-style stride-1 register inner
+ * product. A is K×N so both dot operands stream contiguously over the K axis;
+ * unlike the NoTrans outer product (which RMW-streams each C column K times),
+ * this writes each C(i,j) once, so there is nothing for packing to amortise
+ * and the clean dot loop ties/beats the reference. beta is FUSED into the
+ * store (bit-identical to the old qsyrk_beta_{u,l} prescale + accumulate; one
+ * less pass over C). Per-column so the parallel entry can `omp for` over j
  * (cyclic) for balanced triangular load with no shared pack or barrier. */
 void qsyrk_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
-                     qsyrk_TR alpha, const qsyrk_TR *a, ptrdiff_t lda,
+                     qsyrk_TR alpha, qsyrk_TR beta,
+                     const qsyrk_TR *a, ptrdiff_t lda,
                      qsyrk_TR *c, ptrdiff_t ldc);
 
 /* Pure-serial by-value entry (no OpenMP); the single-thread packed driver.

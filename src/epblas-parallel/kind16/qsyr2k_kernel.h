@@ -60,15 +60,17 @@ void qsyr2k_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, qsyr2k_TR alpha,
                      const qsyr2k_TR *a, const qsyr2k_TR *b,
                      qsyr2k_TR *c, ptrdiff_t ldc, ptrdiff_t offset, bool flag);
 
-/* Transpose path (trans='T'): accumulate the UPLO triangle of output column j
- * of C := alpha·(A^T·B + B^T·A) + C via the netlib-style stride-1 register
- * inner product. A,B are K×N so all dot operands stream contiguously over the K
- * axis; like qsyrk this writes each C(i,j) once, so packing buys nothing and the
- * clean dot loop ties/beats the reference. β is assumed already applied to C (by
- * qsyrk_beta_{u,l}). Per-column so the parallel entry can `omp for` over j
- * (cyclic) for balanced triangular load with no shared packs or barrier. */
+/* Transpose path (trans='T'): compute the UPLO triangle of output column j
+ * of C := alpha·(A^T·B + B^T·A) + beta·C via the netlib-style stride-1
+ * register inner product. A,B are K×N so all dot operands stream contiguously
+ * over the K axis; like qsyrk this writes each C(i,j) once, so packing buys
+ * nothing and the clean dot loop ties/beats the reference. beta is FUSED into
+ * the store (bit-identical to the old qsyrk_beta_{u,l} prescale + accumulate;
+ * one less pass over C). Per-column so the parallel entry can `omp for` over
+ * j (cyclic) for balanced triangular load with no shared packs or barrier. */
 void qsyr2k_trans_col(ptrdiff_t j, char uplo, ptrdiff_t n, ptrdiff_t k,
-                      qsyr2k_TR alpha, const qsyr2k_TR *a, ptrdiff_t lda,
+                      qsyr2k_TR alpha, qsyr2k_TR beta,
+                      const qsyr2k_TR *a, ptrdiff_t lda,
                       const qsyr2k_TR *b, ptrdiff_t ldb,
                       qsyr2k_TR *c, ptrdiff_t ldc);
 

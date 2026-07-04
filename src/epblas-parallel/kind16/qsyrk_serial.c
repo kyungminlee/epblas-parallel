@@ -210,18 +210,26 @@ void qsyrk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k, TR alpha,
 }
 
 /* ── Transpose inner-product (trans='T') ───────────────────────────────
- * C := alpha·A^T·A + C over the UPLO triangle of output column j. A is K×N so
- * both dot operands are unit-stride over the K axis. β is already applied.
- * Unlike the NoTrans outer product (which RMW-streams C K times per column),
- * each C(i,j) is accumulated in a register and written once — packing has
- * nothing to save here, so the clean unpacked loop matches the reference. */
+ * C := alpha·A^T·A + beta·C over the UPLO triangle of output column j. A is
+ * K×N so both dot operands are unit-stride over the K axis. beta is FUSED
+ * into the store (no separate caller prescale — the yherk 9140682 shape):
+ * beta·C(i,j) is rounded to fp128 either way and IEEE add commutes, so the
+ * fused form is bit-identical to prescale-then-+=; beta∈{0,1} skip the
+ * multiply exactly as qsyrk_beta_{u,l} did. The beta case split is resolved
+ * to an int ONCE per column — a per-element `beta == 0.0Q` would be a
+ * libgcc __eqtf2 call inside the hot loop. Unlike the NoTrans outer product
+ * (which RMW-streams C K times per column), each C(i,j) is accumulated in a
+ * register and written once — packing has nothing to save here, so the
+ * clean unpacked loop matches the reference. */
 void qsyrk_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
-                     TR alpha, const TR *a, ptrdiff_t lda, TR *c, ptrdiff_t ldc)
+                     TR alpha, TR beta,
+                     const TR *a, ptrdiff_t lda, TR *c, ptrdiff_t ldc)
 {
     const ptrdiff_t i_lo = (UPLO == 'L') ? j : 0;
     const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
     const TR *Aj = a + j * lda;
     TR *cj = c + j * ldc;
+    const int bmode = (beta == 0.0Q) ? 0 : (beta == 1.0Q) ? 1 : 2;
     for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
         const TR *Ai = a + i * lda;
         /* Single accumulator: SYRK's dot is one product per l, so the two
@@ -231,7 +239,10 @@ void qsyrk_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
          * whose two distinct products genuinely overlap). */
         TR s = 0.0Q;
         for (ptrdiff_t l = 0; l < k; ++l) s += Ai[l] * Aj[l];
-        cj[i] += alpha * s;
+        const TR t = alpha * s;
+        if (bmode == 0)      cj[i] = t;
+        else if (bmode == 1) cj[i] = t + cj[i];
+        else                 cj[i] = t + beta * cj[i];
     }
 }
 
@@ -253,17 +264,24 @@ void qsyrk_serial(
 
     if (n <= 0) return;
 
-    if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
-    else             qsyrk_beta_l(n, beta, c, ldc);
-
-    if (k == 0 || alpha == 0.0Q) return;
-
-    /* Transpose: netlib-style unpacked inner-product (no packing overhead). */
-    if (TRANS != 'N') {
-        for (ptrdiff_t j = 0; j < n; ++j)
-            qsyrk_trans_col(j, UPLO, n, k, alpha, a, lda, c, ldc);
+    /* Degenerate update: pure triangular beta scale. */
+    if (k == 0 || alpha == 0.0Q) {
+        if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
+        else             qsyrk_beta_l(n, beta, c, ldc);
         return;
     }
+
+    /* Transpose: netlib-style unpacked inner-product (no packing overhead).
+     * beta rides the column store — no separate prescale pass over C. */
+    if (TRANS != 'N') {
+        for (ptrdiff_t j = 0; j < n; ++j)
+            qsyrk_trans_col(j, UPLO, n, k, alpha, beta, a, lda, c, ldc);
+        return;
+    }
+
+    /* NoTrans packed path: triangular beta pre-pass, then accumulate. */
+    if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    else             qsyrk_beta_l(n, beta, c, ldc);
 
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);

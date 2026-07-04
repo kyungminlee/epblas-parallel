@@ -65,11 +65,12 @@ static void qsyrk_core(
 
     if (n <= 0) return;
 
-    /* Triangular beta pre-pass on the UPLO triangle of C only. */
-    if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
-    else             qsyrk_beta_l(n, beta, c, ldc);
-
-    if (k == 0 || alpha == 0.0Q) return;
+    /* Degenerate update: pure triangular beta scale. */
+    if (k == 0 || alpha == 0.0Q) {
+        if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
+        else             qsyrk_beta_l(n, beta, c, ldc);
+        return;
+    }
 
     ptrdiff_t MC, KC, NC;
     qgemm_choose_blocks(k, &MC, &KC, &NC);
@@ -90,15 +91,21 @@ static void qsyrk_core(
 
     /* Transpose: netlib-style unpacked inner-product, embarrassingly parallel
      * over the output columns (cyclic schedule balances the triangular load; no
-     * shared pack, no barrier). Same code the serial entry runs at nthreads=1. */
+     * shared pack, no barrier). Same code the serial entry runs at nthreads=1.
+     * beta rides each column's store, so the old serial pre-region prescale
+     * pass is gone (and its work is now spread across the team). */
     if (TRANS != 'N') {
 #ifdef _OPENMP
         #pragma omp parallel for schedule(static, 1) num_threads(nthreads)
 #endif
         for (ptrdiff_t j = 0; j < n; ++j)
-            qsyrk_trans_col(j, UPLO, n, k, alpha, a, lda, c, ldc);
+            qsyrk_trans_col(j, UPLO, n, k, alpha, beta, a, lda, c, ldc);
         return;
     }
+
+    /* NoTrans packed path: triangular beta pre-pass, then accumulate. */
+    if (UPLO == 'U') qsyrk_beta_u(n, beta, c, ldc);
+    else             qsyrk_beta_l(n, beta, c, ldc);
 
     /* Shared Bp, one private Ap per thread, allocated BEFORE the region: a
      * thread that skipped the loop on a failed in-region alloc would deadlock
