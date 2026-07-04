@@ -49,6 +49,139 @@ void etri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etri_TR alpha,
                        const etri_TR *Ap, const etri_TR *Bp,
                        etri_TR *C, ptrdiff_t ldc);
 
+/* Shared body for the general (C += alpha·Ap·Bp) and negate-specialized
+ * (C -= Ap·Bp) kernels. `negate` is a compile-time constant at each
+ * instantiation, so GCC folds the store: the negate=1 clone drops the
+ * per-element `alpha *` multiply (and its alpha reload) to a bare `fsubp`.
+ * Lives in the header so a caller TU can instantiate its OWN static copy:
+ * the trsm solve kernel issues thousands of tiny (2,2,kk) trailing updates
+ * per call, and a cross-TU call denies GCC the IPA-RA and bm/bn constprop
+ * it applies when caller and kernel share a TU (which is what the openblas
+ * overlay gets from having its solve and GEMM in one eblas_l3_real.c —
+ * its interior calls compile to a constprop clone with no caller-side
+ * spill/reload). Extern users keep the etri_kernel.c instantiations. */
+static inline __attribute__((always_inline)) void
+etri_gemm_body(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+               etri_TR alpha, int negate,
+               const etri_TR *Ap, const etri_TR *Bp,
+               etri_TR *C, ptrdiff_t ldc)
+{
+    /* Register-tile dims MR = NR = 2 (must match the packed layout). */
+    /* Walk B in NR=2-col panels. */
+    const etri_TR *ptrba_base = Ap;
+    const etri_TR *ptrbb = Bp;
+    etri_TR *Cj = C;
+
+    for (ptrdiff_t j = 0; j < bn / 2; ++j) {
+        etri_TR *C0 = Cj;
+        etri_TR *C1 = C0 + ldc;
+        const etri_TR *ptrba = ptrba_base;
+
+        /* MR=2 row panels (full 2x2 tiles). */
+        for (ptrdiff_t i = 0; i < bm / 2; ++i) {
+            const etri_TR *ptrbb_loc = ptrbb;
+            etri_TR r0 = 0, r1 = 0, r2 = 0, r3 = 0;
+
+            /* K-loop unrolled by 4 (same shape as OpenBLAS gen kernel). */
+            ptrdiff_t k4 = bk / 4;
+            for (ptrdiff_t k = 0; k < k4; ++k) {
+                etri_TR a0 = ptrba[0], a1 = ptrba[1];
+                etri_TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                r0 += a0 * b0; r1 += a1 * b0;
+                r2 += a0 * b1; r3 += a1 * b1;
+                a0 = ptrba[2]; a1 = ptrba[3];
+                b0 = ptrbb_loc[2]; b1 = ptrbb_loc[3];
+                r0 += a0 * b0; r1 += a1 * b0;
+                r2 += a0 * b1; r3 += a1 * b1;
+                a0 = ptrba[4]; a1 = ptrba[5];
+                b0 = ptrbb_loc[4]; b1 = ptrbb_loc[5];
+                r0 += a0 * b0; r1 += a1 * b0;
+                r2 += a0 * b1; r3 += a1 * b1;
+                a0 = ptrba[6]; a1 = ptrba[7];
+                b0 = ptrbb_loc[6]; b1 = ptrbb_loc[7];
+                r0 += a0 * b0; r1 += a1 * b0;
+                r2 += a0 * b1; r3 += a1 * b1;
+                ptrba += 8;
+                ptrbb_loc += 8;
+            }
+            for (ptrdiff_t k = 0; k < (bk & 3); ++k) {
+                etri_TR a0 = ptrba[0], a1 = ptrba[1];
+                etri_TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                r0 += a0 * b0; r1 += a1 * b0;
+                r2 += a0 * b1; r3 += a1 * b1;
+                ptrba += 2;
+                ptrbb_loc += 2;
+            }
+
+            if (negate) {
+                C0[0] -= r0; C0[1] -= r1; C1[0] -= r2; C1[1] -= r3;
+            } else {
+                C0[0] += alpha * r0; C0[1] += alpha * r1;
+                C1[0] += alpha * r2; C1[1] += alpha * r3;
+            }
+            C0 += 2;
+            C1 += 2;
+        }
+
+        /* bm & 1 — single-row tail (mr=1). */
+        for (ptrdiff_t i = 0; i < (bm & 1); ++i) {
+            const etri_TR *ptrbb_loc = ptrbb;
+            etri_TR r0 = 0, r1 = 0;
+            for (ptrdiff_t k = 0; k < bk; ++k) {
+                etri_TR a0 = ptrba[0];
+                etri_TR b0 = ptrbb_loc[0], b1 = ptrbb_loc[1];
+                r0 += a0 * b0;
+                r1 += a0 * b1;
+                ptrba += 1;
+                ptrbb_loc += 2;
+            }
+            if (negate) { C0[0] -= r0; C1[0] -= r1; }
+            else        { C0[0] += alpha * r0; C1[0] += alpha * r1; }
+            C0 += 1;
+            C1 += 1;
+        }
+
+        ptrbb += bk * 2;       /* advance to next 2-col B panel */
+        Cj += 2 * ldc;
+    }
+
+    /* bn & 1 — single-col tail (nr=1). */
+    for (ptrdiff_t j = 0; j < (bn & 1); ++j) {
+        etri_TR *C0 = Cj;
+        const etri_TR *ptrba = ptrba_base;
+
+        for (ptrdiff_t i = 0; i < bm / 2; ++i) {
+            const etri_TR *ptrbb_loc = ptrbb;
+            etri_TR r0 = 0, r1 = 0;
+            for (ptrdiff_t k = 0; k < bk; ++k) {
+                etri_TR a0 = ptrba[0], a1 = ptrba[1];
+                etri_TR b0 = ptrbb_loc[0];
+                r0 += a0 * b0;
+                r1 += a1 * b0;
+                ptrba += 2;
+                ptrbb_loc += 1;
+            }
+            if (negate) { C0[0] -= r0; C0[1] -= r1; }
+            else        { C0[0] += alpha * r0; C0[1] += alpha * r1; }
+            C0 += 2;
+        }
+        for (ptrdiff_t i = 0; i < (bm & 1); ++i) {
+            const etri_TR *ptrbb_loc = ptrbb;
+            etri_TR r0 = 0;
+            for (ptrdiff_t k = 0; k < bk; ++k) {
+                r0 += ptrba[0] * ptrbb_loc[0];
+                ptrba += 1;
+                ptrbb_loc += 1;
+            }
+            if (negate) C0[0] -= r0;
+            else        C0[0] += alpha * r0;
+            C0 += 1;
+        }
+        ptrbb += bk;           /* advance over single-col B panel */
+        Cj += ldc;
+    }
+}
+
 /* Pack a plain (non-triangular) A/B slab into the packed layout. */
 void etri_ncopy(ptrdiff_t m, ptrdiff_t n, const etri_TR *a, ptrdiff_t lda,
                 etri_TR *b);

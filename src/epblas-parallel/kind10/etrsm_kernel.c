@@ -28,6 +28,24 @@ typedef etrsm_TR TR;
 #define MR 2
 #define NR 2
 
+/* Same-TU instantiation of the C -= Ap·Bp trailing-update kernel. The solve
+ * below issues it thousands of times per call with tiny (MR,NR,kk) shapes —
+ * at that grain the extern etri_gemm_kernel_msub costs real caller-side
+ * spill/reload (GCC must assume full caller-saved clobber across the TU
+ * boundary) plus the generic body's m/n dispatch. A static local copy gives
+ * GCC IPA-RA and bm/bn constprop clones, which is exactly what the openblas
+ * overlay gets from keeping its solve and GEMM in one TU (its interior calls
+ * compile to eblas_egemm_kernel.constprop.0). noinline mirrors that shape:
+ * a real call to a compact specialized kernel, not 16 inlined copies.
+ * Bit-identical math — same body, same instantiation as the extern one. */
+static __attribute__((noinline)) void
+etrsm_gemm_msub(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
+                const TR *Ap, const TR *Bp,
+                TR *C, ptrdiff_t ldc)
+{
+    etri_gemm_body(bm, bn, bk, -1.0L, 1, Ap, Bp, C, ldc);
+}
+
 
 static inline void solve_LN(ptrdiff_t m, ptrdiff_t n,
                             TR *a, TR *b, TR *c, ptrdiff_t ldc)
@@ -155,7 +173,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                         aa = a_buf + ((bm & ~(i - 1)) - i) * bk;
                         cc = C + ((bm & ~(i - 1)) - i);
                         if (bk - kk > 0) {
-                            etri_gemm_kernel_msub(i, UN, bk - kk,
+                            etrsm_gemm_msub(i, UN, bk - kk,
                                                aa + i * kk,
                                                b_buf + UN * kk, cc, ldc);
                         }
@@ -174,7 +192,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                 cc = C + ((bm & ~(UR - 1)) - UR);
                 do {
                     if (bk - kk > 0) {
-                        etri_gemm_kernel_msub(UR, UN, bk - kk,
+                        etrsm_gemm_msub(UR, UN, bk - kk,
                                            aa + UR * kk,
                                            b_buf + UN * kk, cc, ldc);
                     }
@@ -205,7 +223,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                                 aa = a_buf + ((bm & ~(i - 1)) - i) * bk;
                                 cc = C + ((bm & ~(i - 1)) - i);
                                 if (bk - kk > 0) {
-                                    etri_gemm_kernel_msub(i, j, bk - kk,
+                                    etrsm_gemm_msub(i, j, bk - kk,
                                                        aa + i * kk,
                                                        b_buf + j * kk, cc, ldc);
                                 }
@@ -223,7 +241,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                         cc = C + ((bm & ~(UR - 1)) - UR);
                         do {
                             if (bk - kk > 0) {
-                                etri_gemm_kernel_msub(UR, j, bk - kk,
+                                etrsm_gemm_msub(UR, j, bk - kk,
                                                    aa + UR * kk,
                                                    b_buf + j * kk, cc, ldc);
                             }
@@ -258,7 +276,7 @@ void etrsm_solve_kernel(bool left, bool trans,
             i = (bm / UR);
             while (i > 0) {
                 if (kk > 0) {
-                    etri_gemm_kernel_msub(UR, UN, kk, aa, b_buf, cc, ldc);
+                    etrsm_gemm_msub(UR, UN, kk, aa, b_buf, cc, ldc);
                 }
                 solve_LT(UR, UN,
                          aa + kk * UR,
@@ -275,7 +293,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                 while (i > 0) {
                     if (bm & i) {
                         if (kk > 0) {
-                            etri_gemm_kernel_msub(i, UN, kk, aa, b_buf, cc, ldc);
+                            etrsm_gemm_msub(i, UN, kk, aa, b_buf, cc, ldc);
                         }
                         solve_LT(i, UN,
                                  aa + kk * i,
@@ -304,7 +322,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                     i = (bm / UR);
                     while (i > 0) {
                         if (kk > 0) {
-                            etri_gemm_kernel_msub(UR, j, kk, aa, b_buf, cc, ldc);
+                            etrsm_gemm_msub(UR, j, kk, aa, b_buf, cc, ldc);
                         }
                         solve_LT(UR, j,
                                  aa + kk * UR,
@@ -320,7 +338,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                         while (i > 0) {
                             if (bm & i) {
                                 if (kk > 0) {
-                                    etri_gemm_kernel_msub(i, j, kk, aa, b_buf, cc, ldc);
+                                    etrsm_gemm_msub(i, j, kk, aa, b_buf, cc, ldc);
                                 }
                                 solve_LT(i, j,
                                          aa + kk * i,
@@ -354,7 +372,7 @@ void etrsm_solve_kernel(bool left, bool trans,
             if (i > 0) {
                 do {
                     if (kk > 0) {
-                        etri_gemm_kernel_msub(UR, UN, kk, aa, b_buf, cc, ldc);
+                        etrsm_gemm_msub(UR, UN, kk, aa, b_buf, cc, ldc);
                     }
                     solve_RN(UR, UN,
                              aa + kk * UR,
@@ -371,7 +389,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                 while (i > 0) {
                     if (bm & i) {
                         if (kk > 0) {
-                            etri_gemm_kernel_msub(i, UN, kk, aa, b_buf, cc, ldc);
+                            etrsm_gemm_msub(i, UN, kk, aa, b_buf, cc, ldc);
                         }
                         solve_RN(i, UN,
                                  aa + kk * i,
@@ -399,7 +417,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                     i = (bm / UR);
                     while (i > 0) {
                         if (kk > 0) {
-                            etri_gemm_kernel_msub(UR, j, kk, aa, b_buf, cc, ldc);
+                            etrsm_gemm_msub(UR, j, kk, aa, b_buf, cc, ldc);
                         }
                         solve_RN(UR, j,
                                  aa + kk * UR,
@@ -414,7 +432,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                         while (i > 0) {
                             if (bm & i) {
                                 if (kk > 0) {
-                                    etri_gemm_kernel_msub(i, j, kk, aa, b_buf, cc, ldc);
+                                    etrsm_gemm_msub(i, j, kk, aa, b_buf, cc, ldc);
                                 }
                                 solve_RN(i, j,
                                          aa + kk * i,
@@ -456,7 +474,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                     if (i > 0) {
                         do {
                             if (bk - kk > 0) {
-                                etri_gemm_kernel_msub(UR, j, bk - kk,
+                                etrsm_gemm_msub(UR, j, bk - kk,
                                                    aa + UR * kk,
                                                    b_buf + j * kk, cc, ldc);
                             }
@@ -474,7 +492,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                         do {
                             if (bm & i) {
                                 if (bk - kk > 0) {
-                                    etri_gemm_kernel_msub(i, j, bk - kk,
+                                    etrsm_gemm_msub(i, j, bk - kk,
                                                        aa + i * kk,
                                                        b_buf + j * kk, cc, ldc);
                                 }
@@ -506,7 +524,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                 if (i > 0) {
                     do {
                         if (bk - kk > 0) {
-                            etri_gemm_kernel_msub(UR, UN, bk - kk,
+                            etrsm_gemm_msub(UR, UN, bk - kk,
                                                aa + UR * kk,
                                                b_buf + UN * kk, cc, ldc);
                         }
@@ -524,7 +542,7 @@ void etrsm_solve_kernel(bool left, bool trans,
                     do {
                         if (bm & i) {
                             if (bk - kk > 0) {
-                                etri_gemm_kernel_msub(i, UN, bk - kk,
+                                etrsm_gemm_msub(i, UN, bk - kk,
                                                    aa + i * kk,
                                                    b_buf + UN * kk, cc, ldc);
                             }
