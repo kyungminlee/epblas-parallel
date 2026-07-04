@@ -116,30 +116,33 @@ static void etrsm_core(
     const size_t ap_bytes = (size_t)blas_round_up(mc_eff, MR) * (size_t)kc_eff * sizeof(TR);
     const size_t bp_bytes = (size_t)kc_eff * (size_t)blas_round_up(nc_eff, NR) * sizeof(TR);
 
-    /* Per-thread Ap/Bp scratch, allocated BEFORE the region: an in-region
-     * alloc failure that skips a thread's loop body would deadlock the
-     * others at no barrier here (there is none), but pre-allocating keeps
-     * the failure path simple and race-free. */
+    /* Per-thread Ap/Bp scratch, carved BEFORE the region from a persistent
+     * grow-only thread-local arena on the calling thread (a per-call
+     * aligned_alloc+free of these mmap-threshold-sized buffers trips glibc's
+     * trim heuristic and re-faults every touched page each call — see
+     * etrsm_serial.c). Pre-carving keeps the failure path simple and
+     * race-free; only the small pointer arrays stay per-call. */
     TR **Ap_arr = calloc((size_t)nthreads, sizeof(TR *));
     TR **Bp_arr = calloc((size_t)nthreads, sizeof(TR *));
     if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
     const size_t ap_al = ((ap_bytes + 63) & ~(size_t)63) + ETRI_PACK_GUARD;
     const size_t bp_al = ((bp_bytes + 63) & ~(size_t)63) + ETRI_PACK_GUARD;
-    ptrdiff_t alloc_ok = 1;
+    static __thread TR *g_pack = NULL;
+    static __thread size_t g_pack_cap = 0;
+    const size_t need = (size_t)nthreads * (ap_al + bp_al);
+    if (need > g_pack_cap) {
+        free(g_pack);
+        size_t cap = need + (need >> 1);            /* 1.5× headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_pack = aligned_alloc(64, cap);
+        g_pack_cap = g_pack ? cap : 0;
+    }
+    if (!g_pack) { free(Ap_arr); free(Bp_arr); return; }
     for (ptrdiff_t t = 0; t < nthreads; ++t) {
-        Ap_arr[t] = aligned_alloc(64, ap_al);
-        Bp_arr[t] = aligned_alloc(64, bp_al);
-        if (!Ap_arr[t] || !Bp_arr[t]) { alloc_ok = 0; break; }
+        Ap_arr[t] = (TR *)(void *)((char *)g_pack + (size_t)t * (ap_al + bp_al));
+        Bp_arr[t] = (TR *)(void *)((char *)g_pack + (size_t)t * (ap_al + bp_al) + ap_al);
         etri_pack_guard_poison(Ap_arr[t], ap_bytes, ap_al);
         etri_pack_guard_poison(Bp_arr[t], bp_bytes, bp_al);
-    }
-    if (!alloc_ok) {
-        for (ptrdiff_t t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
-        }
-        free(Ap_arr); free(Bp_arr);
-        return;
     }
 
 #ifdef _OPENMP
@@ -179,8 +182,6 @@ static void etrsm_core(
     for (ptrdiff_t t = 0; t < nthreads; ++t) {
         etri_pack_guard_check(Ap_arr[t], ap_bytes, ap_al, "etrsm_parallel Ap");
         etri_pack_guard_check(Bp_arr[t], bp_bytes, bp_al, "etrsm_parallel Bp");
-        free(Ap_arr[t]);
-        free(Bp_arr[t]);
     }
     free(Ap_arr);
     free(Bp_arr);

@@ -145,13 +145,40 @@ static void egemm_core(
      */
     const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * KC * sizeof(TR);
     const size_t bp_bytes = (size_t)KC * blas_round_up(NC, NR) * sizeof(TR);
-    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
+    /* Persistent grow-only thread-local pack arenas: a per-call
+     * aligned_alloc+free of these mmap-threshold-sized buffers trips glibc's
+     * trim heuristic and re-faults every touched page each call — a pure
+     * page-fault tax at small N (see etrsm_serial.c). The shared Bp lives in
+     * the calling thread's arena; each persistent team worker keeps its own
+     * Ap arena inside the region (hot-team reuse keeps workers — and their
+     * arenas — alive across calls). */
+    static __thread TR *g_bpack = NULL;
+    static __thread size_t g_bpack_cap = 0;
+    const size_t bp_need = (bp_bytes + 63) & ~(size_t)63;
+    if (bp_need > g_bpack_cap) {
+        free(g_bpack);
+        size_t cap = bp_need + (bp_need >> 1);      /* 1.5× headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_bpack = aligned_alloc(64, cap);
+        g_bpack_cap = g_bpack ? cap : 0;
+    }
+    TR *Bp = g_bpack;
     if (!Bp) return;
 #ifdef _OPENMP
     #pragma omp parallel
 #endif
     {
-        TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
+        static __thread TR *g_apack = NULL;
+        static __thread size_t g_apack_cap = 0;
+        const size_t ap_need = (ap_bytes + 63) & ~(size_t)63;
+        if (ap_need > g_apack_cap) {
+            free(g_apack);
+            size_t cap = ap_need + (ap_need >> 1);
+            cap = (cap + 63) & ~(size_t)63;
+            g_apack = aligned_alloc(64, cap);
+            g_apack_cap = g_apack ? cap : 0;
+        }
+        TR *Ap = g_apack;
         if (Ap) {
             for (ptrdiff_t jc = 0; jc < n; jc += NC) {
                 const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
@@ -188,9 +215,7 @@ static void egemm_core(
                 }
             }
         }
-        free(Ap);
     }
-    free(Bp);
 }
 
 EPBLAS_FACADE_GEMM(egemm, TR)

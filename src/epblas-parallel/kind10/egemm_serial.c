@@ -388,9 +388,24 @@ void egemm_serial(
 
     const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * KC * sizeof(TR);
     const size_t bp_bytes = (size_t)KC * blas_round_up(NC, NR) * sizeof(TR);
-    TR *Ap = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (Ap && Bp) {
+    /* Persistent grow-only thread-local pack arena (Ap|Bp in one block): a
+     * per-call aligned_alloc+free of these mmap-threshold-sized buffers trips
+     * glibc's trim heuristic and re-faults every touched page each call — a
+     * pure page-fault tax at small N (see etrsm_serial.c). */
+    static __thread TR *g_pack = NULL;
+    static __thread size_t g_pack_cap = 0;
+    const size_t ap_al = (ap_bytes + 63) & ~(size_t)63;
+    const size_t need  = ap_al + ((bp_bytes + 63) & ~(size_t)63);
+    if (need > g_pack_cap) {
+        free(g_pack);
+        size_t cap = need + (need >> 1);            /* 1.5× headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_pack = aligned_alloc(64, cap);
+        g_pack_cap = g_pack ? cap : 0;
+    }
+    if (g_pack) {
+        TR *Ap = g_pack;
+        TR *Bp = (TR *)(void *)((char *)g_pack + ap_al);
         for (ptrdiff_t jc = 0; jc < n; jc += NC) {
             const ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
             for (ptrdiff_t pc = 0; pc < k; pc += KC) {
@@ -405,6 +420,4 @@ void egemm_serial(
             }
         }
     }
-    free(Ap);
-    free(Bp);
 }

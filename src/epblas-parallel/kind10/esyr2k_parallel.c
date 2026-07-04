@@ -88,18 +88,33 @@ static void esyr2k_core(
     long nnk = (long)n * (long)n * (long)k;
     if (nnk < 64L * 64L * 64L) nthreads = 1;
 
-    /* Two shared B-packs (A and B in B-shape), two private A-packs per thread,
-     * all allocated BEFORE the region: a thread that skipped the loop on a
-     * failed in-region alloc would deadlock the others at the Bp barrier. */
-    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    TR **Ap_A_arr = (Bp_A && Bp_B) ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
+    /* Two shared B-packs (A and B in B-shape) + two private A-pack slots per
+     * thread, carved BEFORE the region from a persistent grow-only
+     * thread-local arena on the calling thread (a per-call aligned_alloc+free
+     * of these mmap-threshold-sized buffers trips glibc's trim heuristic and
+     * re-faults every touched page each call — see etrsm_serial.c); a thread
+     * that skipped the loop on a failed in-region alloc would deadlock the
+     * others at the Bp barrier. Only the small pointer arrays stay per-call. */
+    static __thread TR *g_pack = NULL;
+    static __thread size_t g_pack_cap = 0;
+    const size_t ap_al = (ap_bytes + 63) & ~(size_t)63;
+    const size_t bp_al = (bp_bytes + 63) & ~(size_t)63;
+    const size_t need  = 2 * bp_al + (size_t)nthreads * 2 * ap_al;
+    if (need > g_pack_cap) {
+        free(g_pack);
+        size_t cap = need + (need >> 1);            /* 1.5× headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_pack = aligned_alloc(64, cap);
+        g_pack_cap = g_pack ? cap : 0;
+    }
+    TR *Bp_A = g_pack;
+    TR *Bp_B = g_pack ? (TR *)(void *)((char *)g_pack + bp_al) : NULL;
+    TR **Ap_A_arr = g_pack ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
     TR **Ap_B_arr = Ap_A_arr ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
-    ptrdiff_t alloc_ok = (Bp_A && Bp_B && Ap_A_arr && Ap_B_arr);
+    ptrdiff_t alloc_ok = (g_pack && Ap_A_arr && Ap_B_arr);
     for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
-        Ap_A_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-        Ap_B_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-        if (!Ap_A_arr[t] || !Ap_B_arr[t]) alloc_ok = 0;
+        Ap_A_arr[t] = (TR *)(void *)((char *)g_pack + 2 * bp_al + (size_t)t * 2 * ap_al);
+        Ap_B_arr[t] = (TR *)(void *)((char *)g_pack + 2 * bp_al + (size_t)t * 2 * ap_al + ap_al);
     }
     if (alloc_ok) {
 #ifdef _OPENMP
@@ -180,12 +195,8 @@ static void esyr2k_core(
         }
     }
 
-    for (ptrdiff_t t = 0; t < nthreads && Ap_A_arr; ++t) free(Ap_A_arr[t]);
-    for (ptrdiff_t t = 0; t < nthreads && Ap_B_arr; ++t) free(Ap_B_arr[t]);
     free(Ap_A_arr);
     free(Ap_B_arr);
-    free(Bp_A);
-    free(Bp_B);
 }
 
 EPBLAS_FACADE_SYR2K(esyr2k, TR, TR, TR)

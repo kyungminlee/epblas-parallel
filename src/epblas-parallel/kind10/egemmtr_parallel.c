@@ -144,9 +144,25 @@ static void egemmtr_core(char uplo, char transa, char transb,
     #pragma omp parallel if(use_omp)
 #endif
     {
-        /* Per-thread scratch: PRIVATE Ap and Bp — no shared B, no omp single. */
-        TR *Bp = (TR *)aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-        TR *Ap = Bp ? (TR *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63) : NULL;
+        /* Per-thread scratch: PRIVATE Ap and Bp — no shared B, no omp single.
+         * Carved from a persistent grow-only thread-local arena (Bp|Ap in one
+         * block): a per-call aligned_alloc+free of these mmap-threshold-sized
+         * buffers trips glibc's trim heuristic and re-faults every touched
+         * page each call (see etrsm_serial.c). Each persistent team worker
+         * keeps its own arena across calls (hot-team reuse). */
+        static __thread TR *g_pack = NULL;
+        static __thread size_t g_pack_cap = 0;
+        const size_t bp_al = (bp_bytes + 63) & ~(size_t)63;
+        const size_t need  = bp_al + ((ap_bytes + 63) & ~(size_t)63);
+        if (need > g_pack_cap) {
+            free(g_pack);
+            size_t cap = need + (need >> 1);        /* 1.5× headroom to amortize regrow */
+            cap = (cap + 63) & ~(size_t)63;
+            g_pack = aligned_alloc(64, cap);
+            g_pack_cap = g_pack ? cap : 0;
+        }
+        TR *Bp = g_pack;
+        TR *Ap = g_pack ? (TR *)(void *)((char *)g_pack + bp_al) : NULL;
         const bool have_buf = (Ap && Bp);
 
         /* EVERY team thread reaches this worksharing `omp for` (the alloc check
@@ -204,8 +220,6 @@ static void egemmtr_core(char uplo, char transa, char transb,
                 }
             }
         }
-        free(Ap);
-        free(Bp);
     }
 }
 

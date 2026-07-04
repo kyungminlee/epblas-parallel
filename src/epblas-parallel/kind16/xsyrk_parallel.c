@@ -105,13 +105,28 @@ static void xsyrk_core(
     /* One shared B-pack, one private A-pack per thread, all allocated BEFORE
      * the region: a thread that skipped the loop on a failed in-region alloc
      * would deadlock the others at the Bp barrier. */
-    TR *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    TR **Ap_arr = Bp ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
-    bool alloc_ok = (Bp && Ap_arr);
-    for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t) {
-        Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-        if (!Ap_arr[t]) alloc_ok = 0;
+    /* Persistent grow-only thread-local pack arena (Bp | per-thread Ap slots
+     * in one block, carved on the calling thread): a per-call
+     * aligned_alloc+free of these mmap-threshold-sized buffers trips glibc's
+     * trim heuristic and re-faults every touched page each call (see
+     * etrsm_serial.c). Only the small Ap_arr pointer array stays per-call. */
+    static __thread TR *g_pack = NULL;
+    static __thread size_t g_pack_cap = 0;
+    const size_t ap_al = (ap_bytes + 63) & ~(size_t)63;
+    const size_t bp_al = (bp_bytes + 63) & ~(size_t)63;
+    const size_t need  = bp_al + (size_t)nthreads * ap_al;
+    if (need > g_pack_cap) {
+        free(g_pack);
+        size_t cap = need + (need >> 1);            /* 1.5x headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_pack = aligned_alloc(64, cap);
+        g_pack_cap = g_pack ? cap : 0;
     }
+    TR *Bp = g_pack;
+    TR **Ap_arr = g_pack ? calloc((size_t)nthreads, sizeof(TR *)) : NULL;
+    bool alloc_ok = (g_pack && Ap_arr);
+    for (ptrdiff_t t = 0; alloc_ok && t < nthreads; ++t)
+        Ap_arr[t] = (TR *)(void *)((char *)g_pack + bp_al + (size_t)t * ap_al);
     if (alloc_ok) {
 #ifdef _OPENMP
         #pragma omp parallel num_threads(nthreads)
@@ -176,9 +191,7 @@ static void xsyrk_core(
         }
     }
 
-    for (ptrdiff_t t = 0; t < nthreads && Ap_arr; ++t) free(Ap_arr[t]);
     free(Ap_arr);
-    free(Bp);
 }
 
 /* Emit xsyrk_ (LP64) + xsyrk_64_ (ILP64) around the shared ptrdiff_t core.

@@ -248,11 +248,27 @@ void qsyr2k_serial(
 
     const size_t ap_bytes = (size_t)blas_round_up(MC, MR) * (size_t)KC * sizeof(TR);
     const size_t bp_bytes = (size_t)KC * (size_t)blas_round_up(NC, NR) * sizeof(TR);
-    TR *Ap_A = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    TR *Ap_B = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-    TR *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    TR *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (Ap_A && Ap_B && Bp_A && Bp_B) {
+    /* Persistent grow-only thread-local pack arena (Ap_A|Ap_B|Bp_A|Bp_B in one
+     * block): a per-call aligned_alloc+free of these mmap-threshold-sized
+     * buffers trips glibc's trim heuristic and re-faults every touched page
+     * each call — a pure page-fault tax at small N (see etrsm_serial.c). */
+    static __thread TR *g_pack = NULL;
+    static __thread size_t g_pack_cap = 0;
+    const size_t ap_al = (ap_bytes + 63) & ~(size_t)63;
+    const size_t bp_al = (bp_bytes + 63) & ~(size_t)63;
+    const size_t need  = 2 * ap_al + 2 * bp_al;
+    if (need > g_pack_cap) {
+        free(g_pack);
+        size_t cap = need + (need >> 1);            /* 1.5× headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_pack = aligned_alloc(64, cap);
+        g_pack_cap = g_pack ? cap : 0;
+    }
+    if (g_pack) {
+        TR *Ap_A = g_pack;
+        TR *Ap_B = (TR *)(void *)((char *)g_pack + ap_al);
+        TR *Bp_A = (TR *)(void *)((char *)g_pack + 2 * ap_al);
+        TR *Bp_B = (TR *)(void *)((char *)g_pack + 2 * ap_al + bp_al);
         for (ptrdiff_t js = 0; js < n; js += NC) {
             const ptrdiff_t jb = (n - js < NC) ? (n - js) : NC;
 
@@ -295,8 +311,4 @@ void qsyr2k_serial(
             }
         }
     }
-    free(Ap_A);
-    free(Ap_B);
-    free(Bp_A);
-    free(Bp_B);
 }
