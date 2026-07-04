@@ -55,18 +55,33 @@ static inline TC cconj(TC z) { return ~z; }
 static inline TC ytrsv_ut_solve(const TC *ai_, const TC *x_, const TC *xi,
                                 ptrdiff_t m) {
     if (m <= 0) return *xi;
-    const long double *a = (const long double *)ai_;
-    const long double *x = (const long double *)x_;
+    /* Schedule ported from the gfortran reference loop (mig_ytrsv_ contig
+     * U-T dot, perf-annotated): the a.re load issues FIRST off the
+     * pre-incremented pointer (fixed +0x20 bias), the pointer adds sit at
+     * the TOP of the loop between the loads, and only the loop branch stays
+     * at the bottom. par's earlier transcription kept gfortran's FP body but
+     * clustered all four fldt at the top and all adds at the bottom — that
+     * schedule retires fewer instructions yet runs ~0.2 cyc/MAC SLOWER
+     * (measured: par 94.6k vs mig 92.8k cyc/call at N=128, equal branch
+     * misses). Load order is a-first (gfortran's); the a/x swap is symmetric
+     * in the non-conj product so results are bit-identical. The sub sits
+     * after the pointer adds so its ZF survives the (flag-neutral) x87 body
+     * to the bottom jnz. */
+    const char *a = (const char *)ai_ - 32;
+    const char *x = (const char *)x_ + 16;
     const long double *xip = (const long double *)xi;
     long double tre, tim;
     __asm__ (
         "fldt (%[xi])\n\t"         /* st0 = tre = xi.re        */
         "fldt 16(%[xi])\n\t"       /* st0 = tim = xi.im, st1 = tre */
         "1:\n\t"
-        "fldt (%[x])\n\t"
-        "fldt 16(%[x])\n\t"
-        "fldt (%[a])\n\t"
-        "fldt 16(%[a])\n\t"
+        "fldt 0x20(%[a])\n\t"      /* a[k].re (pre-bump)       */
+        "add $32,%[a]\n\t"
+        "add $32,%[x]\n\t"
+        "sub $1,%[i]\n\t"
+        "fldt 0x10(%[a])\n\t"      /* a[k].im                  */
+        "fldt -0x30(%[x])\n\t"     /* x[k].re                  */
+        "fldt -0x20(%[x])\n\t"     /* x[k].im                  */
         "fld %%st(1)\n\t"
         "fmul %%st(4),%%st\n\t"
         "fld %%st(1)\n\t"
@@ -78,9 +93,6 @@ static inline TC ytrsv_ut_solve(const TC *ai_, const TC *x_, const TC *xi,
         "fmulp %%st,%%st(2)\n\t"
         "faddp %%st,%%st(1)\n\t"
         "fsubrp %%st,%%st(1)\n\t"
-        "add $32,%[a]\n\t"
-        "add $32,%[x]\n\t"
-        "sub $1,%[i]\n\t"
         "jnz 1b\n\t"
         "fstpt %[tim]\n\t"
         "fstpt %[tre]\n\t"
@@ -100,18 +112,26 @@ static inline TC ytrsv_ut_solve(const TC *ai_, const TC *x_, const TC *xi,
 static inline TC ytrsv_ut_solve_str(const TC *ai_, const TC *x_, const TC *xi,
                                     ptrdiff_t m, ptrdiff_t xstep) {
     if (m <= 0) return *xi;
-    const long double *a = (const long double *)ai_;
-    const long double *x = (const long double *)x_;
+    /* gfortran-reference schedule, strided twin (see ytrsv_ut_solve): a.re
+     * pre-bump load first, a-pointer add between the a loads, the runtime
+     * x-step add after the x loads (gfortran's placement — x offsets carry a
+     * fixed +0x20 bias so the add can trail them for any stride). sub last
+     * of the flag-writers; x87 body is flag-neutral so ZF reaches the jnz. */
+    const char *a = (const char *)ai_ - 32;
+    const char *x = (const char *)x_ + 32;
     const long double *xip = (const long double *)xi;
     long double tre, tim;
     __asm__ (
         "fldt (%[xi])\n\t"         /* st0 = tre = xi.re        */
         "fldt 16(%[xi])\n\t"       /* st0 = tim = xi.im, st1 = tre */
         "1:\n\t"
-        "fldt (%[x])\n\t"
-        "fldt 16(%[x])\n\t"
-        "fldt (%[a])\n\t"
-        "fldt 16(%[a])\n\t"
+        "fldt 0x20(%[a])\n\t"      /* a[k].re (pre-bump)       */
+        "add $32,%[a]\n\t"
+        "fldt 0x10(%[a])\n\t"      /* a[k].im                  */
+        "fldt -0x20(%[x])\n\t"     /* x[k].re                  */
+        "fldt -0x10(%[x])\n\t"     /* x[k].im                  */
+        "add %[xs],%[x]\n\t"
+        "sub $1,%[i]\n\t"
         "fld %%st(1)\n\t"
         "fmul %%st(4),%%st\n\t"
         "fld %%st(1)\n\t"
@@ -123,15 +143,58 @@ static inline TC ytrsv_ut_solve_str(const TC *ai_, const TC *x_, const TC *xi,
         "fmulp %%st,%%st(2)\n\t"
         "faddp %%st,%%st(1)\n\t"
         "fsubrp %%st,%%st(1)\n\t"
-        "add $32,%[a]\n\t"
-        "add %[xs],%[x]\n\t"
-        "sub $1,%[i]\n\t"
         "jnz 1b\n\t"
         "fstpt %[tim]\n\t"
         "fstpt %[tre]\n\t"
         : [tre] "=m"(tre), [tim] "=m"(tim),
           [a] "+r"(a), [x] "+r"(x), [i] "+r"(m)
         : [xi] "r"(xip), [xs] "r"(xstep * 32)
+        : "st", "st(1)", "st(2)", "st(3)", "st(4)",
+          "st(5)", "st(6)", "st(7)", "memory", "cc");
+    return tre + tim * 1.0iL;
+}
+/* Lower-Trans non-conj inner solve: DESCENDING walk (netlib's DO I=N,J+1,-1
+ * order — bit-exact vs the reference, unlike the forward walk this replaces)
+ * with the same gfortran-reference schedule as ytrsv_ut_solve, sub-stepping.
+ * ai_/x_ point at the LAST element (index n-1); m elements are consumed
+ * downward. mig's backward L-T loop measures ~2.5% faster than its own
+ * forward U-T twin at N=128; the forward-helper reuse this replaces sat
+ * ~1.02 behind it. */
+static inline TC ytrsv_lt_solve(const TC *ai_, const TC *x_, const TC *xi,
+                                ptrdiff_t m) {
+    if (m <= 0) return *xi;
+    const char *a = (const char *)ai_;
+    const char *x = (const char *)x_ + 32;
+    const long double *xip = (const long double *)xi;
+    long double tre, tim;
+    __asm__ (
+        "fldt (%[xi])\n\t"         /* st0 = tre = xi.re        */
+        "fldt 16(%[xi])\n\t"       /* st0 = tim = xi.im, st1 = tre */
+        "1:\n\t"
+        "fldt (%[a])\n\t"          /* a[k].re                  */
+        "sub $32,%[a]\n\t"
+        "sub $32,%[x]\n\t"
+        "sub $1,%[i]\n\t"
+        "fldt 0x30(%[a])\n\t"      /* a[k].im (post-bump bias) */
+        "fldt (%[x])\n\t"          /* x[k].re                  */
+        "fldt 0x10(%[x])\n\t"      /* x[k].im                  */
+        "fld %%st(1)\n\t"
+        "fmul %%st(4),%%st\n\t"
+        "fld %%st(1)\n\t"
+        "fmul %%st(4),%%st\n\t"
+        "fsubrp %%st,%%st(1)\n\t"
+        "fsubrp %%st,%%st(6)\n\t"
+        "fxch %%st(1)\n\t"
+        "fmulp %%st,%%st(2)\n\t"
+        "fmulp %%st,%%st(2)\n\t"
+        "faddp %%st,%%st(1)\n\t"
+        "fsubrp %%st,%%st(1)\n\t"
+        "jnz 1b\n\t"
+        "fstpt %[tim]\n\t"
+        "fstpt %[tre]\n\t"
+        : [tre] "=m"(tre), [tim] "=m"(tim),
+          [a] "+r"(a), [x] "+r"(x), [i] "+r"(m)
+        : [xi] "r"(xip)
         : "st", "st(1)", "st(2)", "st(3)", "st(4)",
           "st(5)", "st(6)", "st(7)", "memory", "cc");
     return tre + tim * 1.0iL;
@@ -152,6 +215,14 @@ static inline TC ytrsv_ut_solve_str(const TC *ai, const TC *x, const TC *xi,
     TC t = *xi;
     ptrdiff_t xk = 0;
     for (ptrdiff_t k = 0; k < m; ++k) { t -= ai[k] * x[xk]; xk += xstep; }
+    return t;
+}
+/* Portable backward twin (netlib L-T descending order); ai/x point at the
+ * LAST element. */
+static inline TC ytrsv_lt_solve(const TC *ai, const TC *x, const TC *xi,
+                                ptrdiff_t m) {
+    TC t = *xi;
+    for (ptrdiff_t k = 0; k > -m; --k) t -= ai[k] * x[k];
     return t;
 }
 #endif
@@ -307,19 +378,17 @@ void ytrsv_serial_(
         } else {
             const bool conj_a = (TRANS == 'C');
             if (UPLO == 'L') {
-                /* L-T non-conj: walk the subdiagonal FORWARD (k=i+1..n-1) via
-                 * the same tight register-resident x87 helper the U-T path
-                 * uses. The complex vector fits L1 at these sizes
-                 * (N·32B ≤ 16KB < 32KB), so the "forward collapses under memory
-                 * pressure" concern (etrsv LTN / Addendum 18, a large-N real
-                 * case) doesn't apply, and forward wins on prefetch — this
-                 * matches gfortran's forward Trans loop and beats both refs at
-                 * N≥256, ~1.01 at N=128 (was a single-accumulator backward C
-                 * loop losing ~3-5% to gfortran, trigger 7). Backward C asm was
-                 * measured ~3% WORSE, confirming direction (not the schedule)
-                 * was the gap. The conj path (L-C) keeps the backward
-                 * single-accumulator loop — its extra fchs disrupts scheduling
-                 * (same reason U-C is not unrolled below). */
+                /* L-T non-conj: walk the subdiagonal BACKWARD (k=n-1..i+1),
+                 * netlib's descending order, via the gfortran-schedule x87
+                 * helper — bit-exact vs the reference. This replaces a
+                 * forward reuse of the U-T helper: with the OLD asm schedule
+                 * backward measured ~3% worse and forward was chosen, but
+                 * under the reference schedule mig's backward L-T loop runs
+                 * ~2.5% FASTER than its own forward U-T twin at N=128, and
+                 * the forward reuse sat ~1.02 behind it. The conj path (L-C)
+                 * keeps the backward single-accumulator C loop — its extra
+                 * fchs disrupts scheduling (same reason U-C is not unrolled
+                 * below). */
                 for (ptrdiff_t i = n - 1; i >= 0; --i) {
                     TC t = x[i];
                     const TC *ai = &A_(0, i);
@@ -327,7 +396,7 @@ void ytrsv_serial_(
                         for (ptrdiff_t k = n - 1; k > i; --k) t -= cconj(ai[k]) * x[k];
                         if (nounit) t /= cconj(ai[i]);
                     } else {
-                        t = ytrsv_ut_solve(&ai[i + 1], &x[i + 1], &x[i], n - 1 - i);
+                        t = ytrsv_lt_solve(&ai[n - 1], &x[n - 1], &x[i], n - 1 - i);
                         if (nounit) t /= ai[i];
                     }
                     x[i] = t;
