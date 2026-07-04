@@ -187,6 +187,39 @@ void ytrsv_core(
 {
     if (n == 0) return;
 
+    /* General stride, NoTrans only: gather x into contiguous scratch, solve
+     * with incx==1 (which also unlocks the blocked/threaded dispatch below —
+     * it is gated on incx==1), scatter back. The contiguous NoTrans solve
+     * beats both OpenBLAS and the gfortran reference by ~23% serial (and far
+     * more threaded) while the strided walk only ties them; the O(n)
+     * gather/scatter is noise against the O(n²/2) solve. Bit-identical to
+     * the contiguous path: the pair-unrolled forward/back substitution
+     * applies column i then column i+1 to each element — the same per-element
+     * operation order as the netlib column-at-a-time form. Trans/ConjTrans
+     * stay on the direct strided walk: their dot-based solves have no
+     * contiguous headroom over the references' strided handling (measured
+     * parity), same split as the etbsv gather. The direct walk below also
+     * serves as the alloc-failure fallback. Stack scratch for the common
+     * small-N case avoids malloc latency; spill to the heap for large N. */
+    if (incx != 1 && blas_up(trans) == 'N') {
+        enum { YTRSV_STACK_N = 512 };
+        TC stackbuf[YTRSV_STACK_N];
+        TC *heap = NULL;
+        TC *xc = (n <= YTRSV_STACK_N)
+            ? stackbuf
+            : (heap = (TC *)malloc((size_t)n * sizeof(TC)));
+        if (xc) {
+            const ptrdiff_t kx0 = (incx < 0) ? -(n - 1) * incx : 0;
+            ptrdiff_t ix = kx0;
+            for (ptrdiff_t i = 0; i < n; ++i) { xc[i] = x[ix]; ix += incx; }
+            ytrsv_core(uplo, trans, diag, n, a, lda, xc, 1);
+            ix = kx0;
+            for (ptrdiff_t i = 0; i < n; ++i) { x[ix] = xc[i]; ix += incx; }
+            free(heap);
+            return;
+        }
+    }
+
 #ifdef _OPENMP
     const bool in_par = omp_in_parallel();
 #else
