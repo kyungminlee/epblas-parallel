@@ -496,22 +496,31 @@ void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
 
+    /* Per-thread Ap/Bp scratch carved from a persistent grow-only
+     * thread-local arena on the calling thread: a per-call
+     * aligned_alloc+free of these mmap-threshold-sized buffers trips
+     * glibc's trim heuristic and re-faults every touched page each call
+     * (see kind10 etrsm_serial.c). Only the small pointer arrays stay
+     * per-call. */
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
     if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
-    int alloc_ok = 1;
-    for (int t = 0; t < nthreads; ++t) {
-        Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
-        Bp_arr[t] = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-        if (!Ap_arr[t] || !Bp_arr[t]) { alloc_ok = 0; break; }
+    const size_t ap_al = (ap_bytes + 63) & ~(size_t)63;
+    const size_t bp_al = (bp_bytes + 63) & ~(size_t)63;
+    static __thread T *g_pack = NULL;
+    static __thread size_t g_pack_cap = 0;
+    const size_t need = (size_t)nthreads * (ap_al + bp_al);
+    if (need > g_pack_cap) {
+        free(g_pack);
+        size_t cap = need + (need >> 1);            /* 1.5× headroom to amortize regrow */
+        cap = (cap + 63) & ~(size_t)63;
+        g_pack = aligned_alloc(64, cap);
+        g_pack_cap = g_pack ? cap : 0;
     }
-    if (!alloc_ok) {
-        for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
-        }
-        free(Ap_arr); free(Bp_arr);
-        return;
+    if (!g_pack) { free(Ap_arr); free(Bp_arr); return; }
+    for (int t = 0; t < nthreads; ++t) {
+        Ap_arr[t] = (T *)(void *)((char *)g_pack + (size_t)t * (ap_al + bp_al));
+        Bp_arr[t] = (T *)(void *)((char *)g_pack + (size_t)t * (ap_al + bp_al) + ap_al);
     }
 
 #ifdef _OPENMP
@@ -556,10 +565,6 @@ void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
         }
     }
 
-    for (int t = 0; t < nthreads; ++t) {
-        free(Ap_arr[t]);
-        free(Bp_arr[t]);
-    }
     free(Ap_arr);
     free(Bp_arr);
 }
