@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #include "../common/epblas_facade.h"
@@ -30,26 +31,23 @@ static inline void band_msub(TR *restrict x, const TR *restrict cb, TR tmp,
     for (; i < hi; ++i) x[i] -= tmp * cb[i];
 }
 
-static void etbsv_core(
-    char uplo, char trans, char diag,
+/* Contiguous (incx==1) solve. noinline: keeps a single copy of the
+ * placement-delicate inner loops, isolated from the strided/gather caller
+ * scaffolding (the etpsv/etbmv noinline-helper precedent). */
+__attribute__((noinline))
+static void etbsv_contig(
+    char UPLO, char TRANS, bool nounit,
     ptrdiff_t n, ptrdiff_t k,
     const TR *restrict a, ptrdiff_t lda,
-    TR *restrict x, ptrdiff_t incx)
+    TR *restrict x)
 {
     const TR zero = 0.0L;
-    const char UPLO = blas_up(uplo);
-    char TRANS = blas_up(trans);
-    if (TRANS == 'C') TRANS = 'T';
-    const bool nounit = (blas_up(diag) != 'U');
-
-    if (n == 0) return;
-
-    if (incx == 1) {
+    {
         /* incx==1 hot path: hoist the column base pointer so the two array
          * walks (band column + x) collapse onto a SINGLE byte-offset induction
-         * (col[off+i] and x[i] share i). The strided branch below cannot
-         * collapse (its ix induction is independent of the band index) so it
-         * stays on the macro form.
+         * (col[off+i] and x[i] share i). The strided branch in etbsv_core
+         * cannot collapse (its ix induction is independent of the band index)
+         * so it stays on the macro form.
          *
          * Codegen of these K-deep inner loops is delicate: the i_lo guard form
          * and the loop-bound form decide whether GCC fuses the per-column base
@@ -116,8 +114,62 @@ static void etbsv_core(
                 }
             }
         }
-    } else {
-        /* Strided (incx != 1) branch. The ix induction is independent of the
+    }
+}
+
+static void etbsv_core(
+    char uplo, char trans, char diag,
+    ptrdiff_t n, ptrdiff_t k,
+    const TR *restrict a, ptrdiff_t lda,
+    TR *restrict x, ptrdiff_t incx)
+{
+    const TR zero = 0.0L;
+    const char UPLO = blas_up(uplo);
+    char TRANS = blas_up(trans);
+    if (TRANS == 'C') TRANS = 'T';
+    const bool nounit = (blas_up(diag) != 'U');
+
+    if (n == 0) return;
+
+    if (incx == 1) {
+        etbsv_contig(UPLO, TRANS, nounit, n, k, a, lda, x);
+        return;
+    }
+
+    /* General stride, NoTrans only: gather x into contiguous scratch, run
+     * the incx==1 solve — its band_msub store loops beat both OpenBLAS and
+     * the gfortran reference on every contiguous NoTrans cell — then
+     * scatter back. O(n) gather/scatter against O(n·k) solve work.
+     * Bit-identical: the NoTrans updates are independent stores, same
+     * operations in the same order as the direct strided walk below.
+     * Trans stays on the direct strided walk: its dot-based solve is ~2x
+     * faster in absolute terms (register accumulation, no store stream),
+     * so the O(n) gather is a ~15% tax there (measured 1.01 -> 1.13-1.17
+     * when gathered) while the direct walk already sits at parity.
+     * The direct walk below also serves as the alloc-failure fallback.
+     * Stack scratch for the common small-N case avoids malloc latency;
+     * spill to the heap for large N. */
+    if (TRANS == 'N') {
+        enum { ETBSV_STACK_N = 512 };
+        TR stackbuf[ETBSV_STACK_N];
+        TR *heap = NULL;
+        TR *xc = (n <= ETBSV_STACK_N)
+            ? stackbuf
+            : (heap = (TR *)malloc((size_t)n * sizeof(TR)));
+        if (xc) {
+            const ptrdiff_t kx0 = (incx < 0) ? -(n - 1) * incx : 0;
+            ptrdiff_t ix = kx0;
+            for (ptrdiff_t i = 0; i < n; ++i) { xc[i] = x[ix]; ix += incx; }
+            etbsv_contig(UPLO, TRANS, nounit, n, k, a, lda, xc);
+            ix = kx0;
+            for (ptrdiff_t i = 0; i < n; ++i) { x[ix] = xc[i]; ix += incx; }
+            free(heap);
+            return;
+        }
+    }
+
+    {
+        /* Strided (incx != 1) fallback. The ix induction is independent of the
          * band index, so it cannot collapse onto a single byte-offset walk the
          * way the incx==1 paths do. Instead hoist the column base pointer
          * (col = &a[j*lda]) ONCE per column and walk col[off+i] — faithful to
