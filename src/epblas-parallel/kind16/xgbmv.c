@@ -146,10 +146,11 @@ void xgbmv_core(
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
             const ptrdiff_t i_hi = (j + KL + 1 < m) ? (j + KL + 1) : m;
             const ptrdiff_t k = KU - j;
+            const TC *col = &A_(k + i_lo, j);
             if (noconj) {
-                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += A_(k + i, j) * x[ix]; ix += incx; }
+                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += *col++ * x[ix]; ix += incx; }
             } else {
-                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += cconj(A_(k + i, j)) * x[ix]; ix += incx; }
+                for (ptrdiff_t i = i_lo; i < i_hi; ++i) { s += cconj(*col++) * x[ix]; ix += incx; }
             }
             y[jy] += alpha * s;
             jy += incy;
