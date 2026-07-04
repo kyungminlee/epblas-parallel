@@ -165,11 +165,22 @@ static void egbmv_core(
             && egbmv_t_omp(m, n, KL, KU, a, lda, x, incx, alpha, y, incy))
             return;
 #endif
-        /* Strided Trans gather (serial). */
+        /* Strided Trans gather (serial). Split the column loop at
+         * jlim = min(n, m+KU): columns j >= m+KU have an EMPTY band range
+         * (i_lo = j-KU >= m >= i_hi), and the pointer-end dot below would
+         * compute cend BEFORE col and walk off the array. Guarding inside
+         * the loop (cmov clamp or `if (blen > 0)`) costs ~10-13% on the
+         * tuned strided-Trans cells by perturbing the per-column setup
+         * codegen, so instead keep the hot body textually unchanged and
+         * only let it see j < jlim, where i_lo < i_hi is guaranteed
+         * (j < m+KU and m >= 1 give both j-KU < m and j+KL+1 >= 1). A cold
+         * tail loop handles the empty columns bit-exactly (netlib still
+         * does y(jy) += alpha*0 there, which can flip -0 to +0). */
         ptrdiff_t kx = (incx < 0) ? -(lenx - 1) * incx : 0;
         ptrdiff_t ky = (incy < 0) ? -(leny - 1) * incy : 0;
         ptrdiff_t jy = ky;
-        for (ptrdiff_t j = 0; j < n; ++j) {
+        const ptrdiff_t jlim = (n < m + KU) ? n : (m + KU);
+        for (ptrdiff_t j = 0; j < jlim; ++j) {
             TR s = zero;
             ptrdiff_t ix = kx;
             const ptrdiff_t i_lo = (j - KU > 0) ? (j - KU) : 0;
@@ -195,6 +206,13 @@ static void egbmv_core(
             y[jy] += alpha * s;
             jy += incy;
             if (j >= KU) kx += incx;
+        }
+        /* Empty-band tail columns (j >= m+KU, only when n > m+KU): the dot
+         * is an empty sum, but netlib still adds alpha*0 to y(jy). kx no
+         * longer matters (no further reads of x), so only jy advances. */
+        for (ptrdiff_t j = jlim; j < n; ++j) {
+            y[jy] += alpha * zero;
+            jy += incy;
         }
     }
 }
