@@ -92,7 +92,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Keep in sync with the release workflow's pinned eplinalg tag.
-          TAG="${{ inputs.eplinalg_tag || 'v0.4.1' }}"
+          TAG="${{ inputs.eplinalg_tag || 'v0.5.0' }}"
           echo "eplinalg tag: $TAG"
 
           mkdir -p ${{ github.workspace }}/eplinalg-install

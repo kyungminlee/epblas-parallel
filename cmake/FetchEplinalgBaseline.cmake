@@ -16,14 +16,14 @@
 #
 # Knobs:
 #   EPBLAS_PARALLEL_FETCH_BASELINE   ON  — fetch release baselines into the build
-#   EPLINALG_BASELINE_VERSION        release tag to pull (default v0.4.2)
+#   EPLINALG_BASELINE_VERSION        release tag to pull (default v0.5.0)
 #   EPLINALG_BASELINE_MPI            MPI flavour in the asset name (default mpich)
 #   EPLINALG_BASELINE_REPO           release host repo URL
 
 option(EPBLAS_PARALLEL_FETCH_BASELINE
     "Download the eplinalg migrated baseline (eblas/qblas/mblas) release \
 binaries into the build tree for the test/bench suite" ON)
-set(EPLINALG_BASELINE_VERSION "v0.4.2" CACHE STRING
+set(EPLINALG_BASELINE_VERSION "v0.5.0" CACHE STRING
     "eplinalg release tag for the prebuilt migrated baseline")
 set(EPLINALG_BASELINE_MPI "mpich" CACHE STRING
     "MPI flavour tag in the eplinalg baseline release asset names")
