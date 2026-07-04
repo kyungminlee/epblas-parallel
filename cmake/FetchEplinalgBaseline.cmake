@@ -37,6 +37,19 @@ function(_epblas_fetch_one_baseline _precision _out_prefix)
     set(_dl_dir "${CMAKE_BINARY_DIR}/_deps/eplinalg-dl")
     set(_tarball "${_dl_dir}/${_asset}")
     set(_prefix "${CMAKE_BINARY_DIR}/_deps/eplinalg-${_precision}")
+    set(_stamp "${_prefix}/.eplinalg-baseline-version")
+
+    # The asset name carries no release tag, so a cached tarball/extract from
+    # a different EPLINALG_BASELINE_VERSION must not be reused — stamp the
+    # extracted prefix with its version and purge both on mismatch.
+    set(_have_version "")
+    if(EXISTS "${_stamp}")
+        file(READ "${_stamp}" _have_version)
+    endif()
+    if(NOT _have_version STREQUAL "${EPLINALG_BASELINE_VERSION}")
+        file(REMOVE "${_tarball}")
+        file(REMOVE_RECURSE "${_prefix}")
+    endif()
 
     if(NOT EXISTS "${_tarball}")
         file(MAKE_DIRECTORY "${_dl_dir}")
@@ -60,6 +73,7 @@ function(_epblas_fetch_one_baseline _precision _out_prefix)
         file(MAKE_DIRECTORY "${_prefix}")
         file(ARCHIVE_EXTRACT INPUT "${_tarball}" DESTINATION "${_prefix}")
     endif()
+    file(WRITE "${_stamp}" "${EPLINALG_BASELINE_VERSION}")
     set(${_out_prefix} "${_prefix}" PARENT_SCOPE)
 endfunction()
 
