@@ -186,6 +186,16 @@ endif()
 # append after the target's -falign-loops=16, and GCC honours the last one.
 set_source_files_properties(enrm2.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
 
+# Same placement swing on egemm_serial.c: its egemm_beta_prepass scale loop
+# (5 instructions, ~20 bytes) is the α-prescale every etrsm/etrmm call runs
+# over all of B. At 16-byte granularity it can land at mod-32 = 16 and
+# straddle a 32-byte fetch chunk — measured 1.17x slower than ob's
+# byte-identical loop sitting 32-aligned and chunk-contained in the same
+# binary (the whole ~2% etrmm omp4 small-N deficit). 32-byte pinning makes
+# the straddle impossible; the file's long-trip GEMM kernel loops are
+# FP/store-bound and indifferent to the wider padding.
+set_source_files_properties(egemm_serial.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
+
 # OpenMP comes in at step 4. Wire it now so the per-kernel #pragmas
 # compile from the start.
 if(OpenMP_C_FOUND)
