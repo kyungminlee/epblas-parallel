@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "../common/blas_char.h"
 #include <ctype.h>
 #ifdef _OPENMP
@@ -350,6 +351,43 @@ static void etpsv_core(
     const bool nounit = (blas_up(diag) != 'U');
 
     if (n == 0) return;
+
+    /* General stride: gather x into contiguous scratch, solve on the incx==1
+     * paths, scatter back. The strided walk touches x O(n^2) times at stride
+     * incx while the packed A stream is already contiguous; the O(n)
+     * gather/scatter routes into (a) the contiguous serial cores — the
+     * Upper-NoTrans substitution and the Trans 2/4-chain forward dots run
+     * ~14-20% faster in absolute terms than the strided walk — and (b) the
+     * blocked threaded solve, which is gated on incx==1 (par4/ob4 0.37-0.59
+     * at N>=512 contiguous, vs ~1.00 strided today). Lower-NoTrans is the one
+     * shape whose contiguous serial core runs at strided-walk speed (no
+     * serial headroom), so it gathers only when the threaded path is in
+     * reach. malloc failure falls through to the direct strided walk. */
+    if (incx != 1) {
+        bool gather = (UPLO == 'U' || TRANS == 'T');
+#ifdef _OPENMP
+        if (!gather && n >= ETPSV_OMP_MIN && blas_omp_max_threads() > 1)
+            gather = true;
+#endif
+        if (gather) {
+            enum { ETPSV_STACK_N = 512 };
+            TR stackbuf[ETPSV_STACK_N];
+            TR *heap = NULL;
+            TR *xc = (n <= ETPSV_STACK_N)
+                ? stackbuf
+                : (heap = (TR *)malloc((size_t)n * sizeof(TR)));
+            if (xc) {
+                const ptrdiff_t kx0 = (incx < 0) ? -(n - 1) * incx : 0;
+                ptrdiff_t ix = kx0;
+                for (ptrdiff_t i = 0; i < n; ++i) { xc[i] = x[ix]; ix += incx; }
+                etpsv_core(uplo, trans, diag, n, ap, xc, 1);
+                ix = kx0;
+                for (ptrdiff_t i = 0; i < n; ++i) { x[ix] = xc[i]; ix += incx; }
+                free(heap);
+                return;
+            }
+        }
+    }
 
 #ifdef _OPENMP
     if (incx == 1 && n >= ETPSV_OMP_MIN && blas_omp_max_threads() > 1
