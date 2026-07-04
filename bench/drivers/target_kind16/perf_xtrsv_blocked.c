@@ -38,13 +38,23 @@ static inline X16 Tc_from_d(double d) { return (X16)((Q16)d); }
 
 BLAS_EXTERN void xtrsv_(const char *, const char *, const char *, const int *,
     const X16 *, const int *, X16 *, const int *, size_t, size_t, size_t);
-BLAS_EXTERN void xtrsv_blocked_(const char *, const char *, const char *, const int *,
-    const X16 *, const int *, X16 *, const int *, size_t, size_t, size_t);
+/* Internal overlay symbol — ptrdiff_t index ABI (NOT the Fortran int ABI;
+ * the int->ptrdiff_t conversion widened every internal entry point). */
+BLAS_EXTERN void xtrsv_blocked_(const char *, const char *, const char *, const ptrdiff_t *,
+    const X16 *, const ptrdiff_t *, X16 *, const ptrdiff_t *, size_t, size_t, size_t);
 BLAS_EXTERN void xtrsv_migrated_(const char *, const char *, const char *, const int *,
     const X16 *, const int *, X16 *, const int *, size_t, size_t, size_t);
 
 typedef void (*xtrsv_fn)(const char *, const char *, const char *, const int *,
     const X16 *, const int *, X16 *, const int *, size_t, size_t, size_t);
+
+/* int-ABI adapter so xtrsv_blocked_ fits the shared xtrsv_fn timing type. */
+static void xtrsv_blocked_i32(const char *uplo, const char *trans, const char *diag,
+    const int *n, const X16 *a, const int *lda, X16 *x, const int *incx,
+    size_t ul, size_t tl, size_t dl) {
+    const ptrdiff_t n_ = *n, lda_ = *lda, incx_ = *incx;
+    xtrsv_blocked_(uplo, trans, diag, &n_, a, &lda_, x, &incx_, ul, tl, dl);
+}
 
 static Q16 q16_abs(Q16 z) { return z < 0 ? -z : z; }
 static Q16 cabsq16(X16 z) {
@@ -131,7 +141,7 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     xtrsv_migrated_(&uplo, &trans, &diag, &N, A, &N, Xref, &incx, 1, 1, 1);
     memcpy(Xtst, Xi, lenx * sizeof(X16));
     omp_set_num_threads(4);
-    xtrsv_blocked_(&uplo, &trans, &diag, &N, A, &N, Xtst, &incx, 1, 1, 1);
+    xtrsv_blocked_i32(&uplo, &trans, &diag, &N, A, &N, Xtst, &incx, 1, 1, 1);
     char label[64];
     snprintf(label, sizeof(label), "xtrsv blk %c%c%c N=%d incx=%d", uplo, trans, diag, N, incx);
     fuzz_check(Xref, Xtst, N, incx, tol, label);
@@ -141,9 +151,9 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
                                   A, Xi, X, lenx, iters, warmup);
     double t_cur_4 = time_kernel(xtrsv_,         4, uplo, trans, diag, N, incx,
                                   A, Xi, X, lenx, iters, warmup);
-    double t_blk_1 = time_kernel(xtrsv_blocked_, 1, uplo, trans, diag, N, incx,
+    double t_blk_1 = time_kernel(xtrsv_blocked_i32, 1, uplo, trans, diag, N, incx,
                                   A, Xi, X, lenx, iters, warmup);
-    double t_blk_4 = time_kernel(xtrsv_blocked_, 4, uplo, trans, diag, N, incx,
+    double t_blk_4 = time_kernel(xtrsv_blocked_i32, 4, uplo, trans, diag, N, incx,
                                   A, Xi, X, lenx, iters, warmup);
     double t_mig_1 = time_kernel(xtrsv_migrated_, 1, uplo, trans, diag, N, incx,
                                   A, Xi, X, lenx, iters, warmup);
