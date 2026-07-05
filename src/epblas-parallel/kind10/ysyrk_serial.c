@@ -103,6 +103,79 @@ static void syrk_diag_add(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t k, TC alpha,
  * small-N tax netlib never pays (its Upper-Trans is a few % faster purely from
  * this single-pass fusion). Bit-identical to prescale-then-add: beta·C(i,j) is
  * rounded to fp80 either way (stored vs. register), and IEEE add commutes. */
+/* The k-long column dot itself is hand-scheduled: gcc's schedule for the
+ * decomposed C loop (17 instrs, copies from the FIRST-loaded stream, no fxch)
+ * runs at IPC ~1.55 on Coffee Lake; gfortran-15's Upper-Trans loop (18 instrs,
+ * copies the SECOND stream's values and fxch-rotates before the two cross
+ * multiplies, real accumulator updated by a deep faddp st(6)) runs the same
+ * math at IPC ~1.79 — ~4% wall on the UT cells. Both loops are ~100% MITE-fed
+ * (idq counters), so this is x87 stack scheduling, not front-end path or
+ * alignment; C has no way to express the schedule, hence the asm port of the
+ * reference body (addressing shape included: shared walking pointer + lea'd
+ * second stream, pointer-end exit). Products/adds are the identical IEEE ops
+ * in the identical order as the C loop it replaces — bit-exact.
+ * Pointer-end do-while: k >= 1 is proven by the caller (ysyrk_serial /
+ * ysyrk_parallel early-exit alpha==0||k==0 before any blocking), per the
+ * pointer-end non-emptiness rule. */
+#if defined(__GNUC__) && defined(__x86_64__)
+static inline void ysyrk_trans_dot_x87(const long double *Air,
+                                       const long double *Ajr, ptrdiff_t k,
+                                       long double *sr, long double *si)
+{
+    const char *px = (const char *)Air - 0x20;
+    const char *pend = px + 0x20 * k;
+    const ptrdiff_t off = (const char *)Ajr - (const char *)Air;
+    const char *tmp;
+    long double sre, sim;
+    __asm__ __volatile__ (
+        "fldz\n\t"                      /* s_re                              */
+        "fldz\n\t"                      /* s_im — stack [s_im, s_re]         */
+        ".p2align 5\n\t"
+        "1:\n\t"
+        "lea (%[px],%[off],1),%[tmp]\n\t"
+        "fldt 0x20(%[px])\n\t"          /* a = Ai.re                         */
+        "add $0x20,%[px]\n\t"
+        "fldt 0x10(%[px])\n\t"          /* b = Ai.im                         */
+        "fldt 0x20(%[tmp])\n\t"         /* c = Aj.re                         */
+        "fldt 0x30(%[tmp])\n\t"         /* d = Aj.im                         */
+        "fld %%st(1)\n\t"
+        "fmul %%st(4),%%st\n\t"         /* c·a                               */
+        "fld %%st(1)\n\t"
+        "fmul %%st(4),%%st\n\t"         /* d·b                               */
+        "fsubrp %%st,%%st(1)\n\t"       /* c·a − d·b (gas AT&T fsub-register
+                                           mnemonics are inverted vs Intel:
+                                           this is FSUBP st1,st — st1−st0)   */
+        "faddp %%st,%%st(6)\n\t"        /* s_re +=                           */
+        "fxch %%st(1)\n\t"
+        "fmulp %%st,%%st(2)\n\t"        /* b·c                               */
+        "fmulp %%st,%%st(2)\n\t"        /* a·d                               */
+        "faddp %%st,%%st(1)\n\t"        /* a·d + b·c                         */
+        "faddp %%st,%%st(1)\n\t"        /* s_im +=                           */
+        "cmp %[pend],%[px]\n\t"
+        "jne 1b"
+        : [px] "+r"(px), [tmp] "=&r"(tmp), "=t"(sim), "=u"(sre)
+        : [pend] "r"(pend), [off] "r"(off)
+        : "st(2)", "st(3)", "st(4)", "st(5)", "st(6)", "st(7)", "cc");
+    *sr = sre;
+    *si = sim;
+}
+#else
+static inline void ysyrk_trans_dot_x87(const long double *Air,
+                                       const long double *Ajr, ptrdiff_t k,
+                                       long double *sr, long double *si)
+{
+    long double sre = 0.0L, sim = 0.0L;
+    for (ptrdiff_t l = 0; l < k; ++l) {
+        const long double air = Air[2*l + 0], aii = Air[2*l + 1];
+        const long double ajr = Ajr[2*l + 0], aji = Ajr[2*l + 1];
+        sre += air * ajr - aii * aji;
+        sim += air * aji + aii * ajr;
+    }
+    *sr = sre;
+    *si = sim;
+}
+#endif
+
 static void syrk_trans_full(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k,
                             TC alpha, TC beta, const TC *restrict a, ptrdiff_t lda,
                             TC *restrict c, ptrdiff_t ldc, char UPLO)
@@ -114,13 +187,8 @@ static void syrk_trans_full(ptrdiff_t jc, ptrdiff_t jb, ptrdiff_t n, ptrdiff_t k
         const long double *Ajr = (const long double *)(a + (size_t)j * lda);
         for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
             const long double *Air = (const long double *)(a + (size_t)i * lda);
-            long double sr = 0.0L, si = 0.0L;
-            for (ptrdiff_t l = 0; l < k; ++l) {
-                const long double air = Air[2*l + 0], aii = Air[2*l + 1];
-                const long double ajr = Ajr[2*l + 0], aji = Ajr[2*l + 1];
-                sr += air * ajr - aii * aji;
-                si += air * aji + aii * ajr;
-            }
+            long double sr, si;
+            ysyrk_trans_dot_x87(Air, Ajr, k, &sr, &si);
             const TC s = alpha * __builtin_complex(sr, si);
             cj[i] = (beta == ZERO) ? s : s + beta * cj[i];
         }
