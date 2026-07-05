@@ -106,7 +106,7 @@ jobs:
           # every epblas-parallel release that ships against a newer
           # eplinalg — keeps the test slot reproducible and surfaces
           # the dependency in PR review.
-          TAG="${{ inputs.eplinalg_tag || 'v0.5.0' }}"
+          TAG="${{ inputs.eplinalg_tag || 'v0.6.0' }}"
           echo "eplinalg tag: $TAG"
 
           mkdir -p ${{ github.workspace }}/eplinalg-install
