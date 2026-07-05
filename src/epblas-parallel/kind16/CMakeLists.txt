@@ -154,6 +154,13 @@ if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
         -march=${EPBLAS_PARALLEL_MARCH})
 endif()
 
+# qtrmm's RLT inner AXPY loop landed at a 32B-chunk offset of 0x18 and
+# straddled a fetch boundary; the instruction-identical gfortran reference
+# loop sits at 0x0 and ran ~3% faster (par-RLT was the only serial cell
+# above the bar while par-RUT, same body at offset 0x8, passed). Pinning
+# loop heads to 32B removes the placement lottery (see kind10/enrm2).
+set_source_files_properties(qtrmm_serial.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
+
 # Quadmath provides __float128 arithmetic + the complex helpers
 # (conjq, cabsq, ...). Link explicitly — libquadmath is a separate .so
 # from libgcc.

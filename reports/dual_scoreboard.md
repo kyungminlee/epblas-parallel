@@ -1,6 +1,6 @@
 # Dual-link perf scoreboard
 
-_Generated 2026-07-05 05:05 UTC by `bench/dual/render_scoreboard.py`._
+_Generated 2026-07-05 07:28 UTC by `bench/dual/render_scoreboard.py`._
 
 All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller = faster**. Bars (OVERRIDE defaults): serial `par1 ≤ min(ob1, mig1)`; omp4 `par4 ≤ ob4`. Cells are flagged at **par/ref > 1.02** (the reps≥40 in-process harness is trustworthy to sub-2%; 1.00–1.02 is the noise band). `leg` = which serial reference binds (`mig` = netlib triple-loop, `ob1` = OpenBLAS clone). See `bench/dual/BENCH_PROTOCOL.md`.
 
@@ -8,7 +8,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 |---|--:|--:|--:|
 | m | 2218 | 100.0% | 100.0% |
 | e | 2218 | 100.0% | 100.0% |
-| q | 2218 | 99.9% | 100.0% |
+| q | 2218 | 100.0% | 100.0% |
 
 ## m — multifloats (double-double)
 
@@ -176,11 +176,10 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 
 ## q — kind16 (__float128)
 
-2218 cells, 75 routines.  **Pass@1.02: serial 99.9% · omp4 100.0%.**  1 routine(s) with ≥1 flagged cell.
+2218 cells, 75 routines.  **Pass@1.02: serial 100.0% · omp4 100.0%.**  0 routine(s) with ≥1 flagged cell.
 
 | routine | cells | serial worst (par/min, leg) | omp4 worst (par/ob4) | status |
 |---|--:|---|---|:--:|
-| **qtrmm** | 64 | 1.034 mig @RLTN/512 | 0.936 | ⚠ |
 | qsbmv | 24 | 1.020 | 0.826 | ✅ |
 | xherk | 12 | 1.020 | 1.008 | ✅ |
 | xdotc | 2 | 1.020 | 1.014 | ✅ |
@@ -222,6 +221,7 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qger | 12 | 1.007 | 0.999 | ✅ |
 | qaxpy | 3 | 1.007 | 0.980 | ✅ |
 | xsymm | 12 | 1.007 | 1.001 | ✅ |
+| qtrmm | 64 | 1.007 | 0.925 | ✅ |
 | xhbmv | 18 | 1.006 | 0.894 | ✅ |
 | xgemmtr | 54 | 1.006 | 0.980 | ✅ |
 | xqscal | 2 | 1.006 | 0.990 | ✅ |
@@ -255,13 +255,4 @@ All values are **bare wall time (ns/call)**, ratio = **par / reference, smaller 
 | qxnrm2 | 2 | 0.791 | 0.253 | ✅ |
 | qnrm2 | 3 | 0.770 | 0.276 | ✅ |
 | xrotg | 1 | 0.690 | 0.689 | ✅ |
-
-<details><summary>q: 2 flagged cells (par/ref > 1.02, smaller=faster)</summary>
-
-| routine | key | N | par1 | ob1 | mig1 | par4 | ob4 | p1/min | p4/ob4 | leg |
-|---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| qtrmm | RLTN | 512 | 1,841,339,373 | 2,496,088,034 | 1,781,029,434 | 504,295,398 | 668,549,200 | 1.034 | 0.754 | mig |
-| qtrmm | RLTU | 512 | 1,981,759,376 | 2,501,481,945 | 1,939,066,367 | 588,721,192 | 669,201,124 | 1.022 | 0.880 | mig |
-
-</details>
 
