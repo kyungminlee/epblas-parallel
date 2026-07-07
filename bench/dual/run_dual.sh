@@ -50,7 +50,7 @@ REFAS=( "${refblas[0]}" )
 # C++ companions (fmoddd/matmuldd_*). Both live ONLY in the `_mf` subproject's
 # archives — built with gcc-15 + fat-LTO (LTO 15.1), so they cannot be linked
 # into our gcc-16 driver (lto1 rejects the bytecode-version mismatch). We can't
-# use build/_mf/{fsrc/libmultifloatsf.a,src/libmultifloats-gcc-15.a} directly.
+# use build/_mf/{fsrc/libmultifloatsf.a,src/libmultifloats-lto-gcc-15.a} directly.
 # Instead we recompile that runtime NON-LTO from the same generated sources
 # (build_mf_runtime, below) into a private archive and link THAT.
 if [[ "$FAM" == m ]]; then

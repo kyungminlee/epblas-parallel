@@ -115,7 +115,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
                 ${_composite}
                 ${_migrated_archive}
                 eplinalg::blas)
-            # The multifloats migrated reference (mblas) calls the
+            # The multifloats migrated reference (mwblas) calls the
             # multifloats Fortran module (dd_mul_dd, …); fp80/quad
             # references are intrinsic and need no runtime. Mirror the
             # fuzz_common link so perf drivers resolve those symbols.

@@ -17,7 +17,7 @@ against the migrated baseline via `tests/epblas-openblas/`.
 > `<quadmath.h>` added alongside the kept `<math.h>`, prefixes
 > `e→q`/`y→x`/`ie→iq`/`iy→ix`/`ey→qx`/`ye→xq`). All **75 routines** are
 > ported and pass the consistency suite **75/75** against the
-> `eplinalg::qblas` migrated baseline (`ctest -R
+> `eplinalg::qxblas` migrated baseline (`ctest -R
 > 'epblas_openblas_fuzz_(q|x|iq|ix)'`). The two trees are kept in sync by
 > hand. The per-routine table below is kind10-specific (bench numbers not
 > re-gathered for kind16; the algorithm is identical at both precisions).

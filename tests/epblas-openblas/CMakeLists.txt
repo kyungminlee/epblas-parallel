@@ -73,10 +73,10 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     # `eplinalg::blas` supplies lsame_/xerbla_. Both `_overlay_archive`
     # and `_migrated_archive` reference them as U-symbols — the
     # objcopied `_migrated_archive` is the per-precision
-    # `eplinalg::eblas` archive with overlay routines renamed, and the
+    # `eplinalg::eyblas` archive with overlay routines renamed, and the
     # per-precision archive never carried lsame_/xerbla_. Those live
     # in the separate std-precision `eplinalg::blas`, transitively
-    # available via the `eblas` Config's find_dependency on
+    # available via the `eyblas` Config's find_dependency on
     # eplinalgStdBlas.
     if(IS_DIRECTORY ${_consist_target_dir})
         file(GLOB _consist_shims CONFIGURE_DEPENDS

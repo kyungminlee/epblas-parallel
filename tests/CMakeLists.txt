@@ -56,7 +56,7 @@ function(_epblas_make_migrated_archive arch_name routines)
     add_custom_command(
         OUTPUT ${_archive}
         COMMAND ${CMAKE_OBJCOPY} --redefine-syms=${_redef_file}
-                $<TARGET_FILE:eplinalg::${BASELINE_PREFIX}blas>
+                $<TARGET_FILE:eplinalg::${LIB_PREFIX}blas>
                 ${_archive}
         DEPENDS ${_redef_file}
         COMMENT "objcopy: emitting lib${arch_name}.a"
@@ -69,10 +69,6 @@ endfunction()
 
 foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     set(LIB_PREFIX "${EPBLAS_PARALLEL_PREFIX_${_target}}")
-    # The eplinalg baseline archive being renamed is single-letter
-    # under the v0.6.0 pin (eplinalg::eblas), while our archive names
-    # carry the two-letter prefix (libeyblas_migrated.a).
-    set(BASELINE_PREFIX "${EPBLAS_PARALLEL_BASELINE_PREFIX_${_target}}")
     _epblas_make_migrated_archive(${LIB_PREFIX}blas_migrated
         "${EPBLAS_PARALLEL_OVERLAY_ROUTINES_${_target}}")
     if(TARGET ${LIB_PREFIX}blas_openblas)

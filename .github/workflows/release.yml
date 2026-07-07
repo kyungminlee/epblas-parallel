@@ -106,7 +106,7 @@ jobs:
           # every epblas-parallel release that ships against a newer
           # eplinalg — keeps the test slot reproducible and surfaces
           # the dependency in PR review.
-          TAG="${{ inputs.eplinalg_tag || 'v0.6.0' }}"
+          TAG="${{ inputs.eplinalg_tag || 'v0.8.0' }}"
           echo "eplinalg tag: $TAG"
 
           mkdir -p ${{ github.workspace }}/eplinalg-install
@@ -279,8 +279,8 @@ jobs:
             ### Test slot
 
             The `gfortran-15` slot additionally runs `ctest -L fuzz`
-            against the matching `eplinalg` release archives (eblas /
-            qblas / mblas, intelmpi flavor — same combo eplinalg's
+            against the matching `eplinalg` release archives (eyblas /
+            qxblas / mwblas, intelmpi flavor — same combo eplinalg's
             own release uses as its correctness signal). This is the
             release workflow's only correctness signal — heavier
             benches and perf sweeps are out of band.

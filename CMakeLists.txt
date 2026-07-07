@@ -31,30 +31,28 @@ include(FortranCompiler)
 # PREFIX (the real+complex routine-letter pair) names our CMake targets
 # AND archive files, following eplinalg's v0.8.0 convention where
 # package, target, and file name agree (`eyblas`, `eplinalg::eyblas`,
-# `libeyblas-gfortran-15.a`). BASELINE_PREFIX (single letter) names the
-# eplinalg baseline packages/targets we consume — the v0.6.0 pin
-# predates eplinalg's own e→ey rename, so its packages are still
-# `eblas` / `eplinalg::eblas`. Fold BASELINE_PREFIX into PREFIX when
-# the baseline pin is bumped to >= v0.8.0.
+# `libeyblas-gfortran-15.a`). The eplinalg baseline pin (>= v0.8.0)
+# uses the same two-letter names, so the one PREFIX table also names
+# the baseline packages/targets we consume (`find_package(eyblas)`,
+# `eplinalg::eyblas`).
 set(EPBLAS_PARALLEL_KNOWN_TARGETS kind10 kind16 multifloats)
 set(EPBLAS_PARALLEL_PREFIX_kind10       ey)
 set(EPBLAS_PARALLEL_PREFIX_kind16       qx)
 set(EPBLAS_PARALLEL_PREFIX_multifloats  mw)
-set(EPBLAS_PARALLEL_BASELINE_PREFIX_kind10       e)
-set(EPBLAS_PARALLEL_BASELINE_PREFIX_kind16       q)
-set(EPBLAS_PARALLEL_BASELINE_PREFIX_multifloats  m)
 
 # Per-target eplinalg baseline helper packages. Some per-precision BLAS
 # baselines pull in precision-specific helper libs whose imported targets
 # their own Config does NOT find_dependency — siblings are the consumer's
 # responsibility (see eplinalg CONTEXT §"No sibling-deps inside eplinalg").
 # These must be find_package'd before the baseline so its imported targets
-# resolve. The multifloats baseline (mblas) links la_constants_mf +
-# la_xisnan_mf (the DD type needs its own constants/isnan); kind10/kind16
-# baselines link only eplinalg::blas, which their Config find_dependency's.
+# resolve. As of the v0.8.0 baseline all three entries are empty — the
+# multifloats baseline folded its la_constants_mf/la_xisnan_mf helpers
+# into the archive, and every per-precision Config find_dependency's the
+# only thing it links (eplinalgStdBlas). The mechanism stays for future
+# baselines that grow sibling deps.
 set(EPBLAS_PARALLEL_BASELINE_DEPS_kind10       "")
 set(EPBLAS_PARALLEL_BASELINE_DEPS_kind16       "")
-set(EPBLAS_PARALLEL_BASELINE_DEPS_multifloats  la_constants_mf la_xisnan_mf)
+set(EPBLAS_PARALLEL_BASELINE_DEPS_multifloats  "")
 
 # Production discovery: a target builds iff its src dir exists. The
 # eplinalg per-target package is only checked later, before the test
@@ -121,8 +119,8 @@ function(_epblas_add_multifloats_subdir)
         include(FetchContent)
         set(MULTIFLOATS_GIT_REPO "https://github.com/kyungminlee/multifloats.git"
             CACHE STRING "Git URL for the multifloats library")
-        set(MULTIFLOATS_GIT_TAG "v0.6.0"
-            CACHE STRING "Git tag/branch/commit for multifloats (>= v0.6.0)")
+        set(MULTIFLOATS_GIT_TAG "v0.8.1"
+            CACHE STRING "Git tag/branch/commit for multifloats (>= v0.8.1)")
         message(STATUS "epblas-parallel: fetching multifloats from ${MULTIFLOATS_GIT_REPO} (${MULTIFLOATS_GIT_TAG})")
         FetchContent_Declare(multifloats_fetch
             GIT_REPOSITORY ${MULTIFLOATS_GIT_REPO}
@@ -361,7 +359,7 @@ option(BUILD_TESTING "Build the overlay test suite (needs fypp + eplinalg)" ON)
 if(BUILD_TESTING)
     enable_testing()
 
-    # Pull the prebuilt eplinalg migrated baseline (eblas/qblas/mblas) for each
+    # Pull the prebuilt eplinalg migrated baseline (eyblas/qxblas/mwblas) for each
     # built precision into the build tree and add it to CMAKE_PREFIX_PATH, so
     # the find_package() probes below resolve without a hand-staged install.
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchEplinalgBaseline.cmake)
@@ -376,9 +374,7 @@ if(BUILD_TESTING)
     # no separate probe is needed.
     set(EPBLAS_PARALLEL_TESTABLE_TARGETS "")
     foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
-        # Baseline package names are single-letter under the v0.6.0 pin
-        # (see the BASELINE_PREFIX table at the top).
-        set(_pkg "${EPBLAS_PARALLEL_BASELINE_PREFIX_${_target}}blas")
+        set(_pkg "${EPBLAS_PARALLEL_PREFIX_${_target}}blas")
         # Pre-find any baseline helper packages so the baseline's imported
         # targets resolve (see EPBLAS_PARALLEL_BASELINE_DEPS_* above).
         foreach(_dep IN LISTS EPBLAS_PARALLEL_BASELINE_DEPS_${_target})

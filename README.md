@@ -13,7 +13,7 @@ as **separate CMake packages**:
   overlay. C/C++/OpenMP kernels for every routine, all three targets
   (`kind10`, `kind16`, `multifloats`). Ships the per-precision composite
   `epblas-parallel::{ey,qx,mw}blas` as a drop-in replacement for
-  `eplinalg::{e,q,m}blas`.
+  `eplinalg::{ey,qx,mw}blas`.
 - **`epblas-openblas`** — experimental reference library. OpenBLAS D/Z
   port to extended precision, all three targets (`kind10`, `kind16`,
   `multifloats`). Used purely as an A/B comparison subject against
@@ -119,8 +119,8 @@ The configure log reports which targets are testable:
 
 ```
 -- epblas-parallel: building target kind16
--- epblas-parallel: tests enabled for target kind16 (qblas found)
--- epblas-parallel: eblas not on CMAKE_PREFIX_PATH — tests for kind10 disabled
+-- epblas-parallel: tests enabled for target kind16 (qxblas found)
+-- epblas-parallel: eyblas not on CMAKE_PREFIX_PATH — tests for kind10 disabled
 ```
 
 Tests/bench A/B against eplinalg's migrated baseline; the production
@@ -137,13 +137,13 @@ target_link_libraries(myapp PRIVATE epblas-parallel::qxblas)  # kind16, with ove
 
 `epblas-parallel::{ey,qx,mw}blas` is an INTERFACE composite that
 WHOLE_ARCHIVE-wraps the overlay archive. The overlay covers the full
-eplinalg baseline surface (`eplinalg::{e,q,m}blas` at the pinned
-v0.6.0), so the composite is a drop-in replacement. `find_package(epblas-parallel)` does not chase any
+eplinalg baseline surface (`eplinalg::{ey,qx,mw}blas` at the pinned
+v0.8.0), so the composite is a drop-in replacement. `find_package(epblas-parallel)` does not chase any
 eplinalg package — production consumers do not need eplinalg
 installed.
 
 To use the plain serial migrated BLAS instead, depend on eplinalg's
-package directly: `find_package(qblas); target_link_libraries(myapp PRIVATE eplinalg::qblas)`.
+package directly: `find_package(qxblas); target_link_libraries(myapp PRIVATE eplinalg::qxblas)`.
 
 To use the OpenBLAS-derived reference archive for A/B comparison:
 
