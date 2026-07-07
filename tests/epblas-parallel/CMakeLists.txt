@@ -102,7 +102,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     # bench's per-iter realloc/copy asymmetry. The
     # -ffunction-sections + --gc-sections combo keeps overlay and
     # migrated entry points close in the linked binary (avoids
-    # ~10% iTLB/page-walk skew from the rest of the eblas_parallel
+    # ~10% iTLB/page-walk skew from the rest of the eyblas_parallel
     # archive landing between them).
     if(IS_DIRECTORY ${_perf_target_dir})
         file(GLOB _perf_srcs CONFIGURE_DEPENDS

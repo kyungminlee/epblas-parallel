@@ -3,7 +3,7 @@
 # epblas-openblas Config.cmake
 #
 # Ships standalone OpenBLAS-derived reference archives
-# (`epblas-openblas::{e,q,m}blas`) used for A/B comparisons against the
+# (`epblas-openblas::{ey,qx,mw}blas`) used for A/B comparisons against the
 # eplinalg migrated baseline. The archives do NOT link `eplinalg::*` at
 # install time — they are raw archives, no composite — so no
 # find_dependency() on per-precision eplinalg packages is needed.

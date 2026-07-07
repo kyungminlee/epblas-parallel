@@ -13,7 +13,7 @@
 # boundary). Built with -ffp-contract=on (NOT =fast — fast folds across the
 # error-free two_prod/two_sum transforms) and WITHOUT -ffast-math.
 #
-# Builds a STATIC archive `${LIB_PREFIX}blas_openblas` (mblas_openblas)
+# Builds a STATIC archive `${LIB_PREFIX}blas_openblas` (mwblas_openblas)
 # consumed only by tests/epblas-openblas/. NOT wired into the public
 # `epblas-parallel::${LIB_PREFIX}blas` composite.
 #

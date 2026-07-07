@@ -12,7 +12,7 @@ as **separate CMake packages**:
 - **`epblas-parallel`** (the primary; same name as this repo) — production
   overlay. C/C++/OpenMP kernels for every routine, all three targets
   (`kind10`, `kind16`, `multifloats`). Ships the per-precision composite
-  `epblas-parallel::{e,q,m}blas` as a drop-in replacement for
+  `epblas-parallel::{ey,qx,mw}blas` as a drop-in replacement for
   `eplinalg::{e,q,m}blas`.
 - **`epblas-openblas`** — experimental reference library. OpenBLAS D/Z
   port to extended precision, all three targets (`kind10`, `kind16`,
@@ -52,8 +52,8 @@ cmake --build build-prod -j8
 ```
 
 This produces, for every target whose `src/epblas-parallel/<target>/`
-directory exists, the static archive `{e,q,m}blas_parallel.a` plus the
-INTERFACE composite `epblas-parallel::{e,q,m}blas`. No `eplinalg`
+directory exists, the static archive `lib{ey,qx,mw}blas_parallel.a` plus
+the INTERFACE composite `epblas-parallel::{ey,qx,mw}blas`. No `eplinalg`
 install is consulted.
 
 ## Running the tests / bench
@@ -132,13 +132,13 @@ build does not link it.
 find_package(epblas-parallel REQUIRED)
 
 add_executable(myapp main.f90)
-target_link_libraries(myapp PRIVATE epblas-parallel::qblas)  # kind16, with overlay
+target_link_libraries(myapp PRIVATE epblas-parallel::qxblas)  # kind16, with overlay
 ```
 
-`epblas-parallel::<prefix>blas` is an INTERFACE composite that
+`epblas-parallel::{ey,qx,mw}blas` is an INTERFACE composite that
 WHOLE_ARCHIVE-wraps the overlay archive. The overlay covers the full
-`eplinalg::<prefix>blas` surface, so the composite is a drop-in
-replacement. `find_package(epblas-parallel)` does not chase any
+eplinalg baseline surface (`eplinalg::{e,q,m}blas` at the pinned
+v0.6.0), so the composite is a drop-in replacement. `find_package(epblas-parallel)` does not chase any
 eplinalg package — production consumers do not need eplinalg
 installed.
 
@@ -149,7 +149,7 @@ To use the OpenBLAS-derived reference archive for A/B comparison:
 
 ```cmake
 find_package(epblas-openblas REQUIRED)
-target_link_libraries(bench PRIVATE epblas-openblas::eblas)  # or ::qblas / ::mblas
+target_link_libraries(bench PRIVATE epblas-openblas::eyblas)  # or ::qxblas / ::mwblas
 ```
 
 The reference package is independent — pull it in only if you need it.

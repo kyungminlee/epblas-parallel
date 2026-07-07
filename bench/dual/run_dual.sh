@@ -33,15 +33,15 @@ CORE4="${CORE4:-2-5}"
 mkdir -p "$OUT" "$DRV"
 
 case "$FAM" in
-  e) LIB=eblas; CC=gcc; EXT=c;   LINK="-lgfortran -lm";            REF=kind10 ;;
-  q) LIB=qblas; CC=gcc; EXT=c;   LINK="-lgfortran -lquadmath -lm"; REF=kind16 ;;
-  m) LIB=mblas; CC=g++; EXT=cpp; LINK="-lgfortran -lquadmath -lm"; REF=multifloats ;;
+  e) LIB=eyblas; CC=gcc; EXT=c;   LINK="-lgfortran -lm";            REF=kind10 ;;
+  q) LIB=qxblas; CC=gcc; EXT=c;   LINK="-lgfortran -lquadmath -lm"; REF=kind16 ;;
+  m) LIB=mwblas; CC=g++; EXT=cpp; LINK="-lgfortran -lquadmath -lm"; REF=multifloats ;;
   *) echo "unknown family '$FAM' (want e|q|m)" >&2; exit 2 ;;
 esac
 
 shopt -s nullglob
 # lsame_/xerbla_ (referenced as bare externals by the mig leg's netlib objects)
-# live in libblas-gfortran, NOT the per-precision lib${LIB}blas reference.
+# live in libblas-gfortran, NOT the per-precision lib${LIB} reference.
 refblas=( "$BUILD/_deps/eplinalg-$REF/lib/libblas-gfortran-"*.a )
 [[ ${#refblas[@]} -ge 1 ]] || { echo "refblas (libblas-gfortran) not found under build/_deps/eplinalg-$REF/lib" >&2; exit 1; }
 REFAS=( "${refblas[0]}" )

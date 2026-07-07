@@ -1,6 +1,6 @@
 # Hand-written parallel BLAS — kind16 (REAL(KIND=16) / __float128).
 #
-# Produces static archive `${LIB_PREFIX}blas_parallel` (= `qblas_parallel`
+# Produces static archive `${LIB_PREFIX}blas_parallel` (= `qxblas_parallel`
 # for kind16). __float128 has no hardware support on x86-64; every
 # add / multiply lowers to a libquadmath call (~hundreds of cycles).
 # Arithmetic dominates, so the overlay uses the unblocked Netlib

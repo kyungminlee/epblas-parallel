@@ -235,8 +235,8 @@ jobs:
 
             | Package | Imported targets | Role |
             |---------|-----------------|------|
-            | `epblas-parallel` | `epblas-parallel::{e,q,m}blas` (composite, INTERFACE), `epblas-parallel::{e,q,m}blas_parallel` (raw STATIC) | Production OpenMP-parallel overlay. The composite WHOLE_ARCHIVE-wraps the overlay so its symbols win at link time over any chained reference BLAS. |
-            | `epblas-openblas` | `epblas-openblas::{e,q,m}blas` (STATIC) | OpenBLAS-derived reference archives. Never wired into the composite — A/B comparison surface only. |
+            | `epblas-parallel` | `epblas-parallel::{ey,qx,mw}blas` (composite, INTERFACE), `epblas-parallel::{ey,qx,mw}blas_parallel` (raw STATIC) | Production OpenMP-parallel overlay. The composite WHOLE_ARCHIVE-wraps the overlay so its symbols win at link time over any chained reference BLAS. |
+            | `epblas-openblas` | `epblas-openblas::{ey,qx,mw}blas` (STATIC) | OpenBLAS-derived reference archives. Never wired into the composite — A/B comparison surface only. |
 
             ### Targets
 
@@ -267,14 +267,14 @@ jobs:
 
             Consumers reach the overlay via
             `find_package(epblas-parallel)` + linking
-            `epblas-parallel::eblas` (or `qblas` / `mblas`). The
+            `epblas-parallel::eyblas` (or `qxblas` / `mwblas`). The
             composite already pulls in `OpenMP::OpenMP_C` (and
             `OpenMP::OpenMP_CXX` when the multifloats target is
             present) on the consumer's link line.
 
             The OpenBLAS reference is reached via
             `find_package(epblas-openblas)` + linking
-            `epblas-openblas::eblas`.
+            `epblas-openblas::eyblas`.
 
             ### Test slot
 

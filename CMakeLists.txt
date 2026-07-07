@@ -7,9 +7,9 @@
 #
 # Repo ships two CMake packages:
 #   * epblas-parallel — production parallel overlay + overlay-equipped
-#                       composite (`epblas-parallel::{e,q,m}blas`)
+#                       composite (`epblas-parallel::{ey,qx,mw}blas`)
 #   * epblas-openblas — OpenBLAS-derived reference archive used for A/B
-#                       comparisons (`epblas-openblas::{e,q,m}blas`)
+#                       comparisons (`epblas-openblas::{ey,qx,mw}blas`)
 
 cmake_minimum_required(VERSION 3.25)
 
@@ -28,18 +28,21 @@ include(FortranCompiler)
 # Baked-in (target, prefix) table. Adding a fourth target is a
 # coordinated change touching both repos.
 #
-# PREFIX (single letter, the real-routine prefix) names CMake targets
-# and the eplinalg baseline packages (`eblas`, `eplinalg::eblas` — the
-# v0.6.0 pin's target names). LIBPREFIX (the real+complex pair) names
-# the archive FILES, following eplinalg's file convention
-# (`libeyblas.a`, `libqxblas.a`, `libmwblas.a`).
+# PREFIX (the real+complex routine-letter pair) names our CMake targets
+# AND archive files, following eplinalg's v0.8.0 convention where
+# package, target, and file name agree (`eyblas`, `eplinalg::eyblas`,
+# `libeyblas-gfortran-15.a`). BASELINE_PREFIX (single letter) names the
+# eplinalg baseline packages/targets we consume — the v0.6.0 pin
+# predates eplinalg's own e→ey rename, so its packages are still
+# `eblas` / `eplinalg::eblas`. Fold BASELINE_PREFIX into PREFIX when
+# the baseline pin is bumped to >= v0.8.0.
 set(EPBLAS_PARALLEL_KNOWN_TARGETS kind10 kind16 multifloats)
-set(EPBLAS_PARALLEL_PREFIX_kind10       e)
-set(EPBLAS_PARALLEL_PREFIX_kind16       q)
-set(EPBLAS_PARALLEL_PREFIX_multifloats  m)
-set(EPBLAS_PARALLEL_LIBPREFIX_kind10       ey)
-set(EPBLAS_PARALLEL_LIBPREFIX_kind16       qx)
-set(EPBLAS_PARALLEL_LIBPREFIX_multifloats  mw)
+set(EPBLAS_PARALLEL_PREFIX_kind10       ey)
+set(EPBLAS_PARALLEL_PREFIX_kind16       qx)
+set(EPBLAS_PARALLEL_PREFIX_multifloats  mw)
+set(EPBLAS_PARALLEL_BASELINE_PREFIX_kind10       e)
+set(EPBLAS_PARALLEL_BASELINE_PREFIX_kind16       q)
+set(EPBLAS_PARALLEL_BASELINE_PREFIX_multifloats  m)
 
 # Per-target eplinalg baseline helper packages. Some per-precision BLAS
 # baselines pull in precision-specific helper libs whose imported targets
@@ -136,7 +139,7 @@ function(_epblas_add_multifloats_subdir)
     # Fortran-bindings multifloatsf out of `make all`) but also drops
     # the subdir's `cmake_install.cmake` from the parent install
     # script, which would leave consumers with a broken
-    # `find_package(multifloats)` that mblas_parallel's
+    # `find_package(multifloats)` that mwblas_parallel's
     # INTERFACE_LINK_LIBRARIES depends on. Re-chain just the C/C++
     # library's install script — the multifloats library archive +
     # headers + multifloatsConfig.cmake land in our install tree, while
@@ -153,7 +156,7 @@ function(_epblas_use_system_multifloats)
     # find_package's IMPORTED target is directory-scoped by default and
     # would be invisible to src/epblas-parallel/multifloats/CMakeLists.txt
     # (consumed from a sibling directory). Promote to GLOBAL so the link
-    # `target_link_libraries(mblas_parallel PUBLIC multifloats)` resolves
+    # `target_link_libraries(mwblas_parallel PUBLIC multifloats)` resolves
     # regardless of which subdir consumes it.
     set_target_properties(multifloats::multifloats PROPERTIES IMPORTED_GLOBAL TRUE)
 
@@ -213,7 +216,7 @@ add_subdirectory(src/epblas-parallel)
 add_subdirectory(src/epblas-openblas)
 
 # ── Composite INTERFACE targets (epblas-parallel package) ─────────
-# epblas-parallel::{e,q,m}blas wraps the overlay archive in
+# epblas-parallel::{ey,qx,mw}blas wraps the overlay archive in
 # WHOLE_ARCHIVE so every Fortran-callable symbol the overlay defines
 # lands in the consumer's binary. Without WHOLE_ARCHIVE a consumer
 # that chains another BLAS archive could resolve the same symbol
@@ -244,7 +247,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
     # Use the namespaced alias inside $<LINK_LIBRARY:...>. install(EXPORT)
     # does NOT introspect generator-expression bodies — it copies them
     # verbatim. The bare target name `${_overlay}` would survive into the
-    # installed Targets file and downstream linkers would try `-lqblas_parallel`
+    # installed Targets file and downstream linkers would try `-lqxblas_parallel`
     # against the system search path. The `epblas-parallel::` form resolves to
     # the IMPORTED target the export installs alongside the composite.
     target_link_libraries(${_composite} INTERFACE
@@ -255,12 +258,12 @@ endforeach()
 
 # ── Install + export ──────────────────────────────────────────────
 #
-# Library file names follow the eplinalg convention (v0.8.0):
-#   * type prefix is the real+complex pair — `libeyblas_parallel.a`,
-#     `libqxblas_openblas.a`, `libmwblas_parallel.a` (cf. eplinalg's
-#     `libeyblas-gfortran-15.a`); CMake target names keep the
-#     single-letter routine prefix, matching the v0.6.0 baseline's
-#     target names (`eplinalg::eblas`).
+# Target and library file names follow the eplinalg convention
+# (v0.8.0):
+#   * type prefix is the real+complex pair, and target name = file
+#     name — `eyblas_parallel` builds `libeyblas_parallel.a`,
+#     exported as `epblas-parallel::eyblas_parallel` (cf. eplinalg's
+#     `eplinalg::eyblas` / `libeyblas-gfortran-15.a`).
 #   * NO compiler tag — a name carries only the tags of toolchains
 #     that compile into the binary, and every archive here is pure
 #     C/C++ (cf. eplinalg's `libeypblas.a`, `libmultifloats.a`). The
@@ -280,20 +283,13 @@ set(_epblas_parallel_install_targets "")
 set(_epblas_openblas_install_targets "")
 foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
     set(_prefix "${EPBLAS_PARALLEL_PREFIX_${_target}}")
-    set(_libprefix "${EPBLAS_PARALLEL_LIBPREFIX_${_target}}")
     foreach(_t ${_prefix}blas_parallel ${_prefix}blas)  # raw + composite
         if(TARGET ${_t})
             list(APPEND _epblas_parallel_install_targets ${_t})
         endif()
     endforeach()
-    if(TARGET ${_prefix}blas_parallel)
-        set_target_properties(${_prefix}blas_parallel PROPERTIES
-            OUTPUT_NAME "${_libprefix}blas_parallel")
-    endif()
     if(TARGET ${_prefix}blas_openblas)
         list(APPEND _epblas_openblas_install_targets ${_prefix}blas_openblas)
-        set_target_properties(${_prefix}blas_openblas PROPERTIES
-            OUTPUT_NAME "${_libprefix}blas_openblas")
     endif()
 endforeach()
 
@@ -317,7 +313,7 @@ if(_epblas_parallel_install_targets)
     set(EPBLAS_PARALLEL_EXTRA_DEPENDENCIES "")
     if("multifloats" IN_LIST EPBLAS_PARALLEL_BUILT_TARGETS)
         string(APPEND EPBLAS_PARALLEL_OPENMP_COMPONENTS " CXX")
-        # mblas_parallel PUBLIC-links multifloats::multifloats; the
+        # mwblas_parallel PUBLIC-links multifloats::multifloats; the
         # IMPORTED target must exist on the consumer side or the
         # Targets file fails to load. multifloats is installed
         # alongside (see _epblas_add_multifloats_subdir above).
@@ -380,8 +376,9 @@ if(BUILD_TESTING)
     # no separate probe is needed.
     set(EPBLAS_PARALLEL_TESTABLE_TARGETS "")
     foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
-        set(_prefix "${EPBLAS_PARALLEL_PREFIX_${_target}}")
-        set(_pkg "${_prefix}blas")
+        # Baseline package names are single-letter under the v0.6.0 pin
+        # (see the BASELINE_PREFIX table at the top).
+        set(_pkg "${EPBLAS_PARALLEL_BASELINE_PREFIX_${_target}}blas")
         # Pre-find any baseline helper packages so the baseline's imported
         # targets resolve (see EPBLAS_PARALLEL_BASELINE_DEPS_* above).
         foreach(_dep IN LISTS EPBLAS_PARALLEL_BASELINE_DEPS_${_target})

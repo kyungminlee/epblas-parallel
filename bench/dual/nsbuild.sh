@@ -24,20 +24,17 @@ BUILD="${BUILD:-$ROOT/build}"
 OUT="${OUT:-$ROOT/workspace/files/gap5/nsbench}"
 mkdir -p "$OUT"
 
-# LIBF = archive-file prefix (two-letter, eplinalg file convention);
-# LIB  = CMake-target prefix (single-letter) — the migrated archive is a
-# build-tree artifact named after its target, so it keeps the short form.
 case "$FAM" in
-  e) PARG="epblas_parallel_kind10";      OBG="epblas_openblas_kind10";      LIB=eblas; LIBF=eyblas ;;
-  q) PARG="epblas_parallel_kind16";      OBG="epblas_openblas_kind16";      LIB=qblas; LIBF=qxblas ;;
-  m) PARG="epblas_parallel_multifloats"; OBG="epblas_openblas_multifloats"; LIB=mblas; LIBF=mwblas ;;
+  e) PARG="epblas_parallel_kind10";      OBG="epblas_openblas_kind10";      LIB=eyblas ;;
+  q) PARG="epblas_parallel_kind16";      OBG="epblas_openblas_kind16";      LIB=qxblas ;;
+  m) PARG="epblas_parallel_multifloats"; OBG="epblas_openblas_multifloats"; LIB=mwblas ;;
   *) echo "unknown family '$FAM' (want e|q|m)" >&2; exit 2 ;;
 esac
 
 # Resolve the three source archives (untagged two-letter names — eplinalg
 # convention since the v0.7 rename; the archives carry no compiler tag).
-par_src="$BUILD/src/epblas-parallel/$PARG/lib${LIBF}_parallel.a"
-ob_src="$BUILD/src/epblas-openblas/$OBG/lib${LIBF}_openblas.a"
+par_src="$BUILD/src/epblas-parallel/$PARG/lib${LIB}_parallel.a"
+ob_src="$BUILD/src/epblas-openblas/$OBG/lib${LIB}_openblas.a"
 mig_src="$BUILD/tests/lib${LIB}_migrated.a"
 [[ -f "$par_src" ]] || { echo "par archive missing: $par_src" >&2; exit 1; }
 [[ -f "$ob_src"  ]] || { echo "ob archive missing: $ob_src"  >&2; exit 1; }

@@ -1,6 +1,6 @@
 # Hand-written parallel BLAS — kind10 (REAL(KIND=10) / 80-bit long double).
 #
-# Produces a STATIC archive `${LIB_PREFIX}blas_parallel` (= `eblas_parallel`
+# Produces a STATIC archive `${LIB_PREFIX}blas_parallel` (= `eyblas_parallel`
 # for kind10) that supplies overlay implementations of selected BLAS
 # entry points. Step 0 ships only a passthrough stub for egemm_ that
 # forwards to the migrated archive's renamed symbol `egemm_migrated_`

@@ -23,7 +23,7 @@ find_dependency(OpenMP COMPONENTS @EPBLAS_PARALLEL_OPENMP_COMPONENTS@)
 
 # Additional dependencies of overlay targets that were built into this
 # install. Currently: find_dependency(multifloats) when the multifloats
-# target is present (mblas_parallel's INTERFACE_LINK_LIBRARIES
+# target is present (mwblas_parallel's INTERFACE_LINK_LIBRARIES
 # references multifloats::multifloats).
 @EPBLAS_PARALLEL_EXTRA_DEPENDENCIES@
 
