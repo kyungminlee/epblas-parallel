@@ -27,10 +27,19 @@ include(FortranCompiler)
 
 # Baked-in (target, prefix) table. Adding a fourth target is a
 # coordinated change touching both repos.
+#
+# PREFIX (single letter, the real-routine prefix) names CMake targets
+# and the eplinalg baseline packages (`eblas`, `eplinalg::eblas` — the
+# v0.6.0 pin's target names). LIBPREFIX (the real+complex pair) names
+# the archive FILES, following eplinalg's file convention
+# (`libeyblas.a`, `libqxblas.a`, `libmwblas.a`).
 set(EPBLAS_PARALLEL_KNOWN_TARGETS kind10 kind16 multifloats)
 set(EPBLAS_PARALLEL_PREFIX_kind10       e)
 set(EPBLAS_PARALLEL_PREFIX_kind16       q)
 set(EPBLAS_PARALLEL_PREFIX_multifloats  m)
+set(EPBLAS_PARALLEL_LIBPREFIX_kind10       ey)
+set(EPBLAS_PARALLEL_LIBPREFIX_kind16       qx)
+set(EPBLAS_PARALLEL_LIBPREFIX_multifloats  mw)
 
 # Per-target eplinalg baseline helper packages. Some per-precision BLAS
 # baselines pull in precision-specific helper libs whose imported targets
@@ -246,13 +255,18 @@ endforeach()
 
 # ── Install + export ──────────────────────────────────────────────
 #
-# Library files and the per-package Targets export are tagged by
-# FORTRAN_COMPILER_TAG (e.g. `libeblas_parallel-gfortran-15.a`,
-# `epblas-parallelTargets-gfortran-15.cmake`) so installs built with
-# different compilers can coexist in the same prefix. The hand-written
-# Config.cmake.in files detect the consuming project's compiler tag at
-# `find_package()` time and load the matching Targets file — same
-# convention as eplinalg's `fortran_install_library`.
+# Library file names follow the eplinalg convention (v0.8.0):
+#   * type prefix is the real+complex pair — `libeyblas_parallel.a`,
+#     `libqxblas_openblas.a`, `libmwblas_parallel.a` (cf. eplinalg's
+#     `libeyblas-gfortran-15.a`); CMake target names keep the
+#     single-letter routine prefix, matching the v0.6.0 baseline's
+#     target names (`eplinalg::eblas`).
+#   * NO compiler tag — a name carries only the tags of toolchains
+#     that compile into the binary, and every archive here is pure
+#     C/C++ (cf. eplinalg's `libeypblas.a`, `libmultifloats.a`). The
+#     overlays implement the gfortran BLAS ABI but contain no
+#     Fortran-compiled objects. The Targets exports are likewise
+#     untagged (`epblas-parallelTargets.cmake`).
 #
 # Builds two packages out of one configure:
 #   epblas-parallel — composite INTERFACEs + raw overlay archives
@@ -266,39 +280,31 @@ set(_epblas_parallel_install_targets "")
 set(_epblas_openblas_install_targets "")
 foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
     set(_prefix "${EPBLAS_PARALLEL_PREFIX_${_target}}")
+    set(_libprefix "${EPBLAS_PARALLEL_LIBPREFIX_${_target}}")
     foreach(_t ${_prefix}blas_parallel ${_prefix}blas)  # raw + composite
         if(TARGET ${_t})
             list(APPEND _epblas_parallel_install_targets ${_t})
         endif()
     endforeach()
+    if(TARGET ${_prefix}blas_parallel)
+        set_target_properties(${_prefix}blas_parallel PROPERTIES
+            OUTPUT_NAME "${_libprefix}blas_parallel")
+    endif()
     if(TARGET ${_prefix}blas_openblas)
         list(APPEND _epblas_openblas_install_targets ${_prefix}blas_openblas)
+        set_target_properties(${_prefix}blas_openblas PROPERTIES
+            OUTPUT_NAME "${_libprefix}blas_openblas")
     endif()
 endforeach()
 
-# Tag the archive OUTPUT_NAME with the compiler tag. INTERFACE targets
-# (the composites) don't have an output file, so the rename only
-# applies to STATIC/SHARED archives.
-function(_epblas_tag_outputs)
-    foreach(_t IN LISTS ARGV)
-        get_target_property(_type ${_t} TYPE)
-        if(NOT _type STREQUAL "INTERFACE_LIBRARY")
-            set_target_properties(${_t} PROPERTIES
-                OUTPUT_NAME "${_t}-${FORTRAN_COMPILER_TAG}")
-        endif()
-    endforeach()
-endfunction()
-
 if(_epblas_parallel_install_targets)
-    _epblas_tag_outputs(${_epblas_parallel_install_targets})
-
     install(TARGETS ${_epblas_parallel_install_targets}
         EXPORT epblas-parallelTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
     install(EXPORT epblas-parallelTargets
-        FILE epblas-parallelTargets-${FORTRAN_COMPILER_TAG}.cmake
+        FILE epblas-parallelTargets.cmake
         NAMESPACE epblas-parallel::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epblas-parallel
     )
@@ -330,15 +336,13 @@ if(_epblas_parallel_install_targets)
 endif()
 
 if(_epblas_openblas_install_targets)
-    _epblas_tag_outputs(${_epblas_openblas_install_targets})
-
     install(TARGETS ${_epblas_openblas_install_targets}
         EXPORT epblas-openblasTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
     install(EXPORT epblas-openblasTargets
-        FILE epblas-openblasTargets-${FORTRAN_COMPILER_TAG}.cmake
+        FILE epblas-openblasTargets.cmake
         NAMESPACE epblas-openblas::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/epblas-openblas
     )

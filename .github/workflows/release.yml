@@ -187,15 +187,14 @@ jobs:
 
       - name: Build combined epblas-parallel tarball
         # Merge every per-compiler tarball into one
-        # ``epblas-parallel-vX.Y.Z-linux-x86_64`` archive that holds all
-        # compilers in a single install tree. Per-compiler tarballs ship
-        # alongside it for consumers who only need one toolchain. Since
-        # every library is tagged with ``-<compiler>`` in its filename
-        # (and the Targets export file is tagged the same way), the
-        # per-tarball extracts don't collide; the only paths that
-        # overlap across tarballs are the per-package Config.cmake
-        # files, which are identical across the same logical
-        # configuration.
+        # ``epblas-parallel-vX.Y.Z-linux-x86_64`` archive — same shape
+        # as eplinalg's combined tarball. Library names are UNTAGGED
+        # (pure-C/C++ archives per the eplinalg convention), so the
+        # per-compiler extracts fully overlap; the same C sources built
+        # by a different GCC are interchangeable deliverables, and the
+        # alphabetically-last extract (the newest GCC slot) wins —
+        # matching how eplinalg merges its own untagged libs
+        # (``libeypblas.a``, ``libmultifloats.a``).
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ARCHIVE="epblas-parallel-v${VERSION}-linux-x86_64"
@@ -219,18 +218,18 @@ jobs:
 
             ### Combined archive
 
-            ``epblas-parallel-vX.Y.Z-linux-x86_64.tar.gz`` bundles every
-            per-compiler archive into a single install tree. Every
-            library file is tagged with its compiler tag in the
-            filename (e.g. ``libeblas_parallel-gfortran-15.a``), so all
-            variants coexist without collisions. Extract once and
-            select the variant you want via
-            ``find_package(epblas-parallel)`` — the per-package
-            ``Config.cmake`` picks the matching Targets file by
-            detecting the consumer's Fortran compiler tag.
-
-            Use the per-compiler tarballs when you only need a single
-            variant and want a smaller download.
+            ``epblas-parallel-vX.Y.Z-linux-x86_64.tar.gz`` merges the
+            per-compiler archives into a single install tree. Library
+            files follow the eplinalg naming convention: two-letter
+            (real+complex) type prefix and no compiler tag —
+            ``libeyblas_parallel.a``, ``libqxblas_parallel.a``,
+            ``libmwblas_parallel.a`` (cf. eplinalg's
+            ``libeyblas-gfortran-15.a``). No tag because the overlays
+            are pure C/C++: they implement the gfortran BLAS ABI but
+            contain no Fortran-compiled objects, so any archive links
+            against any consumer toolchain. In the merged tree the
+            newest GCC slot's archives win; use a per-compiler tarball
+            if you want the overlays built by a specific GCC.
 
             ### Packages (per archive)
 
@@ -241,18 +240,18 @@ jobs:
 
             ### Targets
 
-            | Target | Description | Library prefix |
-            |--------|-------------|----------------|
-            | `kind10` | 80-bit extended precision (`long double` / `_Complex long double`) | `e` / `y` |
-            | `kind16` | 128-bit quad precision (`__float128`) | `q` / `x` |
-            | `multifloats` | Double-double (`float64x2`) | `m` / `w` |
+            | Target | Description | Routine prefixes | Library file |
+            |--------|-------------|------------------|--------------|
+            | `kind10` | 80-bit extended precision (`long double` / `_Complex long double`) | `e` / `y` | `libeyblas_*.a` |
+            | `kind16` | 128-bit quad precision (`__float128`) | `q` / `x` | `libqxblas_*.a` |
+            | `multifloats` | Double-double (`float64x2`) | `m` / `w` | `libmwblas_*.a` |
 
             ### Compilers
 
-            | Compiler | Tag |
-            |----------|-----|
-            | GCC/gfortran 12 | `gfortran-12` |
-            | GCC/gfortran 15 | `gfortran-15` |
+            | Compiler | Per-compiler tarball |
+            |----------|----------------------|
+            | GCC/gfortran 12 | `epblas-parallel-gfortran-12-…` |
+            | GCC/gfortran 15 | `epblas-parallel-gfortran-15-…` |
 
             Intel oneAPI (ifx) and LLVM Flang are not yet covered by
             the release matrix — the overlay kernels lean on GCC-style

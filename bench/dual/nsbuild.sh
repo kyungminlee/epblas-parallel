@@ -24,21 +24,24 @@ BUILD="${BUILD:-$ROOT/build}"
 OUT="${OUT:-$ROOT/workspace/files/gap5/nsbench}"
 mkdir -p "$OUT"
 
+# LIBF = archive-file prefix (two-letter, eplinalg file convention);
+# LIB  = CMake-target prefix (single-letter) — the migrated archive is a
+# build-tree artifact named after its target, so it keeps the short form.
 case "$FAM" in
-  e) PARG="epblas_parallel_kind10";      OBG="epblas_openblas_kind10";      LIB=eblas ;;
-  q) PARG="epblas_parallel_kind16";      OBG="epblas_openblas_kind16";      LIB=qblas ;;
-  m) PARG="epblas_parallel_multifloats"; OBG="epblas_openblas_multifloats"; LIB=mblas ;;
+  e) PARG="epblas_parallel_kind10";      OBG="epblas_openblas_kind10";      LIB=eblas; LIBF=eyblas ;;
+  q) PARG="epblas_parallel_kind16";      OBG="epblas_openblas_kind16";      LIB=qblas; LIBF=qxblas ;;
+  m) PARG="epblas_parallel_multifloats"; OBG="epblas_openblas_multifloats"; LIB=mblas; LIBF=mwblas ;;
   *) echo "unknown family '$FAM' (want e|q|m)" >&2; exit 2 ;;
 esac
 
-# Resolve the three source archives (glob over the gfortran-NN version suffix).
-shopt -s nullglob
-par_src=( "$BUILD/src/epblas-parallel/$PARG/lib${LIB}_parallel"-gfortran-*.a )
-ob_src=(  "$BUILD/src/epblas-openblas/$OBG/lib${LIB}_openblas"-gfortran-*.a )
+# Resolve the three source archives (untagged two-letter names — eplinalg
+# convention since the v0.7 rename; the archives carry no compiler tag).
+par_src="$BUILD/src/epblas-parallel/$PARG/lib${LIBF}_parallel.a"
+ob_src="$BUILD/src/epblas-openblas/$OBG/lib${LIBF}_openblas.a"
 mig_src="$BUILD/tests/lib${LIB}_migrated.a"
-[[ ${#par_src[@]} -eq 1 ]] || { echo "par archive not unique: ${par_src[*]:-<none>}" >&2; exit 1; }
-[[ ${#ob_src[@]}  -eq 1 ]] || { echo "ob archive not unique: ${ob_src[*]:-<none>}"  >&2; exit 1; }
-[[ -f "$mig_src" ]]        || { echo "mig archive missing: $mig_src" >&2; exit 1; }
+[[ -f "$par_src" ]] || { echo "par archive missing: $par_src" >&2; exit 1; }
+[[ -f "$ob_src"  ]] || { echo "ob archive missing: $ob_src"  >&2; exit 1; }
+[[ -f "$mig_src" ]] || { echo "mig archive missing: $mig_src" >&2; exit 1; }
 
 # Build a redefine-syms map from an archive's GLOBAL DEFINED symbols.
 #   $1 archive  $2 prefix  $3 1=strip-_migrated_-and-re-suffix  $4 out map
@@ -61,7 +64,7 @@ ns_one() {
 }
 
 echo "nsbuild family=$FAM ($LIB)  ->  $OUT"
-ns_one "${par_src[0]}" "par_" 0
-ns_one "${ob_src[0]}"  "ob_"  0
+ns_one "$par_src" "par_" 0
+ns_one "$ob_src"  "ob_"  0
 ns_one "$mig_src"      "mig_" 1
 echo "done."
