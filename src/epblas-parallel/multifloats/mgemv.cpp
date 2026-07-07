@@ -82,12 +82,13 @@ static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const T
     #pragma omp parallel num_threads(nthreads)
 #endif
     {
-        std::ptrdiff_t tid = 0;
+        std::ptrdiff_t tid = 0, nth = nthreads;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
+        nth = omp_get_num_threads();
 #endif
-        const std::ptrdiff_t lo = blas_part_bound(m, tid, nthreads);
-        const std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nthreads);
+        const std::ptrdiff_t lo = blas_part_bound(m, tid, nth);
+        const std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nth);
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             const TR xj = x[j];
             if (eq0(xj)) continue;
@@ -122,12 +123,13 @@ static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const T
     #pragma omp parallel num_threads(nthreads)
 #endif
     {
-        std::ptrdiff_t tid = 0;
+        std::ptrdiff_t tid = 0, nth = nthreads;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
+        nth = omp_get_num_threads();
 #endif
-        const std::ptrdiff_t lo = blas_part_bound(m, tid, nthreads);
-        const std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nthreads);
+        const std::ptrdiff_t lo = blas_part_bound(m, tid, nth);
+        const std::ptrdiff_t hi = blas_part_bound(m, tid + 1, nth);
         for (std::ptrdiff_t j = 0; j < n; ++j) {
             const TR xj = x[j];
             if (eq0(xj)) continue;

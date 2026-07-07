@@ -173,9 +173,9 @@ static bool mtrmv_omp_contig(bool upper, bool trans, bool nounit,
         TR *buf_all = static_cast<TR *>(
             std::calloc((std::size_t)ncpu * (std::size_t)n, sizeof(TR)));
         if (!buf_all) { std::free(range); return false; }
-        #pragma omp parallel num_threads(ncpu)
+        #pragma omp parallel for schedule(static, 1) num_threads(ncpu)
+        for (std::ptrdiff_t tid = 0; tid < ncpu; ++tid)
         {
-            const std::ptrdiff_t tid = omp_get_thread_num();
             TR *y = &buf_all[(std::size_t)tid * n];  /* calloc-zeroed */
             std::ptrdiff_t m_from, m_to;
             if (upper) { m_from = range[ncpu - tid - 1]; m_to = range[ncpu - tid]; }

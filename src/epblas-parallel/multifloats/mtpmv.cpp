@@ -127,9 +127,9 @@ static bool mtpmv_omp_contig(bool upper, bool trans, bool nounit,
         if (!buf) return false;
         /* Each thread folds its disjoint column range's AXPY into a private slot,
          * reading the ORIGINAL x (x is overwritten only in the reduction). */
-        #pragma omp parallel num_threads(ncpu)
+        #pragma omp parallel for schedule(static, 1) num_threads(ncpu)
+        for (std::ptrdiff_t t = 0; t < ncpu; ++t)
         {
-            std::ptrdiff_t t = omp_get_thread_num();
             std::ptrdiff_t c_from = range[t], c_to = range[t + 1];
             TR *slot = buf + (std::size_t)t * n;
             if (upper) {

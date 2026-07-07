@@ -174,9 +174,9 @@ static bool wtpmv_omp_contig(bool upper, bool trans, bool conj, bool nounit,
         if (ncpu <= 1) return false;
         TC *buf = static_cast<TC *>(std::calloc((std::size_t)ncpu * n, sizeof(TC)));
         if (!buf) return false;
-        #pragma omp parallel num_threads(ncpu)
+        #pragma omp parallel for schedule(static, 1) num_threads(ncpu)
+        for (std::ptrdiff_t t = 0; t < ncpu; ++t)
         {
-            std::ptrdiff_t t = omp_get_thread_num();
             std::ptrdiff_t c_from = range[t], c_to = range[t + 1];
             TC *slot = buf + (std::size_t)t * n;
             if (upper) {

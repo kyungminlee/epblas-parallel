@@ -204,8 +204,8 @@ __attribute__((noinline)) static ptrdiff_t qgbmv_n_omp(
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
-        ptrdiff_t lo = blas_part_bound(m, tid, nthreads);
-        ptrdiff_t hi = blas_part_bound(m, tid + 1, nthreads);
+        ptrdiff_t lo = blas_part_bound(m, tid, omp_get_num_threads());
+        ptrdiff_t hi = blas_part_bound(m, tid + 1, omp_get_num_threads());
         qgbmv_n_rowgather(m, n, kl, ku, lo, hi, a, lda, xptr, alpha, y, incy);
     }
 
@@ -257,8 +257,8 @@ __attribute__((noinline)) static ptrdiff_t qgbmv_t_omp(
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
-        ptrdiff_t lo = blas_part_bound(n, tid, nthreads);
-        ptrdiff_t hi = blas_part_bound(n, tid + 1, nthreads);
+        ptrdiff_t lo = blas_part_bound(n, tid, omp_get_num_threads());
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, omp_get_num_threads());
         qgbmv_t_colgather(m, n, kl, ku, lo, hi, a, lda, xptr, alpha, y, incy);
     }
 

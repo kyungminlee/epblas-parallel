@@ -186,8 +186,8 @@ __attribute__((noinline)) static bool wtpsv_omp(
                 #pragma omp parallel num_threads(nthreads)
                 {
                     std::ptrdiff_t tid = omp_get_thread_num();
-                    std::ptrdiff_t rlo = j1 + blas_part_bound(n - j1, tid, nthreads);
-                    std::ptrdiff_t rhi = j1 + blas_part_bound(n - j1, tid + 1, nthreads);
+                    std::ptrdiff_t rlo = j1 + blas_part_bound(n - j1, tid, omp_get_num_threads());
+                    std::ptrdiff_t rhi = j1 + blas_part_bound(n - j1, tid + 1, omp_get_num_threads());
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const TC xi = x[i];
                         if (ceq0(xi)) continue;
@@ -204,8 +204,8 @@ __attribute__((noinline)) static bool wtpsv_omp(
                 #pragma omp parallel num_threads(nthreads)
                 {
                     std::ptrdiff_t tid = omp_get_thread_num();
-                    std::ptrdiff_t rlo = blas_part_bound(j0, tid, nthreads);
-                    std::ptrdiff_t rhi = blas_part_bound(j0, tid + 1, nthreads);
+                    std::ptrdiff_t rlo = blas_part_bound(j0, tid, omp_get_num_threads());
+                    std::ptrdiff_t rhi = blas_part_bound(j0, tid + 1, omp_get_num_threads());
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const TC xi = x[i];
                         if (ceq0(xi)) continue;
@@ -223,8 +223,8 @@ __attribute__((noinline)) static bool wtpsv_omp(
                     #pragma omp parallel num_threads(nthreads)
                     {
                         std::ptrdiff_t tid = omp_get_thread_num();
-                        std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, nthreads);
-                        std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, nthreads);
+                        std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, omp_get_num_threads());
+                        std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const TC *col = &ap[cbL(i, n)];
                             x[i] = csub(x[i], mf_kernels::cdot(n - j1, &col[j1 - i], &x[j1], conj));
@@ -240,8 +240,8 @@ __attribute__((noinline)) static bool wtpsv_omp(
                     #pragma omp parallel num_threads(nthreads)
                     {
                         std::ptrdiff_t tid = omp_get_thread_num();
-                        std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, nthreads);
-                        std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, nthreads);
+                        std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, omp_get_num_threads());
+                        std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const TC *col = &ap[cbU(i)];
                             x[i] = csub(x[i], mf_kernels::cdot(j0, &col[0], &x[0], conj));

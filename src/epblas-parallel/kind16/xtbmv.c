@@ -265,8 +265,8 @@ __attribute__((noinline)) static ptrdiff_t xtbmv_omp(
     #pragma omp parallel num_threads(nthreads)
     {
         ptrdiff_t tid = omp_get_thread_num();
-        ptrdiff_t lo = blas_part_bound(n, tid, nthreads);
-        ptrdiff_t hi = blas_part_bound(n, tid + 1, nthreads);
+        ptrdiff_t lo = blas_part_bound(n, tid, omp_get_num_threads());
+        ptrdiff_t hi = blas_part_bound(n, tid + 1, omp_get_num_threads());
         xtbmv_rowgather(upper, trans, conj, nounit, n, k, lo, hi, a, lda, xptr, y);
         #pragma omp barrier
         if (incx == 1) for (ptrdiff_t i = lo; i < hi; ++i) x[i] = y[i];

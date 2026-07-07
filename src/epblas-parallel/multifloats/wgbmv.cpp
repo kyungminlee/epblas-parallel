@@ -57,8 +57,8 @@ static bool wgbmv_n_omp(std::ptrdiff_t m, std::ptrdiff_t n, std::ptrdiff_t KL, s
     #pragma omp parallel num_threads(nthreads)
     {
         const std::ptrdiff_t tid = omp_get_thread_num();
-        const std::ptrdiff_t r0 = blas_part_bound(m, tid, nthreads);
-        const std::ptrdiff_t r1 = blas_part_bound(m, tid + 1, nthreads);
+        const std::ptrdiff_t r0 = blas_part_bound(m, tid, omp_get_num_threads());
+        const std::ptrdiff_t r1 = blas_part_bound(m, tid + 1, omp_get_num_threads());
         const std::ptrdiff_t j0 = (r0 - KL > 0) ? (r0 - KL) : 0;
         const std::ptrdiff_t j1 = (r1 + KU < n) ? (r1 + KU) : n;
         for (std::ptrdiff_t j = j0; j < j1; ++j) {

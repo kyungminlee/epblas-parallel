@@ -97,9 +97,9 @@ __attribute__((noinline)) static bool whbmv_omp(
     TC *buf = static_cast<TC *>(std::calloc((std::size_t)num_cpu * n, sizeof(TC)));
     if (!buf) return false;
 
-    #pragma omp parallel num_threads(num_cpu)
+    #pragma omp parallel for schedule(static, 1) num_threads(num_cpu)
+    for (std::ptrdiff_t t = 0; t < num_cpu; ++t)
     {
-        std::ptrdiff_t t = omp_get_thread_num();
         std::ptrdiff_t m_from = range[t];
         std::ptrdiff_t m_to   = range[t + 1];
         TC *slot = buf + (std::size_t)t * n;

@@ -190,9 +190,9 @@ __attribute__((noinline)) static bool msymv_omp(
     if (!pool) return false;
     std::memset(pool, 0, static_cast<std::size_t>(ncpu) * per * sizeof(double));
 
-    #pragma omp parallel num_threads(ncpu)
+    #pragma omp parallel for schedule(static, 1) num_threads(ncpu)
+    for (std::ptrdiff_t tid = 0; tid < ncpu; ++tid)
     {
-        std::ptrdiff_t tid = omp_get_thread_num();
         double *yp_hi = pool + static_cast<std::size_t>(tid) * per;
         double *yp_lo = yp_hi + N_pad;
         for (std::ptrdiff_t i = (std::ptrdiff_t)range[tid]; i < (std::ptrdiff_t)range[tid + 1]; ++i)

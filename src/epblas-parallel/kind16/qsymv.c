@@ -109,9 +109,9 @@ void qsymv_core(
             TR *buf = (num_cpu > 1)
                 ? (TR *)calloc((size_t)num_cpu * (size_t)n, sizeof(TR)) : NULL;
             if (buf) {
-                #pragma omp parallel num_threads(num_cpu)
+                #pragma omp parallel for schedule(static, 1) num_threads(num_cpu)
+                for (ptrdiff_t t = 0; t < num_cpu; ++t)
                 {
-                    ptrdiff_t t = omp_get_thread_num();
                     TR *restrict slot = buf + (size_t)t * (size_t)n;
                     if (UPLO == 'U') {
                         /* Reversed thread->column assignment (task 14/15): the

@@ -493,7 +493,7 @@ __attribute__((noinline)) static bool mtbmv_omp(
             #pragma omp parallel num_threads(nthreads)
             {
                 std::ptrdiff_t tid = omp_get_thread_num();
-                std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
+                std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, omp_get_num_threads(), lo, hi);
                 if (!trans) mtbmv_colscatter_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
                 else        mtbmv_rowgather_t_soa(upper, nounit, n, k, lo, hi, a, lda, xh, xl, yh, yl);
                 #pragma omp barrier          /* all reads of x done before write-back */
@@ -522,7 +522,7 @@ __attribute__((noinline)) static bool mtbmv_omp(
     #pragma omp parallel num_threads(nthreads)
     {
         std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nthreads, lo, hi);
+        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, omp_get_num_threads(), lo, hi);
         if (!trans) mtbmv_colscatter(upper, nounit, n, k, lo, hi, a, lda, xptr, y);
         else        mtbmv_rowgather_t(upper, nounit, n, k, lo, hi, a, lda, xptr, y);
         #pragma omp barrier              /* all reads of x done before any write-back */

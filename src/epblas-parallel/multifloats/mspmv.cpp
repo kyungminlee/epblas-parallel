@@ -98,9 +98,9 @@ static bool mspmv_axpydot(bool upper, std::ptrdiff_t n, const TR *ap,
     TR *buf = static_cast<TR *>(std::calloc((std::size_t)num_cpu * n, sizeof(TR)));
     if (!buf) return false;
 
-    #pragma omp parallel num_threads(num_cpu)
+    #pragma omp parallel for schedule(static, 1) num_threads(num_cpu)
+    for (std::ptrdiff_t t = 0; t < num_cpu; ++t)
     {
-        std::ptrdiff_t t = omp_get_thread_num();
         std::ptrdiff_t m_from = range[t];
         std::ptrdiff_t m_to   = range[t + 1];
         TR *slot = buf + (std::size_t)t * n;
