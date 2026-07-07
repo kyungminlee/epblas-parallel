@@ -14,7 +14,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(epblas-parallel
-    VERSION 0.7.0
+    VERSION 0.8.0
     LANGUAGES C CXX Fortran)
 
 # Fortran is enabled at project() time (not behind BUILD_TESTING) so the
