@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cctype>
 #include "mf_util.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"   /* mul, add primitives */
@@ -58,6 +59,12 @@ const TR one_dd {1.0, 0.0};
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
 
 #ifdef MBLAS_SIMD_DD
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels and
+ * their helpers are compiled with the feature enabled and reached only behind
+ * mf_have_avx2_fma() at the call sites below. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 constexpr std::ptrdiff_t kSimdLane = simd_fast::NR;
 constexpr std::ptrdiff_t kMaxBlockM = 256;
@@ -262,6 +269,8 @@ inline void mtrmm_simd_diag(trmm_simd_op op, std::ptrdiff_t j_start, std::ptrdif
     }
 }
 
+#pragma GCC pop_options
+
 #endif  /* MBLAS_SIMD_DD */
 
 inline void mtrmm_lln_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, TR alpha,
@@ -326,11 +335,18 @@ inline void mtrmm_lut_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::pt
 
 #ifdef MBLAS_SIMD_DD
 
-/* Forward decls for scalar tails (defined below). */
+/* Forward decls for scalar tails (defined below). These MUST be declared at the
+ * baseline target — outside the push_options region — so their out-of-region
+ * definitions do NOT inherit the avx2,fma target attribute (GCC binds the
+ * attribute at a function's first declaration). */
 inline void mtrmm_rln_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, TR, const TR*, std::ptrdiff_t, TR*, std::ptrdiff_t, bool);
 inline void mtrmm_run_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, TR, const TR*, std::ptrdiff_t, TR*, std::ptrdiff_t, bool);
 inline void mtrmm_rlt_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, TR, const TR*, std::ptrdiff_t, TR*, std::ptrdiff_t, bool);
 inline void mtrmm_rut_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, TR, const TR*, std::ptrdiff_t, TR*, std::ptrdiff_t, bool);
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; see mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 /* AoS→SoA 4-cell transpose load: canonical simd_exact::load_dd4 (col + ofs). */
 using simd_exact::load_dd4;
@@ -504,6 +520,8 @@ inline void mtrmm_simd_diag_R(trmm_r_op op, std::ptrdiff_t i_start, std::ptrdiff
     }
 }
 
+#pragma GCC pop_options
+
 #endif  /* MBLAS_SIMD_DD */
 
 inline void mtrmm_rln_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t n, TR alpha,
@@ -597,7 +615,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
         while (ic >= 0) {
             const std::ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 #ifdef MBLAS_SIMD_DD
-            if (ib <= kMaxBlockM) {
+            if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
                 mtrmm_simd_diag(SLLN, j_start, j_end, ib, alpha,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
@@ -616,7 +634,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
         for (std::ptrdiff_t ic = 0; ic < m; ic += nb) {
             const std::ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 #ifdef MBLAS_SIMD_DD
-            if (ib <= kMaxBlockM) {
+            if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
                 mtrmm_simd_diag(SLUN, j_start, j_end, ib, alpha,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
@@ -636,7 +654,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
         for (std::ptrdiff_t ic = 0; ic < m; ic += nb) {
             const std::ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 #ifdef MBLAS_SIMD_DD
-            if (ib <= kMaxBlockM) {
+            if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
                 mtrmm_simd_diag(SLLT, j_start, j_end, ib, alpha,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
@@ -657,7 +675,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
         while (ic >= 0) {
             const std::ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 #ifdef MBLAS_SIMD_DD
-            if (ib <= kMaxBlockM) {
+            if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
                 mtrmm_simd_diag(SLUT, j_start, j_end, ib, alpha,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
@@ -692,12 +710,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
         for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
             const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 #ifdef MBLAS_SIMD_DD
-            mtrmm_simd_diag_R(RLN_OP, i_start, i_end, jb, alpha,
-                              &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#else
+            if (mf_have_avx2_fma()) {
+                mtrmm_simd_diag_R(RLN_OP, i_start, i_end, jb, alpha,
+                                  &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+            } else
+#endif
             mtrmm_rln_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#endif
             const std::ptrdiff_t trailing = n - (jc + jb);
             if (trailing > 0) {
                 const std::ptrdiff_t k0 = jc + jb;
@@ -712,12 +731,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
         while (jc >= 0) {
             const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 #ifdef MBLAS_SIMD_DD
-            mtrmm_simd_diag_R(RUN_OP, i_start, i_end, jb, alpha,
-                              &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#else
+            if (mf_have_avx2_fma()) {
+                mtrmm_simd_diag_R(RUN_OP, i_start, i_end, jb, alpha,
+                                  &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+            } else
+#endif
             mtrmm_run_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#endif
             if (jc > 0) {
                 mgemm_serial('N', 'N', my_M, jb, jc, &alpha,
                              B_chunk, ldb,
@@ -731,12 +751,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
         while (jc >= 0) {
             const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 #ifdef MBLAS_SIMD_DD
-            mtrmm_simd_diag_R(RLT_OP, i_start, i_end, jb, alpha,
-                              &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#else
+            if (mf_have_avx2_fma()) {
+                mtrmm_simd_diag_R(RLT_OP, i_start, i_end, jb, alpha,
+                                  &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+            } else
+#endif
             mtrmm_rlt_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#endif
             if (jc > 0) {
                 mgemm_serial('N', 'T', my_M, jb, jc, &alpha,
                              B_chunk, ldb,
@@ -749,12 +770,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
         for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
             const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 #ifdef MBLAS_SIMD_DD
-            mtrmm_simd_diag_R(RUT_OP, i_start, i_end, jb, alpha,
-                              &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#else
+            if (mf_have_avx2_fma()) {
+                mtrmm_simd_diag_R(RUT_OP, i_start, i_end, jb, alpha,
+                                  &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+            } else
+#endif
             mtrmm_rut_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#endif
             const std::ptrdiff_t trailing = n - (jc + jb);
             if (trailing > 0) {
                 const std::ptrdiff_t k0 = jc + jb;
@@ -801,8 +823,9 @@ void mtrmm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
     }
 #ifdef MBLAS_SIMD_DD
     /* Small-M (single-block) regime: route the unblocked path through the SIMD
-     * diag too — same kernel, over this slice's column range. */
-    if (m <= kMaxBlockM) {
+     * diag too — same kernel, over this slice's column range. Runtime-gated on
+     * AVX2/FMA; the scalar switch below is always compiled. */
+    if (mf_have_avx2_fma() && m <= kMaxBlockM) {
         trmm_simd_op op;
         if (TRANS == 'N') op = (UPLO == 'L') ? SLLN : SLUN;
         else           op = (UPLO == 'L') ? SLLT : SLUT;
@@ -829,18 +852,20 @@ void mtrmm_R_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
         return;
     }
 #ifdef MBLAS_SIMD_DD
-    trmm_r_op op;
-    if (TRANS == 'N') op = (UPLO == 'L') ? RLN_OP : RUN_OP;
-    else           op = (UPLO == 'L') ? RLT_OP : RUT_OP;
-    mtrmm_simd_diag_R(op, row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit);
-#else
+    if (mf_have_avx2_fma()) {
+        trmm_r_op op;
+        if (TRANS == 'N') op = (UPLO == 'L') ? RLN_OP : RUN_OP;
+        else           op = (UPLO == 'L') ? RLT_OP : RUT_OP;
+        mtrmm_simd_diag_R(op, row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit);
+        return;
+    }
+#endif
     switch (V) {
     case RLN: mtrmm_rln_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit); break;
     case RUN: mtrmm_run_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit); break;
     case RLT: mtrmm_rlt_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit); break;
     case RUT: mtrmm_rut_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit); break;
     }
-#endif
 }
 
 extern "C" void mtrmm_serial(

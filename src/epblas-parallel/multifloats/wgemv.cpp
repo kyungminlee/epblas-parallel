@@ -22,6 +22,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -62,6 +63,10 @@ using simd_exact::cload4;
  * y length M (beta already applied by the caller). SIMD-serial when MBLAS_SIMD_DD
  * (already beats ob's threaded path); scalar fallback threads over output rows. */
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; reached only behind the
+ * mf_have_avx2_fma() runtime probe at the wgemv_n_contig call sites. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 /* NoTrans SIMD core over the output-row slice [i_lo, i_hi): accumulates
  * alpha*A*x into the SoA y buffers for rows in the slice only. i_lo (and i_hi
  * for interior threads) are multiples of 4 so the 4-wide vector blocks never
@@ -108,12 +113,14 @@ static inline void wgemv_n_simd_rows(std::ptrdiff_t i_lo, std::ptrdiff_t i_hi, s
         }
     }
 }
-#endif
+#pragma GCC pop_options
+#endif  /* MBLAS_SIMD_DD */
 
 static void wgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const TC *a, std::size_t lda,
                            const TC *x, TC *y)
 {
 #ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) {
     /* Pack y to SoA (4 buffers: re_hi, re_lo, im_hi, im_lo). */
     const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
     double *y_rh = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
@@ -150,7 +157,9 @@ static void wgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const T
         y[i].im.limbs[0] = y_ih[i]; y[i].im.limbs[1] = y_il[i];
     }
     std::free(y_rh); std::free(y_rl); std::free(y_ih); std::free(y_il);
-#else
+    return;
+    }
+#endif
 #ifdef _OPENMP
     const bool use_omp = (m >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel if(use_omp)
@@ -178,16 +187,19 @@ static void wgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const T
         }
     }
 #endif
-#endif
 }
 
 /* Contiguous (unit-stride) Trans/ConjTrans core: y += alpha * op(A) * x, with x
  * length M and y length N (beta already applied). conj_a selects C (conjugate A)
  * vs T. SIMD-serial when MBLAS_SIMD_DD; scalar fallback threads over output cols. */
-static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const TC *a, std::size_t lda,
-                           const TC *x, TC *y, bool conj_a)
-{
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA Trans/ConjTrans core, compiled under target("avx2,fma"); reached only
+ * behind the mf_have_avx2_fma() runtime probe in wgemv_t_contig below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void wgemv_t_contig_simd(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const TC *a, std::size_t lda,
+                                const TC *x, TC *y, bool conj_a)
+{
     /* Pre-pack x to SoA; 4-lane cmul/cadd accumulator over i for each j;
      * horizontal-reduce. */
     const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
@@ -257,7 +269,16 @@ static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const T
         y[j] = cadd(y[j], cmul(alpha, s));
     }
     std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
-#else
+}
+#pragma GCC pop_options
+#endif  /* MBLAS_SIMD_DD */
+
+static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const TC *a, std::size_t lda,
+                           const TC *x, TC *y, bool conj_a)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { wgemv_t_contig_simd(m, n, alpha, a, lda, x, y, conj_a); return; }
+#endif
 #ifdef _OPENMP
     const bool use_omp = (n >= WGEMV_OMP_MIN && blas_omp_available());
     #pragma omp parallel for if(use_omp) schedule(static)
@@ -272,7 +293,6 @@ static void wgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, const T
         }
         y[j] = cadd(y[j], cmul(alpha, s));
     }
-#endif
 }
 
 static void wgemv_core(

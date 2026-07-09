@@ -8,6 +8,7 @@
 #include "../common/blas_omp.h"
 #include "mf_omp.h"
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -28,11 +29,14 @@ using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (
 }
 #endif
 
-/* Σ(|re|+|im|) over a contiguous unit-stride range — serial kernel, unchanged.
- * Carved out so the OpenMP partial-reduction can call it per sub-range. */
-static R mwasum_unit(std::ptrdiff_t n, const TC *x)
-{
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA kernel body — compiled under target("avx2,fma") so it builds even
+ * when the library's baseline -march is pre-Haswell; reached only behind the
+ * mf_have_avx2_fma() runtime probe below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static R mwasum_unit_simd(std::ptrdiff_t n, const TC *x)
+{
     __m256d a0 = _mm256_setzero_pd();
     __m256d a1 = _mm256_setzero_pd();
     __m256d a2 = _mm256_setzero_pd();
@@ -78,11 +82,21 @@ static R mwasum_unit(std::ptrdiff_t n, const TC *x)
     R s = horizontal_dd(a0, t);
     for (std::ptrdiff_t i = n4; i < n; ++i) s = s + fabsdd(x[i].re) + fabsdd(x[i].im);
     return s;
-#else
+}
+#pragma GCC pop_options
+#endif
+
+/* Σ(|re|+|im|) over a contiguous unit-stride range — serial kernel. Runtime
+ * dispatch: SIMD on Haswell+, scalar (always compiled) on Sandybridge/Ivy.
+ * Carved out so the OpenMP partial-reduction can call it per sub-range. */
+static R mwasum_unit(std::ptrdiff_t n, const TC *x)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return mwasum_unit_simd(n, x);
+#endif
     R s{0.0, 0.0};
     for (std::ptrdiff_t i = 0; i < n; ++i) s = s + fabsdd(x[i].re) + fabsdd(x[i].im);
     return s;
-#endif
 }
 
 #ifdef _OPENMP

@@ -16,6 +16,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
 #include <cstring>
 #include <omp.h>
@@ -55,13 +56,19 @@ using simd_fast::chreduce;
 
 #ifdef MBLAS_SIMD_DD
 namespace {
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; compiled with the feature
+ * enabled and reached only behind mf_have_avx2_fma() (via whemv_col at the gated
+ * call sites). Plain static (not always_inline) so it is legally called from the
+ * baseline whemv_col across the target mismatch. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 /* SIMD inner sweep for Hermitian column i over k in [k_lo,k_hi): the temp1-axpy
  * y[k] += temp1*A[k,i] folded into the SoA accumulator yacc, returning
  * temp2 = sum conj(A[k,i])*x[k]. Every yacc write is additive, so the same
  * instructions serve the serial path (yacc = shared y, in column order) and the
  * threaded path (yacc = private zero buffer, disjoint columns). */
-static inline __attribute__((always_inline)) TC
-whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const TC *a, std::size_t lda, TC alpha,
+static TC
+whemv_inner_simd(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const TC *a, std::size_t lda, TC alpha,
             const double *x_rh, const double *x_rl,
             const double *x_ih, const double *x_il,
             double *yacc_rh, double *yacc_rl,
@@ -132,6 +139,7 @@ whemv_inner(std::ptrdiff_t i, std::ptrdiff_t k_lo, std::ptrdiff_t k_hi, const TC
     }
     return temp2;
 }
+#pragma GCC pop_options
 
 /* One Hermitian column i's contribution ADDED into the SoA accumulator yacc:
  * the off-diagonal axpy + temp2 (whemv_inner) plus the real diagonal and
@@ -152,14 +160,14 @@ whemv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const TC *a, std::size
         yi = cadd(yi, cmul(temp1, aii_re));
         y_rh[i] = yi.re.limbs[0]; y_rl[i] = yi.re.limbs[1];
         y_ih[i] = yi.im.limbs[0]; y_il[i] = yi.im.limbs[1];
-        TC temp2 = whemv_inner(i, i + 1, n, a, lda, alpha,
+        TC temp2 = whemv_inner_simd(i, i + 1, n, a, lda, alpha,
                               x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
         TC yi2{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
         yi2 = cadd(yi2, cmul(alpha, temp2));
         y_rh[i] = yi2.re.limbs[0]; y_rl[i] = yi2.re.limbs[1];
         y_ih[i] = yi2.im.limbs[0]; y_il[i] = yi2.im.limbs[1];
     } else {
-        TC temp2 = whemv_inner(i, 0, i, a, lda, alpha,
+        TC temp2 = whemv_inner_simd(i, 0, i, a, lda, alpha,
                               x_rh, x_rl, x_ih, x_il, y_rh, y_rl, y_ih, y_il);
         TC aii_re{ A_(i, i).re, rzero };
         TC yi{ R{y_rh[i], y_rl[i]}, R{y_ih[i], y_il[i]} };
@@ -238,6 +246,7 @@ static void whemv_contig(bool lower, std::ptrdiff_t n, const TC *a, std::size_t 
                          const TC *x, TC *y)
 {
 #ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) {
     const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     double *x_rh = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *x_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
@@ -275,7 +284,9 @@ static void whemv_contig(bool lower, std::ptrdiff_t n, const TC *a, std::size_t 
     }
     std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
     std::free(y_rh); std::free(y_rl); std::free(y_ih); std::free(y_il);
-#else
+    return;
+    }
+#endif
     if (lower) {
         for (std::ptrdiff_t i = 0; i < n; ++i) {
             const TC temp1 = cmul(alpha, x[i]);
@@ -302,7 +313,6 @@ static void whemv_contig(bool lower, std::ptrdiff_t n, const TC *a, std::size_t 
             y[i] = cadd(y[i], cadd(cmul(temp1, aii_re), cmul(alpha, temp2)));
         }
     }
-#endif
 }
 
 static void whemv_core(

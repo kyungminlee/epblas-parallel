@@ -12,6 +12,7 @@
 #include <immintrin.h>
 #include "mf_simd_exact.h"
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -26,6 +27,10 @@ using mf_pred::gt;
 inline R cabs1(TC const &z) { return mag(z.re) + mag(z.im); }
 
 #ifdef WBLAS_SIMD_DD
+/* AVX2+FMA SoA argmax — target("avx2,fma") so it builds under a pre-Haswell
+ * baseline -march; reached only behind the mf_have_avx2_fma() probe below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 /* SoA argmax over a contiguous complex-DD range, 4 lanes/iter, so par beats the
  * scalar reference instead of tying it (see imamax.cpp for the real twin).
  *
@@ -39,7 +44,7 @@ inline R cabs1(TC const &z) { return mag(z.re) + mag(z.im); }
  * irrelevant to the comparison). */
 /* Deinterleave 4 complex-DD elements (re.hi,re.lo,im.hi,im.lo each) via a 4x4
  * transpose into SoA limb vectors. */
-inline void deint4c(const TC *p, __m256d &reh, __m256d &rel,
+inline void deint4c_simd(const TC *p, __m256d &reh, __m256d &rel,
                     __m256d &imh, __m256d &iml) {
     const double *d = reinterpret_cast<const double *>(p);
     __m256d r0 = _mm256_loadu_pd(d);
@@ -57,10 +62,10 @@ inline void deint4c(const TC *p, __m256d &reh, __m256d &rel,
 }
 /* |re|+|im| for 4 lanes: abs(x) = (|hi|, sign(hi)*lo) branchlessly, summed
  * with the exact EFT add. */
-inline void cabs1_4(const TC *p, __m256d &mh, __m256d &ml) {
+inline void cabs1_4_simd(const TC *p, __m256d &mh, __m256d &ml) {
     const __m256d sgn = _mm256_set1_pd(-0.0);
     __m256d reh, rel, imh, iml;
-    deint4c(p, reh, rel, imh, iml);
+    deint4c_simd(p, reh, rel, imh, iml);
     __m256d arh = _mm256_andnot_pd(sgn, reh);
     __m256d arl = _mm256_xor_pd(rel, _mm256_and_pd(reh, sgn));
     __m256d aih = _mm256_andnot_pd(sgn, imh);
@@ -68,7 +73,7 @@ inline void cabs1_4(const TC *p, __m256d &mh, __m256d &ml) {
     simd_exact::add(arh, arl, aih, ail, mh, ml);
 }
 
-inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
+__attribute__((noinline)) ptrdiff_t iwamax_scan_simd(ptrdiff_t n, const TC *x, R *bv_out)
 {
     if (n < 8) {
         ptrdiff_t best = 0;
@@ -81,7 +86,7 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
         return best;
     }
     __m256d vmh, vml;
-    cabs1_4(x, vmh, vml);
+    cabs1_4_simd(x, vmh, vml);
     __m256i vidx = _mm256_set_epi64x(3, 2, 1, 0);
     __m256i cur  = vidx;
     const __m256i four = _mm256_set1_epi64x(4);
@@ -90,7 +95,7 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
     for (; i + 4 <= n; i += 4) {
         cur = _mm256_add_epi64(cur, four);
         __m256d mh, ml;
-        cabs1_4(x + i, mh, ml);
+        cabs1_4_simd(x + i, mh, ml);
         __m256d gt  = _mm256_cmp_pd(mh, vmh, _CMP_GT_OQ);
         __m256d eq  = _mm256_cmp_pd(mh, vmh, _CMP_EQ_OQ);
         __m256d glo = _mm256_cmp_pd(ml, vml, _CMP_GT_OQ);
@@ -123,10 +128,17 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
     *bv_out = bv;
     return best;
 }
-#else
-/* Contiguous unit-stride scan: 0-based index of first max-|re|+|im| element. */
+#pragma GCC pop_options
+#endif
+
+/* Contiguous unit-stride scan: 0-based index of first max-|re|+|im| element.
+ * Runtime dispatch: SoA-SIMD scan on Haswell+, scalar (always compiled) on
+ * Sandybridge/Ivy. */
 inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
 {
+#ifdef WBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return iwamax_scan_simd(n, x, bv_out);
+#endif
     ptrdiff_t best = 0;
     R bv = cabs1(x[0]);
     for (ptrdiff_t i = 1; i < n; ++i) {
@@ -136,7 +148,6 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
     *bv_out = bv;
     return best;
 }
-#endif
 }
 
 #ifdef _OPENMP

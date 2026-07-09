@@ -23,6 +23,7 @@
  */
 
 #include "mgemm_kernel.h"
+#include "mf_dispatch.h"   /* mf_have_avx2_fma() runtime gate */
 #include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include <cstddef>
@@ -85,6 +86,9 @@ static void mgemm_core(
         TR *Ap = static_cast<TR *>(std::aligned_alloc(
             64, static_cast<std::size_t>(MC) * KC * sizeof(TR)));
 #ifdef MBLAS_SIMD_DD
+        /* Runtime AVX2/FMA dispatch: SIMD SoA path on Haswell+, scalar fallback
+         * (always compiled below) on pre-Haswell CPUs. See mf_dispatch.h. */
+        if (mf_have_avx2_fma()) {
         /* SoA Bp: round NC up to W = NR_LANE * NR_PAN for the trailing panel. */
         const std::ptrdiff_t W_simd = mgemm_simd_pack_W();
         const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
@@ -114,7 +118,9 @@ static void mgemm_core(
         std::free(Ap);
         std::free(Bp_hi);
         std::free(Bp_lo);
-#else
+        } else
+#endif
+        {
         TR *Bp = static_cast<TR *>(std::aligned_alloc(
             64, static_cast<std::size_t>(KC) * NC * sizeof(TR)));
         if (Ap && Bp) {
@@ -138,7 +144,7 @@ static void mgemm_core(
         }
         std::free(Ap);
         std::free(Bp);
-#endif /* MBLAS_SIMD_DD */
+        }
     }
 }
 

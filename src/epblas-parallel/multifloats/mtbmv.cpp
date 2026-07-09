@@ -28,6 +28,7 @@
 #define MTBMV_OMP_MIN 256
 #define MTBMV_MAX_CPUS 256
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -168,6 +169,11 @@ static void mtbmv_serial(bool upper, bool trans, bool nounit,
 }
 
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA SoA kernels — compiled under target("avx2,fma") so they build even
+ * when the library's baseline -march is pre-Haswell; reached only behind the
+ * mf_have_avx2_fma() runtime probe at the call sites in mtbmv_core/mtbmv_omp. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 /* NoTrans unit-stride, 4-wide SoA.  x := A*x is, per column j, an axpy of the
  * band segment of column j scaled by the broadcast x[j].  x is split to SoA
  * limb arrays ONCE (reused as both the broadcast source and the accumulation
@@ -326,6 +332,7 @@ static bool mtbmv_trans_soa(bool upper, bool nounit, std::ptrdiff_t n, std::ptrd
     std::free(xh); std::free(xl); std::free(yh); std::free(yl);
     return true;
 }
+#pragma GCC pop_options
 #endif
 
 #ifdef _OPENMP
@@ -395,6 +402,8 @@ static void mtbmv_colscatter(bool upper, bool nounit, std::ptrdiff_t n, std::ptr
 }
 
 #ifdef MBLAS_SIMD_DD
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 /* 4-wide SoA twin of mtbmv_colscatter: same disjoint-row ownership and same
  * per-row column order (hence bit-exact), with x in/y out as SoA limb arrays so
  * the inner axpy runs packed. The matrix column is deinterleaved inline; y rows
@@ -453,6 +462,7 @@ static void mtbmv_colscatter_soa(bool upper, bool nounit, std::ptrdiff_t n, std:
         }
     }
 }
+#pragma GCC pop_options
 #endif
 
 /* Threaded in-place triangular band matvec. Each thread owns a disjoint output-
@@ -477,8 +487,9 @@ __attribute__((noinline)) static bool mtbmv_omp(
     /* Both triangles thread the 4-wide SoA kernels: split x to SoA limb arrays
      * once, each thread fills its owned yh/yl rows (NoTrans column-scatter /
      * Trans row-gather), barrier, merge back. Disjoint row ownership + scalar
-     * per-row column/d order keep it bit-exact. Alloc failure -> scalar below. */
-    {
+     * per-row column/d order keep it bit-exact. Only entered on AVX2+FMA CPUs
+     * (the SoA kernels it calls are AVX2); alloc failure -> scalar below. */
+    if (mf_have_avx2_fma()) {
         const std::size_t np = ((std::size_t)n + 3) & ~(std::size_t)3;
         double *xh = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
         double *xl = static_cast<double *>(std::aligned_alloc(32, np * sizeof(double)));
@@ -558,13 +569,16 @@ static void mtbmv_core(
 
 #ifdef MBLAS_SIMD_DD
     /* 4-wide SoA — NoTrans axpy-per-column, Trans row-gather. A strided x is
-     * gathered into the SoA limb arrays and scattered back (xp is at logical 0). */
-    if (TRANS == 'N'
-        && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, xp, incx))
-        return;
-    if (TRANS == 'T'
-        && mtbmv_trans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, xp, incx))
-        return;
+     * gathered into the SoA limb arrays and scattered back (xp is at logical 0).
+     * Gated on AVX2+FMA at runtime; Sandybridge/Ivy takes the scalar core below. */
+    if (mf_have_avx2_fma()) {
+        if (TRANS == 'N'
+            && mtbmv_notrans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, xp, incx))
+            return;
+        if (TRANS == 'T'
+            && mtbmv_trans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, xp, incx))
+            return;
+    }
 #endif
 
     mtbmv_serial(UPLO == 'U', TRANS != 'N', nounit != 0,

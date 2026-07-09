@@ -24,6 +24,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -62,17 +63,15 @@ using simd_exact::load_dd4;
  * scatter over only its rows (matrix read contiguous in i; ascending j ->
  * bit-exact vs serial). SIMD build packs y to SoA and uses the AVX2 DD kernel;
  * the scalar fallback runs the reference inner loop. */
-static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const TR *a, std::size_t lda,
-                           const TR *x, TR *y)
-{
-    std::ptrdiff_t nthreads = 1;
-#ifdef _OPENMP
-    if (m >= MGEMV_OMP_MIN && blas_omp_should_thread()) {
-        nthreads = blas_omp_max_threads();
-        if (nthreads > MGEMV_MAX_CPUS) nthreads = MGEMV_MAX_CPUS;
-    }
-#endif
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA NoTrans core, compiled under target("avx2,fma") so it builds even when
+ * the library's baseline -march is pre-Haswell; reached only behind the
+ * mf_have_avx2_fma() runtime probe in mgemv_n_contig below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void mgemv_n_contig_simd(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const TR *a, std::size_t lda,
+                                const TR *x, TR *y, std::ptrdiff_t nthreads)
+{
     const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
     double *y_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
     double *y_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
@@ -118,7 +117,23 @@ static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const T
     }
     for (std::ptrdiff_t i = 0; i < m; ++i) { y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i]; }
     std::free(y_hi); std::free(y_lo);
-#else
+}
+#pragma GCC pop_options
+#endif  /* MBLAS_SIMD_DD */
+
+static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const TR *a, std::size_t lda,
+                           const TR *x, TR *y)
+{
+    std::ptrdiff_t nthreads = 1;
+#ifdef _OPENMP
+    if (m >= MGEMV_OMP_MIN && blas_omp_should_thread()) {
+        nthreads = blas_omp_max_threads();
+        if (nthreads > MGEMV_MAX_CPUS) nthreads = MGEMV_MAX_CPUS;
+    }
+#endif
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { mgemv_n_contig_simd(m, n, alpha, a, lda, x, y, nthreads); return; }
+#endif
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nthreads)
 #endif
@@ -138,20 +153,23 @@ static void mgemv_n_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const T
             for (std::ptrdiff_t i = lo; i < hi; ++i) y[i] = y[i] + t * aj[i];
         }
     }
-#endif
 }
 
 /* Contiguous Trans core: y += alpha*A^T*x, x len M, y len N (pre-beta'd).
  * Columns are independent dots over the shared read-only x; thread over j
  * (disjoint y[j], per-j reduction order fixed). SIMD build runs a 4-lane SoA
  * DD accumulator + hi/lo horizontal reduce; scalar fallback a plain dot. */
-static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const TR *a, std::size_t lda,
-                           const TR *x, TR *y)
+#ifdef MBLAS_SIMD_DD
+/* AVX2+FMA Trans core, compiled under target("avx2,fma"); reached only behind the
+ * mf_have_avx2_fma() runtime probe in mgemv_t_contig below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void mgemv_t_contig_simd(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const TR *a, std::size_t lda,
+                                const TR *x, TR *y)
 {
 #ifdef _OPENMP
     const bool use_omp = (n >= MGEMV_OMP_MIN && blas_omp_should_thread());
 #endif
-#ifdef MBLAS_SIMD_DD
     const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
     double *x_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
     double *x_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
@@ -194,8 +212,18 @@ static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const T
         y[j] = y[j] + alpha * s;
     }
     std::free(x_hi); std::free(x_lo);
-#else
+}
+#pragma GCC pop_options
+#endif  /* MBLAS_SIMD_DD */
+
+static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const TR *a, std::size_t lda,
+                           const TR *x, TR *y)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { mgemv_t_contig_simd(m, n, alpha, a, lda, x, y); return; }
+#endif
 #ifdef _OPENMP
+    const bool use_omp = (n >= MGEMV_OMP_MIN && blas_omp_should_thread());
     #pragma omp parallel for if(use_omp) schedule(static)
 #endif
     for (std::ptrdiff_t j = 0; j < n; ++j) {
@@ -204,7 +232,6 @@ static void mgemv_t_contig(std::ptrdiff_t m, std::ptrdiff_t n, TR alpha, const T
         for (std::ptrdiff_t i = 0; i < m; ++i) s = s + aj[i] * x[i];
         y[j] = y[j] + alpha * s;
     }
-#endif
 }
 
 static void mgemv_core(

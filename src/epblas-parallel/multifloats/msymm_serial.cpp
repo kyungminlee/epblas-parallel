@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
@@ -48,6 +49,11 @@ const TR one_dd {1.0, 0.0};
 #define C_(i, j)  c[static_cast<std::size_t>(j) * ldc + (i)]
 
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels and
+ * their helpers are compiled with the feature enabled and reached only behind
+ * mf_have_avx2_fma() at the call sites below. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 constexpr std::ptrdiff_t kSimdLane = simd_fast::NR;   /* 4 */
 constexpr std::ptrdiff_t kMaxBlockM = 256;
@@ -182,6 +188,7 @@ inline void simd_symm_diag_L_panels(std::ptrdiff_t ic, std::ptrdiff_t ib, std::p
     }
 }
 
+#pragma GCC pop_options
 #endif  /* MBLAS_SIMD_DD */
 
 /* Scalar fallback diag for SIDE='L' (also used when SIMD off or
@@ -218,6 +225,9 @@ void symm_diag_add_L(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t n, TR 
 }
 
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; see mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 /* AoS→SoA 4-cell transpose load: canonical simd_exact::load_dd4 (col + ofs). */
 using simd_exact::load_dd4;
@@ -296,6 +306,7 @@ inline void simd_symm_diag_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_
     }
 }
 
+#pragma GCC pop_options
 #endif  /* MBLAS_SIMD_DD */
 
 void symm_diag_add_R(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t m, TR alpha,
@@ -335,11 +346,12 @@ inline void diag_R_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t
                             TR *c, std::ptrdiff_t ldc, char UPLO)
 {
 #ifdef MBLAS_SIMD_DD
-    simd_symm_diag_R(jc, jb, m, alpha, a, lda, b, ldb, c, ldc, UPLO);
-    return;
-#else
-    symm_diag_add_R(jc, jb, m, alpha, a, lda, b, ldb, c, ldc, UPLO);
+    if (mf_have_avx2_fma()) {
+        simd_symm_diag_R(jc, jb, m, alpha, a, lda, b, ldb, c, ldc, UPLO);
+        return;
+    }
 #endif
+    symm_diag_add_R(jc, jb, m, alpha, a, lda, b, ldb, c, ldc, UPLO);
 }
 
 inline void diag_L_dispatch(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t n, TR alpha,
@@ -347,7 +359,7 @@ inline void diag_L_dispatch(std::ptrdiff_t ic, std::ptrdiff_t ib, std::ptrdiff_t
                             TR *c, std::ptrdiff_t ldc, char UPLO)
 {
 #ifdef MBLAS_SIMD_DD
-    if (ib <= kMaxBlockM) {
+    if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
         simd_symm_diag_L_panels(ic, ib, n, alpha, a, lda, b, ldb, c, ldc, UPLO);
         return;
     }

@@ -16,6 +16,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -32,11 +33,14 @@ using simd_exact::store_dd4;
 #endif
 }  // namespace
 
-/* Y := α·X + Y over a contiguous unit-stride range — serial kernel, unchanged.
- * Carved out so the OpenMP path can run it per disjoint sub-range. */
-static void maxpy_unit(std::ptrdiff_t n, TR alpha, const TR *x, TR *y)
-{
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA kernel body — compiled under target("avx2,fma") so it builds even
+ * when the library's baseline -march is pre-Haswell; reached only behind the
+ * mf_have_avx2_fma() runtime probe below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void maxpy_unit_simd(std::ptrdiff_t n, TR alpha, const TR *x, TR *y)
+{
     const __m256d ah = _mm256_set1_pd(alpha.limbs[0]);
     const __m256d al = _mm256_set1_pd(alpha.limbs[1]);
     const std::ptrdiff_t n4 = n & ~3;
@@ -51,9 +55,19 @@ static void maxpy_unit(std::ptrdiff_t n, TR alpha, const TR *x, TR *y)
         store_dd4(&y[i], nh, nl);
     }
     for (std::ptrdiff_t i = n4; i < n; ++i) y[i] = y[i] + alpha * x[i];
-#else
-    for (std::ptrdiff_t i = 0; i < n; ++i) y[i] = y[i] + alpha * x[i];
+}
+#pragma GCC pop_options
 #endif
+
+/* Y := α·X + Y over a contiguous unit-stride range — serial kernel. Runtime
+ * dispatch: SIMD on Haswell+, scalar (always compiled) on Sandybridge/Ivy.
+ * Carved out so the OpenMP path can run it per disjoint sub-range. */
+static void maxpy_unit(std::ptrdiff_t n, TR alpha, const TR *x, TR *y)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { maxpy_unit_simd(n, alpha, x, y); return; }
+#endif
+    for (std::ptrdiff_t i = 0; i < n; ++i) y[i] = y[i] + alpha * x[i];
 }
 
 #ifdef _OPENMP

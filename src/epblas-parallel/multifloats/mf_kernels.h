@@ -31,6 +31,7 @@
 #include <multifloats.h>
 #include "mf_simd_exact.h"
 #include "mf_pred.h"
+#include "mf_dispatch.h"
 
 namespace mf_kernels {
 
@@ -93,8 +94,15 @@ static inline void scatter_strided(std::ptrdiff_t n, V *x, std::ptrdiff_t inc, c
 
 #ifdef MBLAS_SIMD_DD
 
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; see mf_simd_fast.h.
+ * These shaped SoA kernels are only reached behind mf_have_avx2_fma() — they
+ * carry the _simd suffix and are dispatched to by the public wrappers below.
+ * The scalar twins (built unconditionally) run on pre-Haswell CPUs. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+
 /* xp[i] += t*cp[i] — 4-wide SoA, scalar tail. Order-free -> bit-exact. */
-static inline void axpy_add(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
+static inline void axpy_add_simd(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
     const __m256d th = _mm256_set1_pd(t.limbs[0]);
     const __m256d tl = _mm256_set1_pd(t.limbs[1]);
     std::ptrdiff_t i = 0;
@@ -109,7 +117,7 @@ static inline void axpy_add(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &
 }
 
 /* xp[i] -= t*cp[i] — 4-wide SoA, scalar tail. Order-free -> bit-exact. */
-static inline void axpy_sub(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
+static inline void axpy_sub_simd(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
     const __m256d th = _mm256_set1_pd(t.limbs[0]);
     const __m256d tl = _mm256_set1_pd(t.limbs[1]);
     std::ptrdiff_t i = 0;
@@ -125,7 +133,7 @@ static inline void axpy_sub(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &
 
 /* sum_i cp[i]*xp[i] — vector accumulator + one hreduce, scalar tail. The fold
  * reorders the reduction -> within tolerance, not bit-exact. */
-static inline TR dot(std::ptrdiff_t len, const TR *cp, const TR *xp) {
+static inline TR dot_simd(std::ptrdiff_t len, const TR *cp, const TR *xp) {
     __m256d sh = _mm256_setzero_pd(), sl = _mm256_setzero_pd();
     std::ptrdiff_t i = 0;
     for (; i + 4 <= len; i += 4) {
@@ -142,7 +150,7 @@ static inline TR dot(std::ptrdiff_t len, const TR *cp, const TR *xp) {
 /* ---- complex double-double kernels (w family) --------------------------- */
 
 /* xp[i] += t*cp[i] — 4-wide complex SoA, scalar tail. Order-free -> bit-exact. */
-static inline void caxpy_add(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
+static inline void caxpy_add_simd(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
     const simd_exact::cx4 tt = simd_exact::vbcast(t);
     std::ptrdiff_t i = 0;
     /* 8-wide head: two INDEPENDENT 4-lane complex chains. A complex MAC
@@ -172,7 +180,7 @@ static inline void caxpy_add(std::ptrdiff_t len, TC *xp, const TC *cp, const TC 
 }
 
 /* xp[i] -= t*cp[i] — 4-wide complex SoA, scalar tail. Order-free -> bit-exact. */
-static inline void caxpy_sub(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
+static inline void caxpy_sub_simd(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
     const simd_exact::cx4 tt = simd_exact::vbcast(t);
     std::ptrdiff_t i = 0;
     for (; i + 4 <= len; i += 4) {
@@ -186,7 +194,7 @@ static inline void caxpy_sub(std::ptrdiff_t len, TC *xp, const TC *cp, const TC 
 
 /* sum_i [conj]cp[i]*xp[i] — vector accumulator + one chreduce, scalar tail.
  * Reorders the reduction -> within tolerance, not bit-exact. */
-static inline TC cdot(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj) {
+static inline TC cdot_simd(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj) {
     simd_exact::cx4 s{ _mm256_setzero_pd(), _mm256_setzero_pd(),
                     _mm256_setzero_pd(), _mm256_setzero_pd() };
     std::ptrdiff_t i = 0;
@@ -208,7 +216,7 @@ static inline TC cdot(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj)
  * (mspr/mspr2/msyr/msyr2 + complex twins); x pre-split into SoA limb arrays by
  * the caller (doubles as the strided-x gather, so the kernel is unit-stride). */
 static inline void
-dd_axpy(std::ptrdiff_t n, const double *xh, const double *xl,
+dd_axpy_simd(std::ptrdiff_t n, const double *xh, const double *xl,
         double th, double tl, multifloats::float64x2 *ap)
 {
     const __m256d thb = _mm256_set1_pd(th);
@@ -255,7 +263,7 @@ dd_axpy(std::ptrdiff_t n, const double *xh, const double *xl,
  * the left-associative order of the reference `ap + x*t1 + y*t2`. One ap
  * read/write (vs two dd_axpy passes). */
 static inline void
-dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double tl,
+dd_axpy2_simd(std::ptrdiff_t n, const double *xh, const double *xl, double th, double tl,
          const double *yh, const double *yl, double sh, double sl,
          multifloats::float64x2 *ap)
 {
@@ -301,27 +309,32 @@ dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double
     }
 }
 
-#else  /* scalar fallbacks */
+#pragma GCC pop_options
 
-static inline void axpy_add(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
+#endif  /* MBLAS_SIMD_DD (SIMD kernel definitions) */
+
+/* Scalar twins — ALWAYS compiled (baseline ISA), so they run on pre-Haswell
+ * CPUs where mf_have_avx2_fma() is false. Bit-identical to the pre-dispatch
+ * scalar #else that used to sit here. */
+static inline void axpy_add_scalar(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
     for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] = xp[i] + t * cp[i];
 }
-static inline void axpy_sub(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
+static inline void axpy_sub_scalar(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
     for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] = xp[i] - t * cp[i];
 }
-static inline TR dot(std::ptrdiff_t len, const TR *cp, const TR *xp) {
+static inline TR dot_scalar(std::ptrdiff_t len, const TR *cp, const TR *xp) {
     TR s{0.0, 0.0};
     for (std::ptrdiff_t i = 0; i < len; ++i) s = s + cp[i] * xp[i];
     return s;
 }
 
-static inline void caxpy_add(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
+static inline void caxpy_add_scalar(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
     for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] = cadd(xp[i], cmul(t, cp[i]));
 }
-static inline void caxpy_sub(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
+static inline void caxpy_sub_scalar(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
     for (std::ptrdiff_t i = 0; i < len; ++i) xp[i] = csub(xp[i], cmul(t, cp[i]));
 }
-static inline TC cdot(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj) {
+static inline TC cdot_scalar(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj) {
     TC acc{ TR{0.0, 0.0}, TR{0.0, 0.0} };
     for (std::ptrdiff_t i = 0; i < len; ++i) {
         const TC e = conj ? cconj(cp[i]) : cp[i];
@@ -331,7 +344,7 @@ static inline TC cdot(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj)
 }
 
 static inline void
-dd_axpy(std::ptrdiff_t n, const double *xh, const double *xl,
+dd_axpy_scalar(std::ptrdiff_t n, const double *xh, const double *xl,
         double th, double tl, multifloats::float64x2 *ap)
 {
     const multifloats::float64x2 tv{th, tl};
@@ -342,7 +355,7 @@ dd_axpy(std::ptrdiff_t n, const double *xh, const double *xl,
 }
 
 static inline void
-dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double tl,
+dd_axpy2_scalar(std::ptrdiff_t n, const double *xh, const double *xl, double th, double tl,
          const double *yh, const double *yl, double sh, double sl,
          multifloats::float64x2 *ap)
 {
@@ -353,7 +366,63 @@ dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double
     }
 }
 
-#endif  /* MBLAS_SIMD_DD */
+/* Public wrappers — the API every band/packed/rank caller uses. Runtime
+ * dispatch: SIMD kernel on Haswell+ (behind mf_have_avx2_fma()), scalar twin on
+ * Sandybridge/Ivy. The probe is a cached CPUID bit, so the branch predicts
+ * perfectly; callers need no #ifdef of their own. */
+static inline void axpy_add(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { axpy_add_simd(len, xp, cp, t); return; }
+#endif
+    axpy_add_scalar(len, xp, cp, t);
+}
+static inline void axpy_sub(std::ptrdiff_t len, TR *xp, const TR *cp, const TR &t) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { axpy_sub_simd(len, xp, cp, t); return; }
+#endif
+    axpy_sub_scalar(len, xp, cp, t);
+}
+static inline TR dot(std::ptrdiff_t len, const TR *cp, const TR *xp) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return dot_simd(len, cp, xp);
+#endif
+    return dot_scalar(len, cp, xp);
+}
+static inline void caxpy_add(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { caxpy_add_simd(len, xp, cp, t); return; }
+#endif
+    caxpy_add_scalar(len, xp, cp, t);
+}
+static inline void caxpy_sub(std::ptrdiff_t len, TC *xp, const TC *cp, const TC &t) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { caxpy_sub_simd(len, xp, cp, t); return; }
+#endif
+    caxpy_sub_scalar(len, xp, cp, t);
+}
+static inline TC cdot(std::ptrdiff_t len, const TC *cp, const TC *xp, bool conj) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return cdot_simd(len, cp, xp, conj);
+#endif
+    return cdot_scalar(len, cp, xp, conj);
+}
+static inline void
+dd_axpy(std::ptrdiff_t n, const double *xh, const double *xl,
+        double th, double tl, multifloats::float64x2 *ap) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { dd_axpy_simd(n, xh, xl, th, tl, ap); return; }
+#endif
+    dd_axpy_scalar(n, xh, xl, th, tl, ap);
+}
+static inline void
+dd_axpy2(std::ptrdiff_t n, const double *xh, const double *xl, double th, double tl,
+         const double *yh, const double *yl, double sh, double sl,
+         multifloats::float64x2 *ap) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { dd_axpy2_simd(n, xh, xl, th, tl, yh, yl, sh, sl, ap); return; }
+#endif
+    dd_axpy2_scalar(n, xh, xl, th, tl, yh, yl, sh, sl, ap);
+}
 
 /* xp[i] += t1*c1[i] + t2*c2[i] — complex rank-2 column AXPY run as two
  * independent rank-1 caxpy_add passes. The fused single-pass form spilled (it

@@ -11,6 +11,7 @@
 #define MWNRM2_OMP_MIN 8192
 #define MWNRM2_MAX_CPUS 64
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -37,10 +38,13 @@ using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
 
 /* Pass-1 unit kernel: max(|re.hi|, |im.hi|) over a contiguous (incx==1) slice.
  * Max is exact → the combined global scale is BIT-EXACT regardless of split. */
-static double mwnrm2_maxabs_unit(std::ptrdiff_t n, const TC *x)
+#ifdef MBLAS_SIMD_DD
+/* AVX2+FMA pass-1 body — target("avx2,fma"); reached only behind the probe. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static double mwnrm2_maxabs_unit_simd(std::ptrdiff_t n, const TC *x)
 {
     double scale_hi = 0.0;
-#ifdef MBLAS_SIMD_DD
     __m256d mx = _mm256_setzero_pd();
     const __m256d absmask = _mm256_castsi256_pd(
         _mm256_set1_epi64x(static_cast<long long>(0x7FFFFFFFFFFFFFFFULL)));
@@ -59,21 +63,33 @@ static double mwnrm2_maxabs_unit(std::ptrdiff_t n, const TC *x)
         if (ar.limbs[0] > scale_hi) scale_hi = ar.limbs[0];
         if (ai.limbs[0] > scale_hi) scale_hi = ai.limbs[0];
     }
-#else
+    return scale_hi;
+}
+#pragma GCC pop_options
+#endif
+
+static double mwnrm2_maxabs_unit(std::ptrdiff_t n, const TC *x)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return mwnrm2_maxabs_unit_simd(n, x);
+#endif
+    double scale_hi = 0.0;
     for (std::ptrdiff_t i = 0; i < n; ++i) {
         R ar = fabsdd(x[i].re), ai = fabsdd(x[i].im);
         if (ar.limbs[0] > scale_hi) scale_hi = ar.limbs[0];
         if (ai.limbs[0] > scale_hi) scale_hi = ai.limbs[0];
     }
-#endif
     return scale_hi;
 }
 
 /* Pass-2 unit kernel: Σ (re/scale)² + (im/scale)² over a contiguous slice. */
-static R mwnrm2_ssq_unit(std::ptrdiff_t n, const TC *x, R scale)
+#ifdef MBLAS_SIMD_DD
+/* AVX2+FMA pass-2 body — target("avx2,fma"); reached only behind the probe. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static R mwnrm2_ssq_unit_simd(std::ptrdiff_t n, const TC *x, R scale)
 {
     R s{0.0, 0.0};
-#ifdef MBLAS_SIMD_DD
     R inv = R{1.0, 0.0} / scale;
     __m256d invh = _mm256_set1_pd(inv.limbs[0]);
     __m256d invl = _mm256_set1_pd(inv.limbs[1]);
@@ -109,12 +125,21 @@ static R mwnrm2_ssq_unit(std::ptrdiff_t n, const TC *x, R scale)
         R r = x[i].re / scale, m = x[i].im / scale;
         s = s + r * r + m * m;
     }
-#else
+    return s;
+}
+#pragma GCC pop_options
+#endif
+
+static R mwnrm2_ssq_unit(std::ptrdiff_t n, const TC *x, R scale)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return mwnrm2_ssq_unit_simd(n, x, scale);
+#endif
+    R s{0.0, 0.0};
     for (std::ptrdiff_t i = 0; i < n; ++i) {
         R r = x[i].re / scale, m = x[i].im / scale;
         s = s + r * r + m * m;
     }
-#endif
     return s;
 }
 

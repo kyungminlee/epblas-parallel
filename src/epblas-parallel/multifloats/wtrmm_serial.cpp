@@ -32,6 +32,7 @@
 #include <cstdlib>
 #include <cctype>
 #include "mf_util.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"   /* cmul, cadd primitives */
@@ -73,6 +74,12 @@ inline TC A_op(const TC *a, std::ptrdiff_t lda, std::ptrdiff_t row, std::ptrdiff
 /* ── SIDE = 'L' column-range cores ──────────────────────────────── */
 
 #ifdef MBLAS_SIMD_DD
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels and
+ * their helpers are compiled with the feature enabled and reached only behind
+ * mf_have_avx2_fma() at the call sites below. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 constexpr std::ptrdiff_t kSimdLane = simd_fast::NR;
 constexpr std::ptrdiff_t kMaxBlockM = 128;
@@ -343,6 +350,8 @@ inline void wtrmm_simd_diag(trmm_simd_op_w op, std::ptrdiff_t j_start, std::ptrd
     }
 }
 
+#pragma GCC pop_options
+
 #endif  /* MBLAS_SIMD_DD */
 
 inline void wtrmm_lln_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::ptrdiff_t m, TC alpha,
@@ -411,11 +420,18 @@ inline void wtrmm_lutc_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::p
 
 #ifdef MBLAS_SIMD_DD
 
-/* Forward decls for scalar tails (defined below). */
+/* Forward decls for scalar tails (defined below). These MUST be declared at the
+ * baseline target — outside the push_options region — so their out-of-region
+ * definitions do NOT inherit the avx2,fma target attribute (GCC binds the
+ * attribute at a function's first declaration). */
 inline void wtrmm_rln_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, TC, const TC*, std::ptrdiff_t, TC*, std::ptrdiff_t, bool);
 inline void wtrmm_run_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, TC, const TC*, std::ptrdiff_t, TC*, std::ptrdiff_t, bool);
 inline void wtrmm_rltc_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, TC, const TC*, std::ptrdiff_t, TC*, std::ptrdiff_t, bool, bool);
 inline void wtrmm_rutc_core(std::ptrdiff_t, std::ptrdiff_t, std::ptrdiff_t, TC, const TC*, std::ptrdiff_t, TC*, std::ptrdiff_t, bool, bool);
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; see mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 using simd_exact::cload4;
 using simd_exact::cstore4;
@@ -601,6 +617,8 @@ inline void wtrmm_simd_diag_R(wtrmm_r_op op, std::ptrdiff_t i_start, std::ptrdif
     }
 }
 
+#pragma GCC pop_options
+
 #endif  /* MBLAS_SIMD_DD */
 
 inline void wtrmm_rln_core(std::ptrdiff_t i_start, std::ptrdiff_t i_end, std::ptrdiff_t n, TC alpha,
@@ -701,7 +719,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
         while (ic >= 0) {
             const std::ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 #ifdef MBLAS_SIMD_DD
-            if (ib <= kMaxBlockM) {
+            if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
                 wtrmm_simd_diag(WSLLN, j_start, j_end, ib, alpha,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
@@ -717,7 +735,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
         for (std::ptrdiff_t ic = 0; ic < m; ic += nb) {
             const std::ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 #ifdef MBLAS_SIMD_DD
-            if (ib <= kMaxBlockM) {
+            if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
                 wtrmm_simd_diag(WSLUN, j_start, j_end, ib, alpha,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
@@ -736,7 +754,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
         for (std::ptrdiff_t ic = 0; ic < m; ic += nb) {
             const std::ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 #ifdef MBLAS_SIMD_DD
-            if (ib <= kMaxBlockM) {
+            if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
                 wtrmm_simd_diag(conj_flag ? WSLLC : WSLLT, j_start, j_end, ib, alpha,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
@@ -756,7 +774,7 @@ void blocked_chunk_L(trmm_variant_L V, std::ptrdiff_t j_start, std::ptrdiff_t j_
         while (ic >= 0) {
             const std::ptrdiff_t ib = (m - ic < nb) ? (m - ic) : nb;
 #ifdef MBLAS_SIMD_DD
-            if (ib <= kMaxBlockM) {
+            if (mf_have_avx2_fma() && ib <= kMaxBlockM) {
                 wtrmm_simd_diag(conj_flag ? WSLUC : WSLUT, j_start, j_end, ib, alpha,
                                 &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);
             } else
@@ -791,12 +809,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
         for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
             const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 #ifdef MBLAS_SIMD_DD
-            wtrmm_simd_diag_R(WRLN_OP, i_start, i_end, jb, alpha,
-                              &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#else
+            if (mf_have_avx2_fma()) {
+                wtrmm_simd_diag_R(WRLN_OP, i_start, i_end, jb, alpha,
+                                  &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+            } else
+#endif
             wtrmm_rln_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#endif
             const std::ptrdiff_t trailing = n - (jc + jb);
             if (trailing > 0) {
                 const std::ptrdiff_t k0 = jc + jb;
@@ -808,12 +827,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
         while (jc >= 0) {
             const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 #ifdef MBLAS_SIMD_DD
-            wtrmm_simd_diag_R(WRUN_OP, i_start, i_end, jb, alpha,
-                              &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#else
+            if (mf_have_avx2_fma()) {
+                wtrmm_simd_diag_R(WRUN_OP, i_start, i_end, jb, alpha,
+                                  &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+            } else
+#endif
             wtrmm_run_core(i_start, i_end, jb, alpha,
                            &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#endif
             if (jc > 0) {
                 wgemm_serial(NN[0], NN[0], my_M, jb, jc, &alpha, B_chunk, ldb, &A_(0, jc), lda, &one_cdd, &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
@@ -826,12 +846,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
         while (jc >= 0) {
             const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 #ifdef MBLAS_SIMD_DD
-            wtrmm_simd_diag_R(conj_flag ? WRLC_OP : WRLT_OP, i_start, i_end, jb, alpha,
-                              &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#else
+            if (mf_have_avx2_fma()) {
+                wtrmm_simd_diag_R(conj_flag ? WRLC_OP : WRLT_OP, i_start, i_end, jb, alpha,
+                                  &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+            } else
+#endif
             wtrmm_rltc_core(i_start, i_end, jb, alpha,
                             &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj_flag);
-#endif
             if (jc > 0) {
                 wgemm_serial(NN[0], gemm_trans[0], my_M, jb, jc, &alpha, B_chunk, ldb, &A_(jc, 0), lda, &one_cdd, &B_chunk[static_cast<std::size_t>(jc) * ldb], ldb);
             }
@@ -843,12 +864,13 @@ void blocked_chunk_R(trmm_variant_R V, std::ptrdiff_t i_start, std::ptrdiff_t i_
         for (std::ptrdiff_t jc = 0; jc < n; jc += nb) {
             const std::ptrdiff_t jb = (n - jc < nb) ? (n - jc) : nb;
 #ifdef MBLAS_SIMD_DD
-            wtrmm_simd_diag_R(conj_flag ? WRUC_OP : WRUT_OP, i_start, i_end, jb, alpha,
-                              &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
-#else
+            if (mf_have_avx2_fma()) {
+                wtrmm_simd_diag_R(conj_flag ? WRUC_OP : WRUT_OP, i_start, i_end, jb, alpha,
+                                  &A_(jc, jc), lda, &B_(0, jc), ldb, nounit);
+            } else
+#endif
             wtrmm_rutc_core(i_start, i_end, jb, alpha,
                             &A_(jc, jc), lda, &B_(0, jc), ldb, nounit, conj_flag);
-#endif
             const std::ptrdiff_t trailing = n - (jc + jb);
             if (trailing > 0) {
                 const std::ptrdiff_t k0 = jc + jb;
@@ -894,8 +916,9 @@ void wtrmm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
     }
 #ifdef MBLAS_SIMD_DD
     /* Small-M (single-block) regime: route the unblocked path through the SIMD
-     * diag too — same kernel, over this slice's column range. */
-    if (m <= kMaxBlockM) {
+     * diag too — same kernel, over this slice's column range. Runtime-gated on
+     * AVX2/FMA; the scalar switch below is always compiled. */
+    if (mf_have_avx2_fma() && m <= kMaxBlockM) {
         trmm_simd_op_w op;
         if (TRANS == 'N')      op = (UPLO == 'L') ? WSLLN : WSLUN;
         else if (TRANS == 'T') op = (UPLO == 'L') ? WSLLT : WSLUT;
@@ -925,12 +948,15 @@ void wtrmm_R_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
         return;
     }
 #ifdef MBLAS_SIMD_DD
-    wtrmm_r_op op;
-    if (TRANS == 'N')      op = (UPLO == 'L') ? WRLN_OP : WRUN_OP;
-    else if (TRANS == 'T') op = (UPLO == 'L') ? WRLT_OP : WRUT_OP;
-    else                op = (UPLO == 'L') ? WRLC_OP : WRUC_OP;
-    wtrmm_simd_diag_R(op, row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit);
-#else
+    if (mf_have_avx2_fma()) {
+        wtrmm_r_op op;
+        if (TRANS == 'N')      op = (UPLO == 'L') ? WRLN_OP : WRUN_OP;
+        else if (TRANS == 'T') op = (UPLO == 'L') ? WRLT_OP : WRUT_OP;
+        else                op = (UPLO == 'L') ? WRLC_OP : WRUC_OP;
+        wtrmm_simd_diag_R(op, row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit);
+        return;
+    }
+#endif
     switch (V) {
     case WRLN: wtrmm_rln_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit); break;
     case WRUN: wtrmm_run_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit); break;
@@ -939,7 +965,6 @@ void wtrmm_R_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
     case WRLC: wtrmm_rltc_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 1); break;
     case WRUC: wtrmm_rutc_core(row_lo, row_hi, n, alpha, a, lda, b, ldb, nounit, 1); break;
     }
-#endif
 }
 
 extern "C" void wtrmm_serial(

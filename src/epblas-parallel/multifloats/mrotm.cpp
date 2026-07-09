@@ -24,6 +24,7 @@
 #include "mf_simd_fast.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -34,7 +35,14 @@ using mf_pred::lt0;
 using mf_pred::eq0;
 
 #ifdef MBLAS_SIMD_DD
-inline void load4(const TR *p, __m256d &h, __m256d &l) {
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels and
+ * their load/store/broadcast helpers are compiled with the feature enabled and
+ * reached only behind mf_have_avx2_fma() at the dispatchers below. Each *_simd
+ * kernel runs the 4-wide SoA-DD body and finishes with the same scalar tail as
+ * the always-compiled fallback, so the two are bit-identical. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+inline void load4_simd(const TR *p, __m256d &h, __m256d &l) {
     __m256d v0 = _mm256_loadu_pd(reinterpret_cast<const double *>(p));
     __m256d v1 = _mm256_loadu_pd(reinterpret_cast<const double *>(p + 2));
     __m256d lo = _mm256_unpacklo_pd(v0, v1);
@@ -42,7 +50,7 @@ inline void load4(const TR *p, __m256d &h, __m256d &l) {
     h = _mm256_permute4x64_pd(lo, 0xD8);
     l = _mm256_permute4x64_pd(hi, 0xD8);
 }
-inline void store4(TR *p, __m256d h, __m256d l) {
+inline void store4_simd(TR *p, __m256d h, __m256d l) {
     __m256d lo = _mm256_unpacklo_pd(h, l);
     __m256d hi = _mm256_unpackhi_pd(h, l);
     __m256d v0 = _mm256_permute2f128_pd(lo, hi, 0x20);
@@ -51,74 +59,101 @@ inline void store4(TR *p, __m256d h, __m256d l) {
     _mm256_storeu_pd(reinterpret_cast<double *>(p + 2), v1);
 }
 struct Bcast { __m256d h, l; };
-inline Bcast bcast(TR v) { return Bcast{_mm256_set1_pd(v.limbs[0]), _mm256_set1_pd(v.limbs[1])}; }
-#endif
+inline Bcast bcast_simd(TR v) { return Bcast{_mm256_set1_pd(v.limbs[0]), _mm256_set1_pd(v.limbs[1])}; }
 
-void rotm_neg(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y,
-              TR h11, TR h12, TR h21, TR h22) {
+void rotm_neg_simd(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y,
+                   TR h11, TR h12, TR h21, TR h22) {
     std::ptrdiff_t i = lo;
-#ifdef MBLAS_SIMD_DD
-    const Bcast b11 = bcast(h11), b12 = bcast(h12), b21 = bcast(h21), b22 = bcast(h22);
+    const Bcast b11 = bcast_simd(h11), b12 = bcast_simd(h12), b21 = bcast_simd(h21), b22 = bcast_simd(h22);
     for (; i + 4 <= hi; i += 4) {
         __m256d wh, wl, zh, zl;
-        load4(&x[i], wh, wl); load4(&y[i], zh, zl);
+        load4_simd(&x[i], wh, wl); load4_simd(&y[i], zh, zl);
         __m256d a_h, a_l, b_h, b_l, nh, nl;
         simd_fast::mul(wh, wl, b11.h, b11.l, a_h, a_l);
         simd_fast::mul(zh, zl, b12.h, b12.l, b_h, b_l);
         simd_fast::add(a_h, a_l, b_h, b_l, nh, nl);
-        store4(&x[i], nh, nl);
+        store4_simd(&x[i], nh, nl);
         simd_fast::mul(wh, wl, b21.h, b21.l, a_h, a_l);
         simd_fast::mul(zh, zl, b22.h, b22.l, b_h, b_l);
         simd_fast::add(a_h, a_l, b_h, b_l, nh, nl);
-        store4(&y[i], nh, nl);
+        store4_simd(&y[i], nh, nl);
     }
-#endif
     for (; i < hi; ++i) {
         TR w = x[i], z = y[i];
         x[i] = w * h11 + z * h12;
         y[i] = w * h21 + z * h22;
     }
 }
-void rotm_zero(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y, TR h12, TR h21) {
+void rotm_zero_simd(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y, TR h12, TR h21) {
     std::ptrdiff_t i = lo;
-#ifdef MBLAS_SIMD_DD
-    const Bcast b12 = bcast(h12), b21 = bcast(h21);
+    const Bcast b12 = bcast_simd(h12), b21 = bcast_simd(h21);
     for (; i + 4 <= hi; i += 4) {
         __m256d wh, wl, zh, zl;
-        load4(&x[i], wh, wl); load4(&y[i], zh, zl);
+        load4_simd(&x[i], wh, wl); load4_simd(&y[i], zh, zl);
         __m256d p_h, p_l, nh, nl;
         simd_fast::mul(zh, zl, b12.h, b12.l, p_h, p_l);
         simd_fast::add(wh, wl, p_h, p_l, nh, nl);
-        store4(&x[i], nh, nl);
+        store4_simd(&x[i], nh, nl);
         simd_fast::mul(wh, wl, b21.h, b21.l, p_h, p_l);
         simd_fast::add(p_h, p_l, zh, zl, nh, nl);
-        store4(&y[i], nh, nl);
+        store4_simd(&y[i], nh, nl);
     }
-#endif
     for (; i < hi; ++i) {
         TR w = x[i], z = y[i];
         x[i] = w + z * h12;
         y[i] = w * h21 + z;
     }
 }
-void rotm_pos(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y, TR h11, TR h22) {
+void rotm_pos_simd(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y, TR h11, TR h22) {
     std::ptrdiff_t i = lo;
-#ifdef MBLAS_SIMD_DD
-    const Bcast b11 = bcast(h11), b22 = bcast(h22);
+    const Bcast b11 = bcast_simd(h11), b22 = bcast_simd(h22);
     const __m256d zerov = _mm256_setzero_pd();
     for (; i + 4 <= hi; i += 4) {
         __m256d wh, wl, zh, zl;
-        load4(&x[i], wh, wl); load4(&y[i], zh, zl);
+        load4_simd(&x[i], wh, wl); load4_simd(&y[i], zh, zl);
         __m256d p_h, p_l, nh, nl;
         simd_fast::mul(wh, wl, b11.h, b11.l, p_h, p_l);
         simd_fast::add(p_h, p_l, zh, zl, nh, nl);
-        store4(&x[i], nh, nl);
+        store4_simd(&x[i], nh, nl);
         simd_fast::mul(b22.h, b22.l, zh, zl, p_h, p_l);
         simd_fast::add(_mm256_sub_pd(zerov, wh), _mm256_sub_pd(zerov, wl), p_h, p_l, nh, nl);
-        store4(&y[i], nh, nl);
+        store4_simd(&y[i], nh, nl);
     }
-#endif
     for (; i < hi; ++i) {
+        TR w = x[i], z = y[i];
+        x[i] = w * h11 + z;
+        y[i] = TR{-w.limbs[0], -w.limbs[1]} + h22 * z;
+    }
+}
+#pragma GCC pop_options
+#endif
+
+void rotm_neg(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y,
+              TR h11, TR h12, TR h21, TR h22) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { rotm_neg_simd(lo, hi, x, y, h11, h12, h21, h22); return; }
+#endif
+    for (std::ptrdiff_t i = lo; i < hi; ++i) {
+        TR w = x[i], z = y[i];
+        x[i] = w * h11 + z * h12;
+        y[i] = w * h21 + z * h22;
+    }
+}
+void rotm_zero(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y, TR h12, TR h21) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { rotm_zero_simd(lo, hi, x, y, h12, h21); return; }
+#endif
+    for (std::ptrdiff_t i = lo; i < hi; ++i) {
+        TR w = x[i], z = y[i];
+        x[i] = w + z * h12;
+        y[i] = w * h21 + z;
+    }
+}
+void rotm_pos(std::ptrdiff_t lo, std::ptrdiff_t hi, TR *x, TR *y, TR h11, TR h22) {
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { rotm_pos_simd(lo, hi, x, y, h11, h22); return; }
+#endif
+    for (std::ptrdiff_t i = lo; i < hi; ++i) {
         TR w = x[i], z = y[i];
         x[i] = w * h11 + z;
         y[i] = TR{-w.limbs[0], -w.limbs[1]} + h22 * z;

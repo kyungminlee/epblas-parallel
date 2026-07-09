@@ -13,6 +13,7 @@
 #define MNRM2_OMP_MIN 8192
 #define MNRM2_MAX_CPUS 64
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -36,10 +37,14 @@ using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (
 /* Pass-1 unit kernel: max|x.hi| over a contiguous (incx==1) slice. Max is
  * exact (no rounding), so the combined global scale is order-independent and
  * BIT-EXACT regardless of how the slice is split. */
-static double mnrm2_maxabs_unit(std::ptrdiff_t n, const TR *x)
+#ifdef MBLAS_SIMD_DD
+/* AVX2+FMA pass-1 body — compiled under target("avx2,fma") so it builds under a
+ * pre-Haswell baseline -march; reached only behind mf_have_avx2_fma() below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static double mnrm2_maxabs_unit_simd(std::ptrdiff_t n, const TR *x)
 {
     double scale_hi = 0.0;
-#ifdef MBLAS_SIMD_DD
     __m256d mx = _mm256_setzero_pd();
     const __m256d absmask = _mm256_castsi256_pd(
         _mm256_set1_epi64x(static_cast<long long>(0x7FFFFFFFFFFFFFFFULL)));
@@ -56,20 +61,32 @@ static double mnrm2_maxabs_unit(std::ptrdiff_t n, const TR *x)
         TR ax = fabsdd(x[i]);
         if (ax.limbs[0] > scale_hi) scale_hi = ax.limbs[0];
     }
-#else
+    return scale_hi;
+}
+#pragma GCC pop_options
+#endif
+
+static double mnrm2_maxabs_unit(std::ptrdiff_t n, const TR *x)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return mnrm2_maxabs_unit_simd(n, x);
+#endif
+    double scale_hi = 0.0;
     for (std::ptrdiff_t i = 0; i < n; ++i) {
         TR ax = fabsdd(x[i]);
         if (ax.limbs[0] > scale_hi) scale_hi = ax.limbs[0];
     }
-#endif
     return scale_hi;
 }
 
 /* Pass-2 unit kernel: Σ (x/scale)² over a contiguous (incx==1) slice. */
-static TR mnrm2_ssq_unit(std::ptrdiff_t n, const TR *x, TR scale)
+#ifdef MBLAS_SIMD_DD
+/* AVX2+FMA pass-2 body — target("avx2,fma"); reached only behind the probe. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static TR mnrm2_ssq_unit_simd(std::ptrdiff_t n, const TR *x, TR scale)
 {
     TR s{0.0, 0.0};
-#ifdef MBLAS_SIMD_DD
     /* Precompute inverse so the inner loop avoids dd_div. */
     TR inv = TR{1.0, 0.0} / scale;
     __m256d invh = _mm256_set1_pd(inv.limbs[0]);
@@ -111,9 +128,18 @@ static TR mnrm2_ssq_unit(std::ptrdiff_t n, const TR *x, TR scale)
     __m256d t = _mm256_add_pd(a1, a2);
     s = horizontal_dd(a0, t);
     for (std::ptrdiff_t i = n4; i < n; ++i) { TR u = x[i] / scale; s = s + u * u; }
-#else
-    for (std::ptrdiff_t i = 0; i < n; ++i) { TR u = x[i] / scale; s = s + u * u; }
+    return s;
+}
+#pragma GCC pop_options
 #endif
+
+static TR mnrm2_ssq_unit(std::ptrdiff_t n, const TR *x, TR scale)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return mnrm2_ssq_unit_simd(n, x, scale);
+#endif
+    TR s{0.0, 0.0};
+    for (std::ptrdiff_t i = 0; i < n; ++i) { TR u = x[i] / scale; s = s + u * u; }
     return s;
 }
 

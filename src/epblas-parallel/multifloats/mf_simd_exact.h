@@ -43,6 +43,11 @@
 #include <immintrin.h>
 #include <multifloats.h>
 #include "mf_simd_fast.h"   /* simd_fast::twoprod / twosum / fast2sum (EFTs) */
+#include "mf_dispatch.h"
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; see mf_simd_fast.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 namespace simd_exact {
 
@@ -360,5 +365,7 @@ static inline cx4 cgather4(const multifloats::complex64x2 *p, std::ptrdiff_t s)
 }
 
 }  // namespace simd_exact
+
+#pragma GCC pop_options
 
 #endif  // MBLAS_SIMD_DD

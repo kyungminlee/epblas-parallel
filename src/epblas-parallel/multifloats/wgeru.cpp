@@ -8,6 +8,7 @@
 #include <multifloats.h>
 #include "mf_kernels.h"
 #include "mf_pred.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
 #include "mf_simd_exact.h"
@@ -39,13 +40,15 @@ using simd_exact::cstore4;
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
-/* Contiguous (unit-stride) core: A += alpha * x * y^T, x length M, y length N.
- * SIMD column-AXPY (cmul/cadd) when MBLAS_SIMD_DD; columns of A disjoint
- * so OMP-over-j is race-free and bit-exact. Strided callers gather x/y around it. */
-static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, TC *a, std::size_t lda,
-                         const TC *x, const TC *y)
-{
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA kernel body — compiled under target("avx2,fma") so it builds even
+ * when the library's baseline -march is pre-Haswell; reached only behind the
+ * mf_have_avx2_fma() runtime probe below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void wgeru_contig_simd(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, TC *a, std::size_t lda,
+                              const TC *x, const TC *y)
+{
         const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
         double *x_rh = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
         double *x_rl = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
@@ -91,7 +94,20 @@ static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, TC *a, st
             for (; i < m; ++i) ajs[i] = cadd(ajs[i], cmul(t, x[i]));
         }
         std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
-#else
+}
+#pragma GCC pop_options
+#endif  /* MBLAS_SIMD_DD */
+
+/* Contiguous (unit-stride) core: A += alpha * x * y^T, x length M, y length N.
+ * Runtime dispatch: SIMD column-AXPY (cmul/cadd) on Haswell+, scalar (always
+ * compiled) fallback on Sandybridge/Ivy. Columns of A disjoint so OMP-over-j is
+ * race-free and bit-exact. Strided callers gather x/y around it. */
+static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, TC *a, std::size_t lda,
+                         const TC *x, const TC *y)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { wgeru_contig_simd(m, n, alpha, a, lda, x, y); return; }
+#endif
 #ifdef _OPENMP
         const bool use_omp = (n >= WGERU_OMP_MIN && blas_omp_available());
         #pragma omp parallel for if(use_omp) schedule(static)
@@ -104,7 +120,6 @@ static void wgeru_contig(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha, TC *a, st
                 for (std::ptrdiff_t i = 0; i < m; ++i) aj[i] = cadd(aj[i], cmul(t, x[i]));
             }
         }
-#endif
 }
 
 static void wgeru_core(

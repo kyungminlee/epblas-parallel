@@ -19,6 +19,7 @@
 #define WTBMV_OMP_MIN 256
 #define WTBMV_MAX_CPUS 256
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -65,6 +66,8 @@ __attribute__((noinline)) static TC cdot_rev(const TC *a, const TC *x, std::ptrd
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
 #ifdef MBLAS_SIMD_DD
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 /* 4-wide SoA AVX2 for complex double-double.  DD is arithmetic-bound (no native
  * SIMD for a scalar DD), so packing 4 INDEPENDENT complex64x2 values across the
  * ymm lanes — real/imag hi/lo each in its own register — quarters the op count.
@@ -223,6 +226,7 @@ static bool wtbmv_trans_soa(bool upper, bool conj, bool nounit, std::ptrdiff_t n
     std::free(xb); std::free(yb);
     return true;
 }
+#pragma GCC pop_options
 #endif  /* MBLAS_SIMD_DD */
 
 #ifdef _OPENMP
@@ -274,6 +278,8 @@ static void wtbmv_rowgather(bool upper, bool trans, bool conj, bool nounit,
 }
 
 #ifdef MBLAS_SIMD_DD
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 /* 4-wide SoA NoTrans column-scatter (the OMP twin of wtbmv_notrans_soa): each
  * thread owns output rows [lo,hi), iterating the columns that touch them and
  * reading every column's band segment CONTIGUOUSLY (cload4) — the row-gather's
@@ -324,6 +330,7 @@ static void wtbmv_colscatter_soa(bool upper, bool nounit, std::ptrdiff_t n, std:
         }
     }
 }
+#pragma GCC pop_options
 #endif  /* MBLAS_SIMD_DD */
 
 /* Threaded in-place complex triangular band matvec. Partition the output rows
@@ -344,8 +351,9 @@ __attribute__((noinline)) static bool wtbmv_omp(
     /* Both triangles thread the 4-wide SoA kernels: split x to SoA limb arrays
      * once, each thread fills its owned rows (NoTrans column-scatter / Trans
      * row-gather), barrier, merge back. Disjoint row ownership + scalar per-row
-     * column/d order keep it bit-exact. Alloc failure -> scalar path below. */
-    {
+     * column/d order keep it bit-exact. Only entered on AVX2+FMA CPUs (the SoA
+     * kernels it calls are AVX2); alloc failure -> scalar path below. */
+    if (mf_have_avx2_fma()) {
         const std::size_t np = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
         double *xb = static_cast<double *>(std::aligned_alloc(32, 4 * np * sizeof(double)));
         double *yb = static_cast<double *>(std::aligned_alloc(32, 4 * np * sizeof(double)));
@@ -409,14 +417,17 @@ static void wtbmv_core(
 #ifdef MBLAS_SIMD_DD
     /* Serial 4-wide SoA — NoTrans axpy-per-column, Trans/ConjTrans row-gather.
      * Handles any stride (strided x is gathered to SoA up front; the SoA core's
-     * 4x band speedup repays the O(N) gather). Alloc failure falls through to
-     * the scalar cores below. */
-    if (TRANS == 'N'
-        && wtbmv_notrans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, x, incx))
-        return;
-    if ((TRANS == 'T' || TRANS == 'C')
-        && wtbmv_trans_soa(UPLO == 'U', TRANS == 'C', nounit != 0, n, k, a, lda, x, incx))
-        return;
+     * 4x band speedup repays the O(N) gather). Gated on AVX2+FMA at runtime;
+     * Sandybridge/Ivy takes the scalar cores below. Alloc failure also falls
+     * through to the scalar cores. */
+    if (mf_have_avx2_fma()) {
+        if (TRANS == 'N'
+            && wtbmv_notrans_soa(UPLO == 'U', nounit != 0, n, k, a, lda, x, incx))
+            return;
+        if ((TRANS == 'T' || TRANS == 'C')
+            && wtbmv_trans_soa(UPLO == 'U', TRANS == 'C', nounit != 0, n, k, a, lda, x, incx))
+            return;
+    }
 #endif
 
     if (incx == 1) {

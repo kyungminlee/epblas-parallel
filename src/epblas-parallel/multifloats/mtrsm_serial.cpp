@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cctype>
 #include "mf_util.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"   /* mul, add, neg primitives */
@@ -55,6 +56,12 @@ const TR one_dd {1.0, 0.0};
 #define B_(i, j)  b[static_cast<std::size_t>(j) * ldb + (i)]
 
 #ifdef MBLAS_SIMD_DD
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels and
+ * their helpers are compiled with the feature enabled and reached only behind
+ * mf_have_avx2_fma() at the call sites below. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 /* ── SIMD 4-wide diagonal kernel for SIDE='L' variants.
  *
@@ -304,6 +311,8 @@ inline void mtrsm_simd_diag(trsm_simd_op op, std::ptrdiff_t j_start, std::ptrdif
     }
 }
 
+#pragma GCC pop_options
+
 #endif  /* MBLAS_SIMD_DD */
 
 /* ── Column-range "core" kernels: serial work over j ∈ [j_start, j_end). */
@@ -371,6 +380,10 @@ inline void mtrsm_lut_core(std::ptrdiff_t j_start, std::ptrdiff_t j_end, std::pt
  * as reference DTRSM 'R',*,*. */
 
 #ifdef MBLAS_SIMD_DD
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; see mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 /* AoS→SoA 4-cell transpose load: canonical simd_exact::load_dd4 (col + ofs). */
 using simd_exact::load_dd4;
@@ -625,6 +638,8 @@ inline void mtrsm_simd_diag_R(trsm_r_op op, std::ptrdiff_t m, std::ptrdiff_t n, 
     }
 }
 
+#pragma GCC pop_options
+
 #endif  /* MBLAS_SIMD_DD */
 
 inline void mtrsm_rln_core(std::ptrdiff_t n, std::ptrdiff_t m, TR alpha,
@@ -733,11 +748,12 @@ void blocked_chunk(trsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end,
     const TR one   = TR{ 1.0, 0.0};
     TR *B_chunk = &B_(0, j_start);
 
-/* Diagonal-solve helper: SIMD path if available, scalar otherwise. */
+/* Diagonal-solve helper: AVX2/FMA SIMD path at runtime on Haswell+, scalar
+ * otherwise. Both arms are always compiled; mf_have_avx2_fma() selects. */
 #ifdef MBLAS_SIMD_DD
 #define DIAG_SOLVE(op, scalar_core, ib_arg, alpha_arg)               \
     do {                                                              \
-        if ((ib_arg) <= kMaxBlockM)                                   \
+        if (mf_have_avx2_fma() && (ib_arg) <= kMaxBlockM)             \
             mtrsm_simd_diag(op, j_start, j_end, (ib_arg), (alpha_arg),\
                             &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);\
         else                                                          \
@@ -843,7 +859,7 @@ void mtrsm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
      * because use_blocked is false ⇒ M < 2·nb (= 128) ≤ kMaxBlockM (256).
      * Same kernel the blocked path already drives, so serial and parallel stay
      * bitwise-identical. */
-    if (m <= kMaxBlockM) {
+    if (mf_have_avx2_fma() && m <= kMaxBlockM) {
         static const trsm_simd_op op_of[4] = { SLLN, SLUN, SLLT, SLUT };
         mtrsm_simd_diag(op_of[V], j_start, j_end, m, alpha, a, lda, b, ldb, nounit);
         return;
@@ -865,11 +881,14 @@ void mtrsm_R_slice(char UPLO, char TRANS, std::ptrdiff_t row_lo, std::ptrdiff_t 
     if (Mslice <= 0) return;
     TR *b_slice = b + row_lo;
 #ifdef MBLAS_SIMD_DD
-    trsm_r_op op;
-    if (TRANS == 'N') op = (UPLO == 'L') ? TRSM_RLN : TRSM_RUN;
-    else           op = (UPLO == 'L') ? TRSM_RLT : TRSM_RUT;
-    mtrsm_simd_diag_R(op, Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
-#else
+    if (mf_have_avx2_fma()) {
+        trsm_r_op op;
+        if (TRANS == 'N') op = (UPLO == 'L') ? TRSM_RLN : TRSM_RUN;
+        else           op = (UPLO == 'L') ? TRSM_RLT : TRSM_RUT;
+        mtrsm_simd_diag_R(op, Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
+        return;
+    }
+#endif
     if (TRANS == 'N') {
         if (UPLO == 'L') mtrsm_rln_core(n, Mslice, alpha, a, lda, b_slice, ldb, nounit);
         else             mtrsm_run_core(n, Mslice, alpha, a, lda, b_slice, ldb, nounit);
@@ -877,7 +896,6 @@ void mtrsm_R_slice(char UPLO, char TRANS, std::ptrdiff_t row_lo, std::ptrdiff_t 
         if (UPLO == 'L') mtrsm_rlt_core(n, Mslice, alpha, a, lda, b_slice, ldb, nounit);
         else             mtrsm_rut_core(n, Mslice, alpha, a, lda, b_slice, ldb, nounit);
     }
-#endif
 }
 
 extern "C" void mtrsm_serial(

@@ -18,6 +18,7 @@
 #include "mf_pred.h"
 #include <cstdlib>
 #include <cctype>
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 #ifdef WBLAS_SIMD_DD
 #include "mf_simd_fast.h"
@@ -201,6 +202,13 @@ void wgemm_pack_B_soa_complex(const TC * __restrict__ B, std::ptrdiff_t ldb,
 
 std::ptrdiff_t wgemm_simd_pack_W(void) { return wsimd_pack_W(); }
 
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: the SIMD micro-kernels
+ * below are compiled with the feature enabled and reached only behind
+ * mf_have_avx2_fma() at the call site. The scalar packers above stay OUTSIDE this
+ * region so they compile at the baseline ISA and are SNB-safe. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+
 /* Writeback one ymm-panel of complex DD accumulators into C. */
 static inline __attribute__((always_inline)) void
 simd_writeback_complex(__m256d alpha_rh, __m256d alpha_rl,
@@ -364,6 +372,8 @@ void wgemm_inner_kernel_simd_complex(std::ptrdiff_t ib, std::ptrdiff_t jb, std::
         ib, jb, pb, alpha, Ap, Bp_rh, Bp_rl, Bp_ih, Bp_il, C, ldc);
 }
 
+#pragma GCC pop_options
+
 #endif /* WBLAS_SIMD_DD */
 
 extern "C" void wgemm_serial(
@@ -397,40 +407,45 @@ extern "C" void wgemm_serial(
     TC *Ap = static_cast<TC *>(std::aligned_alloc(
         64, static_cast<std::size_t>(MC) * KC * sizeof(TC)));
 #ifdef WBLAS_SIMD_DD
-    const std::ptrdiff_t W_simd = wgemm_simd_pack_W();
-    const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
-    double *Bp_rh = static_cast<double *>(std::aligned_alloc(
-        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-    double *Bp_rl = static_cast<double *>(std::aligned_alloc(
-        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-    double *Bp_ih = static_cast<double *>(std::aligned_alloc(
-        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-    double *Bp_il = static_cast<double *>(std::aligned_alloc(
-        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-    if (Ap && Bp_rh && Bp_rl && Bp_ih && Bp_il) {
-        for (std::ptrdiff_t jc = 0; jc < n; jc += NC) {
-            const std::ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
-            for (std::ptrdiff_t pc = 0; pc < k; pc += KC) {
-                const std::ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
-                wgemm_pack_B_soa_complex(b, ldb, pc, jc, pb, jb, tb,
-                                         Bp_rh, Bp_rl, Bp_ih, Bp_il);
-                for (std::ptrdiff_t ic = 0; ic < m; ic += MC) {
-                    const std::ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
-                    wgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
-                    wgemm_inner_kernel_simd_complex(ib, jb, pb, alpha, Ap,
-                                                    Bp_rh, Bp_rl, Bp_ih, Bp_il,
-                                                    &c[static_cast<std::size_t>(jc) * ldc + ic],
-                                                    ldc);
+    /* AVX2/FMA SIMD path at runtime on Haswell+; scalar fallback below is always
+     * compiled and taken on pre-Haswell CPUs. See mf_dispatch.h. */
+    if (mf_have_avx2_fma()) {
+        const std::ptrdiff_t W_simd = wgemm_simd_pack_W();
+        const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
+        double *Bp_rh = static_cast<double *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+        double *Bp_rl = static_cast<double *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+        double *Bp_ih = static_cast<double *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+        double *Bp_il = static_cast<double *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+        if (Ap && Bp_rh && Bp_rl && Bp_ih && Bp_il) {
+            for (std::ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const std::ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (std::ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const std::ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
+                    wgemm_pack_B_soa_complex(b, ldb, pc, jc, pb, jb, tb,
+                                             Bp_rh, Bp_rl, Bp_ih, Bp_il);
+                    for (std::ptrdiff_t ic = 0; ic < m; ic += MC) {
+                        const std::ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
+                        wgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
+                        wgemm_inner_kernel_simd_complex(ib, jb, pb, alpha, Ap,
+                                                        Bp_rh, Bp_rl, Bp_ih, Bp_il,
+                                                        &c[static_cast<std::size_t>(jc) * ldc + ic],
+                                                        ldc);
+                    }
                 }
             }
         }
+        std::free(Ap);
+        std::free(Bp_rh);
+        std::free(Bp_rl);
+        std::free(Bp_ih);
+        std::free(Bp_il);
+        return;
     }
-    std::free(Ap);
-    std::free(Bp_rh);
-    std::free(Bp_rl);
-    std::free(Bp_ih);
-    std::free(Bp_il);
-#else
+#endif /* WBLAS_SIMD_DD */
     TC *Bp = static_cast<TC *>(std::aligned_alloc(
         64, static_cast<std::size_t>(KC) * NC * sizeof(TC)));
     if (Ap && Bp) {
@@ -451,5 +466,4 @@ extern "C" void wgemm_serial(
     }
     std::free(Ap);
     std::free(Bp);
-#endif /* WBLAS_SIMD_DD */
 }

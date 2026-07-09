@@ -11,6 +11,7 @@
 #include "mf_kernels.h"
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
 #include "mf_simd_exact.h"
@@ -49,6 +50,11 @@ inline TC cdiv(TC const &a, TC const &b) {
 }
 
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels are
+ * compiled with the feature enabled and reached only behind mf_have_avx2_fma()
+ * at the call sites below. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 using simd_exact::cload4;
 using simd_exact::cstore4;
 using simd_fast::chreduce;
@@ -56,7 +62,7 @@ using simd_fast::chreduce;
  * msub: x[k] = csub(x[k], cmul(xi, ai[k]))  for k in [lo,hi)  (NoTrans).
  * dot : returns sum_{k in [lo,hi)} (conj?conj(ai[k]):ai[k]) * x[k]  (Trans). */
 static inline void
-wtrsv_col_msub(TC *x, const TC *ai, TC xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
+wtrsv_col_msub_simd(TC *x, const TC *ai, TC xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
 {
     double *xp = reinterpret_cast<double *>(x);
     const double *aip = reinterpret_cast<const double *>(ai);
@@ -83,7 +89,7 @@ wtrsv_col_msub(TC *x, const TC *ai, TC xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
     for (; k < hi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
 }
 static inline TC
-wtrsv_dot_range(const TC *ai, const TC *x, std::ptrdiff_t lo, std::ptrdiff_t hi, bool conj_a)
+wtrsv_dot_range_simd(const TC *ai, const TC *x, std::ptrdiff_t lo, std::ptrdiff_t hi, bool conj_a)
 {
     const double *aip = reinterpret_cast<const double *>(ai);
     const double *xp  = reinterpret_cast<const double *>(x);
@@ -109,20 +115,21 @@ wtrsv_dot_range(const TC *ai, const TC *x, std::ptrdiff_t lo, std::ptrdiff_t hi,
     }
     return s;
 }
+#pragma GCC pop_options
 #endif
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
-/* Bit-exact serial path (the SIMD-packed reference). Also reused as the
- * diagonal-block solver by the threaded path below. */
-static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
-                         std::ptrdiff_t n, const TC *a, std::ptrdiff_t lda, TC *x, std::ptrdiff_t incx)
-{
-    if (n == 0) return;
-
-    if (incx == 1) {
 #ifdef MBLAS_SIMD_DD
+/* Packed-SoA AVX2/FMA incx==1 solve, extracted from wtrsv_serial so its
+ * intrinsics compile under target("avx2,fma") on a pre-Haswell baseline -march.
+ * Reached only behind mf_have_avx2_fma() from wtrsv_serial. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void wtrsv_serial_simd_unit(char UPLO, char TRANS, bool nounit,
+                         std::ptrdiff_t n, const TC *a, std::ptrdiff_t lda, TC *x)
+{
         const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
         double *x_rh = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
         double *x_rl = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
@@ -243,7 +250,24 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
             x[i].im.limbs[0] = x_ih[i]; x[i].im.limbs[1] = x_il[i];
         }
         std::free(x_rh); std::free(x_rl); std::free(x_ih); std::free(x_il);
-#else
+}
+#pragma GCC pop_options
+#endif  /* MBLAS_SIMD_DD */
+
+/* Bit-exact serial path (the SIMD-packed reference). Also reused as the
+ * diagonal-block solver by the threaded path below. */
+static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
+                         std::ptrdiff_t n, const TC *a, std::ptrdiff_t lda, TC *x, std::ptrdiff_t incx)
+{
+    if (n == 0) return;
+
+    if (incx == 1) {
+#ifdef MBLAS_SIMD_DD
+        if (mf_have_avx2_fma()) {
+            wtrsv_serial_simd_unit(UPLO, TRANS, nounit, n, a, lda, x);
+        } else
+#endif
+        {
         if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
@@ -294,7 +318,7 @@ static void wtrsv_serial(char UPLO, char TRANS, bool nounit,
                 }
             }
         }
-#endif
+        }
     } else {
         /* Strided: gather x to a contiguous scratch, run the SIMD incx==1 core,
          * scatter back. O(N) gather vs the O(N^2) strided scalar sweep. */
@@ -341,10 +365,11 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         if (ceq0(xi)) continue;
                         const TC *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
-                        wtrsv_col_msub(x, ai, xi, rlo, rhi);
-#else
-                        for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
+                        if (mf_have_avx2_fma())
+                            wtrsv_col_msub_simd(x, ai, xi, rlo, rhi);
+                        else
 #endif
+                            for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
                     }
                 }
             }
@@ -363,10 +388,11 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         if (ceq0(xi)) continue;
                         const TC *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
-                        wtrsv_col_msub(x, ai, xi, rlo, rhi);
-#else
-                        for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
+                        if (mf_have_avx2_fma())
+                            wtrsv_col_msub_simd(x, ai, xi, rlo, rhi);
+                        else
 #endif
+                            for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = csub(x[k], cmul(xi, ai[k]));
                     }
                 }
             }
@@ -386,15 +412,19 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const TC *ai = &A_(0, i);
+                            TC s;
 #ifdef MBLAS_SIMD_DD
-                            TC s = wtrsv_dot_range(ai, x, j1, n, conj_a);
-#else
-                            TC s = zero_cdd;
-                            for (std::ptrdiff_t k = j1; k < n; ++k) {
-                                const TC e = conj_a ? cconj(ai[k]) : ai[k];
-                                s = cadd(s, cmul(e, x[k]));
-                            }
+                            if (mf_have_avx2_fma())
+                                s = wtrsv_dot_range_simd(ai, x, j1, n, conj_a);
+                            else
 #endif
+                            {
+                                s = zero_cdd;
+                                for (std::ptrdiff_t k = j1; k < n; ++k) {
+                                    const TC e = conj_a ? cconj(ai[k]) : ai[k];
+                                    s = cadd(s, cmul(e, x[k]));
+                                }
+                            }
                             x[i] = csub(x[i], s);
                         }
                     }
@@ -412,15 +442,19 @@ __attribute__((noinline)) static bool wtrsv_omp(
                         std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const TC *ai = &A_(0, i);
+                            TC s;
 #ifdef MBLAS_SIMD_DD
-                            TC s = wtrsv_dot_range(ai, x, 0, j0, conj_a);
-#else
-                            TC s = zero_cdd;
-                            for (std::ptrdiff_t k = 0; k < j0; ++k) {
-                                const TC e = conj_a ? cconj(ai[k]) : ai[k];
-                                s = cadd(s, cmul(e, x[k]));
-                            }
+                            if (mf_have_avx2_fma())
+                                s = wtrsv_dot_range_simd(ai, x, 0, j0, conj_a);
+                            else
 #endif
+                            {
+                                s = zero_cdd;
+                                for (std::ptrdiff_t k = 0; k < j0; ++k) {
+                                    const TC e = conj_a ? cconj(ai[k]) : ai[k];
+                                    s = cadd(s, cmul(e, x[k]));
+                                }
+                            }
                             x[i] = csub(x[i], s);
                         }
                     }

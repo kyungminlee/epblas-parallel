@@ -18,6 +18,7 @@
  */
 
 #include "wgemm_kernel.h"
+#include "mf_dispatch.h"   /* mf_have_avx2_fma() runtime gate */
 #include "../common/blas_char.h"
 #include "mf_kernels.h"
 #include "mf_pred.h"
@@ -85,6 +86,9 @@ static void wgemm_core(
         TC *Ap = static_cast<TC *>(std::aligned_alloc(
             64, static_cast<std::size_t>(MC) * KC * sizeof(TC)));
 #ifdef WBLAS_SIMD_DD
+        /* Runtime AVX2/FMA dispatch: SIMD SoA path on Haswell+, scalar fallback
+         * (always compiled below) on pre-Haswell CPUs. See mf_dispatch.h. */
+        if (mf_have_avx2_fma()) {
         const std::ptrdiff_t W_simd = wgemm_simd_pack_W();
         const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
         double *Bp_rh = static_cast<double *>(std::aligned_alloc(
@@ -121,7 +125,9 @@ static void wgemm_core(
         std::free(Bp_rl);
         std::free(Bp_ih);
         std::free(Bp_il);
-#else
+        } else
+#endif
+        {
         TC *Bp = static_cast<TC *>(std::aligned_alloc(
             64, static_cast<std::size_t>(KC) * NC * sizeof(TC)));
         if (Ap && Bp) {
@@ -145,7 +151,7 @@ static void wgemm_core(
         }
         std::free(Ap);
         std::free(Bp);
-#endif /* WBLAS_SIMD_DD */
+        }
     }
 }
 

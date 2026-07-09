@@ -15,6 +15,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -33,10 +34,14 @@ using simd_exact::cstore4;
 #endif
 }  // namespace
 
-/* X := α·X over a contiguous unit-stride range — serial kernel, unchanged. */
-static void wscal_unit(std::ptrdiff_t n, TC alpha, TC *x)
-{
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA kernel body — compiled under target("avx2,fma") so it builds even
+ * when the library's baseline -march is pre-Haswell; reached only behind the
+ * mf_have_avx2_fma() runtime probe below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void wscal_unit_simd(std::ptrdiff_t n, TC alpha, TC *x)
+{
     const __m256d arh = _mm256_set1_pd(alpha.re.limbs[0]);
     const __m256d arl = _mm256_set1_pd(alpha.re.limbs[1]);
     const __m256d aih = _mm256_set1_pd(alpha.im.limbs[0]);
@@ -51,9 +56,18 @@ static void wscal_unit(std::ptrdiff_t n, TC alpha, TC *x)
         cstore4(&x[i], nrh, nrl, nih, nil_);
     }
     for (std::ptrdiff_t i = n4; i < n; ++i) x[i] = cmul(x[i], alpha);
-#else
-    for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = cmul(x[i], alpha);
+}
+#pragma GCC pop_options
 #endif
+
+/* X := α·X over a contiguous unit-stride range — serial kernel. Runtime
+ * dispatch: SIMD on Haswell+, scalar (always compiled) on Sandybridge/Ivy. */
+static void wscal_unit(std::ptrdiff_t n, TC alpha, TC *x)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { wscal_unit_simd(n, alpha, x); return; }
+#endif
+    for (std::ptrdiff_t i = 0; i < n; ++i) x[i] = cmul(x[i], alpha);
 }
 
 #ifdef _OPENMP

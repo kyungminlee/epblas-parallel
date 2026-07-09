@@ -18,6 +18,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
 #include <cstring>
 #include <omp.h>
@@ -51,6 +52,12 @@ using simd_fast::hreduce;
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA under a possibly pre-Haswell baseline -march; this kernel is compiled
+ * with the feature enabled and reached only behind mf_have_avx2_fma() at the call
+ * sites below (msymv_omp and msymv_contig). Plain static (not always_inline) so it
+ * is legally called from the baseline callers across the target mismatch. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 namespace {
 /* One symmetric column i's contribution ADDED into the SoA accumulator
  * yacc_hi/yacc_lo: the temp1-axpy over the off-diagonal run, the diagonal, and
@@ -59,8 +66,8 @@ namespace {
  * (yacc = the shared beta-scaled y, columns applied in order → bit-identical to
  * the prior inline body) and the threaded path (yacc = a private zero buffer,
  * a disjoint column subset; partials reduced afterwards → within DD fuzz tol). */
-static inline __attribute__((always_inline)) void
-msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const TR *a, std::size_t lda,
+static void
+msymv_col_simd(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const TR *a, std::size_t lda,
           const TR *x, const double *x_hi, const double *x_lo,
           double *yacc_hi, double *yacc_lo, TR alpha)
 {
@@ -157,6 +164,7 @@ msymv_col(bool lower, std::ptrdiff_t i, std::ptrdiff_t n, const TR *a, std::size
     }
 }
 }
+#pragma GCC pop_options
 #endif
 
 #if defined(_OPENMP) && defined(MBLAS_SIMD_DD)
@@ -196,7 +204,7 @@ __attribute__((noinline)) static bool msymv_omp(
         double *yp_hi = pool + static_cast<std::size_t>(tid) * per;
         double *yp_lo = yp_hi + N_pad;
         for (std::ptrdiff_t i = (std::ptrdiff_t)range[tid]; i < (std::ptrdiff_t)range[tid + 1]; ++i)
-            msymv_col(lower, i, n, a, lda, x, x_hi, x_lo, yp_hi, yp_lo, alpha);
+            msymv_col_simd(lower, i, n, a, lda, x, x_hi, x_lo, yp_hi, yp_lo, alpha);
     }
 
     /* Bounded reduction: fold each thread's populated row window onto y. */
@@ -224,6 +232,7 @@ static void msymv_contig(bool lower, std::ptrdiff_t n, const TR *a, std::size_t 
                          const TR *x, TR *y, TR alpha)
 {
 #ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) {
     const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
     double *x_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
     double *x_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
@@ -243,12 +252,14 @@ static void msymv_contig(bool lower, std::ptrdiff_t n, const TR *a, std::size_t 
 #endif
     if (!done_omp)
         for (std::ptrdiff_t i = 0; i < n; ++i)
-            msymv_col(lower, i, n, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
+            msymv_col_simd(lower, i, n, a, lda, x, x_hi, x_lo, y_hi, y_lo, alpha);
     for (std::ptrdiff_t i = 0; i < n; ++i) {
         y[i].limbs[0] = y_hi[i]; y[i].limbs[1] = y_lo[i];
     }
     std::free(x_hi); std::free(x_lo); std::free(y_hi); std::free(y_lo);
-#else
+    return;
+    }
+#endif
     if (lower) {
         for (std::ptrdiff_t i = 0; i < n; ++i) {
             const TR temp1 = alpha * x[i];
@@ -273,7 +284,6 @@ static void msymv_contig(bool lower, std::ptrdiff_t n, const TR *a, std::size_t 
             y[i] = y[i] + temp1 * ai[i] + alpha * temp2;
         }
     }
-#endif
 }
 
 static void msymv_core(

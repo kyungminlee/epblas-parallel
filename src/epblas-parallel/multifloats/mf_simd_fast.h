@@ -31,6 +31,14 @@
 
 #include <immintrin.h>
 #include <multifloats.h>
+#include "mf_dispatch.h"
+
+/* Compile every primitive below with AVX2+FMA enabled even when the library's
+ * baseline -march is pre-Haswell (portable release). These are only ever
+ * inlined into MF_SIMD_TARGET (target("avx2,fma")) routine functions, entered
+ * behind mf_have_avx2_fma(); a Sandybridge CPU never reaches them. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 namespace simd_fast {
 
@@ -236,3 +244,5 @@ dd_prod(__m256d xh, __m256d xl, __m256d yh, __m256d yl, __m256d &ph, __m256d &pl
 }
 
 }  // namespace simd_fast
+
+#pragma GCC pop_options

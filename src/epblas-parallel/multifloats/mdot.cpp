@@ -20,6 +20,7 @@
 #include "mf_omp.h"
 #endif
 #include "../common/epblas_facade.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 namespace mf = multifloats;
 using TR = mf::float64x2;
@@ -39,11 +40,13 @@ using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (
 }
 #endif
 
-/* Σ X·Y over contiguous unit-stride ranges — the serial kernel, unchanged.
- * Carved out so the OpenMP partial-reduction can call it per sub-range. */
-static TR mdot_unit(std::ptrdiff_t n, const TR *x, const TR *y)
-{
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA reduction kernel — compiled under target("avx2,fma") so it builds
+ * even at a pre-Haswell baseline -march; reached only behind mf_have_avx2_fma(). */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static TR mdot_unit_simd(std::ptrdiff_t n, const TR *x, const TR *y)
+{
     __m256d a0 = _mm256_setzero_pd();
     __m256d a1 = _mm256_setzero_pd();
     __m256d a2 = _mm256_setzero_pd();
@@ -81,7 +84,18 @@ static TR mdot_unit(std::ptrdiff_t n, const TR *x, const TR *y)
     TR s = horizontal_dd(a0, t);
     for (std::ptrdiff_t i = n4; i < n; ++i) s = s + x[i] * y[i];
     return s;
-#else
+}
+#pragma GCC pop_options
+#endif
+
+/* Σ X·Y over contiguous unit-stride ranges — the serial kernel. Runtime
+ * dispatch: SIMD Bailey-wide on Haswell+, scalar (always compiled) otherwise.
+ * Carved out so the OpenMP partial-reduction can call it per sub-range. */
+static TR mdot_unit(std::ptrdiff_t n, const TR *x, const TR *y)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return mdot_unit_simd(n, x, y);
+#endif
     TR s0{0.0, 0.0}, s1{0.0, 0.0}, s{0.0, 0.0};
     std::ptrdiff_t i = 0;
     for (; i + 1 < n; i += 2) {
@@ -91,7 +105,6 @@ static TR mdot_unit(std::ptrdiff_t n, const TR *x, const TR *y)
     s = s0 + s1;
     for (; i < n; ++i) s = s + x[i] * y[i];
     return s;
-#endif
 }
 
 #ifdef _OPENMP

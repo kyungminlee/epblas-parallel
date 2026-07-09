@@ -9,6 +9,7 @@
 #include "mf_omp.h"
 #endif
 #include "../common/epblas_facade.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 namespace mf = multifloats;
 using R = mf::float64x2;
@@ -37,17 +38,15 @@ using simd_fast::dd_prod;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
 }
 #endif
 
-/* Σ X·Y over contiguous unit-stride ranges — serial kernel, unchanged.
- * Carved out so the OpenMP partial-reduction (and packed/banded triangular
- * matvecs, via mf_kernels.h) can call it per sub-range. */
-multifloats::complex64x2
-mf_kernels::wdotu_unit(std::ptrdiff_t n, const multifloats::complex64x2 *x,
-                       const multifloats::complex64x2 *y)
-{
-    /* spelled out: mf_kernels::T is the real (float64x2) alias and would shadow
-     * this file's complex T inside a member-of-mf_kernels definition. */
-    multifloats::complex64x2 s{R{0.0, 0.0}, R{0.0, 0.0}};
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA complex-dot reduction kernel — compiled under target("avx2,fma") so
+ * it builds even at a pre-Haswell baseline -march; reached only behind the
+ * mf_have_avx2_fma() runtime probe in wdotu_unit below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static TC wdotu_unit_simd(std::ptrdiff_t n, const TC *x, const TC *y)
+{
+    multifloats::complex64x2 s{R{0.0, 0.0}, R{0.0, 0.0}};
     __m256d rA0 = _mm256_setzero_pd(), rA1 = _mm256_setzero_pd(), rA2 = _mm256_setzero_pd();
     __m256d iA0 = _mm256_setzero_pd(), iA1 = _mm256_setzero_pd(), iA2 = _mm256_setzero_pd();
     constexpr std::ptrdiff_t k = 64;
@@ -83,10 +82,26 @@ mf_kernels::wdotu_unit(std::ptrdiff_t n, const multifloats::complex64x2 *x,
     s.im = horizontal_dd(iA0, it);
     for (std::ptrdiff_t i = n4; i < n; ++i) s = cadd(s, cmul(x[i], y[i]));
     return s;
-#else
+}
+#pragma GCC pop_options
+#endif
+
+/* Σ X·Y over contiguous unit-stride ranges — serial kernel. Runtime dispatch:
+ * SIMD Bailey-wide on Haswell+, scalar (always compiled) otherwise.
+ * Carved out so the OpenMP partial-reduction (and packed/banded triangular
+ * matvecs, via mf_kernels.h) can call it per sub-range. */
+multifloats::complex64x2
+mf_kernels::wdotu_unit(std::ptrdiff_t n, const multifloats::complex64x2 *x,
+                       const multifloats::complex64x2 *y)
+{
+    /* spelled out: mf_kernels::T is the real (float64x2) alias and would shadow
+     * this file's complex T inside a member-of-mf_kernels definition. */
+    multifloats::complex64x2 s{R{0.0, 0.0}, R{0.0, 0.0}};
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) return wdotu_unit_simd(n, x, y);
+#endif
     for (std::ptrdiff_t i = 0; i < n; ++i) s = cadd(s, cmul(x[i], y[i]));
     return s;
-#endif
 }
 
 #ifdef _OPENMP

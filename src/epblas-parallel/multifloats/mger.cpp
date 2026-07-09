@@ -15,6 +15,7 @@
 #include <omp.h>
 #include "../common/blas_omp.h"
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -35,13 +36,19 @@ using simd_exact::store_dd4;
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: compiled with the
+ * feature enabled and reached only behind mf_have_avx2_fma() at the call site
+ * below. Plain static (NOT always_inline) so it is legally CALLED across the
+ * target mismatch from the baseline core. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 namespace {
 /* Rank-1 update of one A column: A(:,j) += t * x, x supplied SoA. The matrix is
  * column-major so A(:,j) is contiguous regardless of incx/incy — only x (gathered
  * to SoA once) and the y read differ between the contiguous and strided drivers,
  * so this one SIMD core serves both. */
-static inline __attribute__((always_inline)) void
-mger_col(std::ptrdiff_t m, const double *x_hi, const double *x_lo, TR t, TR *ajT)
+static void
+mger_col_simd(std::ptrdiff_t m, const double *x_hi, const double *x_lo, TR t, TR *ajT)
 {
     const __m256d thi = _mm256_set1_pd(t.limbs[0]);
     const __m256d tlo = _mm256_set1_pd(t.limbs[1]);
@@ -78,6 +85,7 @@ mger_col(std::ptrdiff_t m, const double *x_hi, const double *x_lo, TR t, TR *ajT
     for (; i < m; ++i) ajT[i] = ajT[i] + t * TR{x_hi[i], x_lo[i]};
 }
 }
+#pragma GCC pop_options
 #endif
 
 static void mger_core(
@@ -98,26 +106,30 @@ static void mger_core(
 #endif
 
 #ifdef MBLAS_SIMD_DD
-    /* Gather x to a unit-stride SoA pair once (O(M)); the matrix columns are
-     * already contiguous, so every column update runs the SIMD core. Columns of A
-     * are disjoint -> OMP-over-j is race-free. */
-    const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
-    double *x_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    double *x_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
-    { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < m; ++i) { x_hi[i] = x[ix].limbs[0]; x_lo[i] = x[ix].limbs[1]; ix += incx; } }
-    for (std::size_t i = static_cast<std::size_t>(m); i < M_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
+    if (mf_have_avx2_fma()) {
+        /* Gather x to a unit-stride SoA pair once (O(M)); the matrix columns are
+         * already contiguous, so every column update runs the SIMD core. Columns
+         * of A are disjoint -> OMP-over-j is race-free. */
+        const std::size_t M_pad = (static_cast<std::size_t>(m) + 3) & ~static_cast<std::size_t>(3);
+        double *x_hi = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
+        double *x_lo = static_cast<double *>(std::aligned_alloc(32, M_pad * sizeof(double)));
+        { std::ptrdiff_t ix = ix0; for (std::ptrdiff_t i = 0; i < m; ++i) { x_hi[i] = x[ix].limbs[0]; x_lo[i] = x[ix].limbs[1]; ix += incx; } }
+        for (std::size_t i = static_cast<std::size_t>(m); i < M_pad; ++i) { x_hi[i] = 0.0; x_lo[i] = 0.0; }
 #ifdef _OPENMP
-    #pragma omp parallel for if(use_omp) schedule(static)
+        #pragma omp parallel for if(use_omp) schedule(static)
 #endif
-    for (std::ptrdiff_t j = 0; j < n; ++j) {
-        const TR yj = y[jy0 + j * incy];
-        if (eq0(yj)) continue;
-        mger_col(m, x_hi, x_lo, alpha * yj, &A_(0, j));
+        for (std::ptrdiff_t j = 0; j < n; ++j) {
+            const TR yj = y[jy0 + j * incy];
+            if (eq0(yj)) continue;
+            mger_col_simd(m, x_hi, x_lo, alpha * yj, &A_(0, j));
+        }
+        std::free(x_hi); std::free(x_lo);
+        return;
     }
-    std::free(x_hi); std::free(x_lo);
-#else
-    /* Scalar fallback: gather strided x to unit stride once, then a plain column
-     * AXPY per j (O(M) pack vs O(M*N) repeated gathers). */
+#endif
+    /* Scalar fallback (always compiled): gather strided x to unit stride once,
+     * then a plain column AXPY per j (O(M) pack vs O(M*N) repeated gathers). */
+    {
     const TR *xp = x;
     TR *x_buf = NULL;
     if (incx != 1) {
@@ -138,7 +150,7 @@ static void mger_core(
         }
     }
     std::free(x_buf);
-#endif
+    }
 }
 
 extern "C" {

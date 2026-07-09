@@ -15,6 +15,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -27,11 +28,14 @@ using simd_exact::store_dd4;
 #endif
 }
 
-/* Givens rotation over a contiguous unit-stride range — serial kernel,
- * unchanged. X and Y slices are disjoint per thread → safe to partition. */
-static void mrot_unit(std::ptrdiff_t n, const TR c, const TR s, TR *x, TR *y)
-{
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA kernel body — compiled under target("avx2,fma") so it builds even
+ * when the library's baseline -march is pre-Haswell; reached only behind the
+ * mf_have_avx2_fma() runtime probe in mrot_unit below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void mrot_unit_simd(std::ptrdiff_t n, const TR c, const TR s, TR *x, TR *y)
+{
     const __m256d ch = _mm256_set1_pd(c.limbs[0]);
     const __m256d cl = _mm256_set1_pd(c.limbs[1]);
     const __m256d sh = _mm256_set1_pd(s.limbs[0]);
@@ -56,13 +60,23 @@ static void mrot_unit(std::ptrdiff_t n, const TR c, const TR s, TR *x, TR *y)
         y[i] = c * y[i] - s * x[i];
         x[i] = tx;
     }
-#else
+}
+#pragma GCC pop_options
+#endif
+
+/* Givens rotation over a contiguous unit-stride range — serial kernel. Runtime
+ * dispatch: SIMD on Haswell+, scalar (always compiled) on Sandybridge/Ivy.
+ * X and Y slices are disjoint per thread → safe to partition. */
+static void mrot_unit(std::ptrdiff_t n, const TR c, const TR s, TR *x, TR *y)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { mrot_unit_simd(n, c, s, x, y); return; }
+#endif
     for (std::ptrdiff_t i = 0; i < n; ++i) {
         TR tx = c * x[i] + s * y[i];
         y[i] = c * y[i] - s * x[i];
         x[i] = tx;
     }
-#endif
 }
 
 #ifdef _OPENMP

@@ -18,6 +18,7 @@
 #include "../common/blas_char.h"
 #include <cstdlib>
 #include <cctype>
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
@@ -160,6 +161,13 @@ void mgemm_pack_B_soa(const TR * __restrict__ B, std::ptrdiff_t ldb,
 }
 
 std::ptrdiff_t mgemm_simd_pack_W(void) { return simd_pack_W(); }
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: the SIMD micro-kernels
+ * below are compiled with the feature enabled and reached only behind
+ * mf_have_avx2_fma() at the call site. The scalar packers above stay OUTSIDE this
+ * region so they compile at the baseline ISA and are SNB-safe. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 /*
  * SIMD writeback helper: alpha-scale a DD accumulator (acc_h, acc_l)
@@ -313,6 +321,8 @@ void mgemm_inner_kernel_simd(std::ptrdiff_t ib, std::ptrdiff_t jb, std::ptrdiff_
         ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo, C, ldc);
 }
 
+#pragma GCC pop_options
+
 #endif /* MBLAS_SIMD_DD */
 
 extern "C" void mgemm_serial(
@@ -346,32 +356,37 @@ extern "C" void mgemm_serial(
     TR *Ap = static_cast<TR *>(std::aligned_alloc(
         64, static_cast<std::size_t>(MC) * KC * sizeof(TR)));
 #ifdef MBLAS_SIMD_DD
-    const std::ptrdiff_t W_simd = mgemm_simd_pack_W();
-    const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
-    double *Bp_hi = static_cast<double *>(std::aligned_alloc(
-        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-    double *Bp_lo = static_cast<double *>(std::aligned_alloc(
-        64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-    if (Ap && Bp_hi && Bp_lo) {
-        for (std::ptrdiff_t jc = 0; jc < n; jc += NC) {
-            const std::ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
-            for (std::ptrdiff_t pc = 0; pc < k; pc += KC) {
-                const std::ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
-                mgemm_pack_B_soa(b, ldb, pc, jc, pb, jb, tb, Bp_hi, Bp_lo);
-                for (std::ptrdiff_t ic = 0; ic < m; ic += MC) {
-                    const std::ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
-                    mgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
-                    mgemm_inner_kernel_simd(ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo,
-                                            &c[static_cast<std::size_t>(jc) * ldc + ic],
-                                            ldc);
+    /* AVX2/FMA SIMD path at runtime on Haswell+; scalar fallback below is always
+     * compiled and taken on pre-Haswell CPUs. See mf_dispatch.h. */
+    if (mf_have_avx2_fma()) {
+        const std::ptrdiff_t W_simd = mgemm_simd_pack_W();
+        const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
+        double *Bp_hi = static_cast<double *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+        double *Bp_lo = static_cast<double *>(std::aligned_alloc(
+            64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
+        if (Ap && Bp_hi && Bp_lo) {
+            for (std::ptrdiff_t jc = 0; jc < n; jc += NC) {
+                const std::ptrdiff_t jb = (n - jc < NC) ? (n - jc) : NC;
+                for (std::ptrdiff_t pc = 0; pc < k; pc += KC) {
+                    const std::ptrdiff_t pb = (k - pc < KC) ? (k - pc) : KC;
+                    mgemm_pack_B_soa(b, ldb, pc, jc, pb, jb, tb, Bp_hi, Bp_lo);
+                    for (std::ptrdiff_t ic = 0; ic < m; ic += MC) {
+                        const std::ptrdiff_t ib = (m - ic < MC) ? (m - ic) : MC;
+                        mgemm_pack_A(a, lda, ic, pc, ib, pb, ta, Ap);
+                        mgemm_inner_kernel_simd(ib, jb, pb, alpha, Ap, Bp_hi, Bp_lo,
+                                                &c[static_cast<std::size_t>(jc) * ldc + ic],
+                                                ldc);
+                    }
                 }
             }
         }
+        std::free(Ap);
+        std::free(Bp_hi);
+        std::free(Bp_lo);
+        return;
     }
-    std::free(Ap);
-    std::free(Bp_hi);
-    std::free(Bp_lo);
-#else
+#endif /* MBLAS_SIMD_DD */
     TR *Bp = static_cast<TR *>(std::aligned_alloc(
         64, static_cast<std::size_t>(KC) * NC * sizeof(TR)));
     if (Ap && Bp) {
@@ -392,5 +407,4 @@ extern "C" void mgemm_serial(
     }
     std::free(Ap);
     std::free(Bp);
-#endif /* MBLAS_SIMD_DD */
 }

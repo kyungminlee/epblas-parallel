@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cctype>
 #include "mf_util.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 #ifdef WBLAS_SIMD_DD
 #include "mf_simd_fast.h"   /* mul, add, neg, cmul/add */
@@ -234,6 +235,12 @@ inline void wtrsm_rutc_core(std::ptrdiff_t m, std::ptrdiff_t n, TC alpha,
 /* ── SIMD 4-wide diagonal kernels (complex). ─────────────────── */
 
 #ifdef WBLAS_SIMD_DD
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels and
+ * their helpers are compiled with the feature enabled and reached only behind
+ * mf_have_avx2_fma() at the call sites below. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 constexpr std::ptrdiff_t kSimdLane = simd_fast::NR;
 constexpr std::ptrdiff_t kMaxBlockM = 256;
@@ -805,6 +812,8 @@ inline void wtrsm_simd_diag_R(wtrsm_r_op op, std::ptrdiff_t m, std::ptrdiff_t n,
     }
 }
 
+#pragma GCC pop_options
+
 #endif  /* WBLAS_SIMD_DD */
 
 /* ── Blocked SIDE='L' chunk worker: serial blocked-TRSM over one column slice
@@ -840,11 +849,12 @@ void blocked_chunk(wtrsm_variant V, std::ptrdiff_t j_start, std::ptrdiff_t j_end
     const char CN[1] = {'C'};
     TC *B_chunk = &B_(0, j_start);
 
-    /* Diagonal-solve helper macros (alpha=1 since we prescaled). */
+    /* Diagonal-solve helper macros (alpha=1 since we prescaled). AVX2/FMA SIMD
+     * path at runtime on Haswell+, scalar otherwise; both arms compiled. */
 #ifdef WBLAS_SIMD_DD
 #define DIAG_C(op_simd, scalar_core, ib_arg)                              \
     do {                                                                   \
-        if ((ib_arg) <= kMaxBlockM)                                        \
+        if (mf_have_avx2_fma() && (ib_arg) <= kMaxBlockM)                  \
             wtrsm_simd_diag(op_simd, j_start, j_end, (ib_arg), one,        \
                             &A_(ic, ic), lda, &B_(ic, 0), ldb, nounit);    \
         else                                                               \
@@ -950,7 +960,7 @@ void wtrsm_L_slice(char UPLO, char TRANS, std::ptrdiff_t use_blocked,
      * any M <= kMaxBlockM, so the small-M path (below 2*nb, where blocking would
      * not pay) runs vectorized instead of the scalar cores. Same kernels the
      * blocked path already drives -> bitwise-identical to the serial sweep. */
-    if (m <= kMaxBlockM) {
+    if (mf_have_avx2_fma() && m <= kMaxBlockM) {
         trsm_simd_cop cop;
         switch (V) {
         case WLLN: cop = CSLLN; break;
@@ -982,12 +992,15 @@ void wtrsm_R_slice(char UPLO, char TRANS, std::ptrdiff_t row_lo, std::ptrdiff_t 
     if (Mslice <= 0) return;
     TC *b_slice = b + row_lo;
 #ifdef WBLAS_SIMD_DD
-    wtrsm_r_op op;
-    if (TRANS == 'N')      op = (UPLO == 'L') ? WTR_RLN : WTR_RUN;
-    else if (TRANS == 'C') op = (UPLO == 'L') ? WTR_RLC : WTR_RUC;
-    else                op = (UPLO == 'L') ? WTR_RLT : WTR_RUT;
-    wtrsm_simd_diag_R(op, Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
-#else
+    if (mf_have_avx2_fma()) {
+        wtrsm_r_op op;
+        if (TRANS == 'N')      op = (UPLO == 'L') ? WTR_RLN : WTR_RUN;
+        else if (TRANS == 'C') op = (UPLO == 'L') ? WTR_RLC : WTR_RUC;
+        else                op = (UPLO == 'L') ? WTR_RLT : WTR_RUT;
+        wtrsm_simd_diag_R(op, Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
+        return;
+    }
+#endif
     if (TRANS == 'N') {
         if (UPLO == 'L') wtrsm_rln_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
         else             wtrsm_run_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit);
@@ -998,7 +1011,6 @@ void wtrsm_R_slice(char UPLO, char TRANS, std::ptrdiff_t row_lo, std::ptrdiff_t 
         if (UPLO == 'L') wtrsm_rltc_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 0);
         else             wtrsm_rutc_core(Mslice, n, alpha, a, lda, b_slice, ldb, nounit, 0);
     }
-#endif
 }
 
 extern "C" void wtrsm_serial(

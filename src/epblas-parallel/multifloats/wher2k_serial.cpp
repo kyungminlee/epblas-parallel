@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
@@ -55,6 +56,12 @@ using mf_kernels::rcmul;
 #define C_(i, j)  c[static_cast<std::size_t>(j) * ldc + (i)]
 
 #ifdef MBLAS_SIMD_DD
+
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels and
+ * their helpers are compiled with the feature enabled and reached only behind
+ * mf_have_avx2_fma() at the call site below. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 
 constexpr std::ptrdiff_t kSimdLane = simd_fast::NR;
 constexpr std::ptrdiff_t kMaxBlockM = 128;
@@ -359,6 +366,8 @@ inline void simd_her2k_diag_panels(std::ptrdiff_t jc, std::ptrdiff_t jb, std::pt
     }
 }
 
+#pragma GCC pop_options
+
 #endif  /* MBLAS_SIMD_DD */
 
 void her2k_diag_add(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k, TC alpha,
@@ -412,7 +421,7 @@ inline void diag_dispatch(std::ptrdiff_t jc, std::ptrdiff_t jb, std::ptrdiff_t k
                           TC *c, std::ptrdiff_t ldc, char UPLO, char TRANS)
 {
 #ifdef MBLAS_SIMD_DD
-    if (jb <= kMaxBlockM) {
+    if (mf_have_avx2_fma() && jb <= kMaxBlockM) {
         simd_her2k_diag_panels(jc, jb, k, alpha, a, lda, b, ldb, c, ldc, UPLO, TRANS);
         return;
     }

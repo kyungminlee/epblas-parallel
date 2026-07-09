@@ -16,6 +16,7 @@
 #include "mf_simd_exact.h"
 #include <immintrin.h>
 #endif
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
 
 namespace mf = multifloats;
@@ -29,11 +30,14 @@ using simd_exact::cstore4;
 #endif
 }
 
-/* Complex Givens rotation (real c,s) over a unit-stride range — serial kernel,
- * unchanged. X and Y slices are disjoint per thread → safe to partition. */
-static void wmrot_unit(std::ptrdiff_t n, const R c, const R s, TC *x, TC *y)
-{
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA kernel body — compiled under target("avx2,fma") so it builds even
+ * when the library's baseline -march is pre-Haswell; reached only behind the
+ * mf_have_avx2_fma() runtime probe in wmrot_unit below. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void wmrot_unit_simd(std::ptrdiff_t n, const R c, const R s, TC *x, TC *y)
+{
         const __m256d ch = _mm256_set1_pd(c.limbs[0]);
         const __m256d cl = _mm256_set1_pd(c.limbs[1]);
         const __m256d sh = _mm256_set1_pd(s.limbs[0]);
@@ -70,7 +74,18 @@ static void wmrot_unit(std::ptrdiff_t n, const R c, const R s, TC *x, TC *y)
             x[i].re = nxr; x[i].im = nxi;
             y[i].re = nyr; y[i].im = nyi;
         }
-#else
+}
+#pragma GCC pop_options
+#endif
+
+/* Complex Givens rotation (real c,s) over a unit-stride range — serial kernel.
+ * Runtime dispatch: SIMD on Haswell+, scalar (always compiled) on Sandybridge/
+ * Ivy. X and Y slices are disjoint per thread → safe to partition. */
+static void wmrot_unit(std::ptrdiff_t n, const R c, const R s, TC *x, TC *y)
+{
+#ifdef MBLAS_SIMD_DD
+    if (mf_have_avx2_fma()) { wmrot_unit_simd(n, c, s, x, y); return; }
+#endif
         for (std::ptrdiff_t i = 0; i < n; ++i) {
             R nxr = c * x[i].re + s * y[i].re;
             R nxi = c * x[i].im + s * y[i].im;
@@ -79,7 +94,6 @@ static void wmrot_unit(std::ptrdiff_t n, const R c, const R s, TC *x, TC *y)
             x[i].re = nxr; x[i].im = nxi;
             y[i].re = nyr; y[i].im = nyi;
         }
-#endif
 }
 
 #ifdef _OPENMP

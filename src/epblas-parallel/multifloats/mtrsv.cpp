@@ -9,6 +9,7 @@
 #include <multifloats.h>
 #include "mf_util.h"
 #include "mf_pred.h"
+#include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #ifdef MBLAS_SIMD_DD
 #include "mf_simd_fast.h"
 #include "mf_simd_exact.h"
@@ -35,6 +36,11 @@ namespace {
 const TR zero_dd{0.0, 0.0};
 
 #ifdef MBLAS_SIMD_DD
+/* AVX2+FMA under a possibly pre-Haswell baseline -march: these SIMD kernels are
+ * compiled with the feature enabled and reached only behind mf_have_avx2_fma()
+ * at the call sites below. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
 using simd_exact::load_dd4;
 using simd_exact::store_dd4;
 using simd_fast::hreduce;
@@ -42,7 +48,7 @@ using simd_fast::hreduce;
  * msub:  x[k] -= xi * ai[k]  for k in [lo,hi)  (NoTrans axpy form).
  * dot :  returns sum_{k in [lo,hi)} ai[k] * x[k] (Trans dot form). */
 static inline void
-mtrsv_col_msub(TR *x, const TR *ai, TR xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
+mtrsv_col_msub_simd(TR *x, const TR *ai, TR xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
 {
     double *xp = reinterpret_cast<double *>(x);
     const double *aip = reinterpret_cast<const double *>(ai);
@@ -63,7 +69,7 @@ mtrsv_col_msub(TR *x, const TR *ai, TR xi, std::ptrdiff_t lo, std::ptrdiff_t hi)
     for (; k < hi; ++k) x[k] = x[k] - xi * ai[k];
 }
 static inline TR
-mtrsv_dot_range(const TR *ai, const TR *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
+mtrsv_dot_range_simd(const TR *ai, const TR *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
 {
     const double *aip = reinterpret_cast<const double *>(ai);
     const double *xp  = reinterpret_cast<const double *>(x);
@@ -81,21 +87,21 @@ mtrsv_dot_range(const TR *ai, const TR *x, std::ptrdiff_t lo, std::ptrdiff_t hi)
     for (; k < hi; ++k) s = s + ai[k] * x[k];
     return s;
 }
+#pragma GCC pop_options
 #endif
 }
 
 #define A_(i, j)  a[static_cast<std::size_t>(j) * lda + (i)]
 
-/* Bit-exact serial path (the SIMD-packed reference). Also reused as the
- * diagonal-block solver by the threaded path below. TRANS is already normalized
- * ('C' folded to 'T' by the caller). */
-static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
-                         std::ptrdiff_t n, const TR *a, std::ptrdiff_t lda, TR *x, std::ptrdiff_t incx)
-{
-    if (n == 0) return;
-
-    if (incx == 1) {
 #ifdef MBLAS_SIMD_DD
+/* Packed-SoA AVX2/FMA incx==1 solve, extracted from mtrsv_serial so its
+ * intrinsics compile under target("avx2,fma") on a pre-Haswell baseline -march.
+ * Reached only behind mf_have_avx2_fma() from mtrsv_serial. See mf_dispatch.h. */
+#pragma GCC push_options
+#pragma GCC target("avx2,fma")
+static void mtrsv_serial_simd_unit(char UPLO, char TRANS, bool nounit,
+                         std::ptrdiff_t n, const TR *a, std::ptrdiff_t lda, TR *x)
+{
         const std::size_t N_pad = (static_cast<std::size_t>(n) + 3) & ~static_cast<std::size_t>(3);
         double *x_hi = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
         double *x_lo = static_cast<double *>(std::aligned_alloc(32, N_pad * sizeof(double)));
@@ -235,7 +241,25 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
         }
         for (std::ptrdiff_t i = 0; i < n; ++i) { x[i].limbs[0] = x_hi[i]; x[i].limbs[1] = x_lo[i]; }
         std::free(x_hi); std::free(x_lo);
-#else
+}
+#pragma GCC pop_options
+#endif  /* MBLAS_SIMD_DD */
+
+/* Bit-exact serial path (the SIMD-packed reference). Also reused as the
+ * diagonal-block solver by the threaded path below. TRANS is already normalized
+ * ('C' folded to 'T' by the caller). */
+static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
+                         std::ptrdiff_t n, const TR *a, std::ptrdiff_t lda, TR *x, std::ptrdiff_t incx)
+{
+    if (n == 0) return;
+
+    if (incx == 1) {
+#ifdef MBLAS_SIMD_DD
+        if (mf_have_avx2_fma()) {
+            mtrsv_serial_simd_unit(UPLO, TRANS, nounit, n, a, lda, x);
+        } else
+#endif
+        {
         if (TRANS == 'N') {
             if (UPLO == 'L') {
                 for (std::ptrdiff_t i = 0; i < n; ++i) {
@@ -275,7 +299,7 @@ static void mtrsv_serial(char UPLO, char TRANS, bool nounit,
                 }
             }
         }
-#endif
+        }
     } else {
         /* Strided: gather x into contiguous scratch, run the incx==1 core (the
          * packed-SIMD solve above — ~4x faster per element than a strided scalar
@@ -383,10 +407,11 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         if (eq0(xi)) continue;
                         const TR *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
-                        mtrsv_col_msub(x, ai, xi, rlo, rhi);
-#else
-                        for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
+                        if (mf_have_avx2_fma())
+                            mtrsv_col_msub_simd(x, ai, xi, rlo, rhi);
+                        else
 #endif
+                            for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
                     }
                 }
             }
@@ -405,10 +430,11 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         if (eq0(xi)) continue;
                         const TR *ai = &A_(0, i);
 #ifdef MBLAS_SIMD_DD
-                        mtrsv_col_msub(x, ai, xi, rlo, rhi);
-#else
-                        for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
+                        if (mf_have_avx2_fma())
+                            mtrsv_col_msub_simd(x, ai, xi, rlo, rhi);
+                        else
 #endif
+                            for (std::ptrdiff_t k = rlo; k < rhi; ++k) x[k] = x[k] - xi * ai[k];
                     }
                 }
             }
@@ -428,12 +454,16 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         std::ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const TR *ai = &A_(0, i);
+                            TR s;
 #ifdef MBLAS_SIMD_DD
-                            TR s = mtrsv_dot_range(ai, x, j1, n);
-#else
-                            TR s = zero_dd;
-                            for (std::ptrdiff_t k = j1; k < n; ++k) s = s + ai[k] * x[k];
+                            if (mf_have_avx2_fma())
+                                s = mtrsv_dot_range_simd(ai, x, j1, n);
+                            else
 #endif
+                            {
+                                s = zero_dd;
+                                for (std::ptrdiff_t k = j1; k < n; ++k) s = s + ai[k] * x[k];
+                            }
                             x[i] = x[i] - s;
                         }
                     }
@@ -451,12 +481,16 @@ __attribute__((noinline)) static bool mtrsv_omp(
                         std::ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
                             const TR *ai = &A_(0, i);
+                            TR s;
 #ifdef MBLAS_SIMD_DD
-                            TR s = mtrsv_dot_range(ai, x, 0, j0);
-#else
-                            TR s = zero_dd;
-                            for (std::ptrdiff_t k = 0; k < j0; ++k) s = s + ai[k] * x[k];
+                            if (mf_have_avx2_fma())
+                                s = mtrsv_dot_range_simd(ai, x, 0, j0);
+                            else
 #endif
+                            {
+                                s = zero_dd;
+                                for (std::ptrdiff_t k = 0; k < j0; ++k) s = s + ai[k] * x[k];
+                            }
                             x[i] = x[i] - s;
                         }
                     }
