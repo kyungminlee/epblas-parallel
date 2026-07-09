@@ -180,12 +180,48 @@ endif()
 # disables it if -mavx2 isn't accepted by the compiler. Bench result
 # on Raptor Lake: 3.8× over the scalar outer-product baseline single-
 # threaded, 38× over migrated at OMP=4 s=1024.
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-mavx2 -mfma" _HAS_AVX2_FMA_FLAGS)
+# The DD SIMD kernels (mf_simd_fast.h / mf_simd_exact.h) emit FMA
+# (_mm256_fmadd_pd) and AVX2 (_mm256_permute4x64_pd) instructions, neither of
+# which exists before Haswell. The gate must therefore reflect whether the
+# *deployment target* — the ISA selected by EPBLAS_PARALLEL_MARCH — actually
+# provides AVX2+FMA, NOT merely whether the compiler accepts -mavx2/-mfma.
+# The old check_cxx_compiler_flag test only asked the latter, which every
+# x86-64 GCC/Clang answers yes to regardless of target, so it force-enabled
+# the SIMD path even on a Sandybridge -march (native or explicit) and the
+# kernels SIGILL'd at runtime. Probe the actual target by compiling a program
+# that both requires the feature macros AND uses the intrinsics, WITH the same
+# -march the library builds with.
+include(CheckCXXSourceCompiles)
+set(_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
+if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
+    set(CMAKE_REQUIRED_FLAGS "-march=${EPBLAS_PARALLEL_MARCH}")
+endif()
+check_cxx_source_compiles("
+#if !defined(__AVX2__) || !defined(__FMA__)
+#error target does not provide AVX2+FMA
+#endif
+#include <immintrin.h>
+int main() {
+    __m256d a = _mm256_set1_pd(1.0);
+    a = _mm256_fmadd_pd(a, a, a);
+    a = _mm256_permute4x64_pd(a, 0);
+    return (int) _mm256_cvtsd_f64(a);
+}
+" EPBLAS_TARGET_HAS_AVX2_FMA)
+set(CMAKE_REQUIRED_FLAGS "${_saved_required_flags}")
+
 option(MBLAS_SIMD_DD
     "multifloats: AVX2 SIMD kernel for mgemm (4-wide SoA double-double)"
-    ${_HAS_AVX2_FMA_FLAGS})
+    ${EPBLAS_TARGET_HAS_AVX2_FMA})
 if(MBLAS_SIMD_DD)
+    if(NOT EPBLAS_TARGET_HAS_AVX2_FMA)
+        message(WARNING
+            "MBLAS_SIMD_DD is ON but the -march target "
+            "'${EPBLAS_PARALLEL_MARCH}' does not provide AVX2+FMA. The DD SIMD "
+            "kernels will emit FMA/AVX2 instructions that SIGILL on this "
+            "target (e.g. Sandybridge/Ivy Bridge). Leave it OFF, or set "
+            "EPBLAS_PARALLEL_MARCH to a Haswell-or-newer ISA.")
+    endif()
     target_compile_definitions(${LIB_PREFIX}blas_parallel PRIVATE
         MBLAS_SIMD_DD=1)
     target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
@@ -214,7 +250,7 @@ if(MBLAS_SIMD_DD)
     # together with MBLAS_SIMD_DD if AVX2+FMA isn't supported.
     option(WBLAS_SIMD_DD
         "multifloats: AVX2 SIMD kernel for wgemm (complex DD)"
-        ${_HAS_AVX2_FMA_FLAGS})
+        ${EPBLAS_TARGET_HAS_AVX2_FMA})
     if(WBLAS_SIMD_DD)
         target_compile_definitions(${LIB_PREFIX}blas_parallel PRIVATE
             WBLAS_SIMD_DD=1)
