@@ -51,15 +51,13 @@ void etrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
     const TR *restrict a, const ptrdiff_t *lda_,
-    TR *restrict x, const ptrdiff_t *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len);
+    TR *restrict x, const ptrdiff_t *incx_);
 
 void etrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
     const TR *restrict a, const ptrdiff_t *lda_,
-    TR *restrict x, const ptrdiff_t *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len);
+    TR *restrict x, const ptrdiff_t *incx_);
 
 void etrsv_core(
     char uplo, char trans, char diag,
@@ -114,13 +112,11 @@ void etrsv_core(
      * blocked-parallel and wins. */
     if (incx == 1 && n >= 3 * etrsv_blocked_nb() && !in_par
         && blas_omp_max_threads() > 1) {
-        etrsv_blocked_(&uplo_c, &trans_c, &diag_c, &n, a, &lda, x, &incx,
-                       1, 1, 1);
+        etrsv_blocked_(&uplo_c, &trans_c, &diag_c, &n, a, &lda, x, &incx);
         return;
     }
 
-    etrsv_serial_(&uplo_c, &trans_c, &diag_c, &n, a, &lda, x, &incx,
-                  1, 1, 1);
+    etrsv_serial_(&uplo_c, &trans_c, &diag_c, &n, a, &lda, x, &incx);
 }
 
 /* Pure-serial unblocked Netlib body. No OpenMP. Inherits the
@@ -130,10 +126,8 @@ void etrsv_serial_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
     const TR *restrict a, const ptrdiff_t *lda_,
-    TR *restrict x, const ptrdiff_t *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+    TR *restrict x, const ptrdiff_t *incx_)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
     const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
     const char UPLO = blas_up(*uplo);
@@ -367,8 +361,7 @@ void etrsv_blocked_(
     const char *uplo, const char *trans, const char *diag,
     const ptrdiff_t *n_,
     const TR *restrict a, const ptrdiff_t *lda_,
-    TR *restrict x, const ptrdiff_t *incx_,
-    size_t uplo_len, size_t trans_len, size_t diag_len)
+    TR *restrict x, const ptrdiff_t *incx_)
 {
     const ptrdiff_t n = *n_;
     const ptrdiff_t lda = *lda_, incx = *incx_;
@@ -380,8 +373,7 @@ void etrsv_blocked_(
     if (n == 0) return;
     if (incx != 1 || n < 2 * nb) {
         const ptrdiff_t n_pt = *n_, lda_pt = *lda_, incx_pt = *incx_;
-        etrsv_serial_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt,
-                      uplo_len, trans_len, diag_len);
+        etrsv_serial_(uplo, trans, diag, &n_pt, a, &lda_pt, x, &incx_pt);
         return;
     }
 
@@ -408,7 +400,7 @@ void etrsv_blocked_(
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
-                                  &x[j], &one_i, uplo_len, trans_len, diag_len);
+                                  &x[j], &one_i);
                 }
 #ifdef _OPENMP
                 if (use_omp) {
@@ -442,7 +434,7 @@ void etrsv_blocked_(
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
-                                  &x[j], &one_i, uplo_len, trans_len, diag_len);
+                                  &x[j], &one_i);
                 }
 #ifdef _OPENMP
                 if (use_omp) {
@@ -475,7 +467,7 @@ void etrsv_blocked_(
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
-                                  &x[j], &one_i, uplo_len, trans_len, diag_len);
+                                  &x[j], &one_i);
                 }
 #ifdef _OPENMP
                 if (use_omp) {
@@ -508,7 +500,7 @@ void etrsv_blocked_(
                 if (tid == 0) {
                     const ptrdiff_t lda_pt = *lda_;
                     etrsv_serial_(uplo, trans, diag, &jb, &A_(j, j), &lda_pt,
-                                  &x[j], &one_i, uplo_len, trans_len, diag_len);
+                                  &x[j], &one_i);
                 }
 #ifdef _OPENMP
                 if (use_omp) {

@@ -48,10 +48,8 @@ void xsyrk_(
     const T *alpha_,
     const T *a, const int *lda_,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, const int *ldc_)
 {
-    (void)uplo_len; (void)trans_len;
     const int N = *n_, K = *k_;
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = beta_[0],  beta_i = beta_[1];

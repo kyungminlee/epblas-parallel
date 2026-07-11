@@ -47,8 +47,7 @@ typedef multifloats::float64x2 T;
 
 /* Map a Fortran trans character to a normalized code. For real input,
  * 'C' is equivalent to 'T' (no complex-conjugate operation possible). */
-static int trans_code(const char *p, size_t len) {
-    (void)len;
+static int trans_code(const char *p) {
     char c = (char)toupper((unsigned char)*p);
     return (c == 'C') ? 'T' : c;
 }
@@ -112,14 +111,13 @@ extern "C" void mgemm_(
     const T *a, const int *lda_,
     const T *b, const int *ldb_,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t transa_len, size_t transb_len)
+    T *c, const int *ldc_)
 {
     const int M = *m_, N = *n_, K = *k_;
     const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
-    const int ta = trans_code(transa_p, transa_len);
-    const int tb = trans_code(transb_p, transb_len);
+    const int ta = trans_code(transa_p);
+    const int tb = trans_code(transb_p);
 
     /* OpenBLAS-style early-return: m,n=0 → no-op; k=0 still needs the
      * beta pass on C (handled below). */

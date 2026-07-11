@@ -66,10 +66,8 @@ static int symv_partition(int upper, ptrdiff_t n, int nthreads,
 extern "C" void whpmv_(const char *UPLO, const int *N, const C *ALPHA,
             const C *ap,
             const C *x, const int *INCX,
-            const C *BETA, C *y, const int *INCY,
-            size_t uplo_len)
+            const C *BETA, C *y, const int *INCY)
 {
-    (void)uplo_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);
     ptrdiff_t incy = (ptrdiff_t)(*INCY);

@@ -79,10 +79,8 @@ static int syr_partition(int upper, ptrdiff_t n, int nthreads,
 
 extern "C" void wher_(const char *UPLO, const int *N, const R *ALPHA,
            const C *x, const int *INCX,
-           C *a, const int *LDA,
-           size_t uplo_len)
+           C *a, const int *LDA)
 {
-    (void)uplo_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);

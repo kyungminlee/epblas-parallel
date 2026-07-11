@@ -91,10 +91,8 @@ void egbmv_(const char *TRANS, const int *M, const int *N,
             const int *KL, const int *KU, const T *ALPHA,
             const T *a, const int *LDA,
             const T *x, const int *INCX,
-            const T *BETA, T *y, const int *INCY,
-            size_t trans_len)
+            const T *BETA, T *y, const int *INCY)
 {
-    (void)trans_len;
     ptrdiff_t m    = (ptrdiff_t)(*M);
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t kl   = (ptrdiff_t)(*KL);

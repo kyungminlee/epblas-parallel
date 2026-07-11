@@ -59,10 +59,8 @@ void esymm_(
     const T *a, const int *lda_,
     const T *b, const int *ldb_,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t side_len, size_t uplo_len)
+    T *c, const int *ldc_)
 {
-    (void)side_len; (void)uplo_len;
     const int M = *m_, N = *n_;
     const T alpha = *alpha_, beta = *beta_;
     const int side = (char)toupper((unsigned char)*side_p);

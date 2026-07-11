@@ -16,10 +16,8 @@ typedef __float128 T;
 
 void qtbsv_(const char *UPLO, const char *TRANS, const char *DIAG,
             const int *N, const int *K, const T *a, const int *LDA,
-            T *x, const int *INCX,
-            size_t uplo_len, size_t trans_len, size_t diag_len)
+            T *x, const int *INCX)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t k    = (ptrdiff_t)(*K);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);

@@ -144,10 +144,8 @@ static void symv_strided(int upper, ptrdiff_t n,
 void esymv_(const char *UPLO, const int *N, const T *ALPHA,
             const T *a, const int *LDA,
             const T *x, const int *INCX,
-            const T *BETA, T *y, const int *INCY,
-            size_t uplo_len)
+            const T *BETA, T *y, const int *INCY)
 {
-    (void)uplo_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);

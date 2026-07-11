@@ -138,10 +138,8 @@ static void partition_even(ptrdiff_t n, int nthreads, ptrdiff_t *range_m)
 void xhbmv_(const char *UPLO, const int *N, const int *K, const C *ALPHA,
             const C *a, const int *LDA,
             const C *x, const int *INCX,
-            const C *BETA, C *y, const int *INCY,
-            size_t uplo_len)
+            const C *BETA, C *y, const int *INCY)
 {
-    (void)uplo_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t k    = (ptrdiff_t)(*K);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);

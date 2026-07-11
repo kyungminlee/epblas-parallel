@@ -140,10 +140,8 @@ static void tbmv_kernel(int upper, int trans, int conj, int nounit,
 
 void ytbmv_(const char *UPLO, const char *TRANS, const char *DIAG,
             const int *N, const int *K, const C *a, const int *LDA,
-            C *x, const int *INCX,
-            size_t uplo_len, size_t trans_len, size_t diag_len)
+            C *x, const int *INCX)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t k    = (ptrdiff_t)(*K);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);

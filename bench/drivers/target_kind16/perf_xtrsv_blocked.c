@@ -41,7 +41,7 @@ BLAS_EXTERN void xtrsv_(const char *, const char *, const char *, const int *,
 /* Internal overlay symbol — ptrdiff_t index ABI (NOT the Fortran int ABI;
  * the int->ptrdiff_t conversion widened every internal entry point). */
 BLAS_EXTERN void xtrsv_blocked_(const char *, const char *, const char *, const ptrdiff_t *,
-    const X16 *, const ptrdiff_t *, X16 *, const ptrdiff_t *, size_t, size_t, size_t);
+    const X16 *, const ptrdiff_t *, X16 *, const ptrdiff_t *);
 BLAS_EXTERN void xtrsv_migrated_(const char *, const char *, const char *, const int *,
     const X16 *, const int *, X16 *, const int *, size_t, size_t, size_t);
 
@@ -52,8 +52,9 @@ typedef void (*xtrsv_fn)(const char *, const char *, const char *, const int *,
 static void xtrsv_blocked_i32(const char *uplo, const char *trans, const char *diag,
     const int *n, const X16 *a, const int *lda, X16 *x, const int *incx,
     size_t ul, size_t tl, size_t dl) {
+    (void)ul; (void)tl; (void)dl;
     const ptrdiff_t n_ = *n, lda_ = *lda, incx_ = *incx;
-    xtrsv_blocked_(uplo, trans, diag, &n_, a, &lda_, x, &incx_, ul, tl, dl);
+    xtrsv_blocked_(uplo, trans, diag, &n_, a, &lda_, x, &incx_);
 }
 
 static Q16 q16_abs(Q16 z) { return z < 0 ? -z : z; }

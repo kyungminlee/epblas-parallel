@@ -50,8 +50,7 @@ typedef __float128 T;
 extern void qgemv_(const char *TRANS, const int *M, const int *N,
                    const T *ALPHA, const T *a, const int *LDA,
                    const T *x, const int *INCX,
-                   const T *BETA, T *y, const int *INCY,
-                   size_t trans_len);
+                   const T *BETA, T *y, const int *INCY);
 
 static inline char up(const char *p) {
     return (char)toupper((unsigned char)*p);
@@ -67,10 +66,8 @@ void qgemmtr_(const char *uplo, const char *transa, const char *transb,
               const T *a, const int *lda_,
               const T *b, const int *ldb_,
               const T *beta_,
-              T *c, const int *ldc_,
-              size_t uplo_len, size_t ta_len, size_t tb_len)
+              T *c, const int *ldc_)
 {
-    (void)uplo_len; (void)ta_len; (void)tb_len;
     const int m = *m_, k = *k_;
     const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const T alpha = *alpha_, beta = *beta_;
@@ -101,7 +98,7 @@ void qgemmtr_(const char *uplo, const char *transa, const char *transb,
             if (ta == 'N') { gm = j; gn = k; }
             else           { gm = k; gn = j; }
             qgemv_(&ta, &gm, &gn, &alpha, aa, &lda, bb, &incb,
-                   &one, cc, &incy_one, 1);
+                   &one, cc, &incy_one);
         }
     } else {
         for (int i = 0; i < m; ++i) {
@@ -119,7 +116,7 @@ void qgemmtr_(const char *uplo, const char *transa, const char *transb,
             if (ta == 'N') { gm = j; gn = k; }
             else           { gm = k; gn = j; }
             qgemv_(&ta, &gm, &gn, &alpha, a, &lda, bb, &incb,
-                   &one, cc, &incy_one, 1);
+                   &one, cc, &incy_one);
         }
     }
 }

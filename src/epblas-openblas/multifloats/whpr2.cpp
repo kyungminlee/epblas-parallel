@@ -75,9 +75,8 @@ static int syr_partition(int upper, ptrdiff_t n, int nthreads,
 extern "C" void whpr2_(const char *UPLO, const int *N, const C *ALPHA,
             const C *x, const int *INCX,
             const C *y, const int *INCY,
-            C *ap, size_t uplo_len)
+            C *ap)
 {
-    (void)uplo_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);
     ptrdiff_t incy = (ptrdiff_t)(*INCY);

@@ -35,8 +35,7 @@ typedef __complex128 C;
 extern void xgemv_(const char *TRANS, const int *M, const int *N,
                    const C *ALPHA, const C *a, const int *LDA,
                    const C *x, const int *INCX,
-                   const C *BETA, C *y, const int *INCY,
-                   size_t trans_len);
+                   const C *BETA, C *y, const int *INCY);
 
 static inline char up_(const char *p) {
     return (char)toupper((unsigned char)*p);
@@ -57,10 +56,8 @@ void xgemmtr_(const char *uplo, const char *transa, const char *transb,
               C *a, const int *lda_,
               C *b, const int *ldb_,
               const C *beta_,
-              C *c, const int *ldc_,
-              size_t uplo_len, size_t ta_len, size_t tb_len)
+              C *c, const int *ldc_)
 {
-    (void)uplo_len; (void)ta_len; (void)tb_len;
     const int m = *m_, k = *k_;
     const int lda = *lda_, ldb = *ldb_, ldc = *ldc_;
     const C alpha = *alpha_, beta = *beta_;
@@ -114,7 +111,7 @@ void xgemmtr_(const char *uplo, const char *transa, const char *transb,
             if (ta == 'N') { gm = j; gn = k; }
             else           { gm = k; gn = j; }
             xgemv_(&ta, &gm, &gn, &alpha, aa, &lda, bb, &incb,
-                   &one, cc, &incy_one, 1);
+                   &one, cc, &incy_one);
         }
     } else {
         for (int i = 0; i < m; ++i) {
@@ -132,7 +129,7 @@ void xgemmtr_(const char *uplo, const char *transa, const char *transb,
             if (ta == 'N') { gm = j; gn = k; }
             else           { gm = k; gn = j; }
             xgemv_(&ta, &gm, &gn, &alpha, a, &lda, bb, &incb,
-                   &one, cc, &incy_one, 1);
+                   &one, cc, &incy_one);
         }
     }
 

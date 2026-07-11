@@ -15,10 +15,8 @@ typedef __complex128 C;
 
 void xtpsv_(const char *UPLO, const char *TRANS, const char *DIAG,
             const int *N, const C *ap,
-            C *x, const int *INCX,
-            size_t uplo_len, size_t trans_len, size_t diag_len)
+            C *x, const int *INCX)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);
 

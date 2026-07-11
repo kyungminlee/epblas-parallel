@@ -458,10 +458,8 @@ void ytrsm_(
     const char *transa_p, const char *diag_p,
     const int *m_, const int *n_, const T *alpha_,   /* alpha is 2 long doubles */
     const T *a, const int *lda_,
-    T *b, const int *ldb_,
-    size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)
+    T *b, const int *ldb_)
 {
-    (void)side_len; (void)uplo_len; (void)transa_len; (void)diag_len;
 
     const int M = *m_, N = *n_;
     const int lda = *lda_, ldb = *ldb_;

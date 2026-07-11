@@ -19,10 +19,8 @@ typedef multifloats::float64x2 T;
 
 extern "C" void mtrsv_(const char *UPLO, const char *TRANS, const char *DIAG,
             const int *N, const T *a, const int *LDA,
-            T *x, const int *INCX,
-            size_t uplo_len, size_t trans_len, size_t diag_len)
+            T *x, const int *INCX)
 {
-    (void)uplo_len; (void)trans_len; (void)diag_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);

@@ -162,10 +162,8 @@ static void gemv_n_split_strided_x(ptrdiff_t m, ptrdiff_t j_lo, ptrdiff_t j_hi,
 void qgemv_(const char *TRANS, const int *M, const int *N,
             const T *ALPHA, const T *a, const int *LDA,
             const T *x, const int *INCX,
-            const T *BETA, T *y, const int *INCY,
-            size_t trans_len)
+            const T *BETA, T *y, const int *INCY)
 {
-    (void)trans_len;
     ptrdiff_t m    = (ptrdiff_t)(*M);
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);

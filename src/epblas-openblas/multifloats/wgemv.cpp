@@ -35,10 +35,8 @@ typedef std::complex<multifloats::float64x2> C;
 extern "C" void wgemv_(const char *TRANS, const int *M, const int *N,
             const C *ALPHA, const C *a, const int *LDA,
             const C *x, const int *INCX,
-            const C *BETA, C *y, const int *INCY,
-            size_t trans_len)
+            const C *BETA, C *y, const int *INCY)
 {
-    (void)trans_len;
     ptrdiff_t m    = (ptrdiff_t)(*M);
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);

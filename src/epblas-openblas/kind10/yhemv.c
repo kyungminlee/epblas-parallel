@@ -65,10 +65,8 @@ static int symv_partition(int upper, ptrdiff_t n, int nthreads,
 void yhemv_(const char *UPLO, const int *N, const C *ALPHA,
             const C *a, const int *LDA,
             const C *x, const int *INCX,
-            const C *BETA, C *y, const int *INCY,
-            size_t uplo_len)
+            const C *BETA, C *y, const int *INCY)
 {
-    (void)uplo_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t lda  = (ptrdiff_t)(*LDA);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);

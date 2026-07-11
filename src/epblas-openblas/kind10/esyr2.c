@@ -78,10 +78,8 @@ static int syr_partition(int upper, ptrdiff_t n, int nthreads,
 void esyr2_(const char *UPLO, const int *N, const T *ALPHA,
             const T *x, const int *INCX,
             const T *y, const int *INCY,
-            T *a, const int *LDA,
-            size_t uplo_len)
+            T *a, const int *LDA)
 {
-    (void)uplo_len;
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t incx = (ptrdiff_t)(*INCX);
     ptrdiff_t incy = (ptrdiff_t)(*INCY);

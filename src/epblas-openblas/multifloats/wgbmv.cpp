@@ -100,10 +100,8 @@ extern "C" void wgbmv_(const char *TRANS, const int *M, const int *N,
             const int *KL, const int *KU, const C *ALPHA,
             const C *a, const int *LDA,
             const C *x, const int *INCX,
-            const C *BETA, C *y, const int *INCY,
-            size_t trans_len)
+            const C *BETA, C *y, const int *INCY)
 {
-    (void)trans_len;
     ptrdiff_t m    = (ptrdiff_t)(*M);
     ptrdiff_t n    = (ptrdiff_t)(*N);
     ptrdiff_t kl   = (ptrdiff_t)(*KL);

@@ -73,10 +73,8 @@ extern "C" void wher2k_(
     const T *a, const int *lda_,
     const T *b, const int *ldb_,
     const T *beta_,
-    T *c, const int *ldc_,
-    size_t uplo_len, size_t trans_len)
+    T *c, const int *ldc_)
 {
-    (void)uplo_len; (void)trans_len;
     const int N = *n_, K = *k_;
     const T alphar = alpha_[0], alphai = alpha_[1];
     const T beta_r = *beta_;

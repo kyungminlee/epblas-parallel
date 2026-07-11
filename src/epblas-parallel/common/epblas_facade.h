@@ -5,7 +5,7 @@
  *
  * The facade is the ONLY place the Fortran by-ref ABI is unwrapped:
  *   - integers/sizes/indices  -> deref'd to `ptrdiff_t` BY VALUE
- *   - flag chars              -> deref'd to `char` BY VALUE; hidden `*_len` dropped
+ *   - flag chars              -> deref'd to `char` BY VALUE; hidden `*_len` omitted
  *   - alpha/beta (T or R)     -> the incoming `const T*`/`const R*` is FORWARDED
  *                                (>=16 B; by-value would spill a wide core — doc 02c)
  *   - array data + outputs    -> pointers forwarded unchanged
@@ -21,8 +21,17 @@
  *   ST = scalar type of alpha (may be the real type) RET = return type
  *   SA/SB = alpha/beta scalar types (her2k: alpha=T, beta=R)
  *
- * Hidden Fortran string-length args are declared (so the call-site ABI matches)
- * but unused — same as the pre-refactor entries, which also ignored them.
+ * Hidden Fortran string-length args are OMITTED from the facade signatures.
+ * They were only ever declared-and-ignored, and declaring them is actively
+ * unsafe when the caller does NOT push them: reference PBLAS/ScaLAPACK calls
+ * the local BLAS through a bare `char *` (F_CHAR_T) with no trailing lengths
+ * (see PBLAS/SRC GEMM_T etc.), so a facade declaring `..., size_t transa_len,
+ * size_t transb_len` claims two stack-arg slots the caller never allocated.
+ * A heavyweight facade that opens an OpenMP region (GOMP_parallel) then uses
+ * those phantom slots as scratch for the outlined-context struct, clobbering
+ * the caller's frame. Omitting the lengths makes the callee declare no more
+ * stack args than any caller provides: gfortran callers over-provide the two
+ * trailing lengths harmlessly, reference-PBLAS callers match exactly.
  *
  * `name_core(...)` must be declared/defined (external linkage if cross-called,
  * else `static`) in the including .c BEFORE the macro is invoked. Array/output
@@ -124,7 +133,7 @@
 #define EPBLAS_FACADE_GEMV_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *trans, const INT *m, const INT *n,               \
         const T *alpha, const T *a, const INT *lda, const T *x, const INT *incx,\
-        const T *beta, T *y, const INT *incy, size_t trans_len)                 \
+        const T *beta, T *y, const INT *incy)                                   \
     { NAME##_core(*trans, *m, *n, alpha, a, *lda, x, *incx, beta, y, *incy); }
 #define EPBLAS_FACADE_GEMV(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_GEMV_ONE, NAME, T)
 
@@ -132,8 +141,7 @@
 #define EPBLAS_FACADE_GBMV_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *trans, const INT *m, const INT *n,               \
         const INT *kl, const INT *ku, const T *alpha, const T *a, const INT *lda,\
-        const T *x, const INT *incx, const T *beta, T *y, const INT *incy,      \
-        size_t trans_len)                                                       \
+        const T *x, const INT *incx, const T *beta, T *y, const INT *incy)      \
     { NAME##_core(*trans, *m, *n, *kl, *ku, alpha, a, *lda, x, *incx, beta, y, *incy); }
 #define EPBLAS_FACADE_GBMV(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_GBMV_ONE, NAME, T)
 
@@ -141,7 +149,7 @@
 #define EPBLAS_FACADE_SYMV_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *uplo, const INT *n, const T *alpha,              \
         const T *a, const INT *lda, const T *x, const INT *incx,                \
-        const T *beta, T *y, const INT *incy, size_t uplo_len)                  \
+        const T *beta, T *y, const INT *incy)                                   \
     { NAME##_core(*uplo, *n, alpha, a, *lda, x, *incx, beta, y, *incy); }
 #define EPBLAS_FACADE_SYMV(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SYMV_ONE, NAME, T)
 
@@ -149,7 +157,7 @@
 #define EPBLAS_FACADE_SBMV_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *uplo, const INT *n, const INT *k, const T *alpha,\
         const T *a, const INT *lda, const T *x, const INT *incx,                \
-        const T *beta, T *y, const INT *incy, size_t uplo_len)                  \
+        const T *beta, T *y, const INT *incy)                                   \
     { NAME##_core(*uplo, *n, *k, alpha, a, *lda, x, *incx, beta, y, *incy); }
 #define EPBLAS_FACADE_SBMV(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SBMV_ONE, NAME, T)
 
@@ -157,15 +165,14 @@
 #define EPBLAS_FACADE_SPMV_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *uplo, const INT *n, const T *alpha,              \
         const T *ap, const T *x, const INT *incx,                              \
-        const T *beta, T *y, const INT *incy, size_t uplo_len)                  \
+        const T *beta, T *y, const INT *incy)                                   \
     { NAME##_core(*uplo, *n, alpha, ap, x, *incx, beta, y, *incy); }
 #define EPBLAS_FACADE_SPMV(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SPMV_ONE, NAME, T)
 
 /* TRMV / TRSV: uplo,trans,diag,n,a,lda,x,incx. */
 #define EPBLAS_FACADE_TRMV_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *uplo, const char *trans, const char *diag,       \
-        const INT *n, const T *a, const INT *lda, T *x, const INT *incx,        \
-        size_t uplo_len, size_t trans_len, size_t diag_len)                     \
+        const INT *n, const T *a, const INT *lda, T *x, const INT *incx)        \
     { NAME##_core(*uplo, *trans, *diag, *n, a, *lda, x, *incx); }
 #define EPBLAS_FACADE_TRMV(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_TRMV_ONE, NAME, T)
 
@@ -173,15 +180,14 @@
 #define EPBLAS_FACADE_TBMV_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *uplo, const char *trans, const char *diag,       \
         const INT *n, const INT *k, const T *a, const INT *lda, T *x,           \
-        const INT *incx, size_t uplo_len, size_t trans_len, size_t diag_len)    \
+        const INT *incx)                                                        \
     { NAME##_core(*uplo, *trans, *diag, *n, *k, a, *lda, x, *incx); }
 #define EPBLAS_FACADE_TBMV(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_TBMV_ONE, NAME, T)
 
 /* TPMV / TPSV: packed TRMV/TRSV (ap, no lda). */
 #define EPBLAS_FACADE_TPMV_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *uplo, const char *trans, const char *diag,       \
-        const INT *n, const T *ap, T *x, const INT *incx,                       \
-        size_t uplo_len, size_t trans_len, size_t diag_len)                     \
+        const INT *n, const T *ap, T *x, const INT *incx)                       \
     { NAME##_core(*uplo, *trans, *diag, *n, ap, x, *incx); }
 #define EPBLAS_FACADE_TPMV(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_TPMV_ONE, NAME, T)
 
@@ -196,14 +202,14 @@
 /* SYR / HER: A := alpha*x*x' + A.  esyr(alpha T,x/a T); yher(alpha R,x/a T). */
 #define EPBLAS_FACADE_SYR_ONE(NAME, ST, VT, INT, SUF)                           \
     void NAME##SUF(const char *uplo, const INT *n, const ST *alpha,             \
-        const VT *x, const INT *incx, VT *a, const INT *lda, size_t uplo_len)   \
+        const VT *x, const INT *incx, VT *a, const INT *lda)                    \
     { NAME##_core(*uplo, *n, alpha, x, *incx, a, *lda); }
 #define EPBLAS_FACADE_SYR(NAME, ST, VT) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SYR_ONE, NAME, ST, VT)
 
 /* SPR / HPR: packed SYR/HER (ap, no lda). */
 #define EPBLAS_FACADE_SPR_ONE(NAME, ST, VT, INT, SUF)                           \
     void NAME##SUF(const char *uplo, const INT *n, const ST *alpha,             \
-        const VT *x, const INT *incx, VT *ap, size_t uplo_len)                  \
+        const VT *x, const INT *incx, VT *ap)                                   \
     { NAME##_core(*uplo, *n, alpha, x, *incx, ap); }
 #define EPBLAS_FACADE_SPR(NAME, ST, VT) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SPR_ONE, NAME, ST, VT)
 
@@ -211,7 +217,7 @@
 #define EPBLAS_FACADE_SYR2_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *uplo, const INT *n, const T *alpha,              \
         const T *x, const INT *incx, const T *y, const INT *incy,               \
-        T *a, const INT *lda, size_t uplo_len)                                  \
+        T *a, const INT *lda)                                                   \
     { NAME##_core(*uplo, *n, alpha, x, *incx, y, *incy, a, *lda); }
 #define EPBLAS_FACADE_SYR2(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SYR2_ONE, NAME, T)
 
@@ -219,7 +225,7 @@
 #define EPBLAS_FACADE_SPR2_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *uplo, const INT *n, const T *alpha,              \
         const T *x, const INT *incx, const T *y, const INT *incy,               \
-        T *ap, size_t uplo_len)                                                 \
+        T *ap)                                                                  \
     { NAME##_core(*uplo, *n, alpha, x, *incx, y, *incy, ap); }
 #define EPBLAS_FACADE_SPR2(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SPR2_ONE, NAME, T)
 
@@ -229,8 +235,7 @@
 #define EPBLAS_FACADE_GEMM_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *transa, const char *transb, const INT *m,        \
         const INT *n, const INT *k, const T *alpha, const T *a, const INT *lda, \
-        const T *b, const INT *ldb, const T *beta, T *c, const INT *ldc,        \
-        size_t transa_len, size_t transb_len)                                   \
+        const T *b, const INT *ldb, const T *beta, T *c, const INT *ldc)        \
     { NAME##_core(*transa, *transb, *m, *n, *k, alpha, a, *lda, b, *ldb, beta, c, *ldc); }
 #define EPBLAS_FACADE_GEMM(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_GEMM_ONE, NAME, T)
 
@@ -238,8 +243,7 @@
 #define EPBLAS_FACADE_GEMMTR_ONE(NAME, T, INT, SUF)                             \
     void NAME##SUF(const char *uplo, const char *transa, const char *transb,    \
         const INT *n, const INT *k, const T *alpha, const T *a, const INT *lda, \
-        const T *b, const INT *ldb, const T *beta, T *c, const INT *ldc,        \
-        size_t uplo_len, size_t ta_len, size_t tb_len)                          \
+        const T *b, const INT *ldb, const T *beta, T *c, const INT *ldc)        \
     { NAME##_core(*uplo, *transa, *transb, *n, *k, alpha, a, *lda, b, *ldb, beta, c, *ldc); }
 #define EPBLAS_FACADE_GEMMTR(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_GEMMTR_ONE, NAME, T)
 
@@ -247,8 +251,7 @@
 #define EPBLAS_FACADE_SYMM_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *side, const char *uplo, const INT *m,            \
         const INT *n, const T *alpha, const T *a, const INT *lda,               \
-        const T *b, const INT *ldb, const T *beta, T *c, const INT *ldc,        \
-        size_t side_len, size_t uplo_len)                                       \
+        const T *b, const INT *ldb, const T *beta, T *c, const INT *ldc)        \
     { NAME##_core(*side, *uplo, *m, *n, alpha, a, *lda, b, *ldb, beta, c, *ldc); }
 #define EPBLAS_FACADE_SYMM(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SYMM_ONE, NAME, T)
 
@@ -257,7 +260,7 @@
 #define EPBLAS_FACADE_SYRK_ONE(NAME, ST, VT, INT, SUF)                          \
     void NAME##SUF(const char *uplo, const char *trans, const INT *n,           \
         const INT *k, const ST *alpha, const VT *a, const INT *lda,             \
-        const ST *beta, VT *c, const INT *ldc, size_t uplo_len, size_t trans_len)\
+        const ST *beta, VT *c, const INT *ldc)                                  \
     { NAME##_core(*uplo, *trans, *n, *k, alpha, a, *lda, beta, c, *ldc); }
 #define EPBLAS_FACADE_SYRK(NAME, ST, VT) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SYRK_ONE, NAME, ST, VT)
 
@@ -266,8 +269,7 @@
 #define EPBLAS_FACADE_SYR2K_ONE(NAME, SA, SB, VT, INT, SUF)                     \
     void NAME##SUF(const char *uplo, const char *trans, const INT *n,           \
         const INT *k, const SA *alpha, const VT *a, const INT *lda,             \
-        const VT *b, const INT *ldb, const SB *beta, VT *c, const INT *ldc,     \
-        size_t uplo_len, size_t trans_len)                                      \
+        const VT *b, const INT *ldb, const SB *beta, VT *c, const INT *ldc)     \
     { NAME##_core(*uplo, *trans, *n, *k, alpha, a, *lda, b, *ldb, beta, c, *ldc); }
 #define EPBLAS_FACADE_SYR2K(NAME, SA, SB, VT) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_SYR2K_ONE, NAME, SA, SB, VT)
 
@@ -275,8 +277,7 @@
 #define EPBLAS_FACADE_TRMM_ONE(NAME, T, INT, SUF)                               \
     void NAME##SUF(const char *side, const char *uplo, const char *transa,      \
         const char *diag, const INT *m, const INT *n, const T *alpha,           \
-        const T *a, const INT *lda, T *b, const INT *ldb,                       \
-        size_t side_len, size_t uplo_len, size_t transa_len, size_t diag_len)   \
+        const T *a, const INT *lda, T *b, const INT *ldb)                       \
     { NAME##_core(*side, *uplo, *transa, *diag, *m, *n, alpha, a, *lda, b, *ldb); }
 #define EPBLAS_FACADE_TRMM(NAME, T) EPBLAS_FACADE_PAIR(EPBLAS_FACADE_TRMM_ONE, NAME, T)
 
