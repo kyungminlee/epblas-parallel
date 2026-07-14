@@ -25,6 +25,41 @@ project(epblas-parallel
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(FortranCompiler)
 
+# ── Position-independent code / shared-library output ─────────────────
+# The overlay + reference archives are STATIC. Compiling them PIC is what
+# lets a consumer wrap the archive in `--whole-archive` and link it into a
+# shared object. The one thing that otherwise blocks that link is the
+# persistent per-thread pack arenas (`static __thread g_pack`, from the
+# pack-arena rollout): without PIC the compiler picks the local-exec TLS
+# model (R_X86_64_TPOFF32), legal only inside an executable, so `-shared`
+# fails with "local-exec is incompatible with -shared". PIC moves those
+# file-local TLS vars to the local-dynamic model, which is shared-object-
+# and dlopen-safe.
+#
+# Kept ON by default at negligible cost: on x86-64 the small code model
+# already emits RIP-relative addressing (the static archives carry zero
+# absolute R_X86_64_32/32S relocations either way), so hot-loop codegen is
+# unchanged, and the pack-arena TLS handle is fetched O(1) per BLAS call —
+# never per element. Set -DEPBLAS_POSITION_INDEPENDENT_CODE=OFF for a
+# strictly executable-only static build.
+option(EPBLAS_POSITION_INDEPENDENT_CODE
+    "Compile overlay/reference archives position-independent (-fPIC)" ON)
+if(EPBLAS_POSITION_INDEPENDENT_CODE)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# Optional shared (.so) overlay libraries. Each is built by wrapping the
+# STATIC overlay archive in `--whole-archive` so every Fortran-callable
+# symbol is exported (Linux default visibility). Requires PIC — forced ON
+# below when enabled. OFF by default so the installed/benchmarked
+# artifacts remain the tuned static archives.
+option(EPBLAS_BUILD_SHARED
+    "Also build shared (.so) overlay libraries from the static archives" OFF)
+if(EPBLAS_BUILD_SHARED AND NOT CMAKE_POSITION_INDEPENDENT_CODE)
+    message(STATUS "epblas: EPBLAS_BUILD_SHARED=ON forces position-independent code")
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # Baked-in (target, prefix) table. Adding a fourth target is a
 # coordinated change touching both repos.
 #
@@ -221,6 +256,16 @@ add_subdirectory(src/epblas-openblas)
 # from the wrong source; with it, the overlay always wins for the
 # routines it covers. No serial baseline behind — a routine the
 # overlay does not cover surfaces as an honest link error.
+# Placeholder TU: a SHARED library needs at least one source of its own;
+# the overlay archive itself is pulled in whole via --whole-archive below.
+if(EPBLAS_BUILD_SHARED)
+    set(_epblas_shared_dummy ${CMAKE_CURRENT_BINARY_DIR}/epblas_shared_dummy.c)
+    file(WRITE ${_epblas_shared_dummy}
+        "/* Placeholder TU — the overlay archive is linked in via\n"
+        "   --whole-archive; this only satisfies CMake's requirement that a\n"
+        "   SHARED library have at least one source file. */\n")
+endif()
+
 foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
     set(_prefix "${EPBLAS_PARALLEL_PREFIX_${_target}}")
     set(_overlay "${_prefix}blas_parallel")
@@ -252,6 +297,28 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
         "$<LINK_LIBRARY:WHOLE_ARCHIVE,epblas-parallel::${_overlay}>")
 
     message(STATUS "composite: epblas-parallel::${_composite} = WHOLE_ARCHIVE(epblas-parallel::${_overlay})")
+
+    # Optional shared sibling: lib${_overlay}.so carrying the same
+    # Fortran-callable symbols. --whole-archive forces every object of the
+    # static overlay into the .so; the overlay's usage requirements
+    # (OpenMP, and multifloats for the mw target) propagate through the
+    # generator expression, and OpenMP::OpenMP_C is added directly for the
+    # same reason the composite does.
+    if(EPBLAS_BUILD_SHARED)
+        set(_shared "${_prefix}blas_shared")
+        add_library(${_shared} SHARED ${_epblas_shared_dummy})
+        add_library(epblas-parallel::${_shared} ALIAS ${_shared})
+        set_target_properties(${_shared} PROPERTIES
+            OUTPUT_NAME ${_overlay}
+            VERSION     ${PROJECT_VERSION}
+            SOVERSION   ${PROJECT_VERSION_MAJOR})
+        target_link_libraries(${_shared} PRIVATE
+            "$<LINK_LIBRARY:WHOLE_ARCHIVE,${_overlay}>")
+        if(OpenMP_C_FOUND)
+            target_link_libraries(${_shared} PRIVATE OpenMP::OpenMP_C)
+        endif()
+        message(STATUS "shared: epblas-parallel::${_shared} = lib${_overlay}.so (WHOLE_ARCHIVE ${_overlay})")
+    endif()
 endforeach()
 
 # ── Install + export ──────────────────────────────────────────────
@@ -281,7 +348,7 @@ set(_epblas_parallel_install_targets "")
 set(_epblas_openblas_install_targets "")
 foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
     set(_prefix "${EPBLAS_PARALLEL_PREFIX_${_target}}")
-    foreach(_t ${_prefix}blas_parallel ${_prefix}blas)  # raw + composite
+    foreach(_t ${_prefix}blas_parallel ${_prefix}blas ${_prefix}blas_shared)  # raw + composite + shared
         if(TARGET ${_t})
             list(APPEND _epblas_parallel_install_targets ${_t})
         endif()
