@@ -102,9 +102,15 @@ ctest --preset perf -N    # dry-run: list what would be run
 `fuzz` run stays cheap. The `sweep` preset runs the in-process
 namespaced dual-link harness `bench/dual/run_dual.sh` once per precision
 family (`e`/`q`/`m`): par, ob, and mig are linked into one binary and
-timed interleaved per rep at OMP=1 and OMP=4 (see
-`bench/dual/BENCH_PROTOCOL.md`). Raw data lands in the gitignored
-`workspace/files/gap5/nsbench/`.
+timed interleaved per rep at OMP=1 and OMP=4. Raw data lands in the
+gitignored `workspace/files/gap5/nsbench/`; the scoreboard is committed to
+`reports/dual_scoreboard.md`.
+
+To run perf directly (re-time a routine, sweep a family, refresh the
+scoreboard) start with the runbook **`bench/dual/README.md`** — it covers
+prerequisites, the env knobs, how to read the board, and the machine
+hygiene that keeps the numbers trustworthy. `bench/dual/BENCH_PROTOCOL.md`
+is the rationale behind the method.
 
 Build-only (skip the workflow chaining):
 

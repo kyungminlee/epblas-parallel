@@ -4,6 +4,10 @@ How `epblas-parallel` measures par-vs-ob-vs-mig timing so the numbers are
 trustworthy. The harness lives here (`bench/dual/`); generated drivers and raw
 sweeps land in the gitignored scratch tree `workspace/files/gap5/nsbench/`.
 
+This doc is the **why** (rationale + the pass/fail bars). For the step-by-step
+**how** — prerequisites, which script to run, the env knobs, reading the board,
+troubleshooting — see the runbook [`README.md`](README.md).
+
 This **supersedes** the cross-process `cmp5`/`gap5` harness, whose historical
 reports are frozen under `bench/cmp5/archive/`. Do not cite those for current
 verdicts.
