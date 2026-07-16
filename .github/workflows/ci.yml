@@ -35,7 +35,9 @@ jobs:
     # Fail fast on a stuck runner. A healthy job (apt + Intel MPI install +
     # build + the whole seed rotation) lands around ~12 min; without a cap a
     # stalled ctest step spins to GitHub's 6h default before it's noticed.
-    timeout-minutes: 30
+    # Cap sits above the ctest step guard (below) with room for the ~5 min
+    # setup+build preamble, so a contended runner fails at the step, not here.
+    timeout-minutes: 40
     env:
       # Fixed, reproducible seed rotation. Each value runs the whole fuzz
       # suite; on failure the driver prints `seed=<N>` so you reproduce it
@@ -132,9 +134,11 @@ jobs:
         run: cmake --build build -j$(nproc)
 
       - name: Run ctest (fuzz) across the seed rotation
-        # Whole rotation is ~2-3 min; 15 min is a wide margin that still
-        # trips a hung fuzz process fast instead of riding the job cap.
-        timeout-minutes: 15
+        # Healthy the whole 5-seed rotation runs in ~5-10 min (the slower
+        # gfortran-15 leg is near the top of that). 25 min absorbs a
+        # contended runner — one full rotation blew past 15 min once — while
+        # still tripping a genuinely hung fuzz process well before the job cap.
+        timeout-minutes: 25
         run: |
           rc=0
           for seed in $FUZZ_SEEDS; do
