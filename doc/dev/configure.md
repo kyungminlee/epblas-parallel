@@ -46,7 +46,7 @@ Override with `-D<option>=<value>` at configure time.
 CMAKE_PREFIX_PATH=/opt/eplinalg-q cmake --workflow --preset fuzz
 ```
 
-## eplinalg reference (tests/bench only)
+## eplinalg reference (test + benchmark only)
 
 Tests A/B the overlay against eplinalg's migrated baseline, so each target you
 want exercised needs an eplinalg install reachable via `CMAKE_PREFIX_PATH`.

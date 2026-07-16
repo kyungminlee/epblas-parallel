@@ -36,8 +36,8 @@ for s in 1 7 42 1234 20240617; do BLAS_FUZZ_SEED=$s ctest --test-dir build -L fu
 A change to a hot path is not done until it is re-timed. Performance has its own
 doc — [benchmark.md](benchmark.md) — covering the dual-link harness, the
 pass/fail bars, and how to run it, with the full runbook and rationale in
-`bench/dual/`. The everyday cycle after a kernel change:
+`benchmark/dual/`. The everyday cycle after a kernel change:
 
 ```bash
-bench/dual/update_routine.sh e etbsv     # re-time + refresh reports/dual_scoreboard.md
+benchmark/dual/update_routine.sh e etbsv     # re-time + refresh benchmark/results.md
 ```

@@ -1,0 +1,31 @@
+# Sphinx configuration template. CMake configures this to the build tree with
+# @PROJECT_VERSION@ substituted from the VERSION file; build the HTML with:
+#   sphinx-build -b html <build>/doc <build>/doc/html
+# Standalone (no CMake) use: copy to conf.py and hard-code `version`/`release`.
+
+project = "epblas-parallel"
+author = "Kyungmin Lee"
+copyright = "2026, Kyungmin Lee"
+
+version = "@PROJECT_VERSION@"
+release = "@PROJECT_VERSION@"
+
+extensions = [
+    "myst_parser",
+    "breathe",
+]
+
+myst_enable_extensions = ["colon_fence", "deflist"]
+
+# Breathe points at the Doxygen XML output (see Doxyfile.in). CMake sets the
+# output directory; @DOXYGEN_XML_DIR@ is substituted at configure time.
+breathe_projects = {"epblas-parallel": "@DOXYGEN_XML_DIR@"}
+breathe_default_project = "epblas-parallel"
+
+source_suffix = {".md": "markdown", ".rst": "restructuredtext"}
+root_doc = "index"
+exclude_patterns = ["_build", "requirements.txt"]
+
+html_theme = "furo"
+html_static_path = ["_static"]
+templates_path = ["_templates"]

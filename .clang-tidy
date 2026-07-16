@@ -1,0 +1,14 @@
+# Lint profile for editor/IDE use. Intentionally lean: these are numerical
+# BLAS kernels, so the noisy magic-number, pointer-arithmetic, and
+# array-index checks are disabled — that style is inherent to reference-BLAS
+# ports and load-bearing for performance. Not run in CI.
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -clang-analyzer-security.insecureAPI.*
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*/(src|include)/.*'
+FormatStyle: file

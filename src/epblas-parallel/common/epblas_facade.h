@@ -51,7 +51,7 @@
  *   - bool      — logical flags that are always 0/1 (nounit, upper, conj, …);
  *   - char      — BLAS option letters ('U'/'L'/'N'/'T'/'C'/'R'), normalised
  *                 once via blas_up() (common/blas_char.h) and compared as chars.
- * The guard scripts/check_int_boundary.py (ctest epblas_parallel_int_boundary_
+ * The guard test/check_int_boundary.py (ctest epblas_parallel_int_boundary_
  * guard) fails the suite if a bare `int` reappears in the three kind trees.
  */
 #ifndef EPBLAS_FACADE_H

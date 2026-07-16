@@ -58,7 +58,7 @@ comments refer to; it supersedes the historical `doc/design.md`.)
 The perf harness relies on the same "same symbols, different archives" property
 in reverse: it namespaces par/ob/mig archives with `objcopy` so all three
 coexist in one binary — see
-[`../../bench/dual/BENCH_PROTOCOL.md`](../../bench/dual/BENCH_PROTOCOL.md).
+[`../../benchmark/dual/BENCH_PROTOCOL.md`](../../benchmark/dual/BENCH_PROTOCOL.md).
 
 ## OpenMP runtime
 
@@ -70,13 +70,17 @@ compile-only flag so the two runtimes are never mixed at link.
 ## Repository map
 
 ```
-src/epblas-parallel/<target>/   overlay kernels (the product)
+include/epblas-parallel/         public version header (version.h.in)
+src/epblas-parallel/<target>/    overlay kernels (the product)
 src/epblas-openblas/<target>/    OpenBLAS reference clone (A/B only)
-tests/epblas-parallel/           fypp-templated consistency + fuzz drivers
-tests/epblas-openblas/           same, reusing the parallel bodies
-bench/drivers/target_<target>/   C/C++ perf drivers
-bench/dual/                      in-process dual-link sweep harness + scoreboard
-bench/cmp5/archive/              frozen historical (superseded) verdict reports
-scripts/                         dual-harness generator + perf harness package
+test/epblas-parallel/            fypp-templated consistency + fuzz drivers
+test/epblas-openblas/            same, reusing the parallel bodies
+benchmark/drivers/target_<target>/   C/C++ perf drivers
+benchmark/dual/                      in-process dual-link sweep harness
+benchmark/gen_dual_harnesses.py      dual-harness generator
+benchmark/_perf_harness/             perf harness Python package
+benchmark/cmp5/archive/              frozen historical (superseded) verdict reports
+doc/dev/benchmark/results.md         committed perf scoreboard
+example/                         minimal downstream consumer
 cmake/                           Config.cmake.in templates + Fortran/baseline helpers
 ```

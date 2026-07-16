@@ -37,7 +37,7 @@ failure is suspected.
 
 ```bash
 cmake -S . -B build-dbg -DCMAKE_BUILD_TYPE=RelWithDebInfo ...
-gdb --args ./build-dbg/tests/epblas-parallel/fuzz_<routine>
+gdb --args ./build-dbg/test/epblas-parallel/fuzz_<routine>
 ```
 
 Set `OMP_NUM_THREADS=1` first to isolate a correctness bug from a threading

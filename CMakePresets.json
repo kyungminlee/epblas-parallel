@@ -19,6 +19,36 @@
             "displayName": "Linux (gcc/g++)",
             "description": "Builds all overlays for every eplinalg target it can find on CMAKE_PREFIX_PATH.",
             "inherits": "_linux-base"
+        },
+
+        {
+            "name": "release",
+            "displayName": "Release",
+            "description": "Optimized build (-O3). Alias of the default linux preset.",
+            "inherits": "_linux-base",
+            "binaryDir": "${sourceDir}/build-release",
+            "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "description": "Unoptimized build with debug info (-O0 -g) for gdb.",
+            "inherits": "_linux-base",
+            "binaryDir": "${sourceDir}/build-debug",
+            "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}
+        },
+        {
+            "name": "asan",
+            "displayName": "ASan+UBSan",
+            "description": "Debug build with AddressSanitizer + UndefinedBehaviorSanitizer (see doc/dev/debugging.md).",
+            "inherits": "_linux-base",
+            "binaryDir": "${sourceDir}/build-asan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+                "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+            }
         }
     ],
 
@@ -26,7 +56,10 @@
         {
             "name": "linux",
             "configurePreset": "linux"
-        }
+        },
+        {"name": "release", "configurePreset": "release"},
+        {"name": "debug",   "configurePreset": "debug"},
+        {"name": "asan",    "configurePreset": "asan"}
     ],
 
     "testPresets": [

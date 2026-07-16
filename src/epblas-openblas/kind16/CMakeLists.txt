@@ -6,13 +6,13 @@
 # substitution set is documented in src/epblas-openblas/CHECKLIST.md.
 #
 # Builds a STATIC archive `${LIB_PREFIX}blas_openblas` consumed only by
-# tests/epblas-openblas/. NOT wired into the public
+# test/epblas-openblas/. NOT wired into the public
 # `epblas-parallel::${LIB_PREFIX}blas` composite.
 #
 # Adding a routine:
 #   1. Drop the ported source into this directory, e.g. qaxpy.c
 #   2. Append the filename to _kernels below.
-#   3. The matching tests/epblas-openblas/.../target_kind16/ shim picks it up
+#   3. The matching test/epblas-openblas/.../target_kind16/ shim picks it up
 #      automatically — see CHECKLIST.md for the per-routine status table.
 
 set(_kernels

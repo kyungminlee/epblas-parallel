@@ -6,7 +6,7 @@ Direct ports of OpenBLAS double-precision (D) real and double-complex (Z)
 sources, retyped to 80-bit long double / `_Complex long double`. Builds a
 separate static archive `${LIB_PREFIX}blas_openblas` (not wired into the
 public `epblas-parallel::${LIB_PREFIX}blas` composite). Tested standalone
-against the migrated baseline via `tests/epblas-openblas/`.
+against the migrated baseline via `test/epblas-openblas/`.
 
 > **kind16 (`__float128`) sibling.** `src/epblas-openblas/kind16/` is a
 > faithful hand-port of this kind10 tree — same algorithm, threading, and
@@ -42,7 +42,7 @@ Per row:
 - **smoke** — fuzz passes, bench builds: `n` / `y`
 - **bench-omp1**, **bench-omp4** — most recent GFLOPS overlay vs migrated
   (historical; active reporting has since moved to bare ns/call)
-- **par>ep (omp1/omp4)** — peak `epblas-parallel / epblas-openblas` overlay ratio at OMP=1 and OMP=4, from the 4-variant cmp5 sweep (harness since replaced by `bench/dual/`; reports frozen in `bench/cmp5/archive/`). `—` means within the 10% noise floor at that OMP level (epblas-parallel not meaningfully faster). A value like `1.51× / 2.15×` is the worst (key, size) row for that routine — i.e. the (key, size) at which epblas-parallel most outperforms this epblas-openblas port. `n/d` = no bench data (timed out). `n/a` = no comparable bench (algorithm diverges from OpenBLAS, e.g. Blue's nrm2, or scalar O(1)).
+- **par>ep (omp1/omp4)** — peak `epblas-parallel / epblas-openblas` overlay ratio at OMP=1 and OMP=4, from the 4-variant cmp5 sweep (harness since replaced by `benchmark/dual/`; reports frozen in `benchmark/cmp5/archive/`). `—` means within the 10% noise floor at that OMP level (epblas-parallel not meaningfully faster). A value like `1.51× / 2.15×` is the worst (key, size) row for that routine — i.e. the (key, size) at which epblas-parallel most outperforms this epblas-openblas port. `n/d` = no bench data (timed out). `n/a` = no comparable bench (algorithm diverges from OpenBLAS, e.g. Blue's nrm2, or scalar O(1)).
 
 **`faithful` column:**
 - `yes` — algorithm + threading mirror OpenBLAS (interface + kernel + thread driver structure all ported; OMP replaces blas_queue but matches the partitioning/reduction shape).

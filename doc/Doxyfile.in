@@ -1,0 +1,20 @@
+# Doxygen configuration template. CMake substitutes @PROJECT_VERSION@ and the
+# source/output paths. Generates XML for Breathe to pull into Sphinx:
+#   doxygen <build>/doc/Doxyfile   →   <build>/doc/doxygen/xml
+# The public API surface is the installed headers under include/epblas-parallel/.
+
+PROJECT_NAME           = "epblas-parallel"
+PROJECT_NUMBER         = @PROJECT_VERSION@
+OUTPUT_DIRECTORY       = @DOXYGEN_OUTPUT_DIR@
+INPUT                  = @DOXYGEN_INPUT@
+FILE_PATTERNS          = *.h *.hpp
+RECURSIVE              = YES
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+XML_PROGRAMLISTING     = NO
+
+EXTRACT_ALL            = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO

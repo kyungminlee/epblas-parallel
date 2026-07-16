@@ -14,13 +14,13 @@
 # error-free two_prod/two_sum transforms) and WITHOUT -ffast-math.
 #
 # Builds a STATIC archive `${LIB_PREFIX}blas_openblas` (mwblas_openblas)
-# consumed only by tests/epblas-openblas/. NOT wired into the public
+# consumed only by test/epblas-openblas/. NOT wired into the public
 # `epblas-parallel::${LIB_PREFIX}blas` composite.
 #
 # Adding a routine:
 #   1. Drop the ported source into this directory, e.g. waxpy.cpp
 #   2. Append the filename to _kernels below.
-#   3. The matching tests/epblas-openblas/.../target_multifloats/ shim picks
+#   3. The matching test/epblas-openblas/.../target_multifloats/ shim picks
 #      it up automatically.
 
 # The master driver finds only OpenMP::OpenMP_C; the DD kernels are C++.

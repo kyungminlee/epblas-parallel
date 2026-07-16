@@ -5,7 +5,7 @@
 # src/epblas-openblas/<target>/. This archive is NOT wired into the
 # public `epblas-parallel::<prefix>blas` composite — it exists purely
 # for A/B comparisons against the migrated baseline (via
-# tests/epblas-openblas/).
+# test/epblas-openblas/).
 #
 # All three targets (kind10, kind16, multifloats) have kernel sets;
 # a target is picked up automatically once its <target>/ subdir exists.
@@ -31,7 +31,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
     # per-target subdir publishes EPBLAS_OPENBLAS_OVERLAY_ROUTINES
     # via PARENT_SCOPE; that single global is overwritten between
     # target iterations, so save a per-target copy here for the
-    # migrated-archive helper in tests/CMakeLists.txt to consume.
+    # migrated-archive helper in test/CMakeLists.txt to consume.
     set(EPBLAS_OPENBLAS_OVERLAY_ROUTINES_${_target}
         "${EPBLAS_OPENBLAS_OVERLAY_ROUTINES}" PARENT_SCOPE)
 endforeach()

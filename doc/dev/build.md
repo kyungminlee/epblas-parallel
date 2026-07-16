@@ -9,7 +9,7 @@ cmake -S . -B build-prod -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 cmake --build build-prod -j8
 ```
 
-With tests/bench (the default; needs `fypp` + an eplinalg reference on
+With tests + benchmarks (the default; needs `fypp` + an eplinalg reference on
 `CMAKE_PREFIX_PATH` — see [configure.md](configure.md)):
 
 ```bash
@@ -37,15 +37,15 @@ There is **no code generator for the library** — kernels are hand-written C/C+
 under `src/`. Two kinds of generated code exist, both test/bench-only, and both
 run automatically as part of the build:
 
-- **fypp templates** (`tests/**/*.fypp`) — the consistency/fuzz drivers are
+- **fypp templates** (`test/**/*.fypp`) — the consistency/fuzz drivers are
   Fortran expanded from fypp at build time. `fypp` must be on `PATH`; edit the
   `.fypp` template, never the generated `.f90`. Building the drivers also emits
   Fortran `.mod` files into the build tree — these are build artifacts, never
   committed.
-- **Python bench-driver generator** (`scripts/gen_dual_harnesses.py`) — emits
+- **Python bench-driver generator** (`benchmark/gen_dual_harnesses.py`) — emits
   the per-routine dual-link perf drivers. It is invoked by the perf scripts, not
   the CMake build; to run or modify it see [test.md](test.md) and the perf
-  runbook [`../../bench/dual/README.md`](../../bench/dual/README.md).
+  runbook [`../../benchmark/dual/README.md`](../../benchmark/dual/README.md).
 
 ## Install
 

@@ -41,28 +41,33 @@ target_link_libraries(myapp PRIVATE epblas-parallel::qxblas)  # kind16 overlay
 | **Configure / build / test** it | [`doc/dev/`](doc/dev/index.md) |
 | **Fix a bug** | [`doc/dev/debugging.md`](doc/dev/debugging.md) |
 | **Understand the internals** | [`doc/dev/architecture.md`](doc/dev/architecture.md) |
-| **Run performance benchmarks** | [`bench/dual/README.md`](bench/dual/README.md) |
+| **Run performance benchmarks** | [`benchmark/dual/README.md`](benchmark/dual/README.md) |
 | **Cut a release** | [`doc/dev/release.md`](doc/dev/release.md) |
 
 Contributors: [`CONTRIBUTING.md`](CONTRIBUTING.md). The committed perf
-scoreboard is [`reports/dual_scoreboard.md`](reports/dual_scoreboard.md).
+scoreboard is [`doc/dev/benchmark/results.md`](doc/dev/benchmark/results.md).
 
 ## Layout
 
 ```
 CMakeLists.txt
 CMakePresets.json
+VERSION                         ← single source of truth, read by CMake
 doc/
 ├── user/           ← how to install, link, and call the library
-└── dev/            ← how to configure, build, test, debug, release
+├── dev/            ← how to configure, build, test, debug, release
+│   └── benchmark/  ← committed perf scoreboard (results.md)
+├── index.md, conf.py.in, Doxyfile.in   ← Sphinx/Doxygen scaffolding
 cmake/              ← Config.cmake.in templates + Fortran/baseline helpers
+include/epblas-parallel/        ← version.h.in (public version header)
 src/
 ├── epblas-parallel/<target>/   ← the overlay kernels (the product)
 └── epblas-openblas/<target>/    ← OpenBLAS reference clone (A/B only)
-tests/              ← fypp-templated consistency + fuzz drivers
-bench/
-├── dual/           ← in-process dual-link perf harness + scoreboard
-└── cmp5/archive/   ← frozen historical verdict reports
-scripts/            ← dual-harness generator + perf harness package
-reports/            ← committed perf scoreboard
+test/               ← fypp-templated consistency + fuzz drivers
+benchmark/
+├── dual/           ← in-process dual-link perf harness
+├── cmp5/archive/   ← frozen historical verdict reports
+├── gen_dual_harnesses.py       ← dual-harness generator
+└── _perf_harness/  ← perf harness Python package
+example/            ← minimal downstream consumer
 ```

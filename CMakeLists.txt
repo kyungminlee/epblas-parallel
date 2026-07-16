@@ -3,7 +3,7 @@
 # Production build needs no `eplinalg` install: every target whose
 # `src/epblas-parallel/<target>/` directory exists builds its overlay
 # archive + INTERFACE composite. `eplinalg` is only a test/bench
-# dependency, gated below before `add_subdirectory(tests)`.
+# dependency, gated below before `add_subdirectory(test)`.
 #
 # Repo ships two CMake packages:
 #   * epblas-parallel — production parallel overlay + overlay-equipped
@@ -13,8 +13,15 @@
 
 cmake_minimum_required(VERSION 3.25)
 
+# Single source of truth for the version: the top-level VERSION file.
+# Bumping a release is a one-line edit there (see doc/dev/release.md); CMake,
+# the installed package config, and include/epblas-parallel/version.h.in all
+# read from PROJECT_VERSION so they never drift.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" EPBLAS_PARALLEL_VERSION
+    LIMIT_COUNT 1 REGEX "^[0-9]+\\.[0-9]+\\.[0-9]+")
+
 project(epblas-parallel
-    VERSION 0.10.0
+    VERSION ${EPBLAS_PARALLEL_VERSION}
     LANGUAGES C CXX Fortran)
 
 # Fortran is enabled at project() time (not behind BUILD_TESTING) so the
@@ -344,6 +351,14 @@ endforeach()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+# Public version header, generated from the VERSION file via PROJECT_VERSION.
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/epblas-parallel/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/include/epblas-parallel/version.h
+    @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/epblas-parallel/version.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/epblas-parallel)
+
 set(_epblas_parallel_install_targets "")
 set(_epblas_openblas_install_targets "")
 foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
@@ -456,5 +471,5 @@ if(BUILD_TESTING)
         endif()
     endforeach()
 
-    add_subdirectory(tests)
+    add_subdirectory(test)
 endif()

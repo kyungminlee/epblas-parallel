@@ -13,7 +13,7 @@
 # The WHOLE_ARCHIVE-wrapped composite INTERFACE target
 # (`epblas-parallel::<prefix>blas`) is defined in the top-level
 # CMakeLists. The renamed `_migrated` IMPORTED archive used by the
-# test suite is built in tests/CMakeLists.txt (test-only consumer).
+# test suite is built in test/CMakeLists.txt (test-only consumer).
 
 # Detect both C and CXX so per-target subdirs (kind10/kind16 in C,
 # multifloats in C++) can pick whichever they need.
@@ -40,7 +40,7 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)
     # subdir publishes EPBLAS_PARALLEL_OVERLAY_ROUTINES via PARENT_SCOPE
     # — that single global gets overwritten on each iteration, so save
     # a per-target copy here for the migrated-archive helper in
-    # tests/CMakeLists.txt to consume.
+    # test/CMakeLists.txt to consume.
     set(EPBLAS_PARALLEL_OVERLAY_ROUTINES_${_target}
         "${EPBLAS_PARALLEL_OVERLAY_ROUTINES}" PARENT_SCOPE)
 endforeach()

@@ -22,11 +22,14 @@ __pycache__/
 # Transient run logs
 *.log
 
-# benchmark raw data + local working files live in workspace/, never in bench/
+# benchmark raw data + local working files live in workspace/, never in benchmark/
 workspace*
 
-# generated dual-link drivers (regenerable via scripts/gen_dual_harnesses.py)
-bench/dual/drivers/
+# generated dual-link drivers (regenerable via benchmark/gen_dual_harnesses.py)
+benchmark/dual/drivers/
+
+# Fortran module files
+*.mod
 
 # CTest scratch output
 Testing/

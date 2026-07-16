@@ -1,0 +1,19 @@
+# Style for the hand-written C/C++ kernels. Based on LLVM with the repo's
+# 4-space indentation and 80-column reference-BLAS heritage. Provided for
+# editor integration; not enforced in CI (kernels carry deliberate,
+# performance-motivated layout — see doc/dev/debugging.md).
+---
+BasedOnStyle: LLVM
+Language: Cpp
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 80
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+PointerAlignment: Right
+SpaceAfterCStyleCast: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+SortIncludes: false

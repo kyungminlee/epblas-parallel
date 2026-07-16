@@ -1,14 +1,17 @@
 # Release
 
 Versioning is semver on `0.x`: **patch = fix, minor = feature**. The version
-lives in `CMakeLists.txt` (`project(... VERSION x.y.z)`).
+lives in the top-level `VERSION` file — the single source of truth that CMake
+(`project(... VERSION)`), the installed package config, and the generated
+`epblas-parallel/version.h` all read from. Also add a `CHANGELOG.md` entry.
 
 ## Ritual
 
 1. Land the change on `develop` (its own commit), green on the fuzz gate.
-2. Bump the version in its own commit:
+2. Bump the version in its own commit — edit the `VERSION` file (one line) and
+   move the `CHANGELOG.md` "Unreleased" entries under the new version:
    ```
-   Bump project version to X.Y.Z for the release   # CMakeLists.txt only
+   Bump project version to X.Y.Z for the release   # VERSION + CHANGELOG.md
    ```
 3. Fast-forward `main` and tag:
    ```bash
