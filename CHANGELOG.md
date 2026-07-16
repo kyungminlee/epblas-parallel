@@ -7,12 +7,16 @@ semantics (minor = feature, patch = fix).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-16
+
 ### Changed
 - Restructured the repository to a standard C/C++/CMake layout: `tests/` →
   `test/`, `bench/` → `benchmark/`, `scripts/` folded into `benchmark/`,
   `reports/dual_scoreboard.md` → `doc/dev/benchmark/results.md`.
 - The version is now sourced from a single top-level `VERSION` file; CMake and
   the generated `epblas-parallel/version.h` read from it.
+- Raised the CI and release `ctest` timeout guards so a contended GitHub
+  runner finishes the fuzz rotation instead of failing spuriously.
 
 ### Added
 - `LICENSE` (MIT), `CHANGELOG.md`, `CONTRIBUTING.md`, and editor/tooling
