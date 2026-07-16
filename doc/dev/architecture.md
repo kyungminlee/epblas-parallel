@@ -79,7 +79,6 @@ benchmark/drivers/target_<target>/   C/C++ perf drivers
 benchmark/dual/                      in-process dual-link sweep harness
 benchmark/gen_dual_harnesses.py      dual-harness generator
 benchmark/_perf_harness/             perf harness Python package
-benchmark/cmp5/archive/              frozen historical (superseded) verdict reports
 doc/dev/benchmark/results.md         committed perf scoreboard
 example/                         minimal downstream consumer
 cmake/                           Config.cmake.in templates + Fortran/baseline helpers

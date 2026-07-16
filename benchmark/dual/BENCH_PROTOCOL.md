@@ -8,8 +8,8 @@ This doc is the **why** (rationale + the pass/fail bars). For the step-by-step
 **how** — prerequisites, which script to run, the env knobs, reading the board,
 troubleshooting — see the runbook [`README.md`](README.md).
 
-This **supersedes** the cross-process `cmp5`/`gap5` harness, whose historical
-reports are frozen under `benchmark/cmp5/archive/`. Do not cite those for current
+This **supersedes** the retired cross-process `cmp5`/`gap5` harness (its runners
+and historical reports have been removed); use this harness for all current
 verdicts.
 
 ## The one thing that matters: systematic error, not random noise

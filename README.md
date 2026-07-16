@@ -66,7 +66,6 @@ src/
 test/               ← fypp-templated consistency + fuzz drivers
 benchmark/
 ├── dual/           ← in-process dual-link perf harness
-├── cmp5/archive/   ← frozen historical verdict reports
 ├── gen_dual_harnesses.py       ← dual-harness generator
 └── _perf_harness/  ← perf harness Python package
 example/            ← minimal downstream consumer
