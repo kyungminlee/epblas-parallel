@@ -12,7 +12,8 @@
  *
  * No blocking / no xgemm trailing update in the default entry: at kind16,
  * every op lowers to a libquadmath call so blocking adds dispatch overhead
- * without accelerating the arithmetic. See doc/design.md §10.
+ * without accelerating the arithmetic. See doc/dev/debugging.md
+ * ("__float128 is opaque calls").
  *
  * TRANSA='C' is handled as a distinct case from 'T' (conjugate vs
  * plain transpose).

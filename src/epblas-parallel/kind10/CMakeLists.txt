@@ -7,7 +7,7 @@
 # (produced by the objcopy rename in step 0b). This proves the
 # Fortran-ABI C boundary end-to-end before any real kernel work.
 #
-# Linking model: see doc/design.md §1. The top-level CMakeLists.txt
+# Linking model: see doc/dev/architecture.md. The top-level CMakeLists.txt
 # wraps this archive in an INTERFACE composite that links `_parallel`
 # WHOLE_ARCHIVE before the serial migrated archive so overlay symbols
 # win. This file builds the `_parallel` half only.
