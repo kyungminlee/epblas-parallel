@@ -26,6 +26,7 @@
 #define EPBLAS_PARALLEL_KIND10_ETRI_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef long double etri_TR;
 
@@ -62,7 +63,7 @@ void etri_kernel_store(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk, etri_TR alpha,
  * spill/reload). Extern users keep the etri_kernel.c instantiations. */
 static inline __attribute__((always_inline)) void
 etri_gemm_body(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
-               etri_TR alpha, int negate,
+               etri_TR alpha, bool negate,
                const etri_TR *Ap, const etri_TR *Bp,
                etri_TR *C, ptrdiff_t ldc)
 {

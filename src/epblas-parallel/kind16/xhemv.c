@@ -5,6 +5,7 @@
  */
 
 #include <stddef.h>
+#include <stdbool.h>
 #include "../common/blas_char.h"
 #include <stdlib.h>
 #include <ctype.h>
@@ -30,7 +31,7 @@ static inline TC cconj(TC z) { return conjq(z); }
 /* Sqrt-balanced contiguous column partition (OpenBLAS symv_partition,
  * mask=3, min_width=4): per-column work grows with j for UPPER, shrinks
  * for LOWER. Mirrors the kind10 yhemv fix and the packed twins. */
-static ptrdiff_t xhemv_partition(int upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
+static ptrdiff_t xhemv_partition(bool upper, ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
 {
     const ptrdiff_t mask = 3, min_width = 4;
     const double dnum = (double)n * (double)n / (double)nthreads;

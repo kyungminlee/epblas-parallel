@@ -43,7 +43,7 @@ etrsm_gemm_msub(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                 const TR *Ap, const TR *Bp,
                 TR *C, ptrdiff_t ldc)
 {
-    etri_gemm_body(bm, bn, bk, -1.0L, 1, Ap, Bp, C, ldc);
+    etri_gemm_body(bm, bn, bk, -1.0L, true, Ap, Bp, C, ldc);
 }
 
 

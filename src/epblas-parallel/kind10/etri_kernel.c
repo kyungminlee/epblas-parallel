@@ -55,7 +55,7 @@ void etri_gemm_kernel(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         const TR *Bp,
                         TR *C, ptrdiff_t ldc)
 {
-    etri_gemm_body(bm, bn, bk, alpha, 0, Ap, Bp, C, ldc);
+    etri_gemm_body(bm, bn, bk, alpha, false, Ap, Bp, C, ldc);
 }
 
 /* C -= Ap·Bp — the alpha = -1 trailing update every triangular solve/trmm
@@ -72,7 +72,7 @@ void etri_gemm_kernel_msub(ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                            const TR *Ap, const TR *Bp,
                            TR *C, ptrdiff_t ldc)
 {
-    etri_gemm_body(bm, bn, bk, -1.0L, 1, Ap, Bp, C, ldc);
+    etri_gemm_body(bm, bn, bk, -1.0L, true, Ap, Bp, C, ldc);
 }
 
 void etri_ncopy(ptrdiff_t m, ptrdiff_t n,

@@ -229,7 +229,7 @@ void qsyrk_trans_col(ptrdiff_t j, char UPLO, ptrdiff_t n, ptrdiff_t k,
     const ptrdiff_t i_hi = (UPLO == 'L') ? n : j + 1;
     const TR *Aj = a + j * lda;
     TR *cj = c + j * ldc;
-    const int bmode = (beta == 0.0Q) ? 0 : (beta == 1.0Q) ? 1 : 2;
+    const ptrdiff_t bmode = (beta == 0.0Q) ? 0 : (beta == 1.0Q) ? 1 : 2;
     for (ptrdiff_t i = i_lo; i < i_hi; ++i) {
         const TR *Ai = a + i * lda;
         /* Single accumulator: SYRK's dot is one product per l, so the two

@@ -20,6 +20,7 @@
 #include "xl3_complex.h"
 #include <quadmath.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -30,11 +31,11 @@ typedef __float128 T;
 #define MR QBLAS_XGEMM_MR
 #define NR QBLAS_XGEMM_NR
 
-static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
+static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) * m; }
 
 
 /* ── Complex TRSM packer dispatch (mirrors qtrsm.c's real twin). */
-static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit, int conj,
+static inline void pack_trsm_a_lside_forward(bool upper, bool trans, bool unit, bool conj,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -46,7 +47,7 @@ static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit, int
     }
 }
 
-static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit, int conj,
+static inline void pack_trsm_a_lside_backward(bool upper, bool trans, bool unit, bool conj,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -58,7 +59,7 @@ static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit, in
     }
 }
 
-static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit, int conj,
+static inline void pack_trsm_a_rside_forward(bool upper, bool trans, bool unit, bool conj,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -70,7 +71,7 @@ static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit, int
     }
 }
 
-static inline void pack_trsm_a_rside_backward(int upper, int trans, int unit, int conj,
+static inline void pack_trsm_a_rside_backward(bool upper, bool trans, bool unit, bool conj,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -84,27 +85,27 @@ static inline void pack_trsm_a_rside_backward(int upper, int trans, int unit, in
 
 
 /* ── SIDE='L' driver — complex twin of trsm_L_band ─────────────────── */
-static void trsm_L_band(int upper, int trans, int unit, int conj,
-                        int M, int js0, int js1,
-                        int MC, int KC, int NC,
-                        const T *a, int lda,
-                        T *b, int ldb,
+static void trsm_L_band(bool upper, bool trans, bool unit, bool conj,
+                        ptrdiff_t M, ptrdiff_t js0, ptrdiff_t js1,
+                        ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
+                        const T *a, ptrdiff_t lda,
+                        T *b, ptrdiff_t ldb,
                         T *Ap, T *Bp)
 {
     const T dm1r = -1.0Q, dm1i = 0.0Q;
-    int m = M;
-    const int forward = (!upper && !trans) || (upper && trans);
-    const int kt = forward ? 1 : 0;
+    ptrdiff_t m = M;
+    const bool forward = (!upper && !trans) || (upper && trans);
+    const bool kt = forward ? 1 : 0;
 
-    for (int js = js0; js < js1; js += NC) {
-        int min_j = js1 - js;
+    for (ptrdiff_t js = js0; js < js1; js += NC) {
+        ptrdiff_t min_j = js1 - js;
         if (min_j > NC) min_j = NC;
 
         if (forward) {
-            for (int ls = 0; ls < m; ls += KC) {
-                int min_l = m - ls;
+            for (ptrdiff_t ls = 0; ls < m; ls += KC) {
+                ptrdiff_t min_l = m - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = min_l;
+                ptrdiff_t min_i = min_l;
                 if (min_i > MC) min_i = MC;
 
                 pack_trsm_a_lside_forward(upper, trans, unit, conj,
@@ -112,8 +113,8 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                                           &a[(size_t)ls * 2 + (size_t)ls * lda * 2], lda,
                                           0, Ap);
 
-                for (int jjs = js; jjs < js + min_j; jjs += NR) {
-                    int min_jj = js + min_j - jjs;
+                for (ptrdiff_t jjs = js; jjs < js + min_j; jjs += NR) {
+                    ptrdiff_t min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
                     qblas_xgemm_ncopy(min_l, min_jj, /*conj=*/0,
                                       &b[(size_t)ls * 2 + (size_t)jjs * ldb * 2], ldb,
@@ -125,7 +126,7 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                                        /*offset=*/0);
                 }
 
-                for (int is = ls + min_i; is < ls + min_l; is += MC) {
+                for (ptrdiff_t is = ls + min_i; is < ls + min_l; is += MC) {
                     min_i = ls + min_l - is;
                     if (min_i > MC) min_i = MC;
                     pack_trsm_a_lside_forward(upper, trans, unit, conj,
@@ -142,7 +143,7 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                                        is - ls);
                 }
 
-                for (int is = ls + min_l; is < m; is += MC) {
+                for (ptrdiff_t is = ls + min_l; is < m; is += MC) {
                     min_i = m - is;
                     if (min_i > MC) min_i = MC;
                     if (!trans) {
@@ -158,12 +159,12 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                 }
             }
         } else {
-            for (int ls = m; ls > 0; ls -= KC) {
-                int min_l = ls;
+            for (ptrdiff_t ls = m; ls > 0; ls -= KC) {
+                ptrdiff_t min_l = ls;
                 if (min_l > KC) min_l = KC;
-                int start_is = ls - min_l;
+                ptrdiff_t start_is = ls - min_l;
                 while (start_is + MC < ls) start_is += MC;
-                int min_i = ls - start_is;
+                ptrdiff_t min_i = ls - start_is;
                 if (min_i > MC) min_i = MC;
 
                 pack_trsm_a_lside_backward(upper, trans, unit, conj,
@@ -174,8 +175,8 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                                            lda,
                                            start_is - (ls - min_l), Ap);
 
-                for (int jjs = js; jjs < js + min_j; jjs += NR) {
-                    int min_jj = js + min_j - jjs;
+                for (ptrdiff_t jjs = js; jjs < js + min_j; jjs += NR) {
+                    ptrdiff_t min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
                     qblas_xgemm_ncopy(min_l, min_jj, /*conj=*/0,
                                       &b[(size_t)(ls - min_l) * 2 + (size_t)jjs * ldb * 2], ldb,
@@ -187,7 +188,7 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                                        start_is - ls + min_l);
                 }
 
-                for (int is = start_is - MC; is >= ls - min_l; is -= MC) {
+                for (ptrdiff_t is = start_is - MC; is >= ls - min_l; is -= MC) {
                     min_i = ls - is;
                     if (min_i > MC) min_i = MC;
                     pack_trsm_a_lside_backward(upper, trans, unit, conj,
@@ -204,7 +205,7 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                                        is - (ls - min_l));
                 }
 
-                for (int is = 0; is < ls - min_l; is += MC) {
+                for (ptrdiff_t is = 0; is < ls - min_l; is += MC) {
                     min_i = ls - min_l - is;
                     if (min_i > MC) min_i = MC;
                     if (!trans) {
@@ -225,37 +226,37 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
 
 
 /* ── SIDE='R' driver — complex twin of trsm_R_band ─────────────────── */
-static void trsm_R_band(int upper, int trans, int unit, int conj,
-                        int N, int m_lo, int m_hi,
-                        int MC, int KC, int NC,
-                        const T *a, int lda,
-                        T *b, int ldb,
+static void trsm_R_band(bool upper, bool trans, bool unit, bool conj,
+                        ptrdiff_t N, ptrdiff_t m_lo, ptrdiff_t m_hi,
+                        ptrdiff_t MC, ptrdiff_t KC, ptrdiff_t NC,
+                        const T *a, ptrdiff_t lda,
+                        T *b, ptrdiff_t ldb,
                         T *Ap, T *Bp)
 {
     const T dm1r = -1.0Q, dm1i = 0.0Q;
-    const int m_band = m_hi - m_lo;
+    const ptrdiff_t m_band = m_hi - m_lo;
     if (m_band <= 0) return;
-    const int forward = (upper && !trans) || (!upper && trans);
-    const int kt = forward ? 0 : 1;
+    const bool forward = (upper && !trans) || (!upper && trans);
+    const bool kt = forward ? 0 : 1;
     T *sa = Ap;
     T *sb = Bp;
 
     if (forward) {
-        for (int js = 0; js < N; js += NC) {
-            int min_j = N - js;
+        for (ptrdiff_t js = 0; js < N; js += NC) {
+            ptrdiff_t min_j = N - js;
             if (min_j > NC) min_j = NC;
 
-            for (int ls = 0; ls < js; ls += KC) {
-                int min_l = js - ls;
+            for (ptrdiff_t ls = 0; ls < js; ls += KC) {
+                ptrdiff_t min_l = js - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = m_band;
+                ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
                 qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
                                   &b[(size_t)m_lo * 2 + (size_t)ls * ldb * 2], ldb, sa);
 
-                for (int jjs = js; jjs < js + min_j; jjs += NR) {
-                    int min_jj = js + min_j - jjs;
+                for (ptrdiff_t jjs = js; jjs < js + min_j; jjs += NR) {
+                    ptrdiff_t min_jj = js + min_j - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
                         qblas_xgemm_ncopy(min_l, min_jj, conj,
@@ -271,7 +272,7 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                                        &b[(size_t)m_lo * 2 + (size_t)jjs * ldb * 2], ldb);
                 }
 
-                for (int is = min_i; is < m_band; is += MC) {
+                for (ptrdiff_t is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
                     qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
@@ -282,10 +283,10 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                 }
             }
 
-            for (int ls = js; ls < js + min_j; ls += KC) {
-                int min_l = js + min_j - ls;
+            for (ptrdiff_t ls = js; ls < js + min_j; ls += KC) {
+                ptrdiff_t min_l = js + min_j - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = m_band;
+                ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
                 qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
@@ -302,8 +303,8 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                                    &b[(size_t)m_lo * 2 + (size_t)ls * ldb * 2], ldb,
                                    /*offset=*/0);
 
-                for (int jjs = 0; jjs < min_j - min_l - ls + js; jjs += NR) {
-                    int min_jj = min_j - min_l - ls + js - jjs;
+                for (ptrdiff_t jjs = 0; jjs < min_j - min_l - ls + js; jjs += NR) {
+                    ptrdiff_t min_jj = min_j - min_l - ls + js - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
                         qblas_xgemm_ncopy(min_l, min_jj, conj,
@@ -319,7 +320,7 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                                        &b[(size_t)m_lo * 2 + (size_t)(min_l + ls + jjs) * ldb * 2], ldb);
                 }
 
-                for (int is = min_i; is < m_band; is += MC) {
+                for (ptrdiff_t is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
                     qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
@@ -338,21 +339,21 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
             }
         }
     } else {
-        for (int js = N; js > 0; js -= NC) {
-            int min_j = js;
+        for (ptrdiff_t js = N; js > 0; js -= NC) {
+            ptrdiff_t min_j = js;
             if (min_j > NC) min_j = NC;
 
-            for (int ls = js; ls < N; ls += KC) {
-                int min_l = N - ls;
+            for (ptrdiff_t ls = js; ls < N; ls += KC) {
+                ptrdiff_t min_l = N - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = m_band;
+                ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
                 qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
                                   &b[(size_t)m_lo * 2 + (size_t)ls * ldb * 2], ldb, sa);
 
-                for (int jjs = js; jjs < js + min_j; jjs += NR) {
-                    int min_jj = min_j + js - jjs;
+                for (ptrdiff_t jjs = js; jjs < js + min_j; jjs += NR) {
+                    ptrdiff_t min_jj = min_j + js - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
                         qblas_xgemm_ncopy(min_l, min_jj, conj,
@@ -368,7 +369,7 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                                        &b[(size_t)m_lo * 2 + (size_t)(jjs - min_j) * ldb * 2], ldb);
                 }
 
-                for (int is = min_i; is < m_band; is += MC) {
+                for (ptrdiff_t is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
                     qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
@@ -379,13 +380,13 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                 }
             }
 
-            int start_ls = js - min_j;
+            ptrdiff_t start_ls = js - min_j;
             while (start_ls + KC < js) start_ls += KC;
 
-            for (int ls = start_ls; ls >= js - min_j; ls -= KC) {
-                int min_l = js - ls;
+            for (ptrdiff_t ls = start_ls; ls >= js - min_j; ls -= KC) {
+                ptrdiff_t min_l = js - ls;
                 if (min_l > KC) min_l = KC;
-                int min_i = m_band;
+                ptrdiff_t min_i = m_band;
                 if (min_i > MC) min_i = MC;
 
                 qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
@@ -403,8 +404,8 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                                    &b[(size_t)m_lo * 2 + (size_t)ls * ldb * 2], ldb,
                                    0);
 
-                for (int jjs = 0; jjs < min_j - js + ls; jjs += NR) {
-                    int min_jj = min_j - js + ls - jjs;
+                for (ptrdiff_t jjs = 0; jjs < min_j - js + ls; jjs += NR) {
+                    ptrdiff_t min_jj = min_j - js + ls - jjs;
                     if (min_jj > NR) min_jj = NR;
                     if (!trans) {
                         qblas_xgemm_ncopy(min_l, min_jj, conj,
@@ -420,7 +421,7 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                                        &b[(size_t)m_lo * 2 + (size_t)(js - min_j + jjs) * ldb * 2], ldb);
                 }
 
-                for (int is = min_i; is < m_band; is += MC) {
+                for (ptrdiff_t is = min_i; is < m_band; is += MC) {
                     min_i = m_band - is;
                     if (min_i > MC) min_i = MC;
                     qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
@@ -448,32 +449,32 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
  * the caller's `_Complex __float128` buffers (identical layout: 2 __float128
  * per element). lda/ldb are in complex elements. Threads only when not
  * already inside a parallel region (par convention). */
-void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
-                  int M, int N,
+void xtrsm_packed(bool lside, bool upper, bool trans, bool conj, bool unit,
+                  ptrdiff_t M, ptrdiff_t N,
                   __float128 alpha_r, __float128 alpha_i,
-                  const T *a, int lda,
-                  T *b, int ldb)
+                  const T *a, ptrdiff_t lda,
+                  T *b, ptrdiff_t ldb)
 {
     if (M == 0 || N == 0) return;
 
     /* Pre-scale B by alpha (complex). */
     if (alpha_r != 1.0Q || alpha_i != 0.0Q) {
-        qblas_xgemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha_r, alpha_i, b, (ptrdiff_t)ldb);
+        qblas_xgemm_beta(M, N, alpha_r, alpha_i, b, ldb);
     }
     if (alpha_r == 0.0Q && alpha_i == 0.0Q) return;
 
     ptrdiff_t MC0_p, KC_p, NC_p;
     qblas_xgemm_blocks(&MC0_p, &KC_p, &NC_p);
-    int MC0 = (int)MC0_p, KC = (int)KC_p, NC = (int)NC_p;
+    ptrdiff_t MC0 = MC0_p, KC = KC_p, NC = NC_p;
 
-    int K_eff = lside ? M : N;
-    int MC = MC0;
+    ptrdiff_t K_eff = lside ? M : N;
+    ptrdiff_t MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
-        long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T) * 2);
+        const ptrdiff_t L2_TARGET_BYTES = 256L * 1024L;
+        ptrdiff_t target_mc = L2_TARGET_BYTES / (K_eff * (ptrdiff_t)sizeof(T) * 2);
         if (target_mc > MC) {
-            if (target_mc > 4L * MC0) target_mc = 4L * MC0;
-            MC = round_up((int)target_mc, MR);
+            if (target_mc > 4 * MC0) target_mc = 4 * MC0;
+            MC = round_up(target_mc, MR);
             if (MC < MC0) MC = MC0;
         }
     }
@@ -483,16 +484,16 @@ void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
     const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * sizeof(T) * 2;
 
 #ifdef _OPENMP
-    int nthreads = omp_in_parallel() ? 1 : omp_get_max_threads();
+    ptrdiff_t nthreads = omp_in_parallel() ? 1 : omp_get_max_threads();
     if (nthreads < 1) nthreads = 1;
 #else
-    int nthreads = 1;
+    ptrdiff_t nthreads = 1;
 #endif
 
-    long mnk = (long)M * (long)N * (long)K_eff;
+    ptrdiff_t mnk = M * N * K_eff;
     if (mnk < 64L * 64L * 64L) nthreads = 1;
 
-    int partition_axis = lside ? N : M;
+    ptrdiff_t partition_axis = lside ? N : M;
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
 
@@ -518,7 +519,7 @@ void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
         g_pack_cap = g_pack ? cap : 0;
     }
     if (!g_pack) { free(Ap_arr); free(Bp_arr); return; }
-    for (int t = 0; t < nthreads; ++t) {
+    for (ptrdiff_t t = 0; t < nthreads; ++t) {
         Ap_arr[t] = (T *)(void *)((char *)g_pack + (size_t)t * (ap_al + bp_al));
         Bp_arr[t] = (T *)(void *)((char *)g_pack + (size_t)t * (ap_al + bp_al) + ap_al);
     }
@@ -528,18 +529,18 @@ void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
 #endif
     {
 #ifdef _OPENMP
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
+        ptrdiff_t tid = omp_get_thread_num();
+        ptrdiff_t nth = omp_get_num_threads();
 #else
-        int tid = 0, nth = 1;
+        ptrdiff_t tid = 0, nth = 1;
 #endif
         T *Ap = Ap_arr[tid];
         T *Bp = Bp_arr[tid];
 
         if (lside) {
-            int chunk = round_up((N + nth - 1) / nth, NR);
-            int js0 = tid * chunk;
-            int js1 = js0 + chunk;
+            ptrdiff_t chunk = round_up((N + nth - 1) / nth, NR);
+            ptrdiff_t js0 = tid * chunk;
+            ptrdiff_t js1 = js0 + chunk;
             if (js0 > N) js0 = N;
             if (js1 > N) js1 = N;
             if (js0 < js1) {
@@ -550,9 +551,9 @@ void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
                             Ap, Bp);
             }
         } else {
-            int chunk = round_up((M + nth - 1) / nth, MR);
-            int m_lo = tid * chunk;
-            int m_hi = m_lo + chunk;
+            ptrdiff_t chunk = round_up((M + nth - 1) / nth, MR);
+            ptrdiff_t m_lo = tid * chunk;
+            ptrdiff_t m_hi = m_lo + chunk;
             if (m_lo > M) m_lo = M;
             if (m_hi > M) m_hi = M;
             if (m_lo < m_hi) {

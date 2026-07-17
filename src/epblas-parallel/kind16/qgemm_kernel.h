@@ -34,6 +34,7 @@
 #define EPBLAS_PARALLEL_KIND16_QGEMM_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef __float128 qgemm_TR;
 
@@ -87,7 +88,7 @@ void qgemm_tt_unblocked(ptrdiff_t j_start, ptrdiff_t j_end,
 
 /* True when a TT problem is small enough that the unblocked plain dot beats the
  * blocked packed path (packing's fixed alloc+sweep can't amortize). */
-int qgemm_tt_small(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k);
+bool qgemm_tt_small(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k);
 
 /* Pure-serial by-value entry. No OpenMP anywhere on this call path; safe to
  * invoke from inside another function's `#pragma omp parallel` region. Shares

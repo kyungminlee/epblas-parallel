@@ -287,7 +287,7 @@ void qgemm_tt_unblocked(ptrdiff_t j_start, ptrdiff_t j_end,
  * threshold sits between the N=128 cube (plain wins) and the N=256 cube
  * (packed wins). */
 #define QGEMM_TT_UNBLOCK_FLOPS 8000000.0  /* m*n*k product (not 2*flops) */
-int qgemm_tt_small(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k) {
+bool qgemm_tt_small(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k) {
     return (double)m * (double)n * (double)k < QGEMM_TT_UNBLOCK_FLOPS;
 }
 

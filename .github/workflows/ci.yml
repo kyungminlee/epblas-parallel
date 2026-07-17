@@ -5,9 +5,10 @@ name: CI (fuzz)
 # and kernel regressions stay latent between releases (e.g. the edot
 # operand-norm-floor regression that slipped in at the rename/split and
 # only surfaced, probabilistically, at a release). This workflow closes
-# that gap: it runs `ctest -L fuzz` on every push to main/develop and on
-# every PR, across BOTH compilers and a fixed rotating set of seeds so any
-# failure is deterministically reproducible from its logged seed.
+# that gap: it runs `ctest -L lint` (static source guards) then `ctest -L
+# fuzz` on every push to main/develop and on every PR, across BOTH
+# compilers and a fixed rotating set of seeds so any failure is
+# deterministically reproducible from its logged seed.
 
 on:
   push:
@@ -132,6 +133,14 @@ jobs:
 
       - name: Build
         run: cmake --build build -j$(nproc)
+
+      - name: Run ctest (lint)
+        # Static-source guards (label "lint"): the int-is-boundary-only rule
+        # (epblas_parallel_int_boundary_guard) and any sibling checks. Seed-
+        # independent, so runs once ahead of the fuzz rotation. Fast (~1 min);
+        # a regression here means a bare `int` slipped into an overlay kernel.
+        timeout-minutes: 5
+        run: ctest --test-dir build -j$(nproc) --output-on-failure -L lint
 
       - name: Run ctest (fuzz) across the seed rotation
         # Healthy the whole 5-seed rotation runs in ~5-10 min (the slower

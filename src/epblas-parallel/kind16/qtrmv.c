@@ -49,13 +49,13 @@ typedef __float128 TR;
  * proportional to j, so high columns are heavy). Mirrors the ob leg's
  * trmv_thread.c sqrt-partition: balance by triangular area, narrow range at the
  * heavy high-column end. range[0..nthreads] are column boundaries over [0,n). */
-static void qtrmv_blkrange(ptrdiff_t n, int nthreads, ptrdiff_t *range)
+static void qtrmv_blkrange(ptrdiff_t n, ptrdiff_t nthreads, ptrdiff_t *range)
 {
     const ptrdiff_t mask = 7;
     const double dnum = (double)n * (double)n / (double)nthreads;
     range[nthreads] = n;
     ptrdiff_t i = 0;
-    int nc = 0;
+    ptrdiff_t nc = 0;
     while (i < n && nc < nthreads) {
         ptrdiff_t width;
         if (nthreads - nc > 1) {
@@ -73,7 +73,7 @@ static void qtrmv_blkrange(ptrdiff_t n, int nthreads, ptrdiff_t *range)
         nc++;
         i += width;
     }
-    for (int t = 0; t < nthreads - nc; ++t) range[t] = range[nthreads - nc];
+    for (ptrdiff_t t = 0; t < nthreads - nc; ++t) range[t] = range[nthreads - nc];
 }
 
 /* Threaded out-of-place path (incx==1). Returns 1 if handled, 0 to fall back to
@@ -131,7 +131,7 @@ static bool qtrmv_omp(bool upper, bool trans_t, bool nounit, ptrdiff_t n, ptrdif
         ptrdiff_t *rng = NULL;
         if (upper && n >= QTRMV_BLOCK_MIN) {
             rng = (ptrdiff_t *)malloc(((size_t)nthreads + 1) * sizeof(ptrdiff_t));
-            if (rng) qtrmv_blkrange(n, (int)nthreads, rng);
+            if (rng) qtrmv_blkrange(n, nthreads, rng);
         }
         const bool blk = (rng != NULL);
         #pragma omp parallel num_threads(nthreads)

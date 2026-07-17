@@ -140,6 +140,14 @@ jobs:
       - name: Build
         run: cmake --build build -j$(nproc)
 
+      - name: Run ctest (lint)
+        # Static-source guards (label "lint"): the int-is-boundary-only rule
+        # (epblas_parallel_int_boundary_guard) and siblings. Only the test
+        # slot builds the ctest tree; fast (~1 min), gates the release.
+        if: env.IS_TEST_SLOT == 'true'
+        timeout-minutes: 5
+        run: ctest --test-dir build -j$(nproc) --output-on-failure -L lint
+
       - name: Run ctest (fuzz)
         # `-L fuzz` is the everyday correctness gate (~15s per target)
         # per CMakePresets.json. Heavier presets (bench / perf / sweep)
@@ -291,9 +299,10 @@ jobs:
 
             ### Test slot
 
-            The `gfortran-15` slot additionally runs `ctest -L fuzz`
-            against the matching `eplinalg` release archives (eyblas /
-            qxblas / mwblas, intelmpi flavor — same combo eplinalg's
-            own release uses as its correctness signal). This is the
-            release workflow's only correctness signal — heavier
-            benches and perf sweeps are out of band.
+            The `gfortran-15` slot additionally runs `ctest -L lint`
+            (static source guards, incl. the int-is-boundary-only rule)
+            and `ctest -L fuzz` against the matching `eplinalg` release
+            archives (eyblas / qxblas / mwblas, intelmpi flavor — same
+            combo eplinalg's own release uses as its correctness signal).
+            These are the release workflow's only correctness signals —
+            heavier benches and perf sweeps are out of band.

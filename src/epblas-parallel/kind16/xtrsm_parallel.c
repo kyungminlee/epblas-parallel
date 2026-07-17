@@ -29,7 +29,6 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <limits.h>
 #include <quadmath.h>
 #include "../common/blas_omp.h"
 #ifdef _OPENMP
@@ -76,11 +75,11 @@ extern void xtrsv_core(
  * Trans/ConjTrans cells — the sole cluster where OpenBLAS's blocked
  * packed quad-complex GEMM beats par's naive dot cores (~2-4%). Every
  * other cell keeps the naive cores, where par already wins big. */
-extern void xtrsm_packed(int lside, int upper, int trans, int conj, int unit,
-                         int M, int N,
+extern void xtrsm_packed(bool lside, bool upper, bool trans, bool conj, bool unit,
+                         ptrdiff_t M, ptrdiff_t N,
                          __float128 alpha_r, __float128 alpha_i,
-                         const __float128 *a, int lda,
-                         __float128 *b, int ldb);
+                         const __float128 *a, ptrdiff_t lda,
+                         __float128 *b, ptrdiff_t ldb);
 
 /* Maximum nrhs at which the xtrsv-loop fast path beats column-parallel
  * xtrsm. Derived from xtrsv_blocked's effective scaling factor:
@@ -274,18 +273,15 @@ static void xtrsm_core(
              * dot cores win (they already beat ob AND gfortran); at large
              * M OpenBLAS's blocked packed GEMM pulls ~2-4% ahead, so route
              * through the packed driver there (xtri_driver.c) to match it.
-             * xtrsm_packed takes int dims (ob kernel ABI) — dims past
-             * INT_MAX stay on the naive ptrdiff_t cores instead of being
-             * truncated by the (int) casts below. */
-            if (m >= XTRSM_PACKED_MIN_M &&
-                m <= INT_MAX && n <= INT_MAX && lda <= INT_MAX && ldb <= INT_MAX) {
-                xtrsm_packed(/*lside=*/1, /*upper=*/(UPLO == 'U'),
-                             /*trans=*/1, /*conj=*/(TRANS == 'C'),
+             * xtrsm_packed takes ptrdiff_t dims (par convention). */
+            if (m >= XTRSM_PACKED_MIN_M) {
+                xtrsm_packed(/*lside=*/true, /*upper=*/(UPLO == 'U'),
+                             /*trans=*/true, /*conj=*/(TRANS == 'C'),
                              /*unit=*/!nounit,
-                             (int)m, (int)n,
+                             m, n,
                              __real__ alpha, __imag__ alpha,
-                             (const __float128 *)a, (int)lda,
-                             (__float128 *)b, (int)ldb);
+                             (const __float128 *)a, lda,
+                             (__float128 *)b, ldb);
             } else if (TRANS == 'T') {
                 if (UPLO == 'L') xtrsm_llt(m, n, alpha, a, lda, b, ldb, nounit);
                 else             xtrsm_lut(m, n, alpha, a, lda, b, ldb, nounit);

@@ -67,10 +67,10 @@ __attribute__((noinline, noclone))
 static void epblas_etpmv_notrans_dsb(char uplo_c, char trans_c, char diag_c,
                                      ptrdiff_t n, const TR *ap, TR *x, ptrdiff_t incx)
 {
-    int upper  = (blas_up(uplo_c) == 'U');
-    char trc   = blas_up(trans_c);
-    int trans  = (trc == 'T' || trc == 'C') ? 1 : 0;
-    int nounit = (blas_up(diag_c) == 'N');
+    bool upper  = (blas_up(uplo_c) == 'U');
+    char trc    = blas_up(trans_c);
+    bool trans  = (trc == 'T' || trc == 'C');
+    bool nounit = (blas_up(diag_c) == 'N');
 
     if (n == 0) return;
     if (incx < 0) x -= (n - 1) * incx;

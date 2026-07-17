@@ -261,20 +261,20 @@ void qblas_xherk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
 void qblas_xtrsm_iutcopy(ptrdiff_t m, ptrdiff_t n,
                          const __float128 *a, ptrdiff_t lda,
                          ptrdiff_t offset, __float128 *b,
-                         int unit, int conj);
+                         bool unit, bool conj);
 void qblas_xtrsm_iuncopy(ptrdiff_t m, ptrdiff_t n,
                          const __float128 *a, ptrdiff_t lda,
                          ptrdiff_t offset, __float128 *b,
-                         int unit, int conj);
+                         bool unit, bool conj);
 void qblas_xtrsm_iltcopy(ptrdiff_t m, ptrdiff_t n,
                          const __float128 *a, ptrdiff_t lda,
                          ptrdiff_t offset, __float128 *b,
-                         int unit, int conj);
+                         bool unit, bool conj);
 void qblas_xtrsm_ilncopy(ptrdiff_t m, ptrdiff_t n,
                          const __float128 *a, ptrdiff_t lda,
                          ptrdiff_t offset, __float128 *b,
-                         int unit, int conj);
-void qblas_xtrsm_kernel(int left, int trans,
+                         bool unit, bool conj);
+void qblas_xtrsm_kernel(bool left, bool trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         const __float128 *ba,
                         const __float128 *bb,

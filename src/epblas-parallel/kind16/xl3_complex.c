@@ -1619,7 +1619,7 @@ void qblas_xherk_kernel_l(ptrdiff_t m, ptrdiff_t n, ptrdiff_t k,
  * __float128 per element. Used by the SIDE=L/R blocked xtrsm driver. */
 typedef __float128 T;
 
-static inline void compinv_ld(T *b, T ar, T ai, int unit) {
+static inline void compinv_ld(T *b, T ar, T ai, bool unit) {
     if (unit) {
         b[0] = 1.0Q;
         b[1] = 0.0Q;
@@ -1642,7 +1642,7 @@ static inline void compinv_ld(T *b, T ar, T ai, int unit) {
 
 void qblas_xtrsm_ilncopy(ptrdiff_t m, ptrdiff_t n,
                          const T *a, ptrdiff_t lda,
-                         ptrdiff_t offset, T *b, int unit, int conj)
+                         ptrdiff_t offset, T *b, bool unit, bool conj)
 {
     ptrdiff_t i, ii, j, jj;
     T data01 = 0.0Q, data02 = 0.0Q, data03, data04;
@@ -1756,7 +1756,7 @@ void qblas_xtrsm_ilncopy(ptrdiff_t m, ptrdiff_t n,
 
 void qblas_xtrsm_iltcopy(ptrdiff_t m, ptrdiff_t n,
                          const T *a, ptrdiff_t lda,
-                         ptrdiff_t offset, T *b, int unit, int conj)
+                         ptrdiff_t offset, T *b, bool unit, bool conj)
 {
     ptrdiff_t i, ii, j, jj;
     T data01 = 0.0Q, data02 = 0.0Q, data03, data04;
@@ -1874,7 +1874,7 @@ void qblas_xtrsm_iltcopy(ptrdiff_t m, ptrdiff_t n,
 
 void qblas_xtrsm_iuncopy(ptrdiff_t m, ptrdiff_t n,
                          const T *a, ptrdiff_t lda,
-                         ptrdiff_t offset, T *b, int unit, int conj)
+                         ptrdiff_t offset, T *b, bool unit, bool conj)
 {
     ptrdiff_t i, ii, j, jj;
     T data01 = 0.0Q, data02 = 0.0Q, data03, data04;
@@ -1992,7 +1992,7 @@ void qblas_xtrsm_iuncopy(ptrdiff_t m, ptrdiff_t n,
 
 void qblas_xtrsm_iutcopy(ptrdiff_t m, ptrdiff_t n,
                          const T *a, ptrdiff_t lda,
-                         ptrdiff_t offset, T *b, int unit, int conj)
+                         ptrdiff_t offset, T *b, bool unit, bool conj)
 {
     ptrdiff_t i, ii, j, jj;
     T data01 = 0.0Q, data02 = 0.0Q, data03, data04;
@@ -2235,7 +2235,7 @@ static inline void zsolve_RT(ptrdiff_t m, ptrdiff_t n,
 }
 
 
-void qblas_xtrsm_kernel(int left, int trans,
+void qblas_xtrsm_kernel(bool left, bool trans,
                         ptrdiff_t bm, ptrdiff_t bn, ptrdiff_t bk,
                         const T *ba, const T *bb,
                         T *C, ptrdiff_t ldc,

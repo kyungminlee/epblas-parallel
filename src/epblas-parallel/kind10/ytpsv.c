@@ -224,7 +224,7 @@ static void ytpsv_axpy_col(TC *restrict y_, const TC *restrict a_, TC t, ptrdiff
     const long double *restrict a = (const long double *)a_;
     ptrdiff_t i = 0;
     for (; i + 3 < m; i += 4) {
-        for (int u = 0; u < 4; ++u) {
+        for (ptrdiff_t u = 0; u < 4; ++u) {
             const long double ar = a[2 * (i + u)], ai = a[2 * (i + u) + 1];
             y[2 * (i + u)]     -= tr * ar - ti * ai;
             y[2 * (i + u) + 1] -= tr * ai + ti * ar;

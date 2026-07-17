@@ -20,21 +20,23 @@
  */
 #pragma once
 
+#include <stdbool.h>
+
 #if defined(__x86_64__) || defined(_M_X64)
 #  define MF_SIMD_TARGET __attribute__((target("avx2,fma")))
 #  ifdef __cplusplus
 extern "C" {
 #  endif
-/* Cached CPUID probe: nonzero iff the running CPU has both AVX2 and FMA. */
-int mf_have_avx2_fma(void);
+/* Cached CPUID probe: true iff the running CPU has both AVX2 and FMA. */
+bool mf_have_avx2_fma(void);
 #  ifdef __cplusplus
 }
 #  endif
 #else
 #  define MF_SIMD_TARGET
 #  ifdef __cplusplus
-static inline int mf_have_avx2_fma(void) { return 0; }
+static inline bool mf_have_avx2_fma(void) { return false; }
 #  else
-static inline int mf_have_avx2_fma(void) { return 0; }
+static inline bool mf_have_avx2_fma(void) { return false; }
 #  endif
 #endif
