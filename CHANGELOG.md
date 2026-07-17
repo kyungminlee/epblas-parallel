@@ -7,6 +7,29 @@ semantics (minor = feature, patch = fix).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-17
+
+### Changed
+- Enforced the "int is boundary-only" convention across the overlay kernels:
+  the 131 internal bare-`int` violations flagged by the boundary linter are now
+  `ptrdiff_t` (numeric sizes/indices/strides) or `bool` (logical flags);
+  fixed-width Fortran-ABI `int` is confined to `common/` (facade + `blas_omp`).
+  Covers the kind16 xtrsm L-side packed driver, perf-verified neutral against
+  the `int` baseline (`par` at parity with `ob` at OMP=1 and OMP=4).
+
+### Added
+- CI and the release workflow now run the static `epblas_parallel_int_boundary_guard`
+  check via `ctest -L lint` (ahead of the fuzz rotation), so a bare `int`
+  slipping into an overlay kernel blocks the build.
+
+### Fixed
+- The complex-TRSM fuzz body now draws sizes up to 160 and salts cases into the
+  `m >= XTRSM_PACKED_MIN_M` (128) regime, so the xtrsm L-side packed driver —
+  previously never reached by fuzz (`m,n <= 96`) — is exercised on every seed.
+
+### Removed
+- Retired the cmp5 harness's historical scoreboard reports.
+
 ## [0.11.0] - 2026-07-16
 
 ### Changed
