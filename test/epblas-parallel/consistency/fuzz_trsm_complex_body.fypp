@@ -45,8 +45,8 @@ program fuzz_${routine}$
     fails = 0
     sentinel_fails = 0
     do ic = 1, ncases
-        m = rand_int_log(1, 96)
-        n = rand_int_log(1, 96)
+        m = rand_int_log(1, 160)
+        n = rand_int_log(1, 160)
         call random_number(u)
         if (u < 0.5_8) then; side = 'L'; else; side = 'R'; end if
         call random_number(u)
@@ -54,6 +54,21 @@ program fuzz_${routine}$
         transa = rand_trans_complex()
         call random_number(u)
         if (u < 0.3_8) then; diag = 'U'; else; diag = 'N'; end if
+
+        ! Guarantee the xtrsm L-side packed driver (xtri_driver.c) is covered on
+        ! every seed: it routes only for side 'L', transpose/conj-transpose, and
+        ! m >= XTRSM_PACKED_MIN_M (128). The log-size draw above tops out below
+        ! that for most cases, so without this salt an unlucky seed leaves the
+        ! packed path — a perf-critical hand-port fuzz otherwise never reaches —
+        ! untested. Pin every 8th case into that regime. (ytrsm, the kind10
+        ! twin sharing this body, has no packed path; the salt just adds large
+        ! L-side coverage there, which is harmless.)
+        if (mod(ic, 8) == 0) then
+            m = rand_int_log(128, 160)
+            side = 'L'
+            call random_number(u)
+            if (u < 0.5_8) then; transa = 'T'; else; transa = 'C'; end if
+        end if
         call random_number(ur); call random_number(ui)
         alpha = cmplx(real(2.0_8*ur - 1.0_8, rk), &
                       real(2.0_8*ui - 1.0_8, rk), rk)
