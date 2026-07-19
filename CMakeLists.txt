@@ -30,7 +30,12 @@ project(epblas-parallel
 # Fortran inactive that tag is empty and the discovery probe silently
 # fails.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-include(FortranCompiler)
+message(STATUS "epblas-parallel: Fortran compiler = "
+               "${CMAKE_Fortran_COMPILER_ID} ${CMAKE_Fortran_COMPILER_VERSION}")
+
+# Shared helpers for the six per-kind archive CMakeLists
+# (epblas_add_kind_archive / epblas_kernel_routines).
+include(EpblasKindHelpers)
 
 # ── Position-independent code / shared-library output ─────────────────
 # The overlay + reference archives are STATIC. Compiling them PIC is what

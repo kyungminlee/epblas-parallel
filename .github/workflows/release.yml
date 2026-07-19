@@ -52,78 +52,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install GCC (gfortran)
-        run: |
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.compiler.pkg }}
-
-      - name: Install fypp
-        # multifloats's overlay kernels are emitted from .fypp templates,
-        # and the overlay test drivers are .fypp-templated Fortran — so
-        # fypp is needed both for production multifloats builds and for
-        # the test slot.
-        run: pipx install fypp
-
-      # ── Test slot: pull eplinalg + set up Intel MPI ────────────────
-      # Mirrors eplinalg's own release workflow: intelmpi is the
-      # canonical MPI for the migrated stack, so the matching
-      # `<target>-<compiler>-intelmpi-linux-x86_64.tar.gz` archives
-      # carry the BLAS Configs we link against here.
-      - name: Install Intel MPI (test slot only)
-        if: env.IS_TEST_SLOT == 'true'
-        run: |
-          wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
-            | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
-            | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt-get update
-          sudo apt-get install -y intel-oneapi-mpi-devel
-
-      # Source Intel oneAPI's setvars.sh once and forward the resulting
-      # environment to subsequent steps via $GITHUB_ENV instead of
-      # re-sourcing it inside every cmake invocation. Only vars that
-      # setvars.sh actually adds/changes are forwarded. Matches
-      # eplinalg's release workflow.
-      - name: Setup Intel oneAPI environment (test slot only)
-        if: env.IS_TEST_SLOT == 'true'
-        run: |
-          env | sort > /tmp/env.before
-          source /opt/intel/oneapi/setvars.sh > /dev/null
-          env | sort > /tmp/env.after
-          comm -13 /tmp/env.before /tmp/env.after >> "$GITHUB_ENV"
-
-      - name: Setup Intel MPI compiler shims (test slot only)
-        if: env.IS_TEST_SLOT == 'true'
-        run: |
-          {
-            echo "I_MPI_F90=${{ matrix.compiler.fc }}"
-            echo "I_MPI_CC=${{ matrix.compiler.cc }}"
-            echo "I_MPI_CXX=${{ matrix.compiler.cxx }}"
-          } >> "$GITHUB_ENV"
-
-      - name: Download eplinalg release (test slot only)
-        if: env.IS_TEST_SLOT == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Pinned to the eplinalg release we tested against. Bump on
-          # every epblas-parallel release that ships against a newer
-          # eplinalg — keeps the test slot reproducible and surfaces
-          # the dependency in PR review.
-          TAG="${{ inputs.eplinalg_tag || 'v0.8.0' }}"
-          echo "eplinalg tag: $TAG"
-
-          mkdir -p ${{ github.workspace }}/eplinalg-install
-          for target in kind10 kind16 multifloats; do
-            ARCH="${target}-${{ matrix.compiler.name }}-intelmpi-linux-x86_64.tar.gz"
-            gh release download --repo kyungminlee/eplinalg "$TAG" \
-                --pattern "$ARCH" --dir .
-            tar xzf "$ARCH" -C ${{ github.workspace }}/eplinalg-install
-            rm "$ARCH"
-          done
-          echo "CMAKE_PREFIX_PATH=${{ github.workspace }}/eplinalg-install${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" \
-            >> "$GITHUB_ENV"
+      # Toolchain + migrated-reference provisioning (GCC, fypp, and — for
+      # the test slot only — Intel MPI, oneAPI env, eplinalg reference
+      # archives with download retry) is shared verbatim with ci.yml via
+      # this composite action — edit
+      # .github/actions/setup-epblas-env/action.yml, not here. intelmpi is
+      # the canonical MPI for the migrated stack (mirrors eplinalg's own
+      # release workflow). The eplinalg tag is pinned to the release we
+      # tested against: it defaults to the EPLINALG_BASELINE_VERSION pin
+      # in cmake/FetchEplinalgBaseline.cmake — bump it there on every
+      # epblas-parallel release that ships against a newer eplinalg, so
+      # the test slot stays reproducible and the dependency surfaces in
+      # PR review.
+      - name: Setup toolchain + eplinalg reference
+        uses: ./.github/actions/setup-epblas-env
+        with:
+          compiler-name: ${{ matrix.compiler.name }}
+          compiler-packages: ${{ matrix.compiler.pkg }}
+          fc: ${{ matrix.compiler.fc }}
+          cc: ${{ matrix.compiler.cc }}
+          cxx: ${{ matrix.compiler.cxx }}
+          eplinalg-tag: ${{ inputs.eplinalg_tag }}
+          install-reference: ${{ env.IS_TEST_SLOT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure
         run: |

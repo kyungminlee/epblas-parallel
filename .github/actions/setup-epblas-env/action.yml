@@ -1,0 +1,153 @@
+# Shared toolchain + eplinalg-reference provisioning for ci.yml and
+# release.yml.
+#
+# Extracted from the previously-duplicated ~90-line step blocks in the two
+# workflows, which had already drifted: ci.yml grew the eplinalg download
+# retry loop (CDN connection resets) while release.yml's otherwise-identical
+# download step had none. Any change to the GCC / fypp / Intel MPI /
+# eplinalg-reference provisioning belongs HERE so both workflows stay in
+# lockstep.
+#
+# The eplinalg baseline tag is single-sourced from the
+# EPLINALG_BASELINE_VERSION default in cmake/FetchEplinalgBaseline.cmake
+# (see the parse in the download step below); pass `eplinalg-tag` only to
+# override it (the workflows wire their workflow_dispatch input through).
+
+name: Set up epblas build environment
+description: >-
+  Install GCC/gfortran + fypp and, optionally, Intel MPI + the eplinalg
+  reference archives the overlay test suite links against.
+
+inputs:
+  compiler-name:
+    description: Compiler tag used in the eplinalg asset names (e.g. gfortran-15)
+    required: true
+  compiler-packages:
+    description: apt packages for the toolchain (e.g. "gcc-15 g++-15 gfortran-15")
+    required: true
+  fc:
+    description: Fortran compiler executable (Intel MPI shim I_MPI_F90)
+    required: true
+  cc:
+    description: C compiler executable (Intel MPI shim I_MPI_CC)
+    required: true
+  cxx:
+    description: C++ compiler executable (Intel MPI shim I_MPI_CXX)
+    required: true
+  eplinalg-tag:
+    description: >-
+      eplinalg release tag for the reference archives. Empty (the default)
+      reads the pinned EPLINALG_BASELINE_VERSION default out of
+      cmake/FetchEplinalgBaseline.cmake — the single source of truth for
+      the pin.
+    required: false
+    default: ''
+  install-reference:
+    description: >-
+      "true" installs Intel MPI + the oneAPI environment and downloads the
+      eplinalg reference archives (needed only by jobs that run ctest;
+      release.yml passes its IS_TEST_SLOT flag here).
+    required: false
+    default: 'true'
+  github-token:
+    description: >-
+      Token for `gh release download`. Composite actions cannot read the
+      `secrets` context, so the caller must pass secrets.GITHUB_TOKEN in.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install GCC (gfortran)
+      shell: bash
+      run: |
+        sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+        sudo apt-get update
+        sudo apt-get install -y ${{ inputs.compiler-packages }}
+
+    - name: Install fypp
+      # multifloats's overlay kernels are emitted from .fypp templates, and
+      # the overlay test drivers are .fypp-templated Fortran — so fypp is
+      # needed both for production multifloats builds and for test slots.
+      shell: bash
+      run: pipx install fypp
+
+    # ── Reference setup (ctest-running slots only) ─────────────────────
+    # The fuzz drivers compare the overlay against the migrated netlib
+    # reference, which ships in eplinalg's intelmpi archives — intelmpi is
+    # the canonical MPI for the migrated stack, mirroring eplinalg's own
+    # release workflow.
+    - name: Install Intel MPI
+      if: inputs.install-reference == 'true'
+      shell: bash
+      run: |
+        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+          | gpg --dearmor | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+        echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+          | sudo tee /etc/apt/sources.list.d/oneAPI.list
+        sudo apt-get update
+        sudo apt-get install -y intel-oneapi-mpi-devel
+
+    # Source Intel oneAPI's setvars.sh once and forward the resulting
+    # environment to subsequent steps via $GITHUB_ENV instead of
+    # re-sourcing it inside every cmake invocation. Only vars that
+    # setvars.sh actually adds/changes are forwarded. Matches eplinalg's
+    # release workflow.
+    - name: Setup Intel oneAPI environment
+      if: inputs.install-reference == 'true'
+      shell: bash
+      run: |
+        env | sort > /tmp/env.before
+        source /opt/intel/oneapi/setvars.sh > /dev/null
+        env | sort > /tmp/env.after
+        comm -13 /tmp/env.before /tmp/env.after >> "$GITHUB_ENV"
+
+    - name: Setup Intel MPI compiler shims
+      if: inputs.install-reference == 'true'
+      shell: bash
+      run: |
+        {
+          echo "I_MPI_F90=${{ inputs.fc }}"
+          echo "I_MPI_CC=${{ inputs.cc }}"
+          echo "I_MPI_CXX=${{ inputs.cxx }}"
+        } >> "$GITHUB_ENV"
+
+    - name: Download eplinalg reference archives
+      if: inputs.install-reference == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        TAG="${{ inputs.eplinalg-tag }}"
+        if [ -z "$TAG" ]; then
+          # Single source of truth for the pin: the EPLINALG_BASELINE_VERSION
+          # cache-var default in cmake/FetchEplinalgBaseline.cmake. That
+          # set() line carries a do-not-reformat marker pointing back here.
+          TAG="$(sed -n 's/^set(EPLINALG_BASELINE_VERSION "\([^"]*\)".*/\1/p' \
+                 cmake/FetchEplinalgBaseline.cmake | head -n1)"
+        fi
+        case "$TAG" in
+          v[0-9]*) ;;
+          *) echo "::error::failed to resolve the eplinalg tag from cmake/FetchEplinalgBaseline.cmake (got '$TAG')"; exit 1 ;;
+        esac
+        echo "eplinalg tag: $TAG"
+
+        mkdir -p "$GITHUB_WORKSPACE/eplinalg-install"
+        for target in kind10 kind16 multifloats; do
+          ARCH="${target}-${{ inputs.compiler-name }}-intelmpi-linux-x86_64.tar.gz"
+          # Retry: the release-asset CDN occasionally resets the
+          # connection mid-download (seen as `connection reset by peer`).
+          for attempt in 1 2 3 4 5; do
+            if gh release download --repo kyungminlee/eplinalg "$TAG" \
+                --pattern "$ARCH" --dir . --clobber; then
+              break
+            fi
+            echo "download of $ARCH failed (attempt $attempt); retrying in $((attempt * 5))s"
+            sleep $((attempt * 5))
+            [ "$attempt" -eq 5 ] && { echo "::error::eplinalg download failed after 5 attempts: $ARCH"; exit 1; }
+          done
+          tar xzf "$ARCH" -C "$GITHUB_WORKSPACE/eplinalg-install"
+          rm "$ARCH"
+        done
+        echo "CMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/eplinalg-install${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" \
+          >> "$GITHUB_ENV"

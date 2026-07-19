@@ -6,7 +6,7 @@
         {
             "name": "_linux-base",
             "hidden": true,
-            "description": "Linux with system gcc/g++. OpenMP via libgomp.",
+            "description": "Linux with system gcc/g++. OpenMP runtime: Intel libiomp5 when found (EPBLAS_PREFER_IOMP5), else libgomp.",
             "generator": "Unix Makefiles",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
@@ -24,7 +24,7 @@
         {
             "name": "release",
             "displayName": "Release",
-            "description": "Optimized build (-O3). Alias of the default linux preset.",
+            "description": "Optimized build (-O3), same config as the linux preset but in its own build-release tree.",
             "inherits": "_linux-base",
             "binaryDir": "${sourceDir}/build-release",
             "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}

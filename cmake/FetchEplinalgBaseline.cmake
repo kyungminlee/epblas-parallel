@@ -16,13 +16,22 @@
 #
 # Knobs:
 #   EPBLAS_PARALLEL_FETCH_BASELINE   ON  — fetch release baselines into the build
-#   EPLINALG_BASELINE_VERSION        release tag to pull (default v0.8.0)
+#   EPLINALG_BASELINE_VERSION        release tag to pull (see the set() below —
+#                                    the single authoritative pin site)
 #   EPLINALG_BASELINE_MPI            MPI flavour in the asset name (default mpich)
 #   EPLINALG_BASELINE_REPO           release host repo URL
 
 option(EPBLAS_PARALLEL_FETCH_BASELINE
     "Download the eplinalg migrated baseline (eyblas/qxblas/mwblas) release \
 binaries into the build tree for the test/bench suite" ON)
+# SINGLE SOURCE OF TRUTH for the eplinalg baseline tag. Both CI workflows
+# sed-parse the default out of the next line
+# (.github/actions/setup-epblas-env/action.yml expects
+# `set(EPLINALG_BASELINE_VERSION "<tag>"` on ONE line) — do not reformat it.
+# CACHE-VAR CAUTION: bumping this default does NOT update an existing build
+# dir (the old cached value sticks); reconfigure with
+# -DEPLINALG_BASELINE_VERSION=<tag> or start a fresh build dir. The version
+# stamp below purges a stale extract once the cache var itself changes.
 set(EPLINALG_BASELINE_VERSION "v0.8.0" CACHE STRING
     "eplinalg release tag for the prebuilt migrated baseline")
 set(EPLINALG_BASELINE_MPI "mpich" CACHE STRING
@@ -97,7 +106,9 @@ function(epblas_fetch_eplinalg_baseline)
         list(PREPEND _added "${_prefix}")
     endforeach()
 
-    # Prepend into the cache var so the find_package() probes below see it.
+    # Prepend into the caller's directory-scope CMAKE_PREFIX_PATH (via
+    # PARENT_SCOPE — the cache var is never touched) so the find_package()
+    # probes below see it.
     list(PREPEND CMAKE_PREFIX_PATH ${_added})
     set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}" PARENT_SCOPE)
     message(STATUS "epblas-parallel: baseline prefixes added: ${_added}")
