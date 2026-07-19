@@ -7,6 +7,36 @@ semantics (minor = feature, patch = fix).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-19
+
+### Fixed
+- The multifloats `mspmv` threaded unit-stride Lower path (`n >= 256`) passed
+  an absolute row base to column-relative SIMD kernels, reading ahead of each
+  column and producing wrong results; it now derives the per-column packed
+  base. The salted fuzz workload pins this path on every seed.
+- The fuzz log-uniform size draw now includes its upper bound, and the complex
+  TRMM/TRSM checkers guard against NaN-poisoned comparisons.
+
+### Changed
+- Repo-wide cleanup pass (~600 files): stale hidden-length ABI banners, dead
+  helpers and phantom env knobs, and cmp5-era benchmark remnants removed;
+  reduction/rotation helpers use branchless absolute value; the multifloats
+  L1 reductions share a pre-initialized partial-reduce in `mf_omp`.
+- The openblas-leg L3 drivers perform all pack allocations before any
+  in-place prescale and fail loudly instead of silently corrupting operands;
+  the parallel m/wgemm fall back to the serial path on allocation failure.
+- Benchmark drivers report bare ns/call only (dead FLOP/GF-s scaffolding and
+  the JSON emitter removed); the dual harness honors an `NSDIR` override.
+
+### Added
+- Shared per-kind tuning headers (`eblas_tuning.h`, `qblas_tuning.h`,
+  `mblas_tuning.h`) centralizing the openblas-leg threading thresholds.
+- Salted fuzz sizing steers every 8th case into the OMP-gated regime across
+  48 bodies, deterministically covering formerly unreachable threaded paths.
+- `cmake/EpblasKindHelpers.cmake` dedups the six per-kind CMakeLists; CI and
+  the release workflow share a composite setup action; the eplinalg baseline
+  pin is single-sourced in `cmake/FetchEplinalgBaseline.cmake`.
+
 ## [0.12.0] - 2026-07-17
 
 ### Changed
