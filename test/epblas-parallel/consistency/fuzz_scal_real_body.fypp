@@ -24,7 +24,10 @@ program fuzz_${routine}$
     print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
     call seed_rng(seed); fails = 0
     do ic = 1, ncases
-        n = rand_int_log(1, 4096); incx = rand_incx_pos()
+        ! Salt (audit F1): ESCAL_OMP_MIN = 6144 (serial when n <= gate)
+        ! sits above the 4096 cap — QSCAL gates at 128, inside it. Every
+        ! 8th case draws from the threaded regime.
+        n = rand_size_salted(ic, 1, 4096, 6145, 12288); incx = rand_incx_pos()
         call rand_alpha_beta(alpha, beta_unused)
         tol = max(10.0_rk, 4.0_rk * real(n, rk)) * eps
         lenx = 1 + (n - 1) * abs(incx)

@@ -23,7 +23,11 @@ program fuzz_${routine}$
     print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
     call seed_rng(seed); fails = 0
     do ic = 1, ncases
-        n = rand_int_log(1, 4096); incx = rand_incx_pos()
+        ! Salt (audit F1): IEAMAX_OMP_MIN = 10000 (serial when n <= gate)
+        ! sits above the 4096 cap — IQAMAX gates at 128, inside it. Every
+        ! 8th case reaches the threaded partial[]-reduce argmax (and its
+        ! lowest-index tie-break).
+        n = rand_size_salted(ic, 1, 4096, 10001, 20000); incx = rand_incx_pos()
         lenx = 1 + (n - 1) * abs(incx)
         allocate(X(lenx))
         call fill_matrix_real(X, lenx, 1, lenx)

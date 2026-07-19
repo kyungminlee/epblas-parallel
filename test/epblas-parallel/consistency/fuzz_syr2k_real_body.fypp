@@ -53,8 +53,9 @@ program fuzz_${routine}$
         tol = max(10.0_rk, 8.0_rk * real(k, rk)) * eps
         call random_number(u)
         if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if
-        call random_number(u)
-        if (u < 0.5_8) then; trans = 'N'; else; trans = 'T'; end if
+        ! Audit F8: use rand_trans() so 'C' (legal for real BLAS,
+        ! distinct lsame branch) is drawn too.
+        trans = rand_trans()
         call rand_alpha_beta(alpha, beta)
 
         if (trans == 'N') then; rows_a = n; cols_a = k

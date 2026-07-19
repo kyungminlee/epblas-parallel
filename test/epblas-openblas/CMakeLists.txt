@@ -139,12 +139,10 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
             file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
             foreach(_threads 1 4)
                 set(_test_name epblas_openblas_${_name}_omp${_threads})
-                set(_json
-                    ${CMAKE_BINARY_DIR}/reports/epblas-openblas/${_name}_omp${_threads}.json)
                 add_test(NAME ${_test_name} COMMAND ep_${_name}
                          WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/reports/epblas-openblas)
                 set_tests_properties(${_test_name} PROPERTIES
-                    ENVIRONMENT "OMP_NUM_THREADS=${_threads};BLAS_PERF_JSON=${_json}"
+                    ENVIRONMENT "OMP_NUM_THREADS=${_threads}"
                     LABELS "perf;epblas-openblas-perf;epblas-openblas-perf-omp${_threads}")
             endforeach()
         endforeach()

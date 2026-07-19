@@ -36,12 +36,16 @@ program fuzz_${routine}$
     print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
     call seed_rng(seed); fails = 0
     do ic = 1, ncases
-        m = rand_int_log(1, 128)
-        n = rand_int_log(1, 128)
+        ! Salt (audit F1): EGBMV/QGBMV_OMP_MIN = 256 sit above the 128
+        ! cap; the gate tests m or n depending on trans, so salt both.
+        m = rand_size_salted(ic, 1, 128, 256, 384)
+        n = rand_size_salted(ic, 1, 128, 256, 384)
         kl = rand_int_log(0, min(m - 1, 8)); if (kl < 0) kl = 0
         ku = rand_int_log(0, min(n - 1, 8)); if (ku < 0) ku = 0
         tol = max(10.0_rk, 4.0_rk * real(max(m, n), rk)) * eps
-        call random_number(u); if (u < 0.5_8) then; trans = 'N'; else; trans = 'T'; end if
+        ! Audit F8: use rand_trans() so 'C' (legal for real BLAS,
+        ! distinct lsame branch) is drawn too.
+        trans = rand_trans()
         call rand_alpha_beta(alpha, beta)
         if (trans == 'N') then; lenx = n; leny = m
         else;                   lenx = m; leny = n

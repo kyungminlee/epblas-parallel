@@ -25,7 +25,10 @@ program fuzz_wdotu
     print '(a,i0,a,i0)', 'fuzz_wdotu: seed=', seed, '  cases=', ncases
     call seed_rng(seed); fails = 0
     do ic = 1, ncases
-        n = rand_int_log(1, 4096); incx = rand_incx(); incy = rand_incx()
+        ! Salt (audit F1): WDOTU_OMP_MIN = 8192 (serial when n <= gate)
+        ! sits above the 4096 cap — every 8th
+        ! case draws from the threaded regime.
+        n = rand_size_salted(ic, 1, 4096, 8193, 16384); incx = rand_incx(); incy = rand_incx()
         lenx = 1 + (n - 1) * abs(incx); leny = 1 + (n - 1) * abs(incy)
         allocate(X(lenx), Y(leny))
         call fill_matrix_complex(X, lenx, 1, lenx); call fill_matrix_complex(Y, leny, 1, leny)

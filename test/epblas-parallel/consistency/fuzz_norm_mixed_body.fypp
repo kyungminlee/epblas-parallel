@@ -23,7 +23,10 @@ program fuzz_${routine}$
     print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
     call seed_rng(seed); fails = 0
     do ic = 1, ncases
-        n = rand_int_log(1, 4096); incx = rand_incx_pos()
+        ! Salt (audit F1): EYASUM/EYNRM2_OMP_MIN = 10000 (serial when
+        ! n <= gate) sit above the 4096 cap — QXASUM/QXNRM2 gate at 128,
+        ! inside it. Every 8th case draws from the threaded regime.
+        n = rand_size_salted(ic, 1, 4096, 10001, 20000); incx = rand_incx_pos()
         tol = max(20.0_rk, 8.0_rk * real(n, rk)) * eps
         lenx = 1 + (n - 1) * abs(incx)
         allocate(X(lenx))

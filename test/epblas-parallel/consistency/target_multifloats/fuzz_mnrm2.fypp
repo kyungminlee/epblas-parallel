@@ -24,7 +24,10 @@ program fuzz_mnrm2
     print '(a,i0,a,i0)', 'fuzz_mnrm2: seed=', seed, '  cases=', ncases
     call seed_rng(seed); fails = 0
     do ic = 1, ncases
-        n = rand_int_log(1, 4096); incx = pick_pos()
+        ! Salt (audit F1): MNRM2_OMP_MIN = 8192 (serial when n <= gate)
+        ! sits above the 4096 cap — every 8th
+        ! case draws from the threaded regime.
+        n = rand_size_salted(ic, 1, 4096, 8193, 16384); incx = pick_pos()
         lenx = 1 + (n - 1) * abs(incx)
         allocate(X(lenx))
         call fill_matrix_real(X, lenx, 1, lenx)

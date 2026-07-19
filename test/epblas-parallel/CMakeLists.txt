@@ -62,9 +62,8 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
     set(_fuzz_common ${LIB_PREFIX}blas_parallel_fuzz_common)
     add_library(${_fuzz_common} STATIC ${_fuzz_util_src})
     # Each fuzz_common library defines a module named `fuzz_util` —
-    # they MUST land in separate dirs or the per-target .mod files
-    # race to overwrite each other under the shared layout
-    # `fortran_module_layout` would otherwise install.
+    # they MUST land in separate per-target dirs or the .mod files
+    # race to overwrite each other under a shared module directory.
     set(_fuzz_moddir ${CMAKE_CURRENT_BINARY_DIR}/fmod/${_target})
     set_target_properties(${_fuzz_common} PROPERTIES
         Fortran_MODULE_DIRECTORY ${_fuzz_moddir})
@@ -119,7 +118,9 @@ foreach(_target IN LISTS EPBLAS_PARALLEL_TESTABLE_TARGETS)
             # multifloats Fortran module (dd_mul_dd, …); fp80/quad
             # references are intrinsic and need no runtime. Mirror the
             # fuzz_common link so perf drivers resolve those symbols.
-            if(TARGET multifloatsf AND "${_target}" STREQUAL "multifloats")
+            # Same predicate as the fuzz_common link above (_have_multifloats_f
+            # is the one spelling of the "multifloatsf exists" condition).
+            if(_have_multifloats_f AND "${_target}" STREQUAL "multifloats")
                 target_link_libraries(${_name} PRIVATE
                     $<BUILD_INTERFACE:multifloatsf>)
             endif()

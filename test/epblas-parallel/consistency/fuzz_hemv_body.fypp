@@ -40,7 +40,10 @@ program fuzz_${routine}$
 
     fails = 0
     do ic = 1, ncases
-        n = rand_int_log(1, 128)
+        ! Salt (audit F1/F2): XHEMV_OMP_MIN = 128 equals the cap (YHEMV
+        ! gates at 32), so the plain draw reaches the threaded regime
+        ! only at exactly n = 128 — salt every 8th case past it.
+        n = rand_size_salted(ic, 1, 128, 128, 192)
         tol = max(10.0_rk, 4.0_rk * real(n, rk)) * eps
         call random_number(u)
         if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if

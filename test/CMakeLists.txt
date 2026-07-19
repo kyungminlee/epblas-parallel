@@ -58,7 +58,13 @@ function(_epblas_make_migrated_archive arch_name routines)
         COMMAND ${CMAKE_OBJCOPY} --redefine-syms=${_redef_file}
                 $<TARGET_FILE:eplinalg::${LIB_PREFIX}blas>
                 ${_archive}
-        DEPENDS ${_redef_file}
+        # The input archive MUST be in DEPENDS too: the baseline extracts to
+        # a version-less path (_deps/eplinalg-<target>/), so an
+        # EPLINALG_BASELINE_VERSION bump swaps the archive file in place and
+        # only this dependency retriggers the rename — without it the
+        # _migrated archive silently stays at the old baseline (the
+        # build-system twin of the stale-archive trap).
+        DEPENDS ${_redef_file} $<TARGET_FILE:eplinalg::${LIB_PREFIX}blas>
         COMMENT "objcopy: emitting lib${arch_name}.a"
         VERBATIM)
     add_custom_target(${arch_name}_build DEPENDS ${_archive})

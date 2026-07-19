@@ -33,7 +33,10 @@ program fuzz_${routine}$
     print '(a,i0,a,i0)', 'fuzz_${routine}$: seed=', seed, '  cases=', ncases
     call seed_rng(seed); fails = 0
     do ic = 1, ncases
-        n = rand_int_log(1, 96)
+        ! Salt (audit F1): XTRMV_OMP_MIN = 128 sits above the 96 cap
+        ! (YTRMV gates at 48). Every 8th case draws from the threaded
+        ! regime.
+        n = rand_size_salted(ic, 1, 96, 128, 192)
         tol = max(10.0_rk, 4.0_rk * real(n, rk)) * eps
         call random_number(u); if (u < 0.5_8) then; uplo = 'L'; else; uplo = 'U'; end if
         call random_number(u)

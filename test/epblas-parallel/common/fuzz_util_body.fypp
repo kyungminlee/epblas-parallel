@@ -10,7 +10,8 @@ module fuzz_util
     implicit none
     private
     public :: read_seed, read_cases, seed_rng
-    public :: rand_int_log, rand_trans, rand_trans_complex
+    public :: rand_int_log, rand_size_salted, salted_case
+    public :: rand_trans, rand_trans_complex
     public :: rand_alpha_beta, rand_alpha_beta_complex
     public :: fill_matrix_real, max_rel_err_real, check_sentinels_real
     public :: fill_matrix_complex, max_rel_err_complex, check_sentinels_complex
@@ -87,11 +88,46 @@ contains
         lo_s = lo + off
         hi_s = hi + off
         call random_number(u)
-        t = log(real(lo_s, 8)) + u * (log(real(hi_s, 8)) - log(real(lo_s, 8)))
+        ! Upper bound log(hi_s + 1): with a plain log(hi_s) bound and
+        ! u in [0,1), int(exp(t)) tops out at hi_s - 1, so `hi` itself
+        ! was NEVER drawn (audit F2). exp(t) now spans [lo_s, hi_s + 1)
+        ! and the floor lands in [lo_s, hi_s] — hi is inclusive; the
+        ! clamps below only catch FP overshoot.
+        t = log(real(lo_s, 8)) + u * (log(real(hi_s, 8) + 1.0_8) - log(real(lo_s, 8)))
         k = int(exp(t)) - off
         if (k < lo) k = lo
         if (k > hi) k = hi
     end function rand_int_log
+
+    ! True on the cases rand_size_salted pins into the gated regime.
+    ! Bodies use this to pin companion flags a dispatch gate also
+    ! requires (e.g. incx = 1 for the blocked threaded solves).
+    function salted_case(ic) result(s)
+        integer, intent(in) :: ic
+        logical :: s
+        s = (mod(ic, 8) == 0)
+    end function salted_case
+
+    ! Salted size draw (audit F1): log-uniform in [lo, cap] like
+    ! rand_int_log, but every 8th case (the density established by the
+    ! xtrsm salt in fuzz_trsm_complex_body) is pinned into
+    ! [gate_lo, gate_hi] instead, so dispatch fast paths whose size
+    ! gates sit ABOVE the body's normal cap are exercised on every
+    ! seed. gate_lo must be the smallest size that actually takes the
+    ! gated path (mind strict `n > gate` / serial `n <= gate`
+    ! comparisons in the source); keep gate_hi tight (~1.5-2x gate_lo)
+    ! so wall time stays bounded. ic is the body's 1-based case
+    ! counter. Consumes one RNG draw either way, so the stream stays
+    ! aligned across cases.
+    function rand_size_salted(ic, lo, cap, gate_lo, gate_hi) result(k)
+        integer, intent(in) :: ic, lo, cap, gate_lo, gate_hi
+        integer :: k
+        if (salted_case(ic)) then
+            k = rand_int_log(gate_lo, gate_hi)
+        else
+            k = rand_int_log(lo, cap)
+        end if
+    end function rand_size_salted
 
     function rand_trans() result(c)
         character :: c
