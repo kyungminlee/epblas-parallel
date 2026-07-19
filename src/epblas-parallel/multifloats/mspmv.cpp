@@ -11,6 +11,7 @@
 #include "mf_util.h"
 #include "mf_pred.h"
 #include "mf_kernels.h"
+#include "mf_packed.h"
 #ifdef _OPENMP
 #include <cstdlib>
 #include <cmath>
@@ -26,13 +27,15 @@ namespace mf = multifloats;
 using TR = mf::float64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::eq0;
 using mf_pred::eq1;
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 namespace {
-const TR zero_dd{0.0, 0.0};
+using mf_pred::zero_dd;      /* shared DD constant — mf_pred.h */
+using mf_packed::kk_upper;   /* shared packed-column base offsets — mf_packed.h */
+using mf_packed::kk_lower;
 }
 
 #define AP_(idx) ap[static_cast<std::size_t>(idx)]
@@ -112,7 +115,7 @@ static bool mspmv_axpydot(bool upper, std::ptrdiff_t n, const TR *ap,
         if (upper) {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
                 const TR temp1 = x[j];
-                const TR *aj = &AP_((std::size_t)j * (j + 1) / 2);
+                const TR *aj = &AP_(kk_upper(j));
                 TR temp2 = zero_dd;
                 if (j > 0) {
                     mf_kernels::axpy_add(j, &slot[0], aj, temp1);   /* slot[i] += temp1*aj[i] */
@@ -123,8 +126,13 @@ static bool mspmv_axpydot(bool upper, std::ptrdiff_t n, const TR *ap,
         } else {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
                 const TR temp1 = x[j];
-                const TR *aj = &AP_((std::size_t)j * (2 * (std::size_t)n - j - 1) / 2);
-                slot[j] = slot[j] + temp1 * aj[j];
+                /* Column base kk_lower: diag at aj[0], rows j+1.. at aj[1..] —
+                 * the same convention as mspmv_contig's lower loop and the SIMD
+                 * kernel calls below. (The previous base, j*(2n-j-1)/2 =
+                 * kk_lower - j, is the ob clone's ABSOLUTE-row convention; kept
+                 * against relative aj[1] kernels it read j slots too early.) */
+                const TR *aj = &AP_(kk_lower(j, n));
+                slot[j] = slot[j] + temp1 * aj[0];
                 const std::ptrdiff_t len = n - 1 - j;
                 if (len > 0) {
                     mf_kernels::axpy_add(len, &slot[j + 1], &aj[1], temp1);
