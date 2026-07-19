@@ -45,8 +45,7 @@ static void run_maxpy(int N, int iters, int warmup) {
     PERF_RESET(Y, Yi, N, MFR); PERF_TIME(t_subject, iters, maxpy_(&N, &alpha, X, &one, Y, &one));
     PERF_RESET(Y, Yi, N, MFR); PERF_TIME(t_mg,      iters, maxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
-    double flops = 2.0 * (double)N;
-    PERF_EMIT("maxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("maxpy", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

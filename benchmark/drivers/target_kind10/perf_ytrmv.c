@@ -48,7 +48,6 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, lenx, C10), ytrmv_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, lenx, C10), ytrmv_migrated_(&uplo, &trans, &diag, &N, A, &N, X, &incx, 1, 1, 1));
-    double flops = 4.0 * (double)N * (double)N;
     /* Key encodes UPLO/TRANS/DIAG + stride. Examples: "LTN" (incx=1),
      * "LTN/x2" (incx=2), "LTN/x-1" (incx=-1). incx=1 keeps the old
      * key so existing reports stay parseable. */
@@ -58,7 +57,7 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     } else {
         snprintf(key, sizeof(key), "%c%c%c/x%d", uplo, trans, diag, incx);
     }
-    PERF_EMIT("ytrmv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("ytrmv", key, N, iters, t_subject, t_mg);
     free(A); free(X); free(Xi);
 }
 

@@ -34,8 +34,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME(t_subject, iters, r = qasum_(&N, X, &one));
     PERF_TIME(t_mg,      iters, r = qasum_migrated_(&N, X, &one));
-    double flops = 1.0 * (double)N;
-    PERF_EMIT("qasum", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qasum", "-", N, iters, t_subject, t_mg);
     if ((double)(*((double*)&r)) == -123e30) { free(X); return; }
     free(X);
 }

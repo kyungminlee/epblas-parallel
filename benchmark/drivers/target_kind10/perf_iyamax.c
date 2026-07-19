@@ -33,8 +33,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME(t_subject, iters, r ^= iyamax_(&N, X, &one));
     PERF_TIME(t_mg,      iters, r ^= iyamax_migrated_(&N, X, &one));
-    double flops = 2.0 * (double)N;
-    PERF_EMIT("iyamax", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("iyamax", "-", N, iters, t_subject, t_mg);
     if (r == -123) { free(X); return; }
     free(X);
 }

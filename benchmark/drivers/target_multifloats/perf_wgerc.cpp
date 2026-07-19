@@ -53,7 +53,6 @@ static void run_one(int M, int N, int incx, int incy, int iters, int warmup) {
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(A, Ai, MNelt, MFC), wgerc_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(A, Ai, MNelt, MFC), wgerc_migrated_(&M, &N, &alpha, X, &incx, Y, &incy, A, &M));
 
-    double flops = 8.0 * (double)M * (double)N;
     char key[24];
     if (incx == 1 && incy == 1) {
         key[0] = '-'; key[1] = 0;
@@ -64,7 +63,7 @@ static void run_one(int M, int N, int incx, int incy, int iters, int warmup) {
     } else {
         snprintf(key, sizeof(key), "x%d/y%d", incx, incy);
     }
-    PERF_EMIT("wgerc", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("wgerc", key, N, iters, t_subject, t_mg);
     free(A); free(Ai); free(X); free(Y);
 }
 

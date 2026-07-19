@@ -37,8 +37,7 @@ static void run_yescal(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, C10), yescal_(&N, &alpha, X, &one));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, C10), yescal_migrated_(&N, &alpha, X, &one));
-    double flops = 6.0 * (double)N;
-    PERF_EMIT("yescal", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("yescal", "-", N, iters, t_subject, t_mg);
     free(X); free(Xi);
 }
 

@@ -49,8 +49,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME(t_subject, iters, r = mdot_(&N, X, &one, Y, &one); sink_T(&r));
     PERF_TIME(t_mg,      iters, r = mdot_migrated_(&N, X, &one, Y, &one); sink_T(&r));
-    double flops = 2.0 * (double)N;
-    PERF_EMIT("mdot", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mdot", "-", N, iters, t_subject, t_mg);
     free(X); free(Y);
 }
 

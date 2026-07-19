@@ -45,8 +45,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME(t_subject, iters, r = xdotc_(&N, X, &one, Y, &one); sink_T(&r));
     PERF_TIME(t_mg,      iters, r = xdotc_migrated_(&N, X, &one, Y, &one); sink_T(&r));
-    double flops = 8.0 * (double)N;
-    PERF_EMIT("xdotc", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xdotc", "-", N, iters, t_subject, t_mg);
     free(X); free(Y);
 }
 

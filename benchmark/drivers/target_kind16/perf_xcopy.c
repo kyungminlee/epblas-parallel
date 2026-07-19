@@ -40,10 +40,7 @@ static void run_xcopy(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(Y, Yi, N, X16), xcopy_(&N, X, &one, Y, &one));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(Y, Yi, N, X16), xcopy_migrated_(&N, X, &one, Y, &one));
-    /* Bytes moved per call: copy=2N*sizeof(T), swap=4N*sizeof(T). Report
-     * as "flops" for uniform formatting. */
-    double flops = 2.0 * (double)N * (double)sizeof(X16);
-    PERF_EMIT("xcopy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xcopy", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

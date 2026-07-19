@@ -45,8 +45,7 @@ static void run_waxpy(int N, int iters, int warmup) {
     PERF_RESET(Y, Yi, N, MFC); PERF_TIME(t_subject, iters, waxpy_(&N, &alpha, X, &one, Y, &one));
     PERF_RESET(Y, Yi, N, MFC); PERF_TIME(t_mg,      iters, waxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
-    double flops = 8.0 * (double)N;
-    PERF_EMIT("waxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("waxpy", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

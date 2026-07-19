@@ -37,8 +37,7 @@ static void run_escal(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, R10), escal_(&N, &alpha, X, &one));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, R10), escal_migrated_(&N, &alpha, X, &one));
-    double flops = 1.0 * (double)N;
-    PERF_EMIT("escal", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("escal", "-", N, iters, t_subject, t_mg);
     free(X); free(Xi);
 }
 

@@ -53,9 +53,8 @@ static void run_one(char side, char uplo, char trans, char diag,
         xtrmm_(&side, &uplo, &trans, &diag, &M, &N, &alpha, A, &lda, B, &ldb, 1, 1, 1, 1));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(B, Bi, MNelt, X16),
         xtrmm_migrated_(&side, &uplo, &trans, &diag, &M, &N, &alpha, A, &lda, B, &ldb, 1, 1, 1, 1));
-    double flops = 4.0 * (double)M * (double)N * (double)M;
     char key[5] = {side, uplo, trans, diag, 0};
-    PERF_EMIT("xtrmm", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xtrmm", key, N, iters, t_subject, t_mg);
     free(A); free(B); free(Bi);
 }
 

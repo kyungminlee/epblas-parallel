@@ -43,8 +43,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, C10); PERF_RESET(Y, Yi, N, C10), yerot_(&N, X, &one, Y, &one, &c_, &s_));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, C10); PERF_RESET(Y, Yi, N, C10), yerot_migrated_(&N, X, &one, Y, &one, &c_, &s_));
-    double flops = 12.0 * (double)N;
-    PERF_EMIT("yerot", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("yerot", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

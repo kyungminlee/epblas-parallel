@@ -41,8 +41,7 @@ static void run_wmscal(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, MFC), wmscal_(&N, &alpha, X, &one));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, MFC), wmscal_migrated_(&N, &alpha, X, &one));
-    double flops = 6.0 * (double)N;
-    PERF_EMIT("wmscal", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("wmscal", "-", N, iters, t_subject, t_mg);
     free(X); free(Xi);
 }
 

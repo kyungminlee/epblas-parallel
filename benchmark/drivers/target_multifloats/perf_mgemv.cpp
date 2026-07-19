@@ -59,7 +59,6 @@ static void run_one(char trans, int M, int N, int incx, int incy,
     PERF_RESET(Y, Yi, leny, MFR);
     PERF_TIME(t_mg,      iters, mgemv_migrated_(&trans, &M, &N, &alpha, A, &M, X, &incx, &beta, Y, &incy, 1));
 
-    double flops = 2.0 * (double)M * (double)N;
     char key[24];
     if (incx == 1 && incy == 1) {
         key[0] = trans; key[1] = 0;
@@ -70,7 +69,7 @@ static void run_one(char trans, int M, int N, int incx, int incy,
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", trans, incx, incy);
     }
-    PERF_EMIT("mgemv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mgemv", key, N, iters, t_subject, t_mg);
     free(A); free(X); free(Y); free(Yi);
 }
 

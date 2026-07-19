@@ -34,9 +34,7 @@ static void run_one(int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME(t_subject, iters, X16 a = A, b = B; xrotg_(&a, &b, &C, &S));
     PERF_TIME(t_mg,      iters, X16 a = A, b = B; xrotg_migrated_(&a, &b, &C, &S));
-    /* report time per call as "flops" abuse: per-call flop count ~10. */
-    double flops = 10.0;
-    PERF_EMIT("xrotg", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xrotg", "-", iters, iters, t_subject, t_mg);
 }
 
 int main(void) {

@@ -48,9 +48,8 @@ static void run_one(char uplo, char trans, int N, int K, int iters, int warmup) 
     PERF_TIME(t_subject, iters, xsyrk_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1));
     PERF_RESET(C, Ci, NNelt, X16);
     PERF_TIME(t_mg,      iters, xsyrk_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, &beta, C, &ldc, 1, 1));
-    double flops = 4.0 * (double)N * (double)N * (double)K;
     char key[3] = {uplo, trans, 0};
-    PERF_EMIT("xsyrk", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xsyrk", key, N, iters, t_subject, t_mg);
     free(A); free(C); free(Ci);
 }
 

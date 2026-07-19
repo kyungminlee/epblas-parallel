@@ -26,7 +26,6 @@ Importable surface (used by render_scoreboard.py so the row math lives in ONE
 place): load(path), build_rows(results_dir) -> list[dict].
 """
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 

@@ -40,10 +40,7 @@ static void run_xswap(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, X16); PERF_RESET(Y, Yi, N, X16), xswap_(&N, X, &one, Y, &one));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, X16); PERF_RESET(Y, Yi, N, X16), xswap_migrated_(&N, X, &one, Y, &one));
-    /* Bytes moved per call: copy=2N*sizeof(T), swap=4N*sizeof(T). Report
-     * as "flops" for uniform formatting. */
-    double flops = 4.0 * (double)N * (double)sizeof(X16);
-    PERF_EMIT("xswap", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xswap", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

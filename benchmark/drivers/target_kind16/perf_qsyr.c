@@ -43,14 +43,13 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(A, Ai, NNelt, Q16), qsyr_(&uplo, &N, &alpha, X, &incx, A, &N, 1));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(A, Ai, NNelt, Q16), qsyr_migrated_(&uplo, &N, &alpha, X, &incx, A, &N, 1));
-    double flops = 1.0 * (double)N * (double)N;
     char key[16];
     if (incx == 1) {
         key[0] = uplo; key[1] = 0;
     } else {
         snprintf(key, sizeof(key), "%c/x%d", uplo, incx);
     }
-    PERF_EMIT("qsyr", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qsyr", key, N, iters, t_subject, t_mg);
     free(A); free(Ai); free(X);
 }
 

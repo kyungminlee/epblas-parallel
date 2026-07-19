@@ -21,7 +21,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 FAM="${1:?usage: nsbuild.sh <e|q|m>}"
 BUILD="${BUILD:-$ROOT/build}"
-OUT="${OUT:-$ROOT/workspace/files/gap5/nsbench}"
+# OUT overrides; else honor NSDIR like run_dual.sh/update_routine.sh (same default).
+OUT="${OUT:-${NSDIR:-$ROOT/workspace/files/gap5/nsbench}}"
 mkdir -p "$OUT"
 
 case "$FAM" in

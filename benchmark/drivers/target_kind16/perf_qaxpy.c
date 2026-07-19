@@ -41,8 +41,7 @@ static void run_qaxpy(int N, int iters, int warmup) {
     PERF_RESET(Y, Yi, N, Q16); PERF_TIME(t_subject, iters, qaxpy_(&N, &alpha, X, &one, Y, &one));
     PERF_RESET(Y, Yi, N, Q16); PERF_TIME(t_mg,      iters, qaxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
-    double flops = 2.0 * (double)N;
-    PERF_EMIT("qaxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qaxpy", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

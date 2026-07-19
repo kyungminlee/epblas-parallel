@@ -41,8 +41,7 @@ static void run_yaxpy(int N, int iters, int warmup) {
     PERF_RESET(Y, Yi, N, C10); PERF_TIME(t_subject, iters, yaxpy_(&N, &alpha, X, &one, Y, &one));
     PERF_RESET(Y, Yi, N, C10); PERF_TIME(t_mg,      iters, yaxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
-    double flops = 8.0 * (double)N;
-    PERF_EMIT("yaxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("yaxpy", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

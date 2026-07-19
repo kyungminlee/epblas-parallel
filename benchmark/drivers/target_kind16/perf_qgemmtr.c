@@ -57,9 +57,8 @@ static void run_one(char uplo, char ta, char tb, int N, int K, int iters, int wa
     PERF_TIME(t_subject, iters, qgemmtr_(&uplo, &ta, &tb, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1, 1));
     PERF_RESET(C, Ci, NNelt, Q16);
     PERF_TIME(t_mg,      iters, qgemmtr_migrated_(&uplo, &ta, &tb, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1, 1));
-    double flops = 1.0 * (double)N * (double)N * (double)K;
     char key[4] = {uplo, ta, tb, 0};
-    PERF_EMIT("qgemmtr", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qgemmtr", key, N, iters, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 

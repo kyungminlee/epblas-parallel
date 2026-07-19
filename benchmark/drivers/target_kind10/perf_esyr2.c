@@ -61,15 +61,13 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
         memcpy(A, Ai, (size_t)N * (size_t)N * sizeof(R10));
     }
     double t_mg = t_sum / (iters ? iters : 1);
-    double flops = 2.0 * (double)N * (double)N;
     char key[20];
     if (incx == 1 && incy == 1) {
         key[0] = uplo; key[1] = 0;
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", uplo, incx, incy);
     }
-    perf_emit("esyr2", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("esyr2", key, N, iters, flops, t_subject, t_mg);
+    perf_emit("esyr2", key, N, iters, t_subject, t_mg);
     free(A); free(Ai); free(X); free(Y);
 }
 

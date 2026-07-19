@@ -43,14 +43,13 @@ static void run_one(char uplo, int N, int incx, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(AP, APi, AP_LEN, C10), yhpr_(&uplo, &N, &alpha, X, &incx, AP, 1));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(AP, APi, AP_LEN, C10), yhpr_migrated_(&uplo, &N, &alpha, X, &incx, AP, 1));
-    double flops = 4.0 * (double)N * (double)N;
     char key[16];
     if (incx == 1) {
         key[0] = uplo; key[1] = 0;
     } else {
         snprintf(key, sizeof(key), "%c/x%d", uplo, incx);
     }
-    PERF_EMIT("yhpr", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("yhpr", key, N, iters, t_subject, t_mg);
     free(AP); free(APi); free(X);
 }
 

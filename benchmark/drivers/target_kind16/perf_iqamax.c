@@ -33,8 +33,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME(t_subject, iters, r ^= iqamax_(&N, X, &one));
     PERF_TIME(t_mg,      iters, r ^= iqamax_migrated_(&N, X, &one));
-    double flops = 1.0 * (double)N;
-    PERF_EMIT("iqamax", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("iqamax", "-", N, iters, t_subject, t_mg);
     if (r == -123) { free(X); return; }
     free(X);
 }

@@ -14,13 +14,15 @@ The one-routine cycle is benchmark/dual/update_routine.sh.
 Usage:
     render_scoreboard.py [out.md] [results_dir ...]
         out.md        default: doc/dev/benchmark/results.md
-        results_dir   default: workspace/files/gap5/nsbench/results_{m,e,q}
+        results_dir   default: $NSDIR/results_{m,e,q}
                       (each dir's family is inferred from its routines' first letter)
-Env: BAR (flag threshold, default 1.02 — the reps>=40 sub-2% trust floor).
+Env: BAR (flag threshold, default 1.02 — the reps>=40 sub-2% trust floor);
+     NSDIR (results tree, default workspace/files/gap5/nsbench — same
+     env-with-default convention as run_dual.sh / update_routine.sh, so an
+     NSDIR-overridden update re-renders from the SAME dir it timed into).
 """
 import os
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -125,7 +127,10 @@ def main():
     if len(sys.argv) > 2:
         dirs = [Path(d) for d in sys.argv[2:]]
     else:
-        ns = ROOT / "workspace/files/gap5/nsbench"
+        # Honor NSDIR like run_dual.sh / update_routine.sh (same default), so an
+        # NSDIR-overridden update doesn't silently re-render from the stale
+        # default tree.
+        ns = Path(os.environ.get("NSDIR") or (ROOT / "workspace/files/gap5/nsbench"))
         dirs = [ns / f"results_{f}" for f in ("m", "e", "q")]
 
     fam_rows = {}

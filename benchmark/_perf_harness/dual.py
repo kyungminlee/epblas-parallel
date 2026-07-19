@@ -18,9 +18,9 @@ reset_ns is the per-iter cost of the RMW reset (memcpy) and is subtracted from
 each leg; for read-mostly / value-return shapes there is no reset so it is ~0.
 min-over-reps per leg; start-leg rotation so each leg's min is a cold-slot sample.
 
-This module is the harvest of benchmark/_perf_harness/emit_*.py signatures into a
-3-leg form. The legacy single-subject generator stays in place as a validation
-oracle until the cross-process harness is retired.
+This module absorbed the routine signatures of the retired single-subject
+generators (deleted along with the cross-process cmp5/gap5 harness); the
+dual-link generator is now the only perf-driver generator in the tree.
 """
 from __future__ import annotations
 

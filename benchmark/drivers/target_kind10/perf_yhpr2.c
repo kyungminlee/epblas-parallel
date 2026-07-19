@@ -61,15 +61,13 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
         memcpy(AP, APi, AP_LEN * sizeof(C10));
     }
     double t_mg = t_sum / (iters ? iters : 1);
-    double flops = 8.0 * (double)N * (double)N;
     char key[20];
     if (incx == 1 && incy == 1) {
         key[0] = uplo; key[1] = 0;
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", uplo, incx, incy);
     }
-    perf_emit("yhpr2", key, N, iters, flops, t_subject, t_mg);
-    perf_emit_json("yhpr2", key, N, iters, flops, t_subject, t_mg);
+    perf_emit("yhpr2", key, N, iters, t_subject, t_mg);
     free(AP); free(APi); free(X); free(Y);
 }
 

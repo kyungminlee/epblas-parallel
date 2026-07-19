@@ -41,8 +41,7 @@ static void run_wscal(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, MFC), wscal_(&N, &alpha, X, &one));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, MFC), wscal_migrated_(&N, &alpha, X, &one));
-    double flops = 6.0 * (double)N;
-    PERF_EMIT("wscal", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("wscal", "-", N, iters, t_subject, t_mg);
     free(X); free(Xi);
 }
 

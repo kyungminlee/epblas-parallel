@@ -41,8 +41,7 @@ static void run_xaxpy(int N, int iters, int warmup) {
     PERF_RESET(Y, Yi, N, X16); PERF_TIME(t_subject, iters, xaxpy_(&N, &alpha, X, &one, Y, &one));
     PERF_RESET(Y, Yi, N, X16); PERF_TIME(t_mg,      iters, xaxpy_migrated_(&N, &alpha, X, &one, Y, &one));
 
-    double flops = 8.0 * (double)N;
-    PERF_EMIT("xaxpy", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xaxpy", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Yi);
 }
 

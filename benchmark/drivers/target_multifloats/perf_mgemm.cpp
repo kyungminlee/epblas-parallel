@@ -55,9 +55,8 @@ static void run_one(char ta, char tb, int M, int N, int K, int iters, int warmup
     PERF_RESET(C, Ci, MNelt, MFR);
     PERF_TIME(t_mg,      iters, mgemm_migrated_(&ta, &tb, &M, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
 
-    double flops = 2.0 * (double)M * (double)N * (double)K;
     char key[3] = {ta, tb, 0};
-    PERF_EMIT("mgemm", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mgemm", key, N, iters, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 

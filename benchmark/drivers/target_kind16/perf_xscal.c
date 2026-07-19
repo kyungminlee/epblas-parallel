@@ -37,8 +37,7 @@ static void run_xscal(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, X16), xscal_(&N, &alpha, X, &one));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, X16), xscal_migrated_(&N, &alpha, X, &one));
-    double flops = 6.0 * (double)N;
-    PERF_EMIT("xscal", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xscal", "-", N, iters, t_subject, t_mg);
     free(X); free(Xi);
 }
 

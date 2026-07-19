@@ -2,12 +2,12 @@
 
 Each builder returns (is_c, ret, sig, Spec). Types in `sig` use the driver's
 `T` typedef (CT for complex, RT for real) and `RT` for forced-real scalars
-(herk/her2k alpha-beta). The grid/setup mirror the legacy emit_*.py harnesses
-so the dual driver exercises the same cells.
+(herk/her2k alpha-beta). The grid/setup keep the cell grids of the retired
+single-subject harnesses so results stay comparable across eras.
 
-Currently implemented: L3 (gemm, symm/hemm, syrk/herk, syr2k/her2k, trmm/trsm,
-gemmtr). L2/L1 shapes are added incrementally after the L3 pipeline validates
-against the qsyrk/qsyr2k reps=40 ground truth.
+All three levels are implemented here: L3 (gemm, symm/hemm, syrk/herk,
+syr2k/her2k, trmm/trsm, gemmtr), L2 (full/band/packed matvec, triangular
+solves, rank-updates), and L1 (reductions, rot*, axpy/copy/swap/scal, dot).
 """
 from __future__ import annotations
 
@@ -820,7 +820,9 @@ def build_copy_swap(name, is_c, swap):
     return is_c, 'void', sig, spec
 
 
-def build_dot(name, is_c, conj):
+def build_dot(name, is_c):
+    """dot/dotu/dotc — conjugation is the routine's own business; the driver
+    shape (buffers, call, return kind) is identical for all three."""
     ret = 'CT' if is_c else 'RT'
     kind = 'retcmplx' if is_c else 'retreal'
     sig = 'const int *, const T *, const int *, const T *, const int *'
@@ -1017,11 +1019,9 @@ def build_spec(name):
     if suffix == 'swap':
         return build_copy_swap(name, is_c, swap=True)
     if suffix == 'dot':
-        return build_dot(name, is_c, conj=False)
-    if suffix == 'dotu':
-        return build_dot(name, True, conj=False)
-    if suffix == 'dotc':
-        return build_dot(name, True, conj=True)
+        return build_dot(name, is_c)
+    if suffix in ('dotu', 'dotc'):
+        return build_dot(name, True)
     if suffix in ('asum', 'nrm2'):
         return build_reduce(name, is_c)
     if suffix in ('asum_c', 'nrm2_c'):

@@ -33,8 +33,7 @@ static void run_one(int iters, int warmup) {
     PERF_TIME(t_subject, iters, acc += ecabs1_(&Z));
     PERF_TIME(t_mg,      iters, acc += ecabs1_migrated_(&Z));
     /* per-call proxy: 2 abs + 1 add */
-    double flops = 3.0;
-    PERF_EMIT("ecabs1", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("ecabs1", "-", iters, iters, t_subject, t_mg);
     if ((double)(*((double*)&acc)) == -123e30) return;
 }
 

@@ -48,8 +48,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, MFR); PERF_RESET(Y, Yi, N, MFR), mrotm_(&N, X, &one, Y, &one, PARAM));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, MFR); PERF_RESET(Y, Yi, N, MFR), mrotm_migrated_(&N, X, &one, Y, &one, PARAM));
-    double flops = 4.0 * (double)N;
-    PERF_EMIT("mrotm", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mrotm", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

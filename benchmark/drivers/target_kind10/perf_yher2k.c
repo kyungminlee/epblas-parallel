@@ -53,9 +53,8 @@ static void run_one(char uplo, char trans, int N, int K, int iters, int warmup) 
     PERF_TIME(t_subject, iters, yher2k_(&uplo, &trans, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
     PERF_RESET(C, Ci, NNelt, C10);
     PERF_TIME(t_mg,      iters, yher2k_migrated_(&uplo, &trans, &N, &K, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
-    double flops = 8.0 * (double)N * (double)N * (double)K;
     char key[3] = {uplo, trans, 0};
-    PERF_EMIT("yher2k", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("yher2k", key, N, iters, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 

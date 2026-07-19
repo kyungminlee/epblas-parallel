@@ -51,14 +51,13 @@ static void run_one(char uplo, char trans, char diag, int N, int incx,
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, lenx, R10), etpsv_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, lenx, R10), etpsv_migrated_(&uplo, &trans, &diag, &N, AP, X, &incx, 1, 1, 1));
-    double flops = 1.0 * (double)N * (double)N;
     char key[16];
     if (incx == 1) {
         key[0] = uplo; key[1] = trans; key[2] = diag; key[3] = 0;
     } else {
         snprintf(key, sizeof(key), "%c%c%c/x%d", uplo, trans, diag, incx);
     }
-    PERF_EMIT("etpsv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("etpsv", key, N, iters, t_subject, t_mg);
     free(AP); free(X); free(Xi);
 }
 

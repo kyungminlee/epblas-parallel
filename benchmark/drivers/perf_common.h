@@ -3,7 +3,7 @@
  * Why: each generated perf_<name>.{c,cpp} is independently linked with
  * -ffunction-sections -Wl,--gc-sections so the C overlay's symbol (subject)
  * and the migrated Fortran reference's symbol end up close in the binary
- * (avoids iTLB churn — see findings doc Addendum 14). The helpers below
+ * (avoids iTLB churn). The helpers below
  * stay header-only so each translation unit picks up only what it actually
  * uses; --gc-sections drops the rest.
  *
@@ -25,7 +25,6 @@
  *                          its (unbudgeted) warmup. The emitted `iters` column
  *                          reports the count actually run (the migrated loop's,
  *                          since it is timed last), flagging budget-limited rows.
- *   BLAS_PERF_JSON         write JSON results to this path (append mode)
  */
 #ifndef PERF_COMMON_H
 #define PERF_COMMON_H
@@ -156,46 +155,15 @@ static inline void perf_print_header(void) {
 /* t_subject / t_mg: wall-clock seconds per iter of the C-overlay routine
  * (subject) vs the migrated Fortran reference (mg). Caller doesn't care
  * which overlay — perf_*.c sources are overlay-agnostic. Emitted as bare
- * wall time in ns/call (smaller = faster); the `flops` arg is retained in the
- * signature (the generated perf_*.c callers still pass it) but unused. */
+ * wall time in ns/call (smaller = faster). */
 static inline void perf_emit(const char *routine, const char *key, int size,
-                             int iters, double flops, double t_subject, double t_mg)
+                             int iters, double t_subject, double t_mg)
 {
-    (void)flops;
     double ns_subject = t_subject * 1e9;
     double ns_mg = t_mg * 1e9;
     double ratio = (t_mg > 0) ? t_subject / t_mg : 0;  /* < 1.0 ⇒ subject faster */
     printf("%-18s  %-7s  %6d  %6d  %12.1f  %13.1f  %8.3fx\n",
            routine, key, size, iters, ns_subject, ns_mg, ratio);
-}
-
-/* JSON line emitter, optional. One JSON object per (routine, key, size).
- * Caller writes to BLAS_PERF_JSON in append mode if set.
- *
- * JSON keys:
- *   t_subject, ns_subject  — C overlay (epblas-openblas OR epblas-parallel; varies
- *                            by which archive is linked into the binary); seconds
- *                            and ns/call (smaller = faster)
- *   t_mg, ns_mg            — migrated Fortran reference (seconds, ns/call)
- *   ratio                  — subject ÷ migrated wall time (< 1.0 ⇒ subject faster)
- */
-static inline void perf_emit_json(const char *routine, const char *key,
-                                  int size, int iters, double flops,
-                                  double t_subject, double t_mg)
-{
-    const char *path = getenv("BLAS_PERF_JSON");
-    if (!path || !*path) return;
-    FILE *f = fopen(path, "a");
-    if (!f) return;
-    (void)flops;
-    double ns_subject = t_subject * 1e9;
-    double ns_mg = t_mg * 1e9;
-    double ratio = (t_mg > 0) ? t_subject / t_mg : 0;
-    fprintf(f, "{\"routine\":\"%s\",\"key\":\"%s\",\"size\":%d,\"iters\":%d,"
-               "\"t_subject\":%.6e,\"t_mg\":%.6e,\"ns_subject\":%.1f,"
-               "\"ns_mg\":%.1f,\"ratio\":%.4f}\n",
-            routine, key, size, iters, t_subject, t_mg, ns_subject, ns_mg, ratio);
-    fclose(f);
 }
 
 /* aligned_alloc that bumps the requested size up to a multiple of the
@@ -223,7 +191,7 @@ static inline void *perf_aligned_alloc(size_t align, size_t bytes) {
  * Each generated harness ran 4–6 copies
  * of the same alloc / fill / reset / time / emit boilerplate; lifting
  * the patterns here keeps each run_* body to the parts that actually
- * differ (BLAS call signature, flop count, key formatting).
+ * differ (BLAS call signature, key formatting).
  *
  * The fill macros use token-paste on T so each target's <T>_FROM (whether
  * a #define or a static inline) is picked up automatically — keeps these
@@ -296,13 +264,7 @@ static inline void *perf_aligned_alloc(size_t align, size_t bytes) {
          (n_iters) = _done; \
     } while (0)
 
-/* Always pair perf_emit with perf_emit_json — they take the same args
- * and divergence between them would silently desync JSON from stdout. */
-#define PERF_EMIT(routine, key, size, iters, flops, t_subject, t_mg) \
-    do { perf_emit((routine), (key), (size), (iters), (flops), \
-                   (t_subject), (t_mg)); \
-         perf_emit_json((routine), (key), (size), (iters), (flops), \
-                        (t_subject), (t_mg)); \
-    } while (0)
+#define PERF_EMIT(routine, key, size, iters, t_subject, t_mg) \
+    perf_emit((routine), (key), (size), (iters), (t_subject), (t_mg))
 
 #endif /* PERF_COMMON_H */

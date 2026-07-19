@@ -44,10 +44,7 @@ static void run_mswap(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, MFR); PERF_RESET(Y, Yi, N, MFR), mswap_(&N, X, &one, Y, &one));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, MFR); PERF_RESET(Y, Yi, N, MFR), mswap_migrated_(&N, X, &one, Y, &one));
-    /* Bytes moved per call: copy=2N*sizeof(T), swap=4N*sizeof(T). Report
-     * as "flops" for uniform formatting. */
-    double flops = 4.0 * (double)N * (double)sizeof(MFR);
-    PERF_EMIT("mswap", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mswap", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

@@ -14,8 +14,10 @@
 #     family   : e | q | m   (kind10 | kind16 | multifloats)
 #     routines : comma list (default: ALL routines the generator supports for the family)
 # Env: REPS (default 40), CORE1 (default 2), CORE4 (default 2-5),
-#      OUT (results dir, default workspace/files/gap5/nsbench/results),
-#      SKIP_BUILD=1 to reuse existing archives, NOAGG=1 to skip the scoreboard.
+#      NSDIR (bench tree, default workspace/files/gap5/nsbench — also honored
+#      by nsbuild.sh and render_scoreboard.py), OUT (results dir, default
+#      $NSDIR/results), SKIP_BUILD=1 to reuse existing archives, NOAGG=1 to
+#      skip the scoreboard.
 #
 # Raw data lands in the gitignored workspace; never under benchmark/.
 set -euo pipefail

@@ -43,8 +43,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, R10); PERF_RESET(Y, Yi, N, R10), erot_(&N, X, &one, Y, &one, &c_, &s_));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, R10); PERF_RESET(Y, Yi, N, R10), erot_migrated_(&N, X, &one, Y, &one, &c_, &s_));
-    double flops = 6.0 * (double)N;
-    PERF_EMIT("erot", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("erot", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

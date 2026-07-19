@@ -52,7 +52,6 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     PERF_TIME(t_subject, iters, msymv_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1));
     PERF_RESET(Y, Yi, leny, MFR);
     PERF_TIME(t_mg,      iters, msymv_migrated_(&uplo, &N, &alpha, A, &N, X, &incx, &beta, Y, &incy, 1));
-    double flops = 2.0 * (double)N * (double)N;
     char key[24];
     if (incx == 1 && incy == 1) {
         key[0] = uplo; key[1] = 0;
@@ -63,7 +62,7 @@ static void run_one(char uplo, int N, int incx, int incy, int iters, int warmup)
     } else {
         snprintf(key, sizeof(key), "%c/x%d/y%d", uplo, incx, incy);
     }
-    PERF_EMIT("msymv", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("msymv", key, N, iters, t_subject, t_mg);
     free(A); free(X); free(Y); free(Yi);
 }
 

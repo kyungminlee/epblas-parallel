@@ -43,8 +43,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME_PER_CALL(t_subject, iters, PERF_RESET(X, Xi, N, X16); PERF_RESET(Y, Yi, N, X16), xqrot_(&N, X, &one, Y, &one, &c_, &s_));
     PERF_TIME_PER_CALL(t_mg,      iters, PERF_RESET(X, Xi, N, X16); PERF_RESET(Y, Yi, N, X16), xqrot_migrated_(&N, X, &one, Y, &one, &c_, &s_));
-    double flops = 12.0 * (double)N;
-    PERF_EMIT("xqrot", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("xqrot", "-", N, iters, t_subject, t_mg);
     free(X); free(Y); free(Xi); free(Yi);
 }
 

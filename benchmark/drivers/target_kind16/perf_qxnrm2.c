@@ -34,8 +34,7 @@ static void run_one(int N, int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME(t_subject, iters, r = qxnrm2_(&N, X, &one));
     PERF_TIME(t_mg,      iters, r = qxnrm2_migrated_(&N, X, &one));
-    double flops = 4.0 * (double)N;
-    PERF_EMIT("qxnrm2", "-", N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("qxnrm2", "-", N, iters, t_subject, t_mg);
     if ((double)(*((double*)&r)) == -123e30) { free(X); return; }
     free(X);
 }

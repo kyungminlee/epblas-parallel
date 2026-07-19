@@ -22,7 +22,10 @@
 #     family   : e | q | m
 #     routines : comma list (e.g. etbsv  or  etbsv,etbmv)
 # Env: REPS (default 40 — keep ≥40 for sub-2% verdicts), SKIP_BUILD=1 to reuse
-#      archives, CORE1/CORE4 (pin cores; do NOT run two pinned sweeps at once).
+#      archives, CORE1/CORE4 (pin cores; do NOT run two pinned sweeps at once),
+#      NSDIR (bench tree, default workspace/files/gap5/nsbench — passed through
+#      to run_dual.sh AND honored by render_scoreboard.py, so an overridden
+#      update renders from the same tree it timed into).
 #
 # Raw data stays in the gitignored workspace; only the rendered .md is committed.
 set -euo pipefail
@@ -36,8 +39,8 @@ RESULTS="$NSDIR/results_$FAM"   # the full-surface sweep's per-family dir
 [[ -d "$RESULTS" ]] || echo "note: $RESULTS does not exist yet — creating (first cells for family $FAM)" >&2
 
 echo "### re-timing $FAM: $ROUTINES_CSV  (reps=${REPS:-40}) -> $RESULTS ###"
-OUT="$RESULTS" NOAGG=1 REPS="${REPS:-40}" \
+NSDIR="$NSDIR" OUT="$RESULTS" NOAGG=1 REPS="${REPS:-40}" \
   "$HERE/run_dual.sh" "$FAM" "$ROUTINES_CSV"
 
 echo "### refresh committed scoreboard ###"
-python3 "$HERE/render_scoreboard.py"
+NSDIR="$NSDIR" python3 "$HERE/render_scoreboard.py"

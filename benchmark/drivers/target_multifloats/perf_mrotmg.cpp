@@ -38,8 +38,7 @@ static void run_one(int iters, int warmup) {
     double t_subject, t_mg;
     PERF_TIME(t_subject, iters, MFR d1 = D1, d2 = D2, x1 = X1; mrotmg_(&d1, &d2, &x1, &Y1, PARAM));
     PERF_TIME(t_mg,      iters, MFR d1 = D1, d2 = D2, x1 = X1; mrotmg_migrated_(&d1, &d2, &x1, &Y1, PARAM));
-    double flops = 20.0;
-    PERF_EMIT("mrotmg", "-", iters, iters, flops, t_subject, t_mg);
+    PERF_EMIT("mrotmg", "-", iters, iters, t_subject, t_mg);
 }
 
 int main(void) {

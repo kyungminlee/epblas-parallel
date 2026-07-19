@@ -49,9 +49,8 @@ static void run_one(char side, char uplo, int M, int N, int iters, int warmup) {
     PERF_TIME(t_subject, iters, esymm_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
     PERF_RESET(C, Ci, MNelt, R10);
     PERF_TIME(t_mg,      iters, esymm_migrated_(&side, &uplo, &M, &N, &alpha, A, &lda, B, &ldb, &beta, C, &ldc, 1, 1));
-    double flops = 2.0 * (double)M * (double)M * (double)N;
     char key[3] = {side, uplo, 0};
-    PERF_EMIT("esymm", key, N, iters, flops, t_subject, t_mg);
+    PERF_EMIT("esymm", key, N, iters, t_subject, t_mg);
     free(A); free(B); free(C); free(Ci);
 }
 
