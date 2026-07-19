@@ -63,11 +63,26 @@ function(_epblas_fetch_one_baseline _precision _out_prefix)
     if(NOT EXISTS "${_tarball}")
         file(MAKE_DIRECTORY "${_dl_dir}")
         message(STATUS "epblas-parallel: downloading baseline ${_asset}")
-        file(DOWNLOAD "${_url}" "${_tarball}" STATUS _st TLS_VERIFY ON)
-        list(GET _st 0 _code)
-        if(NOT _code EQUAL 0)
+        # GitHub's release CDN throws occasional transient failures ("SSL
+        # connect error"); retry with backoff before declaring the asset
+        # missing.
+        foreach(_attempt RANGE 1 3)
+            if(_attempt GREATER 1)
+                math(EXPR _pause "5 * (${_attempt} - 1)")
+                message(STATUS "epblas-parallel: download failed (${_msg}); "
+                               "retry ${_attempt}/3 in ${_pause}s")
+                execute_process(COMMAND ${CMAKE_COMMAND} -E sleep ${_pause})
+            endif()
+            file(DOWNLOAD "${_url}" "${_tarball}" STATUS _st TLS_VERIFY ON
+                 INACTIVITY_TIMEOUT 60)
+            list(GET _st 0 _code)
             list(GET _st 1 _msg)
+            if(_code EQUAL 0)
+                break()
+            endif()
             file(REMOVE "${_tarball}")
+        endforeach()
+        if(NOT _code EQUAL 0)
             message(FATAL_ERROR
                 "epblas-parallel: failed to download ${_url}: ${_msg}\n"
                 "  (no '${_FC_baseline_tag}' baseline for ${_precision}? releases ship "

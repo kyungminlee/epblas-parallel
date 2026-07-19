@@ -16,6 +16,9 @@ semantics (minor = feature, patch = fix).
   base. The salted fuzz workload pins this path on every seed.
 - The fuzz log-uniform size draw now includes its upper bound, and the complex
   TRMM/TRSM checkers guard against NaN-poisoned comparisons.
+- The eplinalg baseline fetch retries transient release-CDN failures (three
+  attempts with backoff and an inactivity timeout) instead of failing the
+  configure on the first "SSL connect error".
 
 ### Changed
 - Repo-wide cleanup pass (~600 files): stale hidden-length ABI banners, dead
