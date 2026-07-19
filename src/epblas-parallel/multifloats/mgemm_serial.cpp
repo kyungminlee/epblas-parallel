@@ -15,6 +15,7 @@
  */
 
 #include "mgemm_kernel.h"
+#include "mf_pred.h"
 #include "../common/blas_char.h"
 #include <cstdlib>
 #include <cctype>
@@ -30,21 +31,17 @@ using TR = mf::float64x2;
 
 namespace {
 
-std::ptrdiff_t g_mc = 0, g_kc = 0, g_nc = 0;
-void init_blocks() {
-    if (g_mc) return;
-    g_mc =  64;
-    g_kc = 128;
-    g_nc = 256;
-}
+/* Cache-block sizes — compile-time constants (nothing writes them). */
+constexpr std::ptrdiff_t g_mc =  64;
+constexpr std::ptrdiff_t g_kc = 128;
+constexpr std::ptrdiff_t g_nc = 256;
 
-const TR zero_dd{0.0, 0.0};
-const TR one_dd {1.0, 0.0};
+using mf_pred::zero_dd;   /* shared DD constants — mf_pred.h */
+using mf_pred::one_dd;
 
 }  // namespace
 
 void mgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC) {
-    init_blocks();
     *MC = g_mc; *KC = g_kc; *NC = g_nc;
 }
 
@@ -214,7 +211,7 @@ simd_writeback(__m256d alpha_h, __m256d alpha_l,
  * NR_PAN at compile time.
  */
 #ifndef MGEMM_SIMD_MR
-#define MGEMM_SIMD_MR 3
+#define MGEMM_SIMD_MR 4
 #endif
 #ifndef MGEMM_SIMD_NR_PAN
 #define MGEMM_SIMD_NR_PAN 1

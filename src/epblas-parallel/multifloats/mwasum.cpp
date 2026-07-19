@@ -21,11 +21,11 @@ using TC = mf::complex64x2;
 #include "mf_simd_exact.h"
 
 namespace {
-/* canonical EFTs — mf_simd_fast.h (2a-5) */
+/* canonical EFTs — mf_simd_fast.h */
 using simd_fast::fast2sum;
 using simd_fast::twosum;
 using simd_exact::cload4;
-using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h */
 }
 #endif
 
@@ -100,25 +100,16 @@ static R mwasum_unit(std::ptrdiff_t n, const TC *x)
 }
 
 #ifdef _OPENMP
+/* Threaded partial-reduction — shared wrapper (mf_omp::partial_reduce,
+ * pre-initialized slots); per-slice serial kernel, tid-order merge. */
 #define MWASUM_OMP_MIN 8192
-#define MWASUM_MAX_CPUS 64
 __attribute__((noinline)) static std::ptrdiff_t mwasum_omp(std::ptrdiff_t n, const TC *x, R *out)
 {
     if (n <= MWASUM_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads > MWASUM_MAX_CPUS) nthreads = MWASUM_MAX_CPUS;
-    R partial[MWASUM_MAX_CPUS];
-    #pragma omp parallel num_threads(nthreads)
-    {
-        std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t nth = omp_get_num_threads();
-        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        partial[tid] = (lo < hi) ? mwasum_unit(hi - lo, x + lo) : R{0.0, 0.0};
-    }
-    R s{0.0, 0.0};
-    for (std::ptrdiff_t i = 0; i < nthreads; ++i) s = s + partial[i];
-    *out = s;
+    *out = mf_omp::partial_reduce(n, R{0.0, 0.0},
+        [x](std::ptrdiff_t lo, std::ptrdiff_t hi) { return mwasum_unit(hi - lo, x + lo); },
+        [](const R &a, const R &b) { return a + b; });
     return 1;
 }
 #endif

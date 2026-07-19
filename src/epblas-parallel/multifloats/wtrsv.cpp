@@ -31,19 +31,19 @@ using R = mf::float64x2;
 using TC = mf::complex64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::ceq0;
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 namespace {
-const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+using mf_pred::zero_cdd;   /* shared DD constants — mf_pred.h */
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::csub;
 using mf_kernels::cconj;
 inline TC cdiv(TC const &a, TC const &b) {
     /* a / b = a·conj(b) / |b|², direct DD divide (canonical form shared with
-     * wtbsv/wtpsv/wtrsm_serial — see F2, simd_audit). */
+     * wtbsv/wtpsv/wtrsm_serial). */
     const R denom = b.re * b.re + b.im * b.im;
     return TC{ (a.re * b.re + a.im * b.im) / denom,
               (a.im * b.re - a.re * b.im) / denom };

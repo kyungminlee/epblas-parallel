@@ -27,15 +27,15 @@ using mf_kernels::cadd;
 #include "mf_simd_exact.h"
 
 namespace {
-/* canonical EFTs — mf_simd_fast.h (2a-5) */
+/* canonical EFTs — mf_simd_fast.h */
 using simd_fast::twoprod;
 using simd_fast::fast2sum;
 using simd_fast::twosum;
 using simd_exact::cload4;
-using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
-using simd_fast::absorb;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
-using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
-using simd_fast::dd_prod;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h */
+using simd_fast::absorb;  /* Bailey 3-limb wide-acc — mf_simd_fast.h */
+using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h */
+using simd_fast::dd_prod;  /* Bailey 3-limb wide-acc — mf_simd_fast.h */
 }
 #endif
 
@@ -105,26 +105,16 @@ mf_kernels::wdotc_unit(std::ptrdiff_t n, const multifloats::complex64x2 *x,
 }
 
 #ifdef _OPENMP
+/* Threaded partial-reduction — shared wrapper (mf_omp::partial_reduce,
+ * pre-initialized slots); per-slice serial kernel, tid-order cadd merge. */
 #define WDOTC_OMP_MIN 8192
-#define WDOTC_MAX_CPUS 64
 __attribute__((noinline)) static std::ptrdiff_t wdotc_omp(std::ptrdiff_t n, const TC *x, const TC *y, TC *out)
 {
     if (n <= WDOTC_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads > WDOTC_MAX_CPUS) nthreads = WDOTC_MAX_CPUS;
-    TC partial[WDOTC_MAX_CPUS];
-    #pragma omp parallel num_threads(nthreads)
-    {
-        std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t nth = omp_get_num_threads();
-        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        partial[tid] = (lo < hi) ? mf_kernels::wdotc_unit(hi - lo, x + lo, y + lo)
-                                 : TC{R{0.0, 0.0}, R{0.0, 0.0}};
-    }
-    TC s{R{0.0, 0.0}, R{0.0, 0.0}};
-    for (std::ptrdiff_t i = 0; i < nthreads; ++i) s = cadd(s, partial[i]);
-    *out = s;
+    *out = mf_omp::partial_reduce(n, TC{R{0.0, 0.0}, R{0.0, 0.0}},
+        [x, y](std::ptrdiff_t lo, std::ptrdiff_t hi) { return mf_kernels::wdotc_unit(hi - lo, x + lo, y + lo); },
+        [](const TC &a, const TC &b) { return cadd(a, b); });
     return 1;
 }
 #endif

@@ -31,12 +31,12 @@ using TR = mf::float64x2;
 #include "mf_simd_exact.h"
 
 namespace {
-/* canonical EFTs — mf_simd_fast.h (2a-5) */
+/* canonical EFTs — mf_simd_fast.h */
 using simd_fast::twoprod;
 using simd_fast::fast2sum;
 using simd_fast::twosum;
 using simd_exact::load_dd4;
-using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h */
 }
 #endif
 
@@ -108,28 +108,18 @@ static TR mdot_unit(std::ptrdiff_t n, const TR *x, const TR *y)
 }
 
 #ifdef _OPENMP
-/* Threaded partial-reduction for large unit-stride X·Y. Each thread dots its
+/* Threaded partial-reduction for large unit-stride X·Y — shared wrapper
+ * (mf_omp::partial_reduce, pre-initialized slots). Each thread dots its
  * contiguous slice with the serial kernel; partials combine in tid order.
  * Reduction order differs from serial → within fuzz tolerance (kind10 edot). */
 #define MDOT_OMP_MIN 8192
-#define MDOT_MAX_CPUS 64
 __attribute__((noinline)) static std::ptrdiff_t mdot_omp(std::ptrdiff_t n, const TR *x, const TR *y, TR *out)
 {
     if (n <= MDOT_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads > MDOT_MAX_CPUS) nthreads = MDOT_MAX_CPUS;
-    TR partial[MDOT_MAX_CPUS];
-    #pragma omp parallel num_threads(nthreads)
-    {
-        std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t nth = omp_get_num_threads();
-        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        partial[tid] = (lo < hi) ? mdot_unit(hi - lo, x + lo, y + lo) : TR{0.0, 0.0};
-    }
-    TR s{0.0, 0.0};
-    for (std::ptrdiff_t i = 0; i < nthreads; ++i) s = s + partial[i];
-    *out = s;
+    *out = mf_omp::partial_reduce(n, TR{0.0, 0.0},
+        [x, y](std::ptrdiff_t lo, std::ptrdiff_t hi) { return mdot_unit(hi - lo, x + lo, y + lo); },
+        [](const TR &a, const TR &b) { return a + b; });
     return 1;
 }
 #endif

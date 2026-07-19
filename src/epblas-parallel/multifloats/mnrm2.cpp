@@ -11,7 +11,6 @@
 #include "../common/blas_omp.h"
 #include "mf_omp.h"
 #define MNRM2_OMP_MIN 8192
-#define MNRM2_MAX_CPUS 64
 #endif
 #include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
@@ -25,12 +24,12 @@ using TR = mf::float64x2;
 #include "mf_simd_exact.h"
 
 namespace {
-/* canonical EFTs — mf_simd_fast.h (2a-5) */
+/* canonical EFTs — mf_simd_fast.h */
 using simd_fast::twoprod;
 using simd_fast::fast2sum;
 using simd_fast::twosum;
 using simd_exact::load_dd4;
-using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h */
 }
 #endif
 
@@ -145,7 +144,8 @@ static TR mnrm2_ssq_unit(std::ptrdiff_t n, const TR *x, TR scale)
 
 #ifdef _OPENMP
 /* Threaded two-pass nrm2 (incx==1). Pass 1 reduces max|x.hi| (exact → global
- * scale BIT-EXACT vs serial); pass 2 reduces Σ(x/scale)² in tid order (the
+ * scale BIT-EXACT vs serial); pass 2 reduces Σ(x/scale)² in tid order via the
+ * shared pre-initialized partial[]-reduce wrapper (mf_omp::partial_reduce; the
  * cross-slice summation reorders, so the squared-sum matches serial within
  * fuzz tol). Returns false (caller falls through to serial) when below the
  * threshold or already inside a parallel region. */
@@ -153,8 +153,7 @@ __attribute__((noinline)) static bool mnrm2_omp(std::ptrdiff_t n, const TR *x, T
 {
     if (n <= MNRM2_OMP_MIN || !blas_omp_should_thread())
         return false;
-    std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads > MNRM2_MAX_CPUS) nthreads = MNRM2_MAX_CPUS;
+    const std::ptrdiff_t nthreads = mf_omp::l1_team();
 
     double scale_hi = 0.0;
     #pragma omp parallel num_threads(nthreads) reduction(max:scale_hi)
@@ -169,16 +168,9 @@ __attribute__((noinline)) static bool mnrm2_omp(std::ptrdiff_t n, const TR *x, T
     if (scale_hi == 0.0) { *out = TR{0.0, 0.0}; return true; }
     TR scale{scale_hi, 0.0};
 
-    TR partial[MNRM2_MAX_CPUS];
-    for (std::ptrdiff_t t = 0; t < nthreads; ++t) partial[t] = TR{0.0, 0.0};
-    #pragma omp parallel num_threads(nthreads)
-    {
-        std::ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        if (lo < hi) partial[tid] = mnrm2_ssq_unit(hi - lo, x + lo, scale);
-    }
-    TR s{0.0, 0.0};
-    for (std::ptrdiff_t t = 0; t < nthreads; ++t) s = s + partial[t];
+    TR s = mf_omp::partial_reduce(n, TR{0.0, 0.0},
+        [x, scale](std::ptrdiff_t lo, std::ptrdiff_t hi) { return mnrm2_ssq_unit(hi - lo, x + lo, scale); },
+        [](const TR &a, const TR &b) { return a + b; });
     *out = scale * sqrtdd(s);
     return true;
 }

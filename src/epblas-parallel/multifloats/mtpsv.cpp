@@ -9,6 +9,7 @@
 #include "mf_util.h"
 #include "mf_pred.h"
 #include "mf_kernels.h"
+#include "mf_packed.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -22,23 +23,20 @@ namespace mf = multifloats;
 using TR = mf::float64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::eq0;
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 namespace {
-const TR zero_dd{0.0, 0.0};
+using mf_pred::zero_dd;   /* shared DD constant — mf_pred.h */
 
-/* Column base offsets into the packed array (column-major triangle).
+/* Column base offsets into the packed array (column-major triangle) — shared
+ * helpers mf_packed::kk_upper / kk_lower (same arithmetic as the old local
+ * cbU/cbL).
  *   Lower: column j starts at its diagonal (row j); element (i,j) i>=j at base+(i-j).
  *   Upper: column j starts at row 0;            element (i,j) i<=j at base+i.       */
-inline std::size_t cbL(std::ptrdiff_t j, std::ptrdiff_t n) {
-    return static_cast<std::size_t>(j) * static_cast<std::size_t>(n)
-         - static_cast<std::size_t>(j) * static_cast<std::size_t>(j - 1) / 2;
-}
-inline std::size_t cbU(std::ptrdiff_t j) {
-    return static_cast<std::size_t>(j) * static_cast<std::size_t>(j + 1) / 2;
-}
+using mf_packed::kk_upper;
+using mf_packed::kk_lower;
 }
 
 /* In-place contiguous (incx==1) packed triangular solve. Per column j, &ap[cb*]
@@ -55,7 +53,7 @@ static void mtpsv_serial_contig(char UPLO, char TRANS, bool nounit,
         if (UPLO == 'U') {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
                 if (!eq0(x[j])) {
-                    const TR *aj = &ap[cbU(j)];
+                    const TR *aj = &ap[kk_upper(j)];
                     if (nounit) x[j] = x[j] / aj[j];
                     mf_kernels::axpy_sub(j, &x[0], &aj[0], x[j]);
                 }
@@ -63,7 +61,7 @@ static void mtpsv_serial_contig(char UPLO, char TRANS, bool nounit,
         } else {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
                 if (!eq0(x[j])) {
-                    const TR *aj = &ap[cbL((std::ptrdiff_t)j, (std::ptrdiff_t)n)];
+                    const TR *aj = &ap[kk_lower((std::ptrdiff_t)j, (std::ptrdiff_t)n)];
                     if (nounit) x[j] = x[j] / aj[0];
                     mf_kernels::axpy_sub(n - 1 - j, &x[j + 1], &aj[1], x[j]);
                 }
@@ -72,14 +70,14 @@ static void mtpsv_serial_contig(char UPLO, char TRANS, bool nounit,
     } else {
         if (UPLO == 'U') {
             for (std::ptrdiff_t j = 0; j < n; ++j) {
-                const TR *aj = &ap[cbU(j)];
+                const TR *aj = &ap[kk_upper(j)];
                 TR tmp = x[j] - mf_kernels::dot(j, &aj[0], &x[0]);
                 if (nounit) tmp = tmp / aj[j];
                 x[j] = tmp;
             }
         } else {
             for (std::ptrdiff_t j = n - 1; j >= 0; --j) {
-                const TR *aj = &ap[cbL((std::ptrdiff_t)j, (std::ptrdiff_t)n)];
+                const TR *aj = &ap[kk_lower((std::ptrdiff_t)j, (std::ptrdiff_t)n)];
                 TR tmp = x[j] - mf_kernels::dot(n - 1 - j, &aj[1], &x[j + 1]);
                 if (nounit) tmp = tmp / aj[0];
                 x[j] = tmp;
@@ -207,14 +205,14 @@ static void mtpsv_block(char UPLO, char TRANS, bool nounit,
         if (!lower) {                                   /* Upper: backward */
             for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 if (eq0(x[j])) continue;
-                const std::size_t b = cbU(j);
+                const std::size_t b = kk_upper(j);
                 if (nounit) x[j] = x[j] / ap[b + j];
                 mf_kernels::axpy_sub(j - j0, &x[j0], &ap[b + j0], x[j]);
             }
         } else {                                        /* Lower: forward */
             for (std::ptrdiff_t j = j0; j < j1; ++j) {
                 if (eq0(x[j])) continue;
-                const std::size_t b = cbL(j, n);
+                const std::size_t b = kk_lower(j, n);
                 if (nounit) x[j] = x[j] / ap[b];
                 mf_kernels::axpy_sub(j1 - (j + 1), &x[j + 1], &ap[b + 1], x[j]);
             }
@@ -222,14 +220,14 @@ static void mtpsv_block(char UPLO, char TRANS, bool nounit,
     } else {
         if (!lower) {                                   /* Upper^T: forward, k<j */
             for (std::ptrdiff_t j = j0; j < j1; ++j) {
-                const std::size_t b = cbU(j);
+                const std::size_t b = kk_upper(j);
                 TR tmp = x[j] - mf_kernels::dot(j - j0, &ap[b + j0], &x[j0]);
                 if (nounit) tmp = tmp / ap[b + j];
                 x[j] = tmp;
             }
         } else {                                        /* Lower^T: backward, k>j */
             for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
-                const std::size_t b = cbL(j, n);
+                const std::size_t b = kk_lower(j, n);
                 TR tmp = x[j] - mf_kernels::dot(j1 - (j + 1), &ap[b + 1], &x[j + 1]);
                 if (nounit) tmp = tmp / ap[b];
                 x[j] = tmp;
@@ -268,7 +266,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const TR xi = x[i];
                         if (eq0(xi)) continue;
-                        const TR *col = &ap[cbL(i, n)];      /* col[k-i] = A(k,i) */
+                        const TR *col = &ap[kk_lower(i, n)];      /* col[k-i] = A(k,i) */
                         mf_kernels::axpy_sub(rhi - rlo, &x[rlo], &col[rlo - i], xi);
                     }
                 }
@@ -286,7 +284,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const TR xi = x[i];
                         if (eq0(xi)) continue;
-                        const TR *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
+                        const TR *col = &ap[kk_upper(i)];         /* col[k] = A(k,i) */
                         mf_kernels::axpy_sub(rhi - rlo, &x[rlo], &col[rlo], xi);
                     }
                 }
@@ -306,7 +304,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, omp_get_num_threads());
                         std::ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const TR *col = &ap[cbL(i, n)];
+                            const TR *col = &ap[kk_lower(i, n)];
                             x[i] = x[i] - mf_kernels::dot(n - j1, &col[j1 - i], &x[j1]);
                         }
                     }
@@ -323,7 +321,7 @@ __attribute__((noinline)) static bool mtpsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound((j1 - j0), tid, omp_get_num_threads());
                         std::ptrdiff_t ihi = j0 + blas_part_bound((j1 - j0), tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const TR *col = &ap[cbU(i)];
+                            const TR *col = &ap[kk_upper(i)];
                             x[i] = x[i] - mf_kernels::dot(j0, &col[0], &x[0]);
                         }
                     }

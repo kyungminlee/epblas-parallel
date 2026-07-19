@@ -39,6 +39,15 @@ inline bool eq0(double h, double l) { return h == 0.0 && l == 0.0; }
 inline bool ceq0(TC const &z) { return eq0(z.re) && eq0(z.im); }
 inline bool ceq1(TC const &z) { return eq1(z.re) && eq0(z.im); }
 
+/* The canonical DD zero/one constants. Every L2/L3 file used to define its own
+ * file-local copy of these (same names, same values); they live here once now.
+ * Files pull them in with `using mf_pred::zero_dd;` etc. so call sites keep the
+ * unqualified names — codegen-neutral (same POD bit patterns). */
+inline const TR zero_dd{0.0, 0.0};
+inline const TR one_dd {1.0, 0.0};
+inline const TC zero_cdd{ TR{0.0, 0.0}, TR{0.0, 0.0} };
+inline const TC one_cdd { TR{1.0, 0.0}, TR{0.0, 0.0} };
+
 inline bool lt0(TR x) { return x.limbs[0] < 0.0 || (x.limbs[0] == 0.0 && x.limbs[1] < 0.0); }
 
 inline bool gt0(TR x) { return x.limbs[0] > 0.0 || (x.limbs[0] == 0.0 && x.limbs[1] > 0.0); }

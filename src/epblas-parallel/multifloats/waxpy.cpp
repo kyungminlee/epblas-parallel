@@ -23,7 +23,7 @@ using R = mf::float64x2;
 using TC = mf::complex64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::ceq0;
 namespace {
 using mf_kernels::cmul;

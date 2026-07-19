@@ -36,7 +36,7 @@
 using mgemm_T = multifloats::float64x2;
 
 
-/* Cache-block sizes (env-overridable MBLAS_MC/KC/NC). */
+/* Cache-block sizes (compile-time constants in mgemm_serial.cpp). */
 void mgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC);
 
 /* Scalar (non-SIMD) panel packers + macro kernel. */

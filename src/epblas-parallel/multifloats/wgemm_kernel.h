@@ -28,7 +28,7 @@
 using wgemm_T = multifloats::complex64x2;
 
 
-/* Cache-block sizes (env-overridable MBLAS_MC/KC/NC). */
+/* Cache-block sizes (compile-time constants in wgemm_serial.cpp). */
 void wgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC);
 
 /* Scalar (non-SIMD) panel packers + macro kernel. */

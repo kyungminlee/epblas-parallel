@@ -24,6 +24,7 @@
 
 #include "mgemm_kernel.h"
 #include "mf_dispatch.h"   /* mf_have_avx2_fma() runtime gate */
+#include "mf_pred.h"
 #include "../common/blas_char.h"
 #include "../common/epblas_facade.h"
 #include <cstddef>
@@ -36,8 +37,8 @@ namespace mf = multifloats;
 using TR = mf::float64x2;
 
 namespace {
-const TR zero_dd{0.0, 0.0};
-const TR one_dd {1.0, 0.0};
+using mf_pred::zero_dd;   /* shared DD constants — mf_pred.h */
+using mf_pred::one_dd;
 }  // namespace
 
 static void mgemm_core(
@@ -79,6 +80,15 @@ static void mgemm_core(
     std::ptrdiff_t MC, KC, NC;
     mgemm_choose_blocks(&MC, &KC, &NC);
 
+    /* All-or-none packing-buffer guard. Per-thread pack allocations can fail
+     * independently; a thread that skipped the `omp for` while its teammates
+     * entered it would violate OpenMP's all-or-none worksharing rule (and the
+     * old per-thread guard silently left C = beta*C). Any failed thread sets
+     * this shared flag, a barrier makes the decision uniform BEFORE the
+     * worksharing construct, and on failure every thread skips the loop; the
+     * caller then recomputes through the serial path below. */
+    bool alloc_failed = false;
+
 #ifdef _OPENMP
     #pragma omp parallel
 #endif
@@ -87,7 +97,9 @@ static void mgemm_core(
             64, static_cast<std::size_t>(MC) * KC * sizeof(TR)));
 #ifdef MBLAS_SIMD_DD
         /* Runtime AVX2/FMA dispatch: SIMD SoA path on Haswell+, scalar fallback
-         * (always compiled below) on pre-Haswell CPUs. See mf_dispatch.h. */
+         * (always compiled below) on pre-Haswell CPUs. See mf_dispatch.h.
+         * The probe answers identically on every thread, so the whole team
+         * agrees on the branch (and thus on the barrier/worksharing sequence). */
         if (mf_have_avx2_fma()) {
         /* SoA Bp: round NC up to W = NR_LANE * NR_PAN for the trailing panel. */
         const std::ptrdiff_t W_simd = mgemm_simd_pack_W();
@@ -96,7 +108,16 @@ static void mgemm_core(
             64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
         double *Bp_lo = static_cast<double *>(std::aligned_alloc(
             64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-        if (Ap && Bp_hi && Bp_lo) {
+        if (!(Ap && Bp_hi && Bp_lo)) {
+#ifdef _OPENMP
+            #pragma omp atomic write
+#endif
+            alloc_failed = true;
+        }
+#ifdef _OPENMP
+        #pragma omp barrier
+#endif
+        if (!alloc_failed) {
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
@@ -123,7 +144,16 @@ static void mgemm_core(
         {
         TR *Bp = static_cast<TR *>(std::aligned_alloc(
             64, static_cast<std::size_t>(KC) * NC * sizeof(TR)));
-        if (Ap && Bp) {
+        if (!(Ap && Bp)) {
+#ifdef _OPENMP
+            #pragma omp atomic write
+#endif
+            alloc_failed = true;
+        }
+#ifdef _OPENMP
+        #pragma omp barrier
+#endif
+        if (!alloc_failed) {
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
@@ -145,6 +175,14 @@ static void mgemm_core(
         std::free(Ap);
         std::free(Bp);
         }
+    }
+
+    if (alloc_failed) {
+        /* Serial fallback: beta was already applied by the pre-pass above, so
+         * accumulate alpha*op(A)*op(B) with beta = 1 through the serial entry
+         * (whose own packing needs are per-call and much smaller). */
+        mgemm_serial(transa, transb, m, n, k, alpha_, a, lda,
+                     b, ldb, &one_dd, c, ldc);
     }
 }
 

@@ -151,42 +151,22 @@ inline ptrdiff_t iwamax_scan(ptrdiff_t n, const TC *x, R *bv_out)
 }
 
 #ifdef _OPENMP
-/* Threaded argmax for large unit-stride X. Each thread scans its contiguous
- * slice keeping the first (lowest-index) maximum, then partials merge in
- * ascending-tid order with a strict-greater test — so the lowest global index
- * wins any tie, bit-identical to the serial left-to-right scan. */
+/* Threaded argmax for large unit-stride X — shared partial[]-reduce wrapper
+ * (mf_omp::partial_argmax, pre-initialized slots). Each thread scans its
+ * contiguous slice keeping the first (lowest-index) maximum, then partials
+ * merge in ascending-tid order with a strict-greater test — so the lowest
+ * global index wins any tie, bit-identical to the serial left-to-right scan. */
 #define IWAMAX_OMP_MIN 8192
-#define IWAMAX_MAX_CPUS 64
 __attribute__((noinline)) static std::ptrdiff_t iwamax_omp(std::ptrdiff_t n, const TC *x, std::ptrdiff_t *out)
 {
     if (n <= IWAMAX_OMP_MIN || !blas_omp_should_thread())
         return 0;
-    std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads > IWAMAX_MAX_CPUS) nthreads = IWAMAX_MAX_CPUS;
-    std::ptrdiff_t   idx[IWAMAX_MAX_CPUS];
-    R     val[IWAMAX_MAX_CPUS];
-    #pragma omp parallel num_threads(nthreads)
-    {
-        std::ptrdiff_t tid = omp_get_thread_num();
-        std::ptrdiff_t nth = omp_get_num_threads();
-        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        std::ptrdiff_t b = 0;
-        R bv{0.0, 0.0};
-        if (lo < hi) {
-            R sv;
-            ptrdiff_t li = iwamax_scan(hi - lo, x + lo, &sv);
-            b = lo + (std::ptrdiff_t)li + 1;   /* 1-based global index */
-            bv = sv;
-        }
-        idx[tid] = b; val[tid] = bv;
-    }
-    std::ptrdiff_t best = 0;
-    R bestv{0.0, 0.0};
-    for (std::ptrdiff_t t = 0; t < nthreads; ++t) {
-        if (idx[t] == 0) continue;
-        if (best == 0 || gt(val[t], bestv)) { best = idx[t]; bestv = val[t]; }
-    }
-    *out = best;
+    *out = mf_omp::partial_argmax(n, R{0.0, 0.0},
+        [x](std::ptrdiff_t lo, std::ptrdiff_t hi, R &bv) {
+            ptrdiff_t li = iwamax_scan(hi - lo, x + lo, &bv);
+            return lo + (std::ptrdiff_t)li + 1;   /* 1-based global index */
+        },
+        [](const R &a, const R &b) { return gt(a, b); });
     return 1;
 }
 #endif

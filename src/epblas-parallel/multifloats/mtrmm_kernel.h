@@ -43,7 +43,7 @@ using mtrmm_T = multifloats::float64x2;
 /* Threading threshold (free axis below this stays serial). */
 #define MTRMM_OMP_MIN 32
 
-/* Block size over the triangular axis for the blocked paths (env MTRMM_NB). */
+/* Block size over the triangular axis for the blocked paths (compile-time constant). */
 std::ptrdiff_t mtrmm_block_nb(void);
 
 /* B := 0 over the full M×N tile (the alpha==0 early-exit). */

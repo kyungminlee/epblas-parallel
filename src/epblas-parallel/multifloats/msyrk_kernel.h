@@ -41,7 +41,7 @@ using msyrk_T = multifloats::float64x2;
 /* Threading threshold (N below this stays serial). */
 #define MSYRK_OMP_MIN 32
 
-/* Block size over the diagonal axis (env MSYRK_NB). */
+/* Block size over the diagonal axis (compile-time constant). */
 std::ptrdiff_t msyrk_block_nb(void);
 
 /* Scale column j's UPLO triangle of C by beta (the alpha==0 / K==0 early

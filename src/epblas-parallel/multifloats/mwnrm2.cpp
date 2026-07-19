@@ -9,7 +9,6 @@
 #include "../common/blas_omp.h"
 #include "mf_omp.h"
 #define MWNRM2_OMP_MIN 8192
-#define MWNRM2_MAX_CPUS 64
 #endif
 #include "mf_dispatch.h"   /* MF_SIMD_TARGET + mf_have_avx2_fma() runtime gate */
 #include "../common/epblas_facade.h"
@@ -24,14 +23,14 @@ using TC = mf::complex64x2;
 #include "mf_simd_exact.h"
 
 namespace {
-/* canonical EFTs — mf_simd_fast.h (2a-5) */
+/* canonical EFTs — mf_simd_fast.h */
 using simd_fast::twoprod;
 using simd_fast::fast2sum;
 using simd_fast::twosum;
 using simd_exact::cload4;
-using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h (#4) */
-using simd_fast::absorb;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
-using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h (#4) */
+using simd_fast::horizontal_dd;  /* Bailey 2-limb finalizer — mf_simd_fast.h */
+using simd_fast::absorb;  /* Bailey 3-limb wide-acc — mf_simd_fast.h */
+using simd_fast::renorm3;  /* Bailey 3-limb wide-acc — mf_simd_fast.h */
 
 }
 #endif
@@ -145,14 +144,14 @@ static R mwnrm2_ssq_unit(std::ptrdiff_t n, const TC *x, R scale)
 
 #ifdef _OPENMP
 /* Threaded two-pass nrm2 (incx==1): parallel max (exact → global scale
- * BIT-EXACT) then partial-reduce Σ(re²+im²)/scale² in tid order (reorders, so
- * matches serial within fuzz tol). Returns false below threshold. */
+ * BIT-EXACT) then partial-reduce Σ(re²+im²)/scale² in tid order via the shared
+ * pre-initialized wrapper mf_omp::partial_reduce (reorders, so matches serial
+ * within fuzz tol). Returns false below threshold. */
 __attribute__((noinline)) static bool mwnrm2_omp(std::ptrdiff_t n, const TC *x, R *out)
 {
     if (n <= MWNRM2_OMP_MIN || !blas_omp_should_thread())
         return false;
-    std::ptrdiff_t nthreads = blas_omp_max_threads();
-    if (nthreads > MWNRM2_MAX_CPUS) nthreads = MWNRM2_MAX_CPUS;
+    const std::ptrdiff_t nthreads = mf_omp::l1_team();
 
     double scale_hi = 0.0;
     #pragma omp parallel num_threads(nthreads) reduction(max:scale_hi)
@@ -167,16 +166,9 @@ __attribute__((noinline)) static bool mwnrm2_omp(std::ptrdiff_t n, const TC *x, 
     if (scale_hi == 0.0) { *out = R{0.0, 0.0}; return true; }
     R scale{scale_hi, 0.0};
 
-    R partial[MWNRM2_MAX_CPUS];
-    for (std::ptrdiff_t t = 0; t < nthreads; ++t) partial[t] = R{0.0, 0.0};
-    #pragma omp parallel num_threads(nthreads)
-    {
-        std::ptrdiff_t tid = omp_get_thread_num(), nth = omp_get_num_threads();
-        std::ptrdiff_t lo, hi; mf_omp::even_slice(n, tid, nth, lo, hi);
-        if (lo < hi) partial[tid] = mwnrm2_ssq_unit(hi - lo, x + lo, scale);
-    }
-    R s{0.0, 0.0};
-    for (std::ptrdiff_t t = 0; t < nthreads; ++t) s = s + partial[t];
+    R s = mf_omp::partial_reduce(n, R{0.0, 0.0},
+        [x, scale](std::ptrdiff_t lo, std::ptrdiff_t hi) { return mwnrm2_ssq_unit(hi - lo, x + lo, scale); },
+        [](const R &a, const R &b) { return a + b; });
     *out = scale * sqrtdd(s);
     return true;
 }

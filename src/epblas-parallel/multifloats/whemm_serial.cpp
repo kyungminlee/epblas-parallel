@@ -36,17 +36,17 @@ using R = mf::float64x2;
 using TC = mf::complex64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::ceq0;
 using mf_pred::ceq1;
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 namespace {
 
 
 const R rzero{0.0, 0.0};
-const TC zero_cdd{ rzero, rzero };
-const TC one_cdd { R{1.0, 0.0}, rzero };
+using mf_pred::zero_cdd;   /* shared DD constants — mf_pred.h */
+using mf_pred::one_cdd;
 
 
 using mf_kernels::cmul;

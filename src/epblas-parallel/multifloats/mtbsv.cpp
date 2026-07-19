@@ -30,7 +30,7 @@ namespace mf = multifloats;
 using TR = mf::float64x2;
 
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 namespace {
 
 /* NoTrans band update is mf_kernels::axpy_sub (xp -= temp*cp), an order-free DD

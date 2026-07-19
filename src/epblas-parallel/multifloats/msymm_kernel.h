@@ -37,7 +37,7 @@ using msymm_T = multifloats::float64x2;
 /* Threading threshold (the threaded axis below this stays serial). */
 #define MSYMM_OMP_MIN 32
 
-/* Block size over the threaded axis (env MSYMM_NB). */
+/* Block size over the threaded axis (compile-time constant). */
 std::ptrdiff_t msymm_block_nb(void);
 
 /* Scale column j of C (rows 0..M) by beta — the alpha==0 early exit. Handles

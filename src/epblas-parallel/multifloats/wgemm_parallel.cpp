@@ -37,7 +37,8 @@ namespace {
 using mf_kernels::cmul;
 using mf_pred::ceq0;
 using mf_pred::ceq1;
-const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+using mf_pred::zero_cdd;   /* shared DD constants — mf_pred.h */
+using mf_pred::one_cdd;
 }  // namespace
 
 static void wgemm_core(
@@ -79,6 +80,15 @@ static void wgemm_core(
     std::ptrdiff_t MC, KC, NC;
     wgemm_choose_blocks(&MC, &KC, &NC);
 
+    /* All-or-none packing-buffer guard (mirrors mgemm_parallel.cpp). A thread
+     * whose private pack alloc failed must not skip the `omp for` its
+     * teammates enter (OpenMP worksharing is all-or-none), and the old
+     * per-thread guard silently left C = beta*C. Any failed thread sets the
+     * shared flag, a barrier makes the decision uniform before the
+     * worksharing construct, and on failure the caller recomputes through the
+     * serial path below. */
+    bool alloc_failed = false;
+
 #ifdef _OPENMP
     #pragma omp parallel
 #endif
@@ -87,7 +97,9 @@ static void wgemm_core(
             64, static_cast<std::size_t>(MC) * KC * sizeof(TC)));
 #ifdef WBLAS_SIMD_DD
         /* Runtime AVX2/FMA dispatch: SIMD SoA path on Haswell+, scalar fallback
-         * (always compiled below) on pre-Haswell CPUs. See mf_dispatch.h. */
+         * (always compiled below) on pre-Haswell CPUs. See mf_dispatch.h.
+         * The probe answers identically on every thread, so the whole team
+         * agrees on the branch (and thus on the barrier/worksharing sequence). */
         if (mf_have_avx2_fma()) {
         const std::ptrdiff_t W_simd = wgemm_simd_pack_W();
         const std::ptrdiff_t NC_pad = ((NC + W_simd - 1) / W_simd) * W_simd;
@@ -99,7 +111,16 @@ static void wgemm_core(
             64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
         double *Bp_il = static_cast<double *>(std::aligned_alloc(
             64, static_cast<std::size_t>(KC) * NC_pad * sizeof(double)));
-        if (Ap && Bp_rh && Bp_rl && Bp_ih && Bp_il) {
+        if (!(Ap && Bp_rh && Bp_rl && Bp_ih && Bp_il)) {
+#ifdef _OPENMP
+            #pragma omp atomic write
+#endif
+            alloc_failed = true;
+        }
+#ifdef _OPENMP
+        #pragma omp barrier
+#endif
+        if (!alloc_failed) {
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
@@ -130,7 +151,16 @@ static void wgemm_core(
         {
         TC *Bp = static_cast<TC *>(std::aligned_alloc(
             64, static_cast<std::size_t>(KC) * NC * sizeof(TC)));
-        if (Ap && Bp) {
+        if (!(Ap && Bp)) {
+#ifdef _OPENMP
+            #pragma omp atomic write
+#endif
+            alloc_failed = true;
+        }
+#ifdef _OPENMP
+        #pragma omp barrier
+#endif
+        if (!alloc_failed) {
 #ifdef _OPENMP
             #pragma omp for schedule(static)
 #endif
@@ -152,6 +182,14 @@ static void wgemm_core(
         std::free(Ap);
         std::free(Bp);
         }
+    }
+
+    if (alloc_failed) {
+        /* Serial fallback: beta was already applied by the pre-pass above, so
+         * accumulate alpha*op(A)*op(B) with beta = 1 through the serial entry
+         * (whose own packing needs are per-call and much smaller). */
+        wgemm_serial(transa, transb, m, n, k, alpha_, a, lda,
+                     b, ldb, &one_cdd, c, ldc);
     }
 }
 

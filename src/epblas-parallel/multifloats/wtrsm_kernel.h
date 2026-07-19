@@ -41,7 +41,7 @@ using wtrsm_T = multifloats::complex64x2;
 /* Threading threshold (free axis below this stays serial). */
 #define WTRSM_OMP_N_MIN 32
 
-/* Block size over the M axis for the blocked SIDE='L' path (env WTRSM_NB). */
+/* Block size over the M axis for the blocked SIDE='L' path (compile-time constant). */
 std::ptrdiff_t wtrsm_block_nb(void);
 
 /* B := 0 over the full M×N tile (the alpha==0 early-exit). */

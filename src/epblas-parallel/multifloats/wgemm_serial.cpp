@@ -31,26 +31,21 @@ using TC = mf::complex64x2;
 
 namespace {
 
-std::ptrdiff_t g_mc = 0, g_kc = 0, g_nc = 0;
-void init_blocks() {
-    if (g_mc) return;
-    g_mc =  64;
-    g_kc = 128;
-    g_nc = 256;
-}
+/* Cache-block sizes — compile-time constants (nothing writes them). */
+constexpr std::ptrdiff_t g_mc =  64;
+constexpr std::ptrdiff_t g_kc = 128;
+constexpr std::ptrdiff_t g_nc = 256;
 
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::cconj;
 using mf_pred::ceq0;
 using mf_pred::ceq1;
-
-const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
+using mf_pred::zero_cdd;   /* shared DD constant — mf_pred.h */
 
 }  // namespace
 
 void wgemm_choose_blocks(std::ptrdiff_t *MC, std::ptrdiff_t *KC, std::ptrdiff_t *NC) {
-    init_blocks();
     *MC = g_mc; *KC = g_kc; *NC = g_nc;
 }
 

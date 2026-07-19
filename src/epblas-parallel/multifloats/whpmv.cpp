@@ -7,6 +7,7 @@
 #include "mf_util.h"
 #include "mf_pred.h"
 #include "mf_kernels.h"
+#include "mf_packed.h"
 #ifdef _OPENMP
 #include <cstdlib>
 #include <cmath>
@@ -23,17 +24,19 @@ using R = mf::float64x2;
 using TC = mf::complex64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::ceq0;
 using mf_pred::ceq1;
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 namespace {
 const R rzero{0.0, 0.0};
 const TC czero{ rzero, rzero };
 using mf_kernels::cmul;
 using mf_kernels::cadd;
 using mf_kernels::rcmul;
+using mf_packed::kk_upper;   /* shared packed-column base offsets — mf_packed.h */
+using mf_packed::kk_lower;
 
 /* One Hermitian-packed column j's contribution ADDED into accumulator yacc:
  * the off-diagonal SIMD AXPY (caxpy_add over the contiguous packed column) +
@@ -43,7 +46,7 @@ using mf_kernels::rcmul;
  * disjoint cyclic columns -> within DD fuzz tol). The conj-dot reorders its
  * reduction either way. kk is the packed base of column j. */
 inline void whpmv_col_upper(std::ptrdiff_t j, const TC *ap, const TC *x, TC alpha, TC *yacc) {
-    const std::size_t kk = static_cast<std::size_t>(j) * (j + 1) / 2;
+    const std::size_t kk = kk_upper(j);
     const TC t1 = cmul(alpha, x[j]);
     mf_kernels::caxpy_add(j, yacc, &ap[kk], t1);
     const TC t2 = mf_kernels::cdot(j, &ap[kk], x, true);
@@ -51,8 +54,7 @@ inline void whpmv_col_upper(std::ptrdiff_t j, const TC *ap, const TC *x, TC alph
 }
 
 inline void whpmv_col_lower(std::ptrdiff_t j, std::ptrdiff_t n, const TC *ap, const TC *x, TC alpha, TC *yacc) {
-    const std::size_t kk =
-        static_cast<std::size_t>(j) * n - static_cast<std::size_t>(j) * (j - 1) / 2;
+    const std::size_t kk = kk_lower(j, n);
     const TC t1 = cmul(alpha, x[j]);
     yacc[j] = cadd(yacc[j], rcmul(ap[kk].re, t1));
     const std::ptrdiff_t len = n - j - 1;
@@ -99,7 +101,7 @@ __attribute__((noinline)) static bool whpmv_omp(
         if (upper) {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
                 const TC temp1 = x[j];                          /* alpha deferred */
-                const TC *aj = &ap[(std::size_t)j * (j + 1) / 2];
+                const TC *aj = &ap[kk_upper(j)];
                 TC temp2 = czero;
                 if (j > 0) {
                     mf_kernels::caxpy_add((std::ptrdiff_t)j, &slot[0], aj, temp1);
@@ -110,8 +112,7 @@ __attribute__((noinline)) static bool whpmv_omp(
         } else {
             for (std::ptrdiff_t j = m_from; j < m_to; ++j) {
                 const TC temp1 = x[j];
-                const TC *aj =
-                    &ap[(std::size_t)j * n - (std::size_t)j * (j - 1) / 2];
+                const TC *aj = &ap[kk_lower(j, n)];
                 slot[j] = cadd(slot[j], rcmul(aj[0].re, temp1));
                 const std::ptrdiff_t len = n - (std::ptrdiff_t)j - 1;
                 if (len > 0) {

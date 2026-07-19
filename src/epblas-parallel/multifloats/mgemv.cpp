@@ -35,11 +35,11 @@ namespace mf = multifloats;
 using TR = mf::float64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::eq0;
 using mf_pred::eq1;
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 namespace {
 
 #define MGEMV_OMP_MIN 64
@@ -48,7 +48,7 @@ namespace {
 #endif
 
 
-const TR zero_dd{0.0, 0.0};
+using mf_pred::zero_dd;   /* shared DD constants — mf_pred.h */
 
 #ifdef MBLAS_SIMD_DD
 using simd_exact::load_dd4;

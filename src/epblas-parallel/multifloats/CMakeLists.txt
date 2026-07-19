@@ -127,30 +127,25 @@ set(_split_sources
     wher2k_serial.cpp
 )
 
-set(_routines "")
-foreach(_k ${_kernels})
-    string(REGEX REPLACE "\\.cpp$" "" _r "${_k}")
-    list(APPEND _routines "${_r}")
-endforeach()
+epblas_kernel_routines(_routines ${_kernels})
 list(APPEND _routines mgemm wgemm mgemmtr wgemmtr mtrsm wtrsm mtrmm wtrmm msyrk wsyrk wherk msymm wsymm whemm msyr2k wsyr2k wher2k)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
-add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_split_sources} mf_cpu.cpp)
-add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
-
-# C++17 for std::aligned_alloc + multifloats's header requirements.
-target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE cxx_std_17)
-target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-    -O3
-    # multifloats forbids -ffast-math (breaks IEEE FMA semantics that
-    # the error-free transforms rely on). Use -ffp-contract=on, not
-    # =fast — fast lets the compiler fold across statements.
-    -ffp-contract=on
+# Archive + alias + language standard (C++17 for std::aligned_alloc +
+# multifloats's header requirements) + [-O3 <flags>] + guarded -march,
+# via the shared helper (cmake/EpblasKindHelpers.cmake). mf_cpu.cpp is
+# the CPUID probe backing the runtime SIMD dispatch below.
+epblas_add_kind_archive(${LIB_PREFIX}blas_parallel
+    NAMESPACE epblas-parallel
+    LANGUAGE CXX
+    MARCH "${EPBLAS_PARALLEL_MARCH}"
+    SOURCES ${_kernels} ${_split_sources} mf_cpu.cpp
+    COMPILE_OPTIONS
+        # multifloats forbids -ffast-math (breaks IEEE FMA semantics that
+        # the error-free transforms rely on). Use -ffp-contract=on, not
+        # =fast — fast lets the compiler fold across statements.
+        -ffp-contract=on
 )
-if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
-    target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-        -march=${EPBLAS_PARALLEL_MARCH})
-endif()
 
 # mtbsv is a faithful char-for-char port of the OpenBLAS clone's band solve,
 # yet par trailed ob ~3-5% on the strided Trans/NoTrans leaves at every N — the
@@ -176,8 +171,9 @@ elseif(OpenMP_C_FOUND)
 endif()
 
 # AVX2/FMA double-double SIMD kernels (mf_simd_fast.h / mf_simd_exact.h /
-# mf_kernels.h and the per-routine *_simd_* functions). 4-wide SoA — see
-# mgemm_simd_kernel.h. Bench on Raptor Lake: 3.8× over the scalar outer-product
+# mf_kernels.h and the per-routine *_simd_* functions). 4-wide SoA — see the
+# SIMD micro-kernel in mgemm_kernel.h (built on the mf_simd_fast.h limb
+# primitives). Bench on Raptor Lake: 3.8× over the scalar outer-product
 # baseline single-threaded, 38× over migrated at OMP=4 s=1024.
 #
 # These kernels emit FMA (_mm256_fmadd_pd) and AVX2 (_mm256_permute4x64_pd)

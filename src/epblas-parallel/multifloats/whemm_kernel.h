@@ -40,7 +40,7 @@ using whemm_T = multifloats::complex64x2;
 /* Threading threshold (the threaded axis below this stays serial). */
 #define WHEMM_OMP_MIN 32
 
-/* Block size over the threaded axis (env WHEMM_NB). */
+/* Block size over the threaded axis (compile-time constant). */
 std::ptrdiff_t whemm_block_nb(void);
 
 /* Scale column j of C (rows 0..M) by beta — the alpha==0 early exit. Handles

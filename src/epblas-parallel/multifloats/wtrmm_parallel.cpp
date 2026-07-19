@@ -32,10 +32,10 @@ namespace mf = multifloats;
 using TC = mf::complex64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::ceq0;
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 
 static void wtrmm_core(
     char side, char uplo, char transa, char diag,

@@ -37,7 +37,7 @@ using mtrsm_T = multifloats::float64x2;
 /* Threading threshold (free axis below this stays serial). */
 #define MTRSM_OMP_N_MIN 32
 
-/* Block size over the M axis for the blocked SIDE='L' path (env MTRSM_NB). */
+/* Block size over the M axis for the blocked SIDE='L' path (compile-time constant). */
 std::ptrdiff_t mtrsm_block_nb(void);
 
 /* B := 0 over the full M×N tile (the alpha==0 early-exit). */

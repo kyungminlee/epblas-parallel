@@ -23,7 +23,7 @@ namespace mf = multifloats;
 using TR = mf::float64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::eq1;
 namespace {
 

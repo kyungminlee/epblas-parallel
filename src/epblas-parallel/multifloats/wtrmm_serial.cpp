@@ -45,19 +45,18 @@ using R = mf::float64x2;
 using TC = mf::complex64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::ceq0;
 using mf_pred::ceq1;
 namespace {
 
-std::ptrdiff_t g_nb_trmm = 0;
-std::ptrdiff_t trmm_nb(void) {
-    if (g_nb_trmm == 0) g_nb_trmm = 64;
-    return g_nb_trmm;
-}
+/* Triangular-axis block size for the blocked paths — compile-time constant
+ * (nothing writes it). */
+constexpr std::ptrdiff_t g_nb_trmm = 64;
+std::ptrdiff_t trmm_nb(void) { return g_nb_trmm; }
 
-const TC zero_cdd{ R{0.0, 0.0}, R{0.0, 0.0} };
-const TC one_cdd { R{1.0, 0.0}, R{0.0, 0.0} };
+using mf_pred::zero_cdd;   /* shared DD constants — mf_pred.h */
+using mf_pred::one_cdd;
 
 
 using mf_kernels::cmul;
@@ -518,7 +517,7 @@ inline void simd_wtrmm_r4_rlTC(std::ptrdiff_t ib, std::ptrdiff_t n, TC alpha, bo
                                const TC *a, std::ptrdiff_t lda, TC *b, std::ptrdiff_t ldb, bool nounit)
 {
     for (std::ptrdiff_t k = n - 1; k >= 0; --k) {
-        const TC *bk = b + static_cast<std::size_t>(k) * ldb;
+        TC *bk = b + static_cast<std::size_t>(k) * ldb;   /* written through below */
         __m256d bkrh, bkrl, bkih, bkil;
         cload4(bk + ib, bkrh, bkrl, bkih, bkil);
         for (std::ptrdiff_t j = k + 1; j < n; ++j) {
@@ -546,7 +545,7 @@ inline void simd_wtrmm_r4_rlTC(std::ptrdiff_t ib, std::ptrdiff_t n, TC alpha, bo
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
-            cstore4(const_cast<TC*>(bk) + ib, nrh, nrl, nih, nil_);
+            cstore4(bk + ib, nrh, nrl, nih, nil_);
         }
     }
 }
@@ -555,7 +554,7 @@ inline void simd_wtrmm_r4_ruTC(std::ptrdiff_t ib, std::ptrdiff_t n, TC alpha, bo
                                const TC *a, std::ptrdiff_t lda, TC *b, std::ptrdiff_t ldb, bool nounit)
 {
     for (std::ptrdiff_t k = 0; k < n; ++k) {
-        const TC *bk = b + static_cast<std::size_t>(k) * ldb;
+        TC *bk = b + static_cast<std::size_t>(k) * ldb;   /* written through below */
         __m256d bkrh, bkrl, bkih, bkil;
         cload4(bk + ib, bkrh, bkrl, bkih, bkil);
         for (std::ptrdiff_t j = 0; j < k; ++j) {
@@ -583,7 +582,7 @@ inline void simd_wtrmm_r4_ruTC(std::ptrdiff_t ib, std::ptrdiff_t n, TC alpha, bo
             __m256d nrh, nrl, nih, nil_;
             simd_fast::cmul(bkrh, bkrl, bkih, bkil, trh, trl, tih, til,
                              nrh, nrl, nih, nil_);
-            cstore4(const_cast<TC*>(bk) + ib, nrh, nrl, nih, nil_);
+            cstore4(bk + ib, nrh, nrl, nih, nil_);
         }
     }
 }
@@ -975,7 +974,7 @@ extern "C" void wtrmm_serial(
     TC *b, std::ptrdiff_t ldb)
 {
     const TC alpha = *alpha_;
-    using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+    using mf_util::up;  /* char flag uppercase — mf_util.h */
     const char SIDE = up(&side);
     const char UPLO = up(&uplo);
     const char TRANS = up(&transa);   /* complex: N/T/C kept distinct */

@@ -48,7 +48,7 @@ using wher2k_TC = multifloats::complex64x2;
 /* Threading threshold (N below this stays serial). */
 #define WHER2K_OMP_MIN 32
 
-/* Block size over the diagonal axis (env WHER2K_NB). */
+/* Block size over the diagonal axis (compile-time constant). */
 std::ptrdiff_t wher2k_block_nb(void);
 
 /* Zero the imaginary part of the diagonal cell C[j,j] (the beta==1 early

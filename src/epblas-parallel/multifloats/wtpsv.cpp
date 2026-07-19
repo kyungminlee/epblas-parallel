@@ -7,6 +7,7 @@
 #include "mf_util.h"
 #include "mf_pred.h"
 #include "mf_kernels.h"
+#include "mf_packed.h"
 #ifdef _OPENMP
 #include <omp.h>
 #include "../common/blas_omp.h"
@@ -21,10 +22,10 @@ using R = mf::float64x2;
 using TC = mf::complex64x2;
 
 
-/* zero/one predicates — see mf_pred.h (2a-4 unification) */
+/* zero/one predicates — see mf_pred.h */
 using mf_pred::ceq0;
 
-using mf_util::up;  /* char flag uppercase — mf_util.h (2a-4) */
+using mf_util::up;  /* char flag uppercase — mf_util.h */
 namespace {
 const R rzero{0.0, 0.0};
 using mf_kernels::cmul;
@@ -33,7 +34,7 @@ using mf_kernels::csub;
 using mf_kernels::cconj;
 inline TC cdiv(TC const &a, TC const &b) {
     /* a / b = a·conj(b) / |b|², direct DD divide (canonical form shared with
-     * wtbsv/wtrsv/wtrsm_serial — see F2, simd_audit). */
+     * wtbsv/wtrsv/wtrsm_serial). */
     const R denom = b.re * b.re + b.im * b.im;
     return TC{ (a.re * b.re + a.im * b.im) / denom,
               (a.im * b.re - a.re * b.im) / denom };
@@ -41,16 +42,13 @@ inline TC cdiv(TC const &a, TC const &b) {
 const TC czero{rzero, rzero};
 
 #ifdef _OPENMP
-/* Column base offsets into the packed array (column-major triangle).
+/* Column base offsets into the packed array (column-major triangle) — shared
+ * helpers mf_packed::kk_upper / kk_lower (same arithmetic as the old local
+ * cbU/cbL).
  *   Lower: column j starts at its diagonal (row j); element (i,j) i>=j at base+(i-j).
  *   Upper: column j starts at row 0;            element (i,j) i<=j at base+i.       */
-inline std::size_t cbL(std::ptrdiff_t j, std::ptrdiff_t n) {
-    return static_cast<std::size_t>(j) * static_cast<std::size_t>(n)
-         - static_cast<std::size_t>(j) * static_cast<std::size_t>(j - 1) / 2;
-}
-inline std::size_t cbU(std::ptrdiff_t j) {
-    return static_cast<std::size_t>(j) * static_cast<std::size_t>(j + 1) / 2;
-}
+using mf_packed::kk_upper;
+using mf_packed::kk_lower;
 inline TC melem(const TC &a, bool noconj) { return noconj ? a : cconj(a); }
 #endif
 }
@@ -132,14 +130,14 @@ static void wtpsv_block(char UPLO, char TRANS, bool noconj, bool nounit,
         if (!lower) {                                   /* Upper: backward */
             for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
                 if (ceq0(x[j])) continue;
-                const std::size_t b = cbU(j);
+                const std::size_t b = kk_upper(j);
                 if (nounit) x[j] = cdiv(x[j], ap[b + j]);
                 mf_kernels::caxpy_sub(j - j0, &x[j0], &ap[b + j0], x[j]);
             }
         } else {                                        /* Lower: forward */
             for (std::ptrdiff_t j = j0; j < j1; ++j) {
                 if (ceq0(x[j])) continue;
-                const std::size_t b = cbL(j, n);
+                const std::size_t b = kk_lower(j, n);
                 if (nounit) x[j] = cdiv(x[j], ap[b]);
                 mf_kernels::caxpy_sub(j1 - (j + 1), &x[j + 1], &ap[b + 1], x[j]);
             }
@@ -147,14 +145,14 @@ static void wtpsv_block(char UPLO, char TRANS, bool noconj, bool nounit,
     } else {
         if (!lower) {                                   /* Upper^(T/C): forward, k<j */
             for (std::ptrdiff_t j = j0; j < j1; ++j) {
-                const std::size_t b = cbU(j);
+                const std::size_t b = kk_upper(j);
                 TC tmp = csub(x[j], mf_kernels::cdot(j - j0, &ap[b + j0], &x[j0], conj));
                 if (nounit) tmp = cdiv(tmp, melem(ap[b + j], noconj));
                 x[j] = tmp;
             }
         } else {                                        /* Lower^(T/C): backward, k>j */
             for (std::ptrdiff_t j = j1 - 1; j >= j0; --j) {
-                const std::size_t b = cbL(j, n);
+                const std::size_t b = kk_lower(j, n);
                 TC tmp = csub(x[j], mf_kernels::cdot(j1 - (j + 1), &ap[b + 1], &x[j + 1], conj));
                 if (nounit) tmp = cdiv(tmp, melem(ap[b], noconj));
                 x[j] = tmp;
@@ -191,7 +189,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const TC xi = x[i];
                         if (ceq0(xi)) continue;
-                        const TC *col = &ap[cbL(i, n)];      /* col[k-i] = A(k,i) */
+                        const TC *col = &ap[kk_lower(i, n)];      /* col[k-i] = A(k,i) */
                         mf_kernels::caxpy_sub(rhi - rlo, &x[rlo], &col[rlo - i], xi);
                     }
                 }
@@ -209,7 +207,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                     for (std::ptrdiff_t i = j0; i < j1; ++i) {
                         const TC xi = x[i];
                         if (ceq0(xi)) continue;
-                        const TC *col = &ap[cbU(i)];         /* col[k] = A(k,i) */
+                        const TC *col = &ap[kk_upper(i)];         /* col[k] = A(k,i) */
                         mf_kernels::caxpy_sub(rhi - rlo, &x[rlo], &col[rlo], xi);
                     }
                 }
@@ -226,7 +224,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, omp_get_num_threads());
                         std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const TC *col = &ap[cbL(i, n)];
+                            const TC *col = &ap[kk_lower(i, n)];
                             x[i] = csub(x[i], mf_kernels::cdot(n - j1, &col[j1 - i], &x[j1], conj));
                         }
                     }
@@ -243,7 +241,7 @@ __attribute__((noinline)) static bool wtpsv_omp(
                         std::ptrdiff_t ilo = j0 + blas_part_bound(j1 - j0, tid, omp_get_num_threads());
                         std::ptrdiff_t ihi = j0 + blas_part_bound(j1 - j0, tid + 1, omp_get_num_threads());
                         for (std::ptrdiff_t i = ilo; i < ihi; ++i) {
-                            const TC *col = &ap[cbU(i)];
+                            const TC *col = &ap[kk_upper(i)];
                             x[i] = csub(x[i], mf_kernels::cdot(j0, &col[0], &x[0], conj));
                         }
                     }
