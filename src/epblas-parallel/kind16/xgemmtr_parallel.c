@@ -18,8 +18,8 @@
  * runs serially) or below the XGEMMTR_OMP_MIN threshold.
  *
  * Fortran ABI: name lowercased + trailing underscore; scalars by pointer;
- * character args followed by hidden trailing size_t lengths; COMPLEX(KIND=16)
- * ↔ __complex128.
+ * character args are bare char* — no hidden trailing lengths (see
+ * common/epblas_facade.h; never re-add them); COMPLEX(KIND=16) ↔ __complex128.
  */
 
 #include "xgemmtr_kernel.h"

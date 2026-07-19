@@ -1,11 +1,8 @@
 # Hand-written parallel BLAS — kind10 (REAL(KIND=10) / 80-bit long double).
 #
 # Produces a STATIC archive `${LIB_PREFIX}blas_parallel` (= `eyblas_parallel`
-# for kind10) that supplies overlay implementations of selected BLAS
-# entry points. Step 0 ships only a passthrough stub for egemm_ that
-# forwards to the migrated archive's renamed symbol `egemm_migrated_`
-# (produced by the objcopy rename in step 0b). This proves the
-# Fortran-ABI C boundary end-to-end before any real kernel work.
+# for kind10) that supplies overlay implementations of the BLAS entry
+# points listed below (full L1/L2/L3 coverage for the e/y prefixes).
 #
 # Linking model: see doc/dev/architecture.md. The top-level CMakeLists.txt
 # wraps this archive in an INTERFACE composite that links `_parallel`
@@ -139,41 +136,35 @@ set(_split_sources
 # Strip the .c suffix from each kernel filename; the split routines
 # (egemm, etrsm, ygemm) are appended by hand (their file basenames don't
 # match the routine name — see above).
-set(_routines "")
-foreach(_k ${_kernels})
-    string(REGEX REPLACE "\\.c$" "" _r "${_k}")
-    list(APPEND _routines "${_r}")
-endforeach()
+epblas_kernel_routines(_routines ${_kernels})
 list(APPEND _routines egemm etrsm ygemm ytrsm ytrmm ysyrk yherk ysyr2k yher2k ysymm yhemm ygemmtr egemmtr etrmm esyrk esyr2k esymm)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
-add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_split_sources})
-add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
-
-target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE c_std_99)
-target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-    -O3
-    -ffp-contract=fast
-    # Force 16-byte hot-loop alignment. The int->ptrdiff_t index conversion
-    # widens integer instruction encodings by one byte each (incl->incq,
-    # cmpl->cmpq, movslq, REX prefixes), which shifts GCC's default nop-padding
-    # and lands a few hot loops off a 16-byte boundary (ieamax mod16 0->8,
-    # eynrm2 loop-body fetch). -falign-loops=16 pins them back, restoring
-    # parity; it is neutral on the routines that were already aligned and worse
-    # at 32 (over-align).
-    -falign-loops=16
-    # Use Fortran-style complex arithmetic (skip NaN/Inf checks).
-    # Without this, gcc emits __mulxc3/__divxc3 library calls for
-    # _Complex long double — measurably slower than the gfortran
-    # path used by the migrated archive (e.g. ytrsm OMP=1 was 30%
-    # behind migrated until this flag landed).
-    -fcx-fortran-rules
+# Archive + alias + c_std_99 + [-O3 <flags>] + guarded -march, via the
+# shared helper (cmake/EpblasKindHelpers.cmake). -march comes from
+# src/epblas-parallel/CMakeLists.txt (shared knob).
+epblas_add_kind_archive(${LIB_PREFIX}blas_parallel
+    NAMESPACE epblas-parallel
+    LANGUAGE C
+    MARCH "${EPBLAS_PARALLEL_MARCH}"
+    SOURCES ${_kernels} ${_split_sources}
+    COMPILE_OPTIONS
+        -ffp-contract=fast
+        # Force 16-byte hot-loop alignment. The int->ptrdiff_t index conversion
+        # widens integer instruction encodings by one byte each (incl->incq,
+        # cmpl->cmpq, movslq, REX prefixes), which shifts GCC's default nop-padding
+        # and lands a few hot loops off a 16-byte boundary (ieamax mod16 0->8,
+        # eynrm2 loop-body fetch). -falign-loops=16 pins them back, restoring
+        # parity; it is neutral on the routines that were already aligned and worse
+        # at 32 (over-align).
+        -falign-loops=16
+        # Use Fortran-style complex arithmetic (skip NaN/Inf checks).
+        # Without this, gcc emits __mulxc3/__divxc3 library calls for
+        # _Complex long double — measurably slower than the gfortran
+        # path used by the migrated archive (e.g. ytrsm OMP=1 was 30%
+        # behind migrated until this flag landed).
+        -fcx-fortran-rules
 )
-# -march comes from src/epblas-parallel/CMakeLists.txt (shared knob).
-if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
-    target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-        -march=${EPBLAS_PARALLEL_MARCH})
-endif()
 
 # enrm2 wants 32-byte loop alignment, not the archive-wide 16. Its Blue's-algo
 # hot loop carries a deeper x87 working set than ieamax/eynrm2 (three magnitude
@@ -216,8 +207,9 @@ set_source_files_properties(esyr2k_serial.c PROPERTIES COMPILE_OPTIONS "-falign-
 # are latency-bound and indifferent to the wider padding.
 set_source_files_properties(egbmv.c PROPERTIES COMPILE_OPTIONS "-falign-loops=32")
 
-# OpenMP comes in at step 4. Wire it now so the per-kernel #pragmas
-# compile from the start.
+# OpenMP runtime for the per-kernel #pragma omp regions (the runtime
+# choice — Intel libiomp5 preferred via EPBLAS_PREFER_IOMP5 — is handled
+# centrally in the top-level CMakeLists).
 if(OpenMP_C_FOUND)
     target_link_libraries(${LIB_PREFIX}blas_parallel PUBLIC OpenMP::OpenMP_C)
 endif()

@@ -16,8 +16,8 @@
  * matching core runs serially over the full range.
  *
  * Fortran ABI: name lowercased + trailing underscore; scalars by pointer;
- * character args followed by hidden trailing size_t lengths;
- * COMPLEX(KIND=16) ↔ __complex128.
+ * character args are bare char* — no hidden trailing lengths (see
+ * common/epblas_facade.h; never re-add them); COMPLEX(KIND=16) ↔ __complex128.
  */
 
 #include "xtrmm_kernel.h"

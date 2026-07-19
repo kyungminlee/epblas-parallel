@@ -7,7 +7,7 @@
  *                     OpenMP). Owns the uplo-char decode and the eight
  *                     range-parameterized per-column / per-row compute
  *                     cores (declared here), plus the public
- *                     `qtrmm_serial_` Fortran entry that dispatches to a
+ *                     `qtrmm_serial` by-value entry that dispatches to a
  *                     core over the FULL [0,N) / [0,M) range.
  *
  *   qtrmm_parallel.c  The public Fortran entry `qtrmm_` — threading

@@ -5,13 +5,13 @@
  *   qgemm_serial.c    The pure single-thread GEMM (no OpenMP). Owns ALL
  *                     the math — packers, MR×NR micro-kernel, beta
  *                     pre-pass, block-size policy — and the public
- *                     `qgemm_serial_` entry. Called directly by the L3
+ *                     `qgemm_serial` entry. Called directly by the L3
  *                     routines (qtrsm, …) that run qgemm trailing updates
  *                     inside their OWN parallel region, and by qgemm_ as
  *                     its serial branch.
  *
  *   qgemm_parallel.c  The public Fortran entry `qgemm_` — threading
- *                     orchestration only. Delegates to qgemm_serial_ when
+ *                     orchestration only. Delegates to qgemm_serial when
  *                     called from inside a parallel region; otherwise fans
  *                     these same kernel pieces across an OpenMP team
  *                     (M-axis split, shared packed Bp).
@@ -26,9 +26,9 @@
  * reference. (Measured: the ob blocked clone beats the unblocked reference
  * ~13% serial.)
  *
- * Everything here is internal to the overlay. `qgemm_serial_` keeps the
- * exact Fortran-ABI signature of qgemm_ so callers already inside a
- * parallel region can swap the symbol name only.
+ * Everything here is internal to the overlay. `qgemm_serial` is the
+ * by-value core entry (char/ptrdiff_t by value, alpha/beta by pointer) so
+ * callers already inside a parallel region can call it directly.
  */
 #ifndef EPBLAS_PARALLEL_KIND16_QGEMM_KERNEL_H
 #define EPBLAS_PARALLEL_KIND16_QGEMM_KERNEL_H
@@ -45,7 +45,7 @@ typedef __float128 qgemm_TR;
 
 
 
-/* Cache-block sizes (env-overridable QBLAS_MC/KC/NC) with OpenBLAS-style
+/* Cache-block sizes (fixed compile-time constants) with OpenBLAS-style
  * adaptive MC when K fits one panel. */
 void qgemm_choose_blocks(ptrdiff_t k, ptrdiff_t *MC, ptrdiff_t *KC, ptrdiff_t *NC);
 

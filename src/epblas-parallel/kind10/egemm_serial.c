@@ -30,10 +30,12 @@
  *   NC=512  column band per thread
  * Register-tile dims MR=2, NR=2 are compile-time constants (EGEMM_MR/NR).
  *
- * Fortran ABI (egemm_serial mirrors egemm_ exactly):
- *   - scalars passed by pointer
- *   - character args followed by hidden trailing `size_t` lengths
- *   - REAL(KIND=10) ↔ `long double` (x86-64 80-bit extended)
+ * ABI: egemm_serial is the by-value core entry (char/ptrdiff_t by value,
+ * alpha/beta by pointer); the public Fortran entry egemm_ lives in
+ * egemm_parallel.c behind common/epblas_facade.h. Character args are bare
+ * `char *` by design — NO hidden trailing length args anywhere (declaring
+ * them corrupts reference-PBLAS caller frames; never re-add them).
+ * REAL(KIND=10) ↔ `long double` (x86-64 80-bit extended).
  */
 
 #include "egemm_kernel.h"

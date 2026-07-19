@@ -11,7 +11,7 @@
  * the kind10 esymm overlay.
  *
  * Nesting guard: when qsymm_ is called from inside another routine's parallel
- * region, delegate to qsymm_serial_ and open no team of our own.
+ * region, delegate to qsymm_serial and open no team of our own.
  */
 
 #include "qsymm_kernel.h"

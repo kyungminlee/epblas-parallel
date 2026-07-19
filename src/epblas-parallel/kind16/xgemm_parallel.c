@@ -17,7 +17,7 @@
  * Nesting guard: when xgemm_ is itself called from inside another routine's
  * parallel region (the complex L3 family — xtrsm, xtrmm, xsyrk, … runs
  * xgemm trailing updates inside its own `omp parallel`), it delegates to
- * xgemm_serial_ and opens no region of its own.
+ * xgemm_serial and opens no region of its own.
  */
 
 #include "xgemm_kernel.h"

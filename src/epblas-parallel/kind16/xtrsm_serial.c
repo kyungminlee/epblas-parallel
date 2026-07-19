@@ -4,12 +4,12 @@
  *
  * Owns ALL the numerics shared by the serial and parallel entries: the
  * uplo decode, the conjugate / A_op helpers, the eight range-parameterized
- * solve cores (declared in xtrsm_kernel.h), plus the public `xtrsm_serial_`
- * Fortran entry — the xtrsm_ algorithm forced fully serial. No OpenMP
+ * solve cores (declared in xtrsm_kernel.h), plus the by-value `xtrsm_serial`
+ * entry — the xtrsm_ algorithm forced fully serial. No OpenMP
  * anywhere on this call path; safe to invoke from inside another function's
  * `#pragma omp parallel` region.
  *
- * xtrsm_serial_ drives numerics through the same cores the parallel entry
+ * xtrsm_serial drives numerics through the same cores the parallel entry
  * threads (each called over the full column/row range), so the two paths
  * are bitwise-identical.
  *
@@ -25,9 +25,8 @@
 #include <ctype.h>
 #include <quadmath.h>
 
-/* xtrsv-loop fast path thresholds (mirror xtrsm_parallel.c). */
+/* xtrsv-loop fast path threshold (mirror xtrsm_parallel.c). */
 #define XTRSM_XTRSV_LOOP_M_MIN       128
-#define XTRSM_XTRSV_LOOP_NB_HINT     64
 
 typedef xtrsm_TC TC;
 
@@ -36,17 +35,6 @@ extern void xtrsv_core(
     ptrdiff_t n,
     const TC *restrict a, ptrdiff_t lda,
     TC *restrict x, ptrdiff_t incx);
-
-/* Maximum nrhs at which the xtrsv-loop fast path beats column-parallel
- * xtrsm. In the serial entry no team is available, so the heuristic floors
- * at 1. */
-static ptrdiff_t xtrsm_xtrsv_loop_max(ptrdiff_t m) {
-    const ptrdiff_t max_nt     = 1 - 1;
-    const ptrdiff_t max_amdahl = m / XTRSM_XTRSV_LOOP_NB_HINT;
-    ptrdiff_t v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
-    if (v < 1) v = 1;
-    return v;
-}
 
 char xtrsm_uplo(char c) {
     return blas_up(c);
@@ -234,8 +222,10 @@ void xtrsm_serial(
 
     /* xtrsv-loop fast path (serial: nrhs sequential xtrsv solves). */
     {
-        const ptrdiff_t xv_max = xtrsm_xtrsv_loop_max(m);
-        if (SIDE == 'L' && n >= 1 && n <= xv_max && m >= XTRSM_XTRSV_LOOP_M_MIN) {
+        /* Serial entry: no team is available, so the xtrsv-loop cap
+         * floors at n == 1 (the parallel twin computes a real
+         * min(team, m/NB) bound). */
+        if (SIDE == 'L' && n == 1 && m >= XTRSM_XTRSV_LOOP_M_MIN) {
             if (alpha != ONE) {
                 for (ptrdiff_t j = 0; j < n; ++j)
                     for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;

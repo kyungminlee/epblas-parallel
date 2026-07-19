@@ -4,8 +4,8 @@
  *
  *   qsyr2k_serial.c    The pure single-thread rank-2k update (no OpenMP). Owns
  *                      the SYR2K-specific diagonal-aware writeback kernel and
- *                      the fused serial driver, plus the public Fortran-ABI
- *                      serial entry `qsyr2k_serial_`. Called directly by
+ *                      the fused serial driver, plus the public by-value
+ *                      serial entry `qsyr2k_serial`. Called directly by
  *                      qsyr2k_ as its serial branch / OOM fallback / nesting
  *                      delegate.
  *
@@ -13,7 +13,7 @@
  *                      Fans the same pieces across an OpenMP team (the two
  *                      shared B-packs under `omp single`, each thread an M-row
  *                      slice of the output, UPLO-clipped per N-band). Delegates
- *                      to qsyr2k_serial_ when called from inside another
+ *                      to qsyr2k_serial when called from inside another
  *                      routine's parallel region.
  *
  * SYR2K is a faithful __float128 port of OpenBLAS DSYR2K:

@@ -4,11 +4,11 @@
  * across two translation units:
  *
  *   qsymm_serial.c   — the symm-aware packers + the pure single-thread
- *                      fused driver (`qsymm_serial_`). No `#pragma omp`.
+ *                      fused driver (`qsymm_serial`). No `#pragma omp`.
  *   qsymm_parallel.c — the public Fortran entry `qsymm_`: same fused
  *                      driver fanned across an OpenMP team (M-axis split,
  *                      shared Bp), with an `omp_in_parallel()` guard that
- *                      delegates to `qsymm_serial_` when called from inside
+ *                      delegates to `qsymm_serial` when called from inside
  *                      another routine's parallel region.
  *
  * Structure mirrors the qgemm overlay: qsymm owns NO GEMM math of its own.

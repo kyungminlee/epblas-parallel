@@ -2,7 +2,7 @@
  * xgemm_serial — kind16 complex GEMM (COMPLEX(KIND=16), __complex128),
  * single-thread. This TU owns ALL of the xgemm math: the block plan, the
  * B-panel packer, the per-M-slab level3 worker, and the pure-serial
- * Fortran-ABI entry `xgemm_serial_`. xgemm_parallel.c only orchestrates
+ * by-value entry `xgemm_serial`. xgemm_parallel.c only orchestrates
  * threads over these same pieces.
  *
  * Strategy: faithful port of the OpenBLAS GotoBLAS blocking nest (the ob
@@ -12,10 +12,12 @@
  * overlap libquadmath soft-float call latency. Conjugation is absorbed into
  * the packers (imag sign flip), so the kernel is NN-only.
  *
- * Fortran ABI (xgemm_serial_ mirrors xgemm_ exactly):
- *   - scalars by pointer; complex scalar = __complex128 (re, im)
- *   - character args followed by hidden trailing `size_t` lengths
- *   - COMPLEX(KIND=16) ↔ __complex128; lda/ldb/ldc in complex elements
+ * ABI: xgemm_serial is the by-value core entry (char/ptrdiff_t by value,
+ * alpha/beta by pointer); the public Fortran entry xgemm_ lives in
+ * xgemm_parallel.c behind common/epblas_facade.h. Character args are bare
+ * `char *` by design — NO hidden trailing length args anywhere (declaring
+ * them corrupts reference-PBLAS caller frames; never re-add them).
+ * COMPLEX(KIND=16) ↔ __complex128; lda/ldb/ldc in complex elements.
  * The substrate works on __float128* (interleaved re,im), reached by
  * reinterpreting the __complex128* a/b/c.
  */

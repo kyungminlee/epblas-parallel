@@ -5,14 +5,14 @@
  *
  *   xgemm_serial.c   — all the math: the block plan, the per-M-slab level3
  *                      worker (ICOPY(A) + microkernel), the B-panel packer,
- *                      and the pure-serial Fortran-ABI entry `xgemm_serial_`.
+ *                      and the pure-serial by-value entry `xgemm_serial`.
  *                      No `#pragma omp`. Called directly by the complex L3
  *                      routines (xtrsm, xtrmm, xsyrk, … ) that run xgemm
  *                      trailing updates inside their OWN parallel region.
  *   xgemm_parallel.c — the public Fortran entry `xgemm_`: threading
  *                      orchestration only (M-axis partition with per-thread
  *                      Ap and shared Bp), with an `omp_in_parallel()` guard
- *                      that delegates to `xgemm_serial_` when called from
+ *                      that delegates to `xgemm_serial` when called from
  *                      inside another routine's parallel region.
  *
  * Both drivers run the OpenBLAS GotoBLAS blocking nest over the shared
@@ -23,7 +23,7 @@
  * the plain reference rank-1 loop cannot. This is a faithful port of the ob
  * clone src/epblas-openblas/kind16/xgemm.c.
  *
- * `xgemm_serial_` keeps the exact int Fortran-ABI signature of xgemm_ so
+ * `xgemm_serial` shares the by-value ptrdiff_t core ABI of xgemm_core so
  * callers already inside a parallel region (e.g. xtrsm) swap the symbol name
  * only. The a/b/c/alpha/beta pointers are __complex128 (interleaved re,im);
  * the substrate is reached by reinterpreting them as __float128*.

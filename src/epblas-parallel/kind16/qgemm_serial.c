@@ -26,16 +26,18 @@
  *   Bp: tiled by NR cols. For each NR-panel within (jc..jc+jb),
  *       Bp_panel[p*NR + jj] = op(B)[pc + p, jc + panel_off + jj].
  *
- * Block sizes (env-overridable):
- *   QBLAS_MC=64   panel rows
- *   QBLAS_KC=256  panel depth
- *   QBLAS_NC=512  column band per thread
+ * Block sizes (fixed compile-time constants; see qgemm_choose_blocks):
+ *   MC=64   panel rows (grown adaptively at small K toward the L2 budget)
+ *   KC=256  panel depth
+ *   NC=512  column band per thread
  * Register-tile dims MR=2, NR=2 are compile-time constants (QGEMM_MR/NR).
  *
- * Fortran ABI (qgemm_serial_ mirrors qgemm_ exactly):
- *   - scalars passed by pointer
- *   - character args followed by hidden trailing `size_t` lengths
- *   - REAL(KIND=16) ↔ `__float128`
+ * ABI: qgemm_serial is the by-value core entry (char/ptrdiff_t by value,
+ * alpha/beta by pointer); the public Fortran entry qgemm_ lives in
+ * qgemm_parallel.c behind common/epblas_facade.h. Character args are bare
+ * `char *` by design — NO hidden trailing length args anywhere (declaring
+ * them corrupts reference-PBLAS caller frames; never re-add them).
+ * REAL(KIND=16) ↔ `__float128`.
  */
 
 #include "qgemm_kernel.h"

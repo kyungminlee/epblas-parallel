@@ -37,7 +37,7 @@ typedef etrsm_TR TR;
 #define MR 2
 #define NR 2
 
-static inline void pack_trsm_a_lside_forward(bool upper, bool trans, bool unit,
+static inline void pack_trsm_a_lside_forward(bool trans, bool unit,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const TR *a, ptrdiff_t lda,
                                              ptrdiff_t offset, TR *bp)
@@ -51,7 +51,7 @@ static inline void pack_trsm_a_lside_forward(bool upper, bool trans, bool unit,
     }
 }
 
-static inline void pack_trsm_a_lside_backward(bool upper, bool trans, bool unit,
+static inline void pack_trsm_a_lside_backward(bool trans, bool unit,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const TR *a, ptrdiff_t lda,
                                               ptrdiff_t offset, TR *bp)
@@ -64,7 +64,7 @@ static inline void pack_trsm_a_lside_backward(bool upper, bool trans, bool unit,
     }
 }
 
-static inline void pack_trsm_a_rside_forward(bool upper, bool trans, bool unit,
+static inline void pack_trsm_a_rside_forward(bool trans, bool unit,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const TR *a, ptrdiff_t lda,
                                              ptrdiff_t offset, TR *bp)
@@ -78,7 +78,7 @@ static inline void pack_trsm_a_rside_forward(bool upper, bool trans, bool unit,
     }
 }
 
-static inline void pack_trsm_a_rside_backward(bool upper, bool trans, bool unit,
+static inline void pack_trsm_a_rside_backward(bool trans, bool unit,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const TR *a, ptrdiff_t lda,
                                               ptrdiff_t offset, TR *bp)
@@ -123,7 +123,7 @@ void etrsm_L_band(bool upper, bool trans, bool unit,
                  * In trsm_L.c the packed shape is (min_l, min_i) with the
                  * is-iteration packing only `min_i` rows at a time of the
                  * `min_l × min_l` diagonal block. */
-                pack_trsm_a_lside_forward(upper, trans, unit,
+                pack_trsm_a_lside_forward(trans, unit,
                                           min_l, min_i,
                                           &a[(size_t)ls + (size_t)ls * lda], lda,
                                           /*offset=*/0, Ap);
@@ -147,7 +147,7 @@ void etrsm_L_band(bool upper, bool trans, bool unit,
                 for (ptrdiff_t is = ls + min_i; is < ls + min_l; is += MC) {
                     min_i = ls + min_l - is;
                     if (min_i > MC) min_i = MC;
-                    pack_trsm_a_lside_forward(upper, trans, unit,
+                    pack_trsm_a_lside_forward(trans, unit,
                                               min_l, min_i,
                                               !trans ? &a[(size_t)is + (size_t)ls * lda]
                                                      : &a[(size_t)ls + (size_t)is * lda],
@@ -190,7 +190,7 @@ void etrsm_L_band(bool upper, bool trans, bool unit,
                  *   a + (start_is + (ls - min_l)*lda)   [for !TRANS / IUTCOPY]
                  *   a + ((ls - min_l) + start_is*lda)   [for TRANS / ILNCOPY]
                  * with offset = start_is - (ls - min_l). */
-                pack_trsm_a_lside_backward(upper, trans, unit,
+                pack_trsm_a_lside_backward(trans, unit,
                                            min_l, min_i,
                                            !trans
                                              ? &a[(size_t)start_is + (size_t)(ls - min_l) * lda]
@@ -215,7 +215,7 @@ void etrsm_L_band(bool upper, bool trans, bool unit,
                 for (ptrdiff_t is = start_is - MC; is >= ls - min_l; is -= MC) {
                     min_i = ls - is;
                     if (min_i > MC) min_i = MC;
-                    pack_trsm_a_lside_backward(upper, trans, unit,
+                    pack_trsm_a_lside_backward(trans, unit,
                                                min_l, min_i,
                                                !trans
                                                  ? &a[(size_t)is + (size_t)(ls - min_l) * lda]
@@ -327,7 +327,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
 
                 /* TRSM_O*COPY of A diagonal block. */
-                pack_trsm_a_rside_forward(upper, trans, unit,
+                pack_trsm_a_rside_forward(trans, unit,
                                           min_l, min_l,
                                           &a[(size_t)ls + (size_t)ls * lda], lda,
                                           /*offset=*/0, sb);
@@ -438,7 +438,7 @@ void etrsm_R_band(bool upper, bool trans, bool unit,
                  * sb offset = min_l * (min_j - js + ls) — packs diag
                  * block at the tail of sb so the off-diagonal pack to
                  * its LEFT can be sb + 0. */
-                pack_trsm_a_rside_backward(upper, trans, unit,
+                pack_trsm_a_rside_backward(trans, unit,
                                            min_l, min_l,
                                            &a[(size_t)ls + (size_t)ls * lda], lda,
                                            /*offset=*/0,

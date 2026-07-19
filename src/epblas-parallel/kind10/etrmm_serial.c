@@ -326,7 +326,6 @@ void etrmm_R_band(bool upper, bool trans, bool unit,
                         TR *b, ptrdiff_t ldb,
                         TR *Ap, TR *Bp)
 {
-    (void)MC;
     const TR dp1 = 1.0L;
     ptrdiff_t m_band = m_hi - m_lo;
     if (m_band <= 0) return;

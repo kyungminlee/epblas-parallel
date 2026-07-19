@@ -5,12 +5,12 @@
  * Owns ALL the numerics shared by the serial and parallel entries: the
  * char decode, the file-static conj / A_op helpers (only the cores use
  * them), the range-parameterized compute cores (declared in
- * xtrmm_kernel.h), and the public `xtrmm_serial_` Fortran entry. No OpenMP
+ * xtrmm_kernel.h), and the by-value `xtrmm_serial` entry. No OpenMP
  * anywhere on this call path — safe to invoke from inside another
  * function's `#pragma omp parallel` region; callers are responsible for
  * partitioning if they want thread parallelism.
  *
- * Both xtrmm_serial_ and the parallel xtrmm_ drive numerics through the same
+ * Both xtrmm_serial and the parallel xtrmm_ drive numerics through the same
  * cores over identical [start,end) ranges, so the two paths are
  * bitwise-identical.
  */

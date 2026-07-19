@@ -6,10 +6,10 @@
  *                     Owns the uplo decode, the conjugate / A_op helpers,
  *                     all eight range-parameterized solve cores (declared
  *                     below; the trans/conj variants take a conj_flag),
- *                     and the public `xtrsm_serial_` entry — the xtrsm_
+ *                     and the public `xtrsm_serial` entry — the xtrsm_
  *                     algorithm forced fully serial. Cores are called
  *                     directly by the parallel entries' threaded wrappers,
- *                     and by xtrsm_serial_ over the full range.
+ *                     and by xtrsm_serial over the full range.
  *
  *   xtrsm_parallel.c  The public Fortran entries `xtrsm_` (column/row
  *                     parallel, one fork-join, with the xtrsv-loop fast

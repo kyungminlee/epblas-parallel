@@ -5,16 +5,16 @@
  *   qtrsm_serial.c    The pure single-thread triangular solve (no OpenMP).
  *                     Owns the uplo decode, all eight range-parameterized
  *                     solve cores (declared below), and the public
- *                     `qtrsm_serial_` entry — the qtrsm_ algorithm forced
+ *                     `qtrsm_serial` entry — the qtrsm_ algorithm forced
  *                     fully serial. Cores are called directly by the
  *                     parallel entries' threaded wrappers, and by
- *                     qtrsm_serial_ over the full [0,N)/[0,M) range.
+ *                     qtrsm_serial over the full [0,N)/[0,M) range.
  *
  *   qtrsm_parallel.c  The public Fortran entries `qtrsm_` (column/row
  *                     parallel, one fork-join, with the qtrsv-loop fast
  *                     path) and `qtrsm_blocked_` (LAPACK-blocked inside a
  *                     SINGLE parallel region, driving trailing updates
- *                     through qgemm_serial_). Threading orchestration only;
+ *                     through qgemm_serial). Threading orchestration only;
  *                     all numerics live in the shared cores.
  *
  * The within-core solve is loop-carried (serial), but DIFFERENT columns

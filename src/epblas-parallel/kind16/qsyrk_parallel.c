@@ -21,7 +21,7 @@
  * shapes.
  *
  * Nesting guard: when qsyrk_ is called from inside another routine's parallel
- * region, delegate to qsyrk_serial_ and open no team of our own — calling only
+ * region, delegate to qsyrk_serial and open no team of our own — calling only
  * the *serial* kernel primitives means no nested team either way.
  */
 

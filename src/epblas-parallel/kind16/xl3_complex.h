@@ -111,7 +111,7 @@ void qblas_xgemm_beta(ptrdiff_t m, ptrdiff_t n,
                       __float128 beta_r, __float128 beta_i,
                       __float128 *c, ptrdiff_t ldc);
 
-/* ── Env-var block-size overrides (lazy, idempotent) ──────────────── */
+/* ── Block-size constants (compile-time QBLAS_XGEMM_GEMM_P/Q/R) ────── */
 void qblas_xgemm_blocks(ptrdiff_t *mc, ptrdiff_t *kc, ptrdiff_t *nc);
 
 /* ── SYMM-aware packers (complex) ────────────────────────────────────

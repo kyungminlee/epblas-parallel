@@ -5,7 +5,7 @@
  *   qsyrk_serial.c    The pure single-thread rank-k update (no OpenMP). Owns
  *                     the SYRK-specific math — the triangular β pre-pass and
  *                     the diagonal-aware writeback kernel — plus the public
- *                     Fortran-ABI serial entry `qsyrk_serial_`. Called directly
+ *                     by-value serial entry `qsyrk_serial`. Called directly
  *                     by qsyrk_ as its serial branch / OOM fallback / nesting
  *                     delegate.
  *
@@ -13,7 +13,7 @@
  *                     Fans the same pieces across an OpenMP team (shared Bp
  *                     packed under `omp single`, each thread an M-row slice
  *                     of the output, UPLO-clipped per N-band). Delegates to
- *                     qsyrk_serial_ when called from inside another routine's
+ *                     qsyrk_serial when called from inside another routine's
  *                     parallel region.
  *
  * SYRK is a faithful __float128 port of OpenBLAS DSYRK: C := alpha·A·A^T +

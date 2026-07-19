@@ -7,7 +7,7 @@
  *                     OpenMP). Owns the char decode, the conj/A_op helpers
  *                     (file-static — only the cores use them), the
  *                     range-parameterized compute cores (declared here),
- *                     and the public `xtrmm_serial_` Fortran entry that
+ *                     and the public `xtrmm_serial` by-value entry that
  *                     dispatches to a core over the FULL [0,N) / [0,M)
  *                     range.
  *

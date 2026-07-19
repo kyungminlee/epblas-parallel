@@ -16,8 +16,8 @@
  *     of the ic loop.
  *
  * Fortran ABI: name lowercased + trailing underscore; scalars by pointer;
- * character args followed by hidden trailing size_t lengths; REAL(KIND=16)
- * ↔ __float128.
+ * character args are bare char* — no hidden trailing lengths (see
+ * common/epblas_facade.h; never re-add them); REAL(KIND=16) ↔ __float128.
  */
 
 #include "qgemm_kernel.h"

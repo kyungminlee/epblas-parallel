@@ -4,12 +4,12 @@
  *
  * Owns ALL the numerics shared by the serial and parallel entries: the
  * uplo-char decode and the eight range-parameterized compute cores
- * (declared in qtrmm_kernel.h), plus the public `qtrmm_serial_` Fortran
- * entry. No OpenMP anywhere on this call path — safe to invoke from inside
+ * (declared in qtrmm_kernel.h), plus the by-value `qtrmm_serial` entry.
+ * No OpenMP anywhere on this call path — safe to invoke from inside
  * another function's `#pragma omp parallel` region; callers are responsible
  * for partitioning if they want thread parallelism.
  *
- * Both qtrmm_serial_ and the parallel qtrmm_ drive numerics through the same
+ * Both qtrmm_serial and the parallel qtrmm_ drive numerics through the same
  * cores over identical [start,end) ranges, so the two paths are
  * bitwise-identical.
  */

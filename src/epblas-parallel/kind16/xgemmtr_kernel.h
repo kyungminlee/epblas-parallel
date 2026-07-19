@@ -4,8 +4,8 @@
  *
  *   xgemmtr_serial.c    The pure single-thread complex triangular GEMM update
  *                       (no OpenMP). Owns the per-column compute cores and the
- *                       trans-char decode, plus the public `xgemmtr_serial_`
- *                       Fortran entry. Safe to call from inside another
+ *                       trans-char decode, plus the public `xgemmtr_serial`
+ *                       by-value entry. Safe to call from inside another
  *                       routine's own parallel region.
  *
  *   xgemmtr_parallel.c  The public Fortran entry `xgemmtr_` — threading

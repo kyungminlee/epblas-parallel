@@ -35,7 +35,7 @@ static ptrdiff_t round_up(ptrdiff_t v, ptrdiff_t m) { return ((v + m - 1) / m) *
 
 
 /* ── Complex TRSM packer dispatch (mirrors qtrsm.c's real twin). */
-static inline void pack_trsm_a_lside_forward(bool upper, bool trans, bool unit, bool conj,
+static inline void pack_trsm_a_lside_forward(bool trans, bool unit, bool conj,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -47,7 +47,7 @@ static inline void pack_trsm_a_lside_forward(bool upper, bool trans, bool unit, 
     }
 }
 
-static inline void pack_trsm_a_lside_backward(bool upper, bool trans, bool unit, bool conj,
+static inline void pack_trsm_a_lside_backward(bool trans, bool unit, bool conj,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -59,7 +59,7 @@ static inline void pack_trsm_a_lside_backward(bool upper, bool trans, bool unit,
     }
 }
 
-static inline void pack_trsm_a_rside_forward(bool upper, bool trans, bool unit, bool conj,
+static inline void pack_trsm_a_rside_forward(bool trans, bool unit, bool conj,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -71,7 +71,7 @@ static inline void pack_trsm_a_rside_forward(bool upper, bool trans, bool unit, 
     }
 }
 
-static inline void pack_trsm_a_rside_backward(bool upper, bool trans, bool unit, bool conj,
+static inline void pack_trsm_a_rside_backward(bool trans, bool unit, bool conj,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -95,7 +95,7 @@ static void trsm_L_band(bool upper, bool trans, bool unit, bool conj,
     const T dm1r = -1.0Q, dm1i = 0.0Q;
     ptrdiff_t m = M;
     const bool forward = (!upper && !trans) || (upper && trans);
-    const bool kt = forward ? 1 : 0;
+    const bool kt = forward;
 
     for (ptrdiff_t js = js0; js < js1; js += NC) {
         ptrdiff_t min_j = js1 - js;
@@ -108,7 +108,7 @@ static void trsm_L_band(bool upper, bool trans, bool unit, bool conj,
                 ptrdiff_t min_i = min_l;
                 if (min_i > MC) min_i = MC;
 
-                pack_trsm_a_lside_forward(upper, trans, unit, conj,
+                pack_trsm_a_lside_forward(trans, unit, conj,
                                           min_l, min_i,
                                           &a[(size_t)ls * 2 + (size_t)ls * lda * 2], lda,
                                           0, Ap);
@@ -129,7 +129,7 @@ static void trsm_L_band(bool upper, bool trans, bool unit, bool conj,
                 for (ptrdiff_t is = ls + min_i; is < ls + min_l; is += MC) {
                     min_i = ls + min_l - is;
                     if (min_i > MC) min_i = MC;
-                    pack_trsm_a_lside_forward(upper, trans, unit, conj,
+                    pack_trsm_a_lside_forward(trans, unit, conj,
                                               min_l, min_i,
                                               !trans
                                                 ? &a[(size_t)is * 2 + (size_t)ls * lda * 2]
@@ -167,7 +167,7 @@ static void trsm_L_band(bool upper, bool trans, bool unit, bool conj,
                 ptrdiff_t min_i = ls - start_is;
                 if (min_i > MC) min_i = MC;
 
-                pack_trsm_a_lside_backward(upper, trans, unit, conj,
+                pack_trsm_a_lside_backward(trans, unit, conj,
                                            min_l, min_i,
                                            !trans
                                              ? &a[(size_t)start_is * 2 + (size_t)(ls - min_l) * lda * 2]
@@ -191,7 +191,7 @@ static void trsm_L_band(bool upper, bool trans, bool unit, bool conj,
                 for (ptrdiff_t is = start_is - MC; is >= ls - min_l; is -= MC) {
                     min_i = ls - is;
                     if (min_i > MC) min_i = MC;
-                    pack_trsm_a_lside_backward(upper, trans, unit, conj,
+                    pack_trsm_a_lside_backward(trans, unit, conj,
                                                min_l, min_i,
                                                !trans
                                                  ? &a[(size_t)is * 2 + (size_t)(ls - min_l) * lda * 2]
@@ -292,7 +292,7 @@ static void trsm_R_band(bool upper, bool trans, bool unit, bool conj,
                 qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
                                   &b[(size_t)m_lo * 2 + (size_t)ls * ldb * 2], ldb, sa);
 
-                pack_trsm_a_rside_forward(upper, trans, unit, conj,
+                pack_trsm_a_rside_forward(trans, unit, conj,
                                           min_l, min_l,
                                           &a[(size_t)ls * 2 + (size_t)ls * lda * 2], lda,
                                           0, sb);
@@ -392,7 +392,7 @@ static void trsm_R_band(bool upper, bool trans, bool unit, bool conj,
                 qblas_xgemm_tcopy(min_l, min_i, /*conj=*/0,
                                   &b[(size_t)m_lo * 2 + (size_t)ls * ldb * 2], ldb, sa);
 
-                pack_trsm_a_rside_backward(upper, trans, unit, conj,
+                pack_trsm_a_rside_backward(trans, unit, conj,
                                            min_l, min_l,
                                            &a[(size_t)ls * 2 + (size_t)ls * lda * 2], lda,
                                            0,

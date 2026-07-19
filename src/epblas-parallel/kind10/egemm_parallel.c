@@ -24,7 +24,8 @@
  * Fortran ABI:
  *   - subroutine name lowercased + trailing underscore: `egemm_`
  *   - scalars passed by pointer
- *   - character args followed by hidden trailing `size_t` lengths
+ *   - character args are bare `char *` — NO hidden trailing length args
+ *     (see common/epblas_facade.h; never re-add them)
  *   - REAL(KIND=10) ↔ `long double` (x86-64 80-bit extended)
  */
 

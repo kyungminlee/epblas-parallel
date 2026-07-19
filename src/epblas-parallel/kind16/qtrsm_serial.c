@@ -21,9 +21,8 @@
 #include <ctype.h>
 #include <quadmath.h>
 
-/* qtrsv-loop fast path thresholds (mirror qtrsm_parallel.c). */
+/* qtrsv-loop fast path threshold (mirror qtrsm_parallel.c). */
 #define QTRSM_QTRSV_LOOP_M_MIN       128
-#define QTRSM_QTRSV_LOOP_NB_HINT     64
 
 typedef qtrsm_TR TR;
 
@@ -32,17 +31,6 @@ extern void qtrsv_core(
     ptrdiff_t n,
     const TR *restrict a, ptrdiff_t lda,
     TR *restrict x, ptrdiff_t incx);
-
-/* Maximum nrhs at which the qtrsv-loop fast path beats column-parallel
- * qtrsm. In the serial entry no team is available, so the heuristic floors
- * at 1. */
-static ptrdiff_t qtrsm_qtrsv_loop_max(ptrdiff_t m) {
-    const ptrdiff_t max_nt     = 1 - 1;
-    const ptrdiff_t max_amdahl = m / QTRSM_QTRSV_LOOP_NB_HINT;
-    ptrdiff_t v = (max_nt < max_amdahl) ? max_nt : max_amdahl;
-    if (v < 1) v = 1;
-    return v;
-}
 
 char qtrsm_uplo(char c) {
     return blas_up(c);
@@ -217,8 +205,10 @@ void qtrsm_serial(
 
     /* qtrsv-loop fast path (serial: nrhs sequential qtrsv solves). */
     {
-        const ptrdiff_t xv_max = qtrsm_qtrsv_loop_max(m);
-        if (SIDE == 'L' && n >= 1 && n <= xv_max && m >= QTRSM_QTRSV_LOOP_M_MIN) {
+        /* Serial entry: no team is available, so the qtrsv-loop cap
+         * floors at n == 1 (the parallel twin computes a real
+         * min(team, m/NB) bound). */
+        if (SIDE == 'L' && n == 1 && m >= QTRSM_QTRSV_LOOP_M_MIN) {
             if (alpha != 1.0Q) {
                 for (ptrdiff_t j = 0; j < n; ++j)
                     for (ptrdiff_t i = 0; i < m; ++i) B_(i, j) *= alpha;

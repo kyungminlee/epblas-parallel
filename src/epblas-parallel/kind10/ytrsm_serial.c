@@ -12,10 +12,12 @@
  * would open a nested team and trip the libgomp barrier wedge (memory
  * project-etrsm-omp4-wedge).
  *
- * Fortran ABI (ytrsm_serial mirrors ytrsm_ exactly):
- *   - scalars by pointer; complex scalar = pointer to (re, im) pair
- *   - character args followed by hidden trailing `size_t` lengths
- *   - COMPLEX(KIND=10) ↔ `_Complex long double` (32 bytes on x86-64)
+ * ABI: ytrsm_serial is the by-value core entry (char/ptrdiff_t by value,
+ * alpha by pointer); the public Fortran entry ytrsm_ lives in
+ * ytrsm_parallel.c behind common/epblas_facade.h. Character args are bare
+ * `char *` by design — NO hidden trailing length args anywhere (declaring
+ * them corrupts reference-PBLAS caller frames; never re-add them).
+ * COMPLEX(KIND=10) ↔ `_Complex long double` (32 bytes on x86-64).
  */
 
 #include "ytrsm_kernel.h"

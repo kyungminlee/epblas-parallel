@@ -5,10 +5,10 @@
  * Owns ALL the numerics shared by the serial and parallel entries: the
  * trans-char decode and the two per-column cores (a beta-only pass and the
  * full compute pass, declared in qgemmtr_kernel.h), plus the public
- * `qgemmtr_serial_` Fortran entry. No OpenMP anywhere on this call path —
+ * by-value `qgemmtr_serial` entry. No OpenMP anywhere on this call path —
  * safe to invoke from inside another function's `#pragma omp parallel` region.
  *
- * Both qgemmtr_serial_ and the parallel qgemmtr_ drive numerics through these
+ * Both qgemmtr_serial and the parallel qgemmtr_ drive numerics through these
  * cores, so the two paths are bitwise-identical.
  */
 

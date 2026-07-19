@@ -131,28 +131,22 @@ set(_split_sources
     xher2k_serial.c
 )
 
-set(_routines "")
-foreach(_k ${_kernels})
-    string(REGEX REPLACE "\\.c$" "" _r "${_k}")
-    list(APPEND _routines "${_r}")
-endforeach()
+epblas_kernel_routines(_routines ${_kernels})
 list(APPEND _routines qgemm xgemm qgemmtr xgemmtr qtrsm xtrsm qtrmm xtrmm
                       qsyrk xsyrk xherk qsymm xsymm xhemm qsyr2k xsyr2k xher2k)
 set(EPBLAS_PARALLEL_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
-add_library(${LIB_PREFIX}blas_parallel STATIC ${_kernels} ${_split_sources})
-add_library(epblas-parallel::${LIB_PREFIX}blas_parallel ALIAS ${LIB_PREFIX}blas_parallel)
-
-target_compile_features(${LIB_PREFIX}blas_parallel PRIVATE c_std_99)
-target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-    -O3
-    -ffp-contract=fast
-    -fcx-fortran-rules  # see note in kind10/CMakeLists.txt
+# Archive + alias + c_std_99 + [-O3 <flags>] + guarded -march, via the
+# shared helper (cmake/EpblasKindHelpers.cmake).
+epblas_add_kind_archive(${LIB_PREFIX}blas_parallel
+    NAMESPACE epblas-parallel
+    LANGUAGE C
+    MARCH "${EPBLAS_PARALLEL_MARCH}"
+    SOURCES ${_kernels} ${_split_sources}
+    COMPILE_OPTIONS
+        -ffp-contract=fast
+        -fcx-fortran-rules  # see note in kind10/CMakeLists.txt
 )
-if(NOT "${EPBLAS_PARALLEL_MARCH}" STREQUAL "")
-    target_compile_options(${LIB_PREFIX}blas_parallel PRIVATE
-        -march=${EPBLAS_PARALLEL_MARCH})
-endif()
 
 # qtrmm's RLT inner AXPY loop landed at a 32B-chunk offset of 0x18 and
 # straddled a fetch boundary; the instruction-identical gfortran reference
