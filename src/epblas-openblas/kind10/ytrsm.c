@@ -28,8 +28,10 @@
  */
 
 #include "eblas_l3_complex.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -44,7 +46,7 @@ static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
 
 
 /* ── Complex TRSM packer dispatch (mirrors etrsm.c's real twin). */
-static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit, int conj,
+static inline void pack_trsm_a_lside_forward(int trans, int unit, int conj,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -56,7 +58,7 @@ static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit, int
     }
 }
 
-static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit, int conj,
+static inline void pack_trsm_a_lside_backward(int trans, int unit, int conj,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -68,7 +70,7 @@ static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit, in
     }
 }
 
-static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit, int conj,
+static inline void pack_trsm_a_rside_forward(int trans, int unit, int conj,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -80,7 +82,7 @@ static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit, int
     }
 }
 
-static inline void pack_trsm_a_rside_backward(int upper, int trans, int unit, int conj,
+static inline void pack_trsm_a_rside_backward(int trans, int unit, int conj,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -117,7 +119,7 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                 int min_i = min_l;
                 if (min_i > MC) min_i = MC;
 
-                pack_trsm_a_lside_forward(upper, trans, unit, conj,
+                pack_trsm_a_lside_forward(trans, unit, conj,
                                           min_l, min_i,
                                           &a[(size_t)ls * 2 + (size_t)ls * lda * 2], lda,
                                           0, Ap);
@@ -138,7 +140,7 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                 for (int is = ls + min_i; is < ls + min_l; is += MC) {
                     min_i = ls + min_l - is;
                     if (min_i > MC) min_i = MC;
-                    pack_trsm_a_lside_forward(upper, trans, unit, conj,
+                    pack_trsm_a_lside_forward(trans, unit, conj,
                                               min_l, min_i,
                                               !trans
                                                 ? &a[(size_t)is * 2 + (size_t)ls * lda * 2]
@@ -176,7 +178,7 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                 int min_i = ls - start_is;
                 if (min_i > MC) min_i = MC;
 
-                pack_trsm_a_lside_backward(upper, trans, unit, conj,
+                pack_trsm_a_lside_backward(trans, unit, conj,
                                            min_l, min_i,
                                            !trans
                                              ? &a[(size_t)start_is * 2 + (size_t)(ls - min_l) * lda * 2]
@@ -200,7 +202,7 @@ static void trsm_L_band(int upper, int trans, int unit, int conj,
                 for (int is = start_is - MC; is >= ls - min_l; is -= MC) {
                     min_i = ls - is;
                     if (min_i > MC) min_i = MC;
-                    pack_trsm_a_lside_backward(upper, trans, unit, conj,
+                    pack_trsm_a_lside_backward(trans, unit, conj,
                                                min_l, min_i,
                                                !trans
                                                  ? &a[(size_t)is * 2 + (size_t)(ls - min_l) * lda * 2]
@@ -301,7 +303,7 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                 eblas_ygemm_tcopy(min_l, min_i, /*conj=*/0,
                                   &b[(size_t)m_lo * 2 + (size_t)ls * ldb * 2], ldb, sa);
 
-                pack_trsm_a_rside_forward(upper, trans, unit, conj,
+                pack_trsm_a_rside_forward(trans, unit, conj,
                                           min_l, min_l,
                                           &a[(size_t)ls * 2 + (size_t)ls * lda * 2], lda,
                                           0, sb);
@@ -401,7 +403,7 @@ static void trsm_R_band(int upper, int trans, int unit, int conj,
                 eblas_ygemm_tcopy(min_l, min_i, /*conj=*/0,
                                   &b[(size_t)m_lo * 2 + (size_t)ls * ldb * 2], ldb, sa);
 
-                pack_trsm_a_rside_backward(upper, trans, unit, conj,
+                pack_trsm_a_rside_backward(trans, unit, conj,
                                            min_l, min_l,
                                            &a[(size_t)ls * 2 + (size_t)ls * lda * 2], lda,
                                            0,
@@ -476,11 +478,11 @@ void ytrsm_(
 
     if (M == 0 || N == 0) return;
 
-    /* Pre-scale B by alpha (complex). */
-    if (alpha_r != 1.0L || alpha_i != 0.0L) {
+    /* alpha==0: zeroing B is the entire operation. */
+    if (alpha_r == 0.0L && alpha_i == 0.0L) {
         eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha_r, alpha_i, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alpha_r == 0.0L && alpha_i == 0.0L) return;
 
     int MC0, KC, NC;
     eblas_ygemm_blocks(&MC0, &KC, &NC);
@@ -488,7 +490,6 @@ void ytrsm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T) * 2);
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -515,9 +516,16 @@ void ytrsm_(
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
 
+    /* All pack allocations happen BEFORE the in-place alpha pre-scale
+     * of B so a failure can never leave B scaled but not solved;
+     * benchmark-reference policy is to abort() loudly on failure. */
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "ytrsm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -526,11 +534,18 @@ void ytrsm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "ytrsm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* Pre-scale B by alpha (complex) — after every allocation has
+     * succeeded. */
+    if (alpha_r != 1.0L || alpha_i != 0.0L) {
+        eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha_r, alpha_i, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP

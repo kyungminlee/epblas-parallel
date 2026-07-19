@@ -8,7 +8,7 @@
 
 typedef _Complex long double C;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
 static void swap_kernel(ptrdiff_t n, C *x, ptrdiff_t incx,
                                      C *y, ptrdiff_t incy)

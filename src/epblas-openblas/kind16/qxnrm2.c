@@ -35,7 +35,7 @@ static void blue_init(void)
     blue_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T q_abs(T x) { return __builtin_fabsf128(x); }
 
 T qxnrm2_(const int *N, const C *x, const int *INCX)
 {
@@ -53,7 +53,7 @@ T qxnrm2_(const int *N, const C *x, const int *INCX)
     for (ptrdiff_t i = 0; i < n; ++i) {
         const T *p = (const T *)(x + ix);
         for (int c = 0; c < 2; ++c) {
-            T ax = ldabs(p[c]);
+            T ax = q_abs(p[c]);
             if (ax > btbig) {
                 T t = ax * bsbig;
                 abig += t * t;

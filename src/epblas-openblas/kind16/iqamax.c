@@ -12,24 +12,25 @@
 
 typedef __float128 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L1
 
-static inline T t_abs(T a) { return a < 0 ? -a : a; }
+static inline T q_abs(T a) { return __builtin_fabsf128(a); }
 
 static void iamax_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx,
                          ptrdiff_t *out_idx, T *out_max)
 {
     /* 0-based index within this slice; caller converts to 1-based global */
-    T m = t_abs(x[0]);
+    T m = q_abs(x[0]);
     ptrdiff_t imax = 0;
     if (incx == 1) {
         for (ptrdiff_t i = 1; i < n; ++i) {
-            T a = t_abs(x[i]);
+            T a = q_abs(x[i]);
             if (a > m) { m = a; imax = i; }
         }
     } else {
         for (ptrdiff_t i = 1; i < n; ++i) {
-            T a = t_abs(x[i*incx]);
+            T a = q_abs(x[i*incx]);
             if (a > m) { m = a; imax = i; }
         }
     }
@@ -49,9 +50,9 @@ int iqamax_(const int *N, const T *x, const int *INCX)
     if (n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            ptrdiff_t pidx[64]; T pmax[64];
-            for (int i = 0; i < 64; ++i) { pidx[i] = -1; pmax[i] = 0.0Q; }
+            if (nthreads > QBLAS_L1_MAX_THREADS) nthreads = QBLAS_L1_MAX_THREADS;
+            ptrdiff_t pidx[QBLAS_L1_MAX_THREADS]; T pmax[QBLAS_L1_MAX_THREADS];
+            for (int i = 0; i < QBLAS_L1_MAX_THREADS; ++i) { pidx[i] = -1; pmax[i] = 0.0Q; }
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

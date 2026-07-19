@@ -38,7 +38,8 @@
 
 typedef __float128 T;
 
-#define MULTI_THREAD_MINIMAL 4096   /* m*n threshold for main path */
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L2_MN   /* m*n threshold for main path */
 #define SPLIT_X_MN_MIN       9216   /* matches OpenBLAS 24*24*GEMM_THRESH^2 */
 #define Y_DUMMY_NUM          1024   /* element cap on m*nthreads in split_x */
 

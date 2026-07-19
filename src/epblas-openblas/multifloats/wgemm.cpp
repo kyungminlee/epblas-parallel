@@ -17,8 +17,9 @@
  *       zgemm_beta.c            → mblas_ygemm_beta
  *
  * Differences from upstream ZGEMM:
- *   - No SIMD. x86_64 has no AVX path for 80-bit multifloats::float64x2 complex;
- *     the reference scalar `zgemmkernel_2x2.c` is the kernel template.
+ *   - No SIMD, by design: deliberately scalar retype (AVX2 SoA
+ *     double-double paths exist elsewhere in this repo); the reference
+ *     scalar `zgemmkernel_2x2.c` is the kernel template.
  *   - No `blas_queue` SMP runtime. Single-level OpenMP parallelism
  *     over the M-axis inside the (jc, pc) blocking — each thread
  *     keeps a private Ap buffer; Bp is shared and packed once per
@@ -33,13 +34,15 @@
  * Fortran ABI:
  *   subroutine wgemm(transa, transb, m, n, k, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args with trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - alpha, beta are COMPLEX(KIND=10): 2 multifloats::float64x2s each (re, im)
  *   - a, b, c are COMPLEX(KIND=10) arrays (interleaved re,im)
  *   - lda, ldb, ldc are in COMPLEX(KIND=10) elements
  */
 
 #include "mblas_l3_complex.h"
+#include "mblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -138,7 +141,7 @@ extern "C" void wgemm_(
      * Complex `multifloats::float64x2` is 2 * sizeof(multifloats::float64x2) = 32 B/element. */
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = MBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)(2 * sizeof(T)));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;

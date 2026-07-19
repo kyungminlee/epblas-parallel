@@ -5,7 +5,7 @@
  *   C := alpha * A^T * A + beta * C    (trans='T', A is K×N)
  *
  * Complex SYMMETRIC variant — no conjugation, A == A^T (NOT Hermitian).
- * HERK is a separate routine (yherk — task #65). Only the UPLO triangle
+ * HERK is a separate routine (wherk). Only the UPLO triangle
  * of C is read or written.
  *
  * Port source: OpenBLAS.
@@ -26,6 +26,7 @@
  */
 
 #include "mblas_l3_complex.h"
+#include "mblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -70,7 +71,7 @@ extern "C" void wsyrk_(
 
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = MBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K * 2L * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;

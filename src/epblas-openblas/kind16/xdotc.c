@@ -9,7 +9,8 @@
 
 typedef __complex128 C;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L1
 
 static inline C cconjq(C z)
 {
@@ -45,9 +46,9 @@ C xdotc_(const int *N, const C *x, const int *INCX,
     if (incx != 0 && incy != 0 && n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            C partial[64];
-            for (int i = 0; i < 64; ++i) partial[i] = (__complex128)(0.0Q);
+            if (nthreads > QBLAS_L1_MAX_THREADS) nthreads = QBLAS_L1_MAX_THREADS;
+            C partial[QBLAS_L1_MAX_THREADS];
+            for (int i = 0; i < QBLAS_L1_MAX_THREADS; ++i) partial[i] = (__complex128)(0.0Q);
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

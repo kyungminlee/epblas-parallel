@@ -29,15 +29,18 @@
  *
  * Fortran ABI:
  *   subroutine ytrmm(side, uplo, transa, diag, m, n, alpha, a, lda, b, ldb)
- *   - character args with trailing hidden size_t lengths (gfortran)
+ *   - character args are passed as bare char* (hidden gfortran length
+ *     args deliberately omitted — never re-add them)
  *   - alpha is COMPLEX(KIND=10): 2 long doubles (re, im)
  *   - a, b are COMPLEX(KIND=10) arrays (interleaved re,im)
  *   - lda, ldb are in COMPLEX(KIND=10) elements
  */
 
 #include "eblas_l3_complex.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -301,7 +304,6 @@ static void trmm_R_band(int upper, int trans, int unit, int conj,
                         T *b, int ldb,
                         T *Ap, T *Bp)
 {
-    (void)MC;
     const T dp1r = 1.0L, dp1i = 0.0L;
     int m_band = m_hi - m_lo;
     if (m_band <= 0) return;
@@ -557,11 +559,12 @@ void ytrmm_(
 
     if (M == 0 || N == 0) return;
 
-    /* alpha pre-scale of B (mirrors interface/trsm.c TRMM macro path). */
-    if (!(alphar == 1.0L && alphai == 0.0L)) {
+    /* alpha==0: zeroing B is the entire operation (mirrors
+     * interface/trsm.c TRMM macro path's early return). */
+    if (alphar == 0.0L && alphai == 0.0L) {
         eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alphar, alphai, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alphar == 0.0L && alphai == 0.0L) return;
 
     int MC0, KC, NC;
     eblas_ygemm_blocks(&MC0, &KC, &NC);
@@ -569,7 +572,6 @@ void ytrmm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * 2L * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -596,9 +598,16 @@ void ytrmm_(
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
 
+    /* All pack allocations happen BEFORE the in-place alpha pre-scale
+     * of B so a failure can never leave B scaled but not transformed;
+     * benchmark-reference policy is to abort() loudly on failure. */
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "ytrmm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -607,11 +616,18 @@ void ytrmm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "ytrmm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* alpha pre-scale of B (mirrors interface/trsm.c TRMM macro path) —
+     * after every allocation has succeeded. */
+    if (!(alphar == 1.0L && alphai == 0.0L)) {
+        eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alphar, alphai, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP

@@ -22,8 +22,10 @@
 
 typedef long double T;
 
+/* Family-tuned threading gate (packed/symmetric L2) — overrides the
+ * shared L1 default in eblas_tuning.h. */
 #define MULTI_THREAD_MINIMAL 16384
-#define MAX_PARTITION_CPUS   256
+#include "eblas_tuning.h"
 
 static int symv_partition(int upper, ptrdiff_t n, int nthreads,
                           int mask, int min_width, ptrdiff_t *range)

@@ -46,7 +46,7 @@ static void blue_init(void)
     blue_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0.0 ? -x : x; }
+static inline T dd_abs(T x) { return mf::fabs(x); }
 
 extern "C" T mnrm2_(const int *N, const T *x, const int *INCX)
 {
@@ -63,7 +63,7 @@ extern "C" T mnrm2_(const int *N, const T *x, const int *INCX)
     if (incx < 0) ix = -(n - 1) * incx;
 
     for (std::ptrdiff_t i = 0; i < n; ++i) {
-        T ax = ldabs(x[ix]);
+        T ax = dd_abs(x[ix]);
         if (ax > btbig) {
             T t = ax * bsbig;
             abig += t * t;

@@ -23,8 +23,8 @@
 typedef __complex128 C;
 typedef __float128 R;
 
-#define MULTI_THREAD_MINIMAL 16384
-#define MAX_PARTITION_CPUS   256
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L2_NN
 
 static int syr_partition(int upper, ptrdiff_t n, int nthreads,
                          int mask, int min_width,

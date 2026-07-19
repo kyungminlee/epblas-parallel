@@ -27,13 +27,16 @@
  * Fortran ABI:
  *   subroutine egemm(transa, transb, m, n, k, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are passed as bare char* (hidden gfortran length
+ *     args deliberately omitted — never re-add them)
  *   - all scalars by pointer; REAL(KIND=10) ↔ long double
  */
 
 #include "eblas_l3_real.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -60,20 +63,17 @@ static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
  * Mirrors driver/level3/level3.c's `for(js..) for(ls..) for(is..)`
  * blocking nest. Each call is the work of one thread; the caller
  * passes (m_lo, m_hi) as the thread's M slice, and Ap is a private
- * per-thread scratch buffer. Bp is shared with the rest of the
- * threads (packed once per (js, ls)).
- *
- * Returns 0 on success, -1 on allocation failure (only happens for
- * the caller-supplied Ap if it was NULL).
+ * per-thread scratch buffer. Bp_shared is shared with the rest of
+ * the threads (packed once per (js, ls) by the caller).
  */
-static void level3_kernel(int m_lo, int m_hi, int N, int K,
-                          int MC, int KC, int NC,
-                          int ta, int tb,
+static void level3_kernel(int m_lo, int m_hi,
+                          int MC,
+                          int ta,
                           T alpha,
                           const T *A, int lda,
-                          const T *B, int ldb,
-                          T *C, int ldc,
-                          T *Ap, const T *Bp_shared, int js, int ls, int pb, int jb)
+                          T *Ap, const T *Bp_shared,
+                          int js, int ls, int pb, int jb,
+                          T *C, int ldc)
 {
     /* Process the (m_lo..m_hi) × (js..js+jb) C-band against
      * the K-panel B[ls..ls+pb, js..js+jb] that has already been
@@ -123,10 +123,11 @@ void egemm_(
      * beta pass on C (handled below). */
     if (M <= 0 || N <= 0) return;
 
-    /* Beta pre-pass — written exactly once before the K-walk starts. */
-    eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
-
-    if (K == 0 || alpha == 0.0L) return;
+    /* K==0 / alpha==0: the beta pass on C is the entire operation. */
+    if (K == 0 || alpha == 0.0L) {
+        eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+        return;
+    }
 
     /* Block sizes (env-overridable). */
     int MC0, KC, NC;
@@ -136,7 +137,6 @@ void egemm_(
      * MC*KC roughly fits the L2 target. */
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;  /* P-core L2 nominal */
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -162,15 +162,23 @@ void egemm_(
     if (mnk < 64L * 64L * 64L) nthreads = 1;
 
     /* Allocate per-thread Ap and the shared Bp BEFORE the parallel
-     * region. If any allocation fails we abort the whole call —
-     * we can't have some threads skipping the loop body while others
-     * proceed, since `omp single` / `omp barrier` require every
-     * thread in the team to encounter them. */
+     * region (every thread must encounter each `omp single` /
+     * `omp barrier`) and BEFORE the in-place beta pass on C, so a
+     * failed allocation can never leave C scaled but not updated.
+     * This leg is a benchmark reference: on failure, be loud and
+     * abort() rather than silently return a wrong result. */
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (!Bp) return;
+    if (!Bp) {
+        fprintf(stderr, "egemm: pack buffer allocation failed\n");
+        abort();
+    }
 
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr) { free(Bp); return; }
+    if (!Ap_arr) {
+        free(Bp);
+        fprintf(stderr, "egemm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -180,8 +188,12 @@ void egemm_(
         for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
         free(Ap_arr);
         free(Bp);
-        return;
+        fprintf(stderr, "egemm: pack buffer allocation failed\n");
+        abort();
     }
+
+    /* Beta pre-pass — written exactly once before the K-walk starts. */
+    eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nthreads)
@@ -247,11 +259,10 @@ void egemm_(
 
                         /* Inner kernel — each thread handles its m
                          * slice against the shared Bp panel. */
-                        level3_kernel(m_lo, m_hi, N, K, MC, KC, NC,
-                                      ta, tb, alpha,
-                                      a, lda, b, ldb,
-                                      c, ldc,
-                                      Ap, Bp, js, ls, pb, jb);
+                        level3_kernel(m_lo, m_hi, MC, ta, alpha,
+                                      a, lda, Ap, Bp,
+                                      js, ls, pb, jb,
+                                      c, ldc);
 
                         /* Next iteration's leading `#pragma omp barrier`
                          * (or the `omp parallel` end-barrier on the

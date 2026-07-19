@@ -27,8 +27,8 @@ using C = std::complex<multifloats::float64x2>;
 typedef std::complex<multifloats::float64x2> C;
 typedef multifloats::float64x2 R;
 
-#define MULTI_THREAD_MINIMAL 16384
-#define MAX_PARTITION_CPUS   256
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L2_NN
 
 static int symv_partition(int upper, ptrdiff_t n, int nthreads,
                           int mask, int min_width, ptrdiff_t *range)

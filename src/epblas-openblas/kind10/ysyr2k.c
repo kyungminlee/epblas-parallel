@@ -26,8 +26,10 @@
  */
 
 #include "eblas_l3_complex.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -59,19 +61,21 @@ void ysyr2k_(
 
     if (N <= 0) return;
 
-    if (uplo == 'U') eblas_ysyrk_beta_u((ptrdiff_t)N, beta_r, beta_i,
-                                        c, (ptrdiff_t)ldc);
-    else             eblas_ysyrk_beta_l((ptrdiff_t)N, beta_r, beta_i,
-                                        c, (ptrdiff_t)ldc);
-
-    if (K == 0 || (alphar == 0.0L && alphai == 0.0L)) return;
+    /* K==0 / alpha==0: the triangular beta pass on the UPLO triangle
+     * of C is the entire operation. */
+    if (K == 0 || (alphar == 0.0L && alphai == 0.0L)) {
+        if (uplo == 'U') eblas_ysyrk_beta_u((ptrdiff_t)N, beta_r, beta_i,
+                                            c, (ptrdiff_t)ldc);
+        else             eblas_ysyrk_beta_l((ptrdiff_t)N, beta_r, beta_i,
+                                            c, (ptrdiff_t)ldc);
+        return;
+    }
 
     int MC0, KC, NC;
     eblas_ygemm_blocks(&MC0, &KC, &NC);
 
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
         long target_mc = L2_TARGET_BYTES / ((long)K * 2L * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -93,14 +97,23 @@ void ysyr2k_(
     long nnk = (long)N * (long)N * (long)K;
     if (nnk < 64L * 64L * 64L) nthreads = 1;
 
+    /* All pack allocations happen BEFORE the in-place beta pass on C so
+     * a failure can never leave C scaled but not updated; benchmark-
+     * reference policy is to abort() loudly on failure. */
     T *Bp_A = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
     T *Bp_B = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (!Bp_A || !Bp_B) { free(Bp_A); free(Bp_B); return; }
+    if (!Bp_A || !Bp_B) {
+        free(Bp_A); free(Bp_B);
+        fprintf(stderr, "ysyr2k: pack buffer allocation failed\n");
+        abort();
+    }
 
     T **Ap_A_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Ap_B_arr = calloc((size_t)nthreads, sizeof(T *));
     if (!Ap_A_arr || !Ap_B_arr) {
-        free(Ap_A_arr); free(Ap_B_arr); free(Bp_A); free(Bp_B); return;
+        free(Ap_A_arr); free(Ap_B_arr); free(Bp_A); free(Bp_B);
+        fprintf(stderr, "ysyr2k: pack buffer allocation failed\n");
+        abort();
     }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
@@ -112,8 +125,17 @@ void ysyr2k_(
         for (int t = 0; t < nthreads; ++t) {
             free(Ap_A_arr[t]); free(Ap_B_arr[t]);
         }
-        free(Ap_A_arr); free(Ap_B_arr); free(Bp_A); free(Bp_B); return;
+        free(Ap_A_arr); free(Ap_B_arr); free(Bp_A); free(Bp_B);
+        fprintf(stderr, "ysyr2k: pack buffer allocation failed\n");
+        abort();
     }
+
+    /* Triangular beta pre-pass on the UPLO triangle of C only —
+     * after every allocation has succeeded. */
+    if (uplo == 'U') eblas_ysyrk_beta_u((ptrdiff_t)N, beta_r, beta_i,
+                                        c, (ptrdiff_t)ldc);
+    else             eblas_ysyrk_beta_l((ptrdiff_t)N, beta_r, beta_i,
+                                        c, (ptrdiff_t)ldc);
 
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nthreads)

@@ -10,7 +10,7 @@
 
 typedef long double T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
 static void copy_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx,
                                      T       *y, ptrdiff_t incy)

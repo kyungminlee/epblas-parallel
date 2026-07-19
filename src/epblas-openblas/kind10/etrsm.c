@@ -38,14 +38,17 @@
  *
  * Fortran ABI matches the migrated reference:
  *   subroutine etrsm(side, uplo, transa, diag, m, n, alpha, a, lda, b, ldb)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are passed as bare char* (hidden gfortran length
+ *     args deliberately omitted — never re-add them)
  *   - REAL(KIND=10) scalars are passed by pointer
  *   - 'C' on transa is treated identically to 'T' for reals
  */
 
 #include "eblas_l3_real.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -76,7 +79,7 @@ static int round_up(int v, int m) { return ((v + m - 1) / m) * m; }
  * Same packer source serves both ICOPY (sa-role) and OCOPY (sb-role) —
  * upstream uses the same .c file for both because the data layout is
  * identical; only the call site / argument shape differs. */
-static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit,
+static inline void pack_trsm_a_lside_forward(int trans, int unit,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -90,7 +93,7 @@ static inline void pack_trsm_a_lside_forward(int upper, int trans, int unit,
     }
 }
 
-static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit,
+static inline void pack_trsm_a_lside_backward(int trans, int unit,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -103,7 +106,7 @@ static inline void pack_trsm_a_lside_backward(int upper, int trans, int unit,
     }
 }
 
-static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit,
+static inline void pack_trsm_a_rside_forward(int trans, int unit,
                                              ptrdiff_t m, ptrdiff_t n,
                                              const T *a, ptrdiff_t lda,
                                              ptrdiff_t offset, T *bp)
@@ -117,7 +120,7 @@ static inline void pack_trsm_a_rside_forward(int upper, int trans, int unit,
     }
 }
 
-static inline void pack_trsm_a_rside_backward(int upper, int trans, int unit,
+static inline void pack_trsm_a_rside_backward(int trans, int unit,
                                               ptrdiff_t m, ptrdiff_t n,
                                               const T *a, ptrdiff_t lda,
                                               ptrdiff_t offset, T *bp)
@@ -165,7 +168,7 @@ static void trsm_L_band(int upper, int trans, int unit,
                  * In trsm_L.c the packed shape is (min_l, min_i) with the
                  * is-iteration packing only `min_i` rows at a time of the
                  * `min_l × min_l` diagonal block. */
-                pack_trsm_a_lside_forward(upper, trans, unit,
+                pack_trsm_a_lside_forward(trans, unit,
                                           min_l, min_i,
                                           &a[(size_t)ls + (size_t)ls * lda], lda,
                                           /*offset=*/0, Ap);
@@ -189,7 +192,7 @@ static void trsm_L_band(int upper, int trans, int unit,
                 for (int is = ls + min_i; is < ls + min_l; is += MC) {
                     min_i = ls + min_l - is;
                     if (min_i > MC) min_i = MC;
-                    pack_trsm_a_lside_forward(upper, trans, unit,
+                    pack_trsm_a_lside_forward(trans, unit,
                                               min_l, min_i,
                                               !trans ? &a[(size_t)is + (size_t)ls * lda]
                                                      : &a[(size_t)ls + (size_t)is * lda],
@@ -232,7 +235,7 @@ static void trsm_L_band(int upper, int trans, int unit,
                  *   a + (start_is + (ls - min_l)*lda)   [for !TRANS / IUTCOPY]
                  *   a + ((ls - min_l) + start_is*lda)   [for TRANS / ILNCOPY]
                  * with offset = start_is - (ls - min_l). */
-                pack_trsm_a_lside_backward(upper, trans, unit,
+                pack_trsm_a_lside_backward(trans, unit,
                                            min_l, min_i,
                                            !trans
                                              ? &a[(size_t)start_is + (size_t)(ls - min_l) * lda]
@@ -257,7 +260,7 @@ static void trsm_L_band(int upper, int trans, int unit,
                 for (int is = start_is - MC; is >= ls - min_l; is -= MC) {
                     min_i = ls - is;
                     if (min_i > MC) min_i = MC;
-                    pack_trsm_a_lside_backward(upper, trans, unit,
+                    pack_trsm_a_lside_backward(trans, unit,
                                                min_l, min_i,
                                                !trans
                                                  ? &a[(size_t)is + (size_t)(ls - min_l) * lda]
@@ -371,7 +374,7 @@ static void trsm_R_band(int upper, int trans, int unit,
                                   &b[(size_t)m_lo + (size_t)ls * ldb], ldb, sa);
 
                 /* TRSM_O*COPY of A diagonal block. */
-                pack_trsm_a_rside_forward(upper, trans, unit,
+                pack_trsm_a_rside_forward(trans, unit,
                                           min_l, min_l,
                                           &a[(size_t)ls + (size_t)ls * lda], lda,
                                           /*offset=*/0, sb);
@@ -482,7 +485,7 @@ static void trsm_R_band(int upper, int trans, int unit,
                  * sb offset = min_l * (min_j - js + ls) — packs diag
                  * block at the tail of sb so the off-diagonal pack to
                  * its LEFT can be sb + 0. */
-                pack_trsm_a_rside_backward(upper, trans, unit,
+                pack_trsm_a_rside_backward(trans, unit,
                                            min_l, min_l,
                                            &a[(size_t)ls + (size_t)ls * lda], lda,
                                            /*offset=*/0,
@@ -558,12 +561,12 @@ void etrsm_(
 
     if (M == 0 || N == 0) return;
 
-    /* alpha pre-scale of B (mirrors trsm_L.c/trsm_R.c GEMM_BETA pass —
-     * args.beta is set to alpha by interface/trsm.c). */
-    if (alpha != 1.0L) {
+    /* alpha==0: zeroing B is the entire operation (mirrors the
+     * trsm_L.c/trsm_R.c GEMM_BETA pass followed by the early return). */
+    if (alpha == 0.0L) {
         eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alpha == 0.0L) return;
 
     int MC0, KC, NC;
     eblas_egemm_blocks(&MC0, &KC, &NC);
@@ -573,7 +576,6 @@ void etrsm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -599,9 +601,16 @@ void etrsm_(
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
 
+    /* All pack allocations happen BEFORE the in-place alpha pre-scale
+     * of B so a failure can never leave B scaled but not solved;
+     * benchmark-reference policy is to abort() loudly on failure. */
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "etrsm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -610,11 +619,19 @@ void etrsm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "etrsm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* alpha pre-scale of B (mirrors trsm_L.c/trsm_R.c GEMM_BETA pass —
+     * args.beta is set to alpha by interface/trsm.c) — after every
+     * allocation has succeeded. */
+    if (alpha != 1.0L) {
+        eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP

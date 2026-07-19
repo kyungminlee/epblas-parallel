@@ -1,5 +1,11 @@
 /*
- * mgemmtr — kind10 (REAL(KIND=10) / 80-bit multifloats::float64x2) port of OpenBLAS DGEMMT.
+ * mgemmtr — multifloats DD (float64x2, 128-bit double-double) port of OpenBLAS DGEMMT.
+ *
+ * ADAPTATION vs the verbatim kind10 source: the element type here is
+ * multifloats::float64x2 — a double-double of two binary64 limbs
+ * (128 bits), not the 80-bit x87 REAL(KIND=10) of the kind10 leg.
+ * Structure, loop order, blocking and thresholds are the kind10
+ * port's; only the element type and its arithmetic differ.
  *
  *   C := alpha * op(A) * op(B) + beta * C   (only UPLO triangle of C touched)
  *   op(X) ∈ {X, X^T}; A is (n×k) or (k×n); B is (k×n) or (n×k); C is n×n.

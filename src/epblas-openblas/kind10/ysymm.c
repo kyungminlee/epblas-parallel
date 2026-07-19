@@ -25,15 +25,18 @@
  * Fortran ABI:
  *   subroutine ysymm(side, uplo, m, n, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args with trailing hidden size_t lengths (gfortran)
+ *   - character args are passed as bare char* (hidden gfortran length
+ *     args deliberately omitted — never re-add them)
  *   - alpha, beta are COMPLEX(KIND=10): 2 long doubles each (re, im)
  *   - a, b, c are COMPLEX(KIND=10) arrays (interleaved re,im)
  *   - lda, ldb, ldc are in COMPLEX(KIND=10) elements
  */
 
 #include "eblas_l3_complex.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -64,11 +67,12 @@ void ysymm_(
 
     if (M <= 0 || N <= 0) return;
 
-    /* Beta pre-pass. */
-    eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i,
-                     c, (ptrdiff_t)(*ldc_));
-
-    if (alphar == 0.0L && alphai == 0.0L) return;
+    /* alpha==0: the beta pass on C is the entire operation. */
+    if (alphar == 0.0L && alphai == 0.0L) {
+        eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i,
+                         c, (ptrdiff_t)(*ldc_));
+        return;
+    }
 
     const T *A_eff = (side == 'L') ? a : b;
     const T *B_eff = (side == 'L') ? b : a;
@@ -77,14 +81,17 @@ void ysymm_(
     const int ldc    = *ldc_;
     const int K = (side == 'L') ? M : N;
 
-    if (K == 0) return;
+    if (K == 0) {
+        eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i,
+                         c, (ptrdiff_t)ldc);
+        return;
+    }
 
     int MC0, KC, NC;
     eblas_ygemm_blocks(&MC0, &KC, &NC);
 
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)(2 * sizeof(T)));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -107,11 +114,21 @@ void ysymm_(
     long mnk = (long)M * (long)N * (long)K;
     if (mnk < 64L * 64L * 64L) nthreads = 1;
 
+    /* All pack allocations happen BEFORE the in-place beta pass on C so
+     * a failure can never leave C scaled but not updated; benchmark-
+     * reference policy is to abort() loudly on failure. */
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (!Bp) return;
+    if (!Bp) {
+        fprintf(stderr, "ysymm: pack buffer allocation failed\n");
+        abort();
+    }
 
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr) { free(Bp); return; }
+    if (!Ap_arr) {
+        free(Bp);
+        fprintf(stderr, "ysymm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -120,8 +137,13 @@ void ysymm_(
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
         free(Ap_arr); free(Bp);
-        return;
+        fprintf(stderr, "ysymm: pack buffer allocation failed\n");
+        abort();
     }
+
+    /* Beta pre-pass — after every allocation has succeeded. */
+    eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i,
+                     c, (ptrdiff_t)ldc);
 
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nthreads)

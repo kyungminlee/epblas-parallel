@@ -19,7 +19,8 @@
 typedef __complex128 C;
 typedef __float128 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L1
 
 static void scal_kernel(ptrdiff_t n, T alpha, T *base, ptrdiff_t incx)
 {

@@ -8,7 +8,7 @@
 #include <multifloats/float64x2.h>
 typedef multifloats::float64x2 T;
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T dd_abs(T x) { return multifloats::fabs(x); }
 
 extern "C" void mrotmg_(T *DD1, T *DD2, T *DX1, const T *DY1, T *DPARAM)
 {
@@ -39,7 +39,7 @@ extern "C" void mrotmg_(T *DD1, T *DD2, T *DX1, const T *DY1, T *DPARAM)
         dq2 = dp2 * dy1;
         dq1 = dp1 * dx1;
 
-        if (ldabs(dq1) > ldabs(dq2)) {
+        if (dd_abs(dq1) > dd_abs(dq2)) {
             dh21 = -dy1 / dx1;
             dh12 = dp2 / dp1;
             du = ONE - dh12 * dh21;
@@ -95,7 +95,7 @@ extern "C" void mrotmg_(T *DD1, T *DD2, T *DX1, const T *DY1, T *DPARAM)
         }
         /* SCALE-CHECK on dd2 */
         if (dd2 != ZERO) {
-            while ((ldabs(dd2) <= RGAMSQ) || (ldabs(dd2) >= GAMSQ)) {
+            while ((dd_abs(dd2) <= RGAMSQ) || (dd_abs(dd2) >= GAMSQ)) {
                 if (dflag == ZERO) {
                     dh11 = ONE; dh22 = ONE;
                     dflag = -ONE;
@@ -103,7 +103,7 @@ extern "C" void mrotmg_(T *DD1, T *DD2, T *DX1, const T *DY1, T *DPARAM)
                     dh21 = -ONE; dh12 = ONE;
                     dflag = -ONE;
                 }
-                if (ldabs(dd2) <= RGAMSQ) {
+                if (dd_abs(dd2) <= RGAMSQ) {
                     dd2 = dd2 * (GAM * GAM);
                     dh21 = dh21 / GAM;
                     dh22 = dh22 / GAM;

@@ -25,6 +25,8 @@
 
 typedef long double T;
 
+/* Family-tuned threading gate (gemv/ger) — deviates from the shared
+ * default in eblas_tuning.h; kept local (family tuning). */
 #define MULTI_THREAD_MINIMAL 4096
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]

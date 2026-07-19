@@ -26,7 +26,8 @@
 using C = std::complex<multifloats::float64x2>;
 typedef std::complex<multifloats::float64x2> C;
 
-#define MULTI_THREAD_MINIMAL 4096
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L2_MN
 #define SPLIT_X_MN_MIN       9216   /* matches OpenBLAS 24*24*GEMM_THRESH^2 */
 #define Y_DUMMY_NUM          512    /* element cap on m*nthreads (complex = 2x storage) */
 

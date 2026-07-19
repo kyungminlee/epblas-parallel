@@ -40,15 +40,18 @@
  *
  * Fortran ABI:
  *   subroutine qtrmm(side, uplo, transa, diag, m, n, alpha, a, lda, b, ldb)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - all scalars by pointer; REAL(KIND=16) ↔ __float128
  *   - 'C' on transa is treated identically to 'T' (no conjugation for reals)
  */
 
 #include "qblas_l3_real.h"
+#include "qblas_tuning.h"
 #include <quadmath.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -655,12 +658,12 @@ void qtrmm_(
 
     if (M == 0 || N == 0) return;
 
-    /* alpha pre-scale of B (mirrors trmm_L.c lines 103-113: if (beta!=ONE)
-     * GEMM_BETA(...); if (beta==ZERO) return). */
-    if (alpha != 1.0Q) {
+    /* alpha == 0 zeroes B outright (the beta==ZERO path of trmm_L.c
+     * lines 103-113); no pack buffers are needed. */
+    if (alpha == 0.0Q) {
         qblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alpha == 0.0Q) return;
 
     /* Block sizes (env-overridable). */
     int MC0, KC, NC;
@@ -671,7 +674,7 @@ void qtrmm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = QBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -688,9 +691,6 @@ void qtrmm_(
      * the size). */
     const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * sizeof(T);
-    /* For SIDE='R', Ap holds an MC*KC strip and Bp holds a KC*NC slab.
-     * For SIDE='L', Ap holds an MC*KC strip (the triangular A pack) and
-     * Bp holds a KC*NC slab (B OCOPY). Same sizes either way. */
 
 #ifdef _OPENMP
     int nthreads = omp_get_max_threads();
@@ -710,7 +710,11 @@ void qtrmm_(
 
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "qtrmm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -719,11 +723,19 @@ void qtrmm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "qtrmm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* alpha pre-scale of B (mirrors trmm_L.c lines 103-113 GEMM_BETA).
+     * Deferred until after pack-buffer allocation so an allocation
+     * failure can never leave B scaled but untransformed. */
+    if (alpha != 1.0Q) {
+        qblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP

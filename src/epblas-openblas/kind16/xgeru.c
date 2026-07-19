@@ -16,7 +16,8 @@
 
 typedef __complex128 C;
 
-#define MULTI_THREAD_MINIMAL 4096
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L2_MN
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 

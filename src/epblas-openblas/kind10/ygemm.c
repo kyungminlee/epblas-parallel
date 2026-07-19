@@ -33,15 +33,18 @@
  * Fortran ABI:
  *   subroutine ygemm(transa, transb, m, n, k, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args with trailing hidden size_t lengths (gfortran)
+ *   - character args are passed as bare char* (hidden gfortran length
+ *     args deliberately omitted — never re-add them)
  *   - alpha, beta are COMPLEX(KIND=10): 2 long doubles each (re, im)
  *   - a, b, c are COMPLEX(KIND=10) arrays (interleaved re,im)
  *   - lda, ldb, ldc are in COMPLEX(KIND=10) elements
  */
 
 #include "eblas_l3_complex.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -124,11 +127,12 @@ void ygemm_(
 
     if (M <= 0 || N <= 0) return;
 
-    /* Beta pre-pass — written exactly once before the K-walk starts. */
-    eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i,
-                     c, (ptrdiff_t)ldc);
-
-    if (K == 0 || (alphar == 0.0L && alphai == 0.0L)) return;
+    /* K==0 / alpha==0: the beta pass on C is the entire operation. */
+    if (K == 0 || (alphar == 0.0L && alphai == 0.0L)) {
+        eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i,
+                         c, (ptrdiff_t)ldc);
+        return;
+    }
 
     /* Block sizes (env-overridable). */
     int MC0, KC, NC;
@@ -138,7 +142,6 @@ void ygemm_(
      * Complex `long double` is 2 * sizeof(long double) = 32 B/element. */
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)(2 * sizeof(T)));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -163,13 +166,23 @@ void ygemm_(
     if (mnk < 64L * 64L * 64L) nthreads = 1;
 
     /* Allocate per-thread Ap and the shared Bp BEFORE the parallel
-     * region; abort cleanly on alloc failure so every thread in the
-     * team hits every `omp barrier` / `omp single`. */
+     * region (every thread must hit every `omp barrier` / `omp single`)
+     * and BEFORE the in-place beta pass on C, so a failed allocation
+     * can never leave C scaled but not updated. Benchmark-reference
+     * policy: on failure, be loud and abort() rather than silently
+     * return a wrong result. */
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (!Bp) return;
+    if (!Bp) {
+        fprintf(stderr, "ygemm: pack buffer allocation failed\n");
+        abort();
+    }
 
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr) { free(Bp); return; }
+    if (!Ap_arr) {
+        free(Bp);
+        fprintf(stderr, "ygemm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -179,8 +192,13 @@ void ygemm_(
         for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
         free(Ap_arr);
         free(Bp);
-        return;
+        fprintf(stderr, "ygemm: pack buffer allocation failed\n");
+        abort();
     }
+
+    /* Beta pre-pass — written exactly once before the K-walk starts. */
+    eblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta_r, beta_i,
+                     c, (ptrdiff_t)ldc);
 
     const int conj_b  = op_is_conj(tb);
     const int trans_b = op_is_trans(tb);

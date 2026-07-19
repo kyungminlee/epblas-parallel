@@ -1,5 +1,11 @@
 /*
- * mtrmm — kind10 (REAL(KIND=10) / 80-bit multifloats::float64x2) port of OpenBLAS DTRMM.
+ * mtrmm — multifloats DD (float64x2, 128-bit double-double) port of OpenBLAS DTRMM.
+ *
+ * ADAPTATION vs the verbatim kind10 source: the element type here is
+ * multifloats::float64x2 — a double-double of two binary64 limbs
+ * (128 bits), not the 80-bit x87 REAL(KIND=10) of the kind10 leg.
+ * Structure, loop order, blocking and thresholds are the kind10
+ * port's; only the element type and its arithmetic differ.
  *
  *   B := alpha * op(A) * B    (SIDE='L')
  *   B := alpha * B * op(A)    (SIDE='R')
@@ -40,14 +46,18 @@
  *
  * Fortran ABI:
  *   subroutine mtrmm(side, uplo, transa, diag, m, n, alpha, a, lda, b, ldb)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - all scalars by pointer; REAL(KIND=10) ↔ multifloats::float64x2
  *   - 'C' on transa is treated identically to 'T' (no conjugation for reals)
  */
 
 #include "mblas_l3_real.h"
+#include "mblas_tuning.h"
 #include <stddef.h>
+#include <type_traits>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -654,12 +664,12 @@ extern "C" void mtrmm_(
 
     if (M == 0 || N == 0) return;
 
-    /* alpha pre-scale of B (mirrors trmm_L.c lines 103-113: if (beta!=ONE)
-     * GEMM_BETA(...); if (beta==ZERO) return). */
-    if (alpha != 1.0) {
+    /* alpha == 0 zeroes B outright (the beta==ZERO path of trmm_L.c
+     * lines 103-113); no pack buffers are needed. */
+    if (alpha == 0.0) {
         mblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alpha == 0.0) return;
 
     /* Block sizes (env-overridable). */
     int MC0, KC, NC;
@@ -670,7 +680,7 @@ extern "C" void mtrmm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = MBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -687,9 +697,6 @@ extern "C" void mtrmm_(
      * the size). */
     const size_t ap_bytes = (size_t)round_up(MC, MR) * (size_t)KC * sizeof(T);
     const size_t bp_bytes = (size_t)KC * (size_t)round_up(NC, NR) * sizeof(T);
-    /* For SIDE='R', Ap holds an MC*KC strip and Bp holds a KC*NC slab.
-     * For SIDE='L', Ap holds an MC*KC strip (the triangular A pack) and
-     * Bp holds a KC*NC slab (B OCOPY). Same sizes either way. */
 
 #ifdef _OPENMP
     int nthreads = omp_get_max_threads();
@@ -707,9 +714,21 @@ extern "C" void mtrmm_(
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
 
+    /* Pack buffers throughout this leg are raw C-heap storage
+     * (calloc/aligned_alloc) used as T with no placement-new. That is
+     * only well-defined while the DD type stays trivially
+     * copyable/destructible; pin the assumption once, here: */
+    static_assert(std::is_trivially_copyable<T>::value &&
+                  std::is_trivially_destructible<T>::value,
+                  "C-heap pack buffers require a trivial multifloats::float64x2");
+
     T **Ap_arr = (T **)calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = (T **)calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "mtrmm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = (T *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -718,11 +737,19 @@ extern "C" void mtrmm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "mtrmm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* alpha pre-scale of B (mirrors trmm_L.c lines 103-113 GEMM_BETA).
+     * Deferred until after pack-buffer allocation so an allocation
+     * failure can never leave B scaled but untransformed. */
+    if (alpha != 1.0) {
+        mblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP

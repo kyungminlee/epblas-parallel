@@ -8,7 +8,7 @@
 
 typedef _Complex long double C;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
 static void axpy_kernel(ptrdiff_t n, C alpha, const C *x, ptrdiff_t incx,
                                               C *y,       ptrdiff_t incy)

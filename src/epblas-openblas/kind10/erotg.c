@@ -34,7 +34,7 @@ static void safscale_init(void)
     safscale_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T ldabs(T x) { return __builtin_fabsl(x); }  /* branchless x87 fabs */
 static inline T ldsign1(T x) { return x < 0 ? -1.0L : 1.0L; }
 
 void erotg_(T *a, T *b, T *c, T *s)

@@ -10,7 +10,8 @@
 
 typedef multifloats::float64x2 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
 static void swap_kernel(ptrdiff_t n, T *x, ptrdiff_t incx,
                                      T *y, ptrdiff_t incy)

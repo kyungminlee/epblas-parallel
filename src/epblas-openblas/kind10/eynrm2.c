@@ -34,7 +34,7 @@ static void blue_init(void)
     blue_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T ldabs(T x) { return __builtin_fabsl(x); }  /* branchless x87 fabs */
 
 T eynrm2_(const int *N, const C *x, const int *INCX)
 {

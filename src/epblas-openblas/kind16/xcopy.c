@@ -9,7 +9,8 @@
 
 typedef __complex128 C;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L1
 
 static void copy_kernel(ptrdiff_t n, const C *x, ptrdiff_t incx,
                                      C *y,       ptrdiff_t incy)

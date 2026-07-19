@@ -38,15 +38,18 @@
  *
  * Fortran ABI matches the migrated reference:
  *   subroutine qtrsm(side, uplo, transa, diag, m, n, alpha, a, lda, b, ldb)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - REAL(KIND=16) scalars are passed by pointer
  *   - 'C' on transa is treated identically to 'T' for reals
  */
 
 #include "qblas_l3_real.h"
+#include "qblas_tuning.h"
 #include <quadmath.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -559,12 +562,11 @@ void qtrsm_(
 
     if (M == 0 || N == 0) return;
 
-    /* alpha pre-scale of B (mirrors trsm_L.c/trsm_R.c GEMM_BETA pass —
-     * args.beta is set to alpha by interface/trsm.c). */
-    if (alpha != 1.0Q) {
+    /* alpha == 0 zeroes B outright; no pack buffers are needed. */
+    if (alpha == 0.0Q) {
         qblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alpha == 0.0Q) return;
 
     int MC0, KC, NC;
     qblas_egemm_blocks(&MC0, &KC, &NC);
@@ -574,7 +576,7 @@ void qtrsm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = QBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -602,7 +604,11 @@ void qtrsm_(
 
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "qtrsm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -611,11 +617,20 @@ void qtrsm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "qtrsm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* alpha pre-scale of B (mirrors trsm_L.c/trsm_R.c GEMM_BETA pass —
+     * args.beta is set to alpha by interface/trsm.c). Deferred until
+     * after pack-buffer allocation so an allocation failure can never
+     * leave B scaled but untransformed. */
+    if (alpha != 1.0Q) {
+        qblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP

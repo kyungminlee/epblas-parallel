@@ -24,10 +24,7 @@ static void blue_init(void)
     int max_exp = LDBL_MAX_EXP;
     int dig     = LDBL_MANT_DIG;
 
-    /* Blue's thresholds: ceil/floor of half * range. */
-    int e_btsml = (min_exp - 1 + 1) / 2;        /* ceil((min_exp-1)/2) */
-    if (((min_exp - 1) & 1) && (min_exp - 1) < 0) e_btsml = (min_exp - 1) / 2;
-    /* Use safer compute via ldexpl directly with the exact LAPACK
+    /* Blue's thresholds — computed via ldexpl with the exact LAPACK
      * formula:
      *     btsml = radix^ceiling((minexp - 1) * 0.5)
      *     btbig = radix^floor   ((maxexp - dig + 1) * 0.5)
@@ -48,7 +45,7 @@ static void blue_init(void)
     blue_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T ldabs(T x) { return __builtin_fabsl(x); }  /* branchless x87 fabs */
 
 T enrm2_(const int *N, const T *x, const int *INCX)
 {

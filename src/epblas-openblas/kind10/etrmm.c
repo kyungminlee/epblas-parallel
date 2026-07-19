@@ -40,14 +40,17 @@
  *
  * Fortran ABI:
  *   subroutine etrmm(side, uplo, transa, diag, m, n, alpha, a, lda, b, ldb)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are passed as bare char* (hidden gfortran length
+ *     args deliberately omitted — never re-add them)
  *   - all scalars by pointer; REAL(KIND=10) ↔ long double
  *   - 'C' on transa is treated identically to 'T' (no conjugation for reals)
  */
 
 #include "eblas_l3_real.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -110,13 +113,13 @@ static inline void pack_trmm_a(int side_l, int uplo_upper, int trans, int unit,
  * over-N-slice partitioning, each thread has its own (Ap, Bp).
  */
 static void trmm_L_band(int upper, int trans, int unit,
-                        int M, int js0, int js1, int K_alias,
+                        int M, int js0, int js1,
                         int MC, int KC, int NC,
                         const T *a, int lda,
                         T *b, int ldb,
                         T *Ap, T *Bp)
 {
-    (void)K_alias;  /* For SIDE='L', K = M */
+    /* For SIDE='L', K = M. */
     const T dp1 = 1.0L;
     int m = M;
 
@@ -374,7 +377,6 @@ static void trmm_R_band(int upper, int trans, int unit,
                         T *b, int ldb,
                         T *Ap, T *Bp)
 {
-    (void)MC;
     const T dp1 = 1.0L;
     int m_band = m_hi - m_lo;
     if (m_band <= 0) return;
@@ -654,12 +656,12 @@ void etrmm_(
 
     if (M == 0 || N == 0) return;
 
-    /* alpha pre-scale of B (mirrors trmm_L.c lines 103-113: if (beta!=ONE)
-     * GEMM_BETA(...); if (beta==ZERO) return). */
-    if (alpha != 1.0L) {
+    /* alpha==0: zeroing B is the entire operation (mirrors trmm_L.c
+     * lines 103-113: if (beta==ZERO) return after GEMM_BETA). */
+    if (alpha == 0.0L) {
         eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alpha == 0.0L) return;
 
     /* Block sizes (env-overridable). */
     int MC0, KC, NC;
@@ -670,7 +672,6 @@ void etrmm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -707,9 +708,16 @@ void etrmm_(
     if (nthreads > partition_axis) nthreads = partition_axis;
     if (nthreads < 1) nthreads = 1;
 
+    /* All pack allocations happen BEFORE the in-place alpha pre-scale
+     * of B so a failure can never leave B scaled but not transformed;
+     * benchmark-reference policy is to abort() loudly on failure. */
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "etrmm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -718,11 +726,18 @@ void etrmm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "etrmm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* alpha pre-scale of B (mirrors trmm_L.c lines 103-113: if (beta!=ONE)
+     * GEMM_BETA(...)) — after every allocation has succeeded. */
+    if (alpha != 1.0L) {
+        eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP
@@ -748,7 +763,7 @@ void etrmm_(
 
             if (js0 < js1) {
                 trmm_L_band(upper, trans, unit,
-                            M, js0, js1, M,
+                            M, js0, js1,
                             MC, KC, NC,
                             a, lda, b, ldb,
                             Ap, Bp);

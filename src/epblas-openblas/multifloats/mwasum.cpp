@@ -16,9 +16,10 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
-static inline T ldabs(T x) { return x < 0.0 ? -x : x; }
+static inline T dd_abs(T x) { return mf::fabs(x); }
 
 static T asum_kernel(std::ptrdiff_t n, const mf::complex64x2 *x, std::ptrdiff_t incx)
 {
@@ -27,13 +28,13 @@ static T asum_kernel(std::ptrdiff_t n, const mf::complex64x2 *x, std::ptrdiff_t 
     if (incx == 1) {
         p = reinterpret_cast<const T *>(x);
         for (std::ptrdiff_t i = 0; i < 2*n; i += 2) {
-            s += ldabs(p[i]) + ldabs(p[i+1]);
+            s += dd_abs(p[i]) + dd_abs(p[i+1]);
         }
         return s;
     }
     for (std::ptrdiff_t i = 0; i < n; ++i) {
         p = reinterpret_cast<const T *>(x + i*incx);
-        s += ldabs(p[0]) + ldabs(p[1]);
+        s += dd_abs(p[0]) + dd_abs(p[1]);
     }
     return s;
 }
@@ -48,8 +49,8 @@ extern "C" T mwasum_(const int *N, const mf::complex64x2 *x, const int *INCX)
     if (n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            T partial[64] = {};
+            if (nthreads > MBLAS_L1_MAX_THREADS) nthreads = MBLAS_L1_MAX_THREADS;
+            T partial[MBLAS_L1_MAX_THREADS] = {};
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

@@ -12,7 +12,8 @@
 using C = std::complex<multifloats::float64x2>;
 typedef std::complex<multifloats::float64x2> C;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
 static C dotu_kernel(ptrdiff_t n, const C *x, ptrdiff_t incx,
                                   const C *y, ptrdiff_t incy)
@@ -40,9 +41,9 @@ extern "C" C wdotu_(const int *N, const C *x, const int *INCX,
     if (incx != 0 && incy != 0 && n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            C partial[64];
-            for (int i = 0; i < 64; ++i) partial[i] = C(0.0, 0.0);
+            if (nthreads > MBLAS_L1_MAX_THREADS) nthreads = MBLAS_L1_MAX_THREADS;
+            C partial[MBLAS_L1_MAX_THREADS];
+            for (int i = 0; i < MBLAS_L1_MAX_THREADS; ++i) partial[i] = C(0.0, 0.0);
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

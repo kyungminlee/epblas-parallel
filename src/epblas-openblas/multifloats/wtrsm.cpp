@@ -28,8 +28,10 @@
  */
 
 #include "mblas_l3_complex.h"
+#include "mblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -476,11 +478,11 @@ extern "C" void wtrsm_(
 
     if (M == 0 || N == 0) return;
 
-    /* Pre-scale B by alpha (complex). */
-    if (alpha_r != 1.0 || alpha_i != 0.0) {
+    /* alpha == 0 zeroes B outright; no pack buffers are needed. */
+    if (alpha_r == 0.0 && alpha_i == 0.0) {
         mblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha_r, alpha_i, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alpha_r == 0.0 && alpha_i == 0.0) return;
 
     int MC0, KC, NC;
     mblas_ygemm_blocks(&MC0, &KC, &NC);
@@ -488,7 +490,7 @@ extern "C" void wtrsm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = MBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T) * 2);
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -517,7 +519,11 @@ extern "C" void wtrsm_(
 
     T **Ap_arr = (T **)calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = (T **)calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "wtrsm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = (T *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -526,11 +532,19 @@ extern "C" void wtrsm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "wtrsm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* Pre-scale B by alpha (complex). Deferred until after pack-buffer
+     * allocation so an allocation failure can never leave B scaled but
+     * untransformed. */
+    if (alpha_r != 1.0 || alpha_i != 0.0) {
+        mblas_ygemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha_r, alpha_i, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP

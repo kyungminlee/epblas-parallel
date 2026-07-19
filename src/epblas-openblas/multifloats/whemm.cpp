@@ -33,13 +33,15 @@
  * Fortran ABI:
  *   subroutine whemm(side, uplo, m, n, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args with trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - alpha, beta are COMPLEX(KIND=10): 2 multifloats::float64x2s each (re, im)
  *   - a, b, c are COMPLEX(KIND=10) arrays (interleaved re,im)
  *   - lda, ldb, ldc are in COMPLEX(KIND=10) elements
  */
 
 #include "mblas_l3_complex.h"
+#include "mblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -91,7 +93,7 @@ extern "C" void whemm_(
 
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = MBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)(2 * sizeof(T)));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;

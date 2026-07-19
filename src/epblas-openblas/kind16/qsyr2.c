@@ -27,8 +27,8 @@
 
 typedef __float128 T;
 
-#define MULTI_THREAD_MINIMAL 16384
-#define MAX_PARTITION_CPUS   256
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L2_NN
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 

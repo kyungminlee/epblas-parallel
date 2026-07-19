@@ -1,5 +1,11 @@
 /*
- * mgemm — kind10 (REAL(KIND=10) / 80-bit multifloats::float64x2) port of OpenBLAS DGEMM.
+ * mgemm — multifloats DD (float64x2, 128-bit double-double) port of OpenBLAS DGEMM.
+ *
+ * ADAPTATION vs the verbatim kind10 source: the element type here is
+ * multifloats::float64x2 — a double-double of two binary64 limbs
+ * (128 bits), not the 80-bit x87 REAL(KIND=10) of the kind10 leg.
+ * Structure, loop order, blocking and thresholds are the kind10
+ * port's; only the element type and its arithmetic differ.
  *
  *   C := alpha * op(A) * op(B) + beta * C
  *
@@ -15,8 +21,10 @@
  *       gemm_beta.c             → mblas_egemm_beta    (shared via common/)
  *
  * Differences from upstream DGEMM:
- *   - No SIMD. x86_64 has no AVX path for 80-bit multifloats::float64x2; the
- *     reference scalar `gemmkernel_2x2.c` is the kernel.
+ *   - No SIMD, by design: this hand-port stays deliberately scalar to
+ *     remain a line-for-line retype of the kind10 leg (AVX2 SoA
+ *     double-double paths exist elsewhere in this repo); the reference
+ *     scalar `gemmkernel_2x2.c` is the kernel.
  *   - No `blas_queue` SMP runtime. Single-level OpenMP parallelism
  *     over the M-axis inside the (jc, pc) blocking — each thread
  *     keeps a private Ap buffer; Bp is shared and packed once per
@@ -27,11 +35,13 @@
  * Fortran ABI:
  *   subroutine mgemm(transa, transb, m, n, k, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - all scalars by pointer; REAL(KIND=10) ↔ multifloats::float64x2
  */
 
 #include "mblas_l3_real.h"
+#include "mblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -136,7 +146,7 @@ extern "C" void mgemm_(
      * MC*KC roughly fits the L2 target. */
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;  /* P-core L2 nominal */
+        const long L2_TARGET_BYTES = MBLAS_L2_TARGET_BYTES;  /* P-core L2 nominal */
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;

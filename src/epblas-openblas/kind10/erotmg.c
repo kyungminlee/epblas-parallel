@@ -6,7 +6,7 @@
  */
 typedef long double T;
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T ldabs(T x) { return __builtin_fabsl(x); }  /* branchless x87 fabs */
 
 void erotmg_(T *DD1, T *DD2, T *DX1, const T *DY1, T *DPARAM)
 {

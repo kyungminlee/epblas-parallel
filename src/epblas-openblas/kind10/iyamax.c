@@ -12,9 +12,9 @@
 typedef _Complex long double C;
 typedef long double T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T ldabs(T x) { return __builtin_fabsl(x); }  /* branchless x87 fabs */
 static inline T cabs1(C z) {
     const T *p = (const T *)&z;
     return ldabs(p[0]) + ldabs(p[1]);
@@ -51,9 +51,9 @@ int iyamax_(const int *N, const C *x, const int *INCX)
     if (n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            ptrdiff_t pidx[64]; T pmax[64];
-            for (int i = 0; i < 64; ++i) { pidx[i] = -1; pmax[i] = 0.0L; }
+            if (nthreads > L1_PARTIAL_MAX_THREADS) nthreads = L1_PARTIAL_MAX_THREADS;
+            ptrdiff_t pidx[L1_PARTIAL_MAX_THREADS]; T pmax[L1_PARTIAL_MAX_THREADS];
+            for (int i = 0; i < L1_PARTIAL_MAX_THREADS; ++i) { pidx[i] = -1; pmax[i] = 0.0L; }
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();
@@ -70,7 +70,8 @@ int iyamax_(const int *N, const C *x, const int *INCX)
                 }
             }
             ptrdiff_t gidx = 0;
-            T gmax = 0.0L;
+            T gmax = 0.0L;  /* value never read: `first` forces the first
+                             * valid slot to overwrite it */
             int first = 1;
             for (int i = 0; i < nthreads; ++i) {
                 if (pidx[i] < 0) continue;

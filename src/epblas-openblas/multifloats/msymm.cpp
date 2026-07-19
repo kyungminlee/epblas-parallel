@@ -1,5 +1,11 @@
 /*
- * msymm — kind10 (REAL(KIND=10) / 80-bit multifloats::float64x2) port of OpenBLAS DSYMM.
+ * msymm — multifloats DD (float64x2, 128-bit double-double) port of OpenBLAS DSYMM.
+ *
+ * ADAPTATION vs the verbatim kind10 source: the element type here is
+ * multifloats::float64x2 — a double-double of two binary64 limbs
+ * (128 bits), not the 80-bit x87 REAL(KIND=10) of the kind10 leg.
+ * Structure, loop order, blocking and thresholds are the kind10
+ * port's; only the element type and its arithmetic differ.
  *
  *   C := alpha * A * B + beta * C    (SIDE='L', A symmetric M×M)
  *   C := alpha * B * A + beta * C    (SIDE='R', A symmetric N×N)
@@ -30,13 +36,15 @@
  * Fortran ABI:
  *   subroutine msymm(side, uplo, m, n, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args with trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - all scalars by pointer; REAL(KIND=10) ↔ multifloats::float64x2
  *   - A is M×M when side='L', N×N when side='R'; only the UPLO-indicated
  *     triangle is read.
  */
 
 #include "mblas_l3_real.h"
+#include "mblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -93,7 +101,7 @@ extern "C" void msymm_(
 
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = MBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;

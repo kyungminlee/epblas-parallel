@@ -35,7 +35,7 @@ static void safscale_init(void)
     safscale_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T q_abs(T x) { return __builtin_fabsf128(x); }
 static inline T lmax(T a, T b) { return a > b ? a : b; }
 static inline T lmin(T a, T b) { return a < b ? a : b; }
 static inline T abssq(C t) {
@@ -65,7 +65,7 @@ void xrotg_(C *Ain, C *Bin, T *Cout, C *Sout)
         c = 0.0Q;
         T g1;
         T gr = re(g), gi = im(g);
-        T agi = ldabs(gi), agr = ldabs(gr);
+        T agi = q_abs(gi), agr = q_abs(gr);
         if (gr == 0.0Q) {
             r = agi;
             s = cconjq(g) / r;
@@ -90,8 +90,8 @@ void xrotg_(C *Ain, C *Bin, T *Cout, C *Sout)
             }
         }
     } else {
-        T f1 = lmax(ldabs(re(f)), ldabs(im(f)));
-        T g1 = lmax(ldabs(re(g)), ldabs(im(g)));
+        T f1 = lmax(q_abs(re(f)), q_abs(im(f)));
+        T g1 = lmax(q_abs(re(g)), q_abs(im(g)));
         T rtmax = sqrtq(safmax / 4.0Q);
         if (f1 > rtmin && f1 < rtmax && g1 > rtmin && g1 < rtmax) {
             T f2 = abssq(f);

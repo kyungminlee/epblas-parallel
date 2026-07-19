@@ -1,5 +1,11 @@
 /*
- * maxpy — kind10 (REAL(KIND=10) / 80-bit multifloats::float64x2) port of OpenBLAS daxpy.
+ * maxpy — multifloats DD (float64x2, 128-bit double-double) port of OpenBLAS daxpy.
+ *
+ * ADAPTATION vs the verbatim kind10 source: the element type here is
+ * multifloats::float64x2 — a double-double of two binary64 limbs
+ * (128 bits), not the 80-bit x87 REAL(KIND=10) of the kind10 leg.
+ * Structure, loop order, blocking and thresholds are the kind10
+ * port's; only the element type and its arithmetic differ.
  *
  * Y := alpha * X + Y
  *
@@ -12,7 +18,8 @@
  *     tail, and the general 4-way-unrolled strided branch.
  *
  * Differences from OpenBLAS daxpy:
- *   - No SIMD. x86_64 has no AVX path for 80-bit multifloats::float64x2.
+ *   - No SIMD, by design: deliberately scalar retype (AVX2 SoA
+ *     double-double paths exist elsewhere in this repo).
  *   - No micro-arch dispatch: a single C kernel.
  *   - Multi-thread split uses OpenMP (when compiled with -fopenmp)
  *     instead of OpenBLAS's blas_level1_thread infrastructure.
@@ -33,7 +40,8 @@
 
 typedef multifloats::float64x2 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
 static void axpy_kernel(ptrdiff_t n, T alpha, const T *x, ptrdiff_t incx,
                                               T *y,       ptrdiff_t incy)

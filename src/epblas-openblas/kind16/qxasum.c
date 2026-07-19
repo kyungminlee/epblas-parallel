@@ -13,9 +13,10 @@
 typedef __complex128 C;
 typedef __float128 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L1
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T q_abs(T x) { return __builtin_fabsf128(x); }
 
 static T asum_kernel(ptrdiff_t n, const C *x, ptrdiff_t incx)
 {
@@ -24,13 +25,13 @@ static T asum_kernel(ptrdiff_t n, const C *x, ptrdiff_t incx)
     if (incx == 1) {
         p = (const T *)x;
         for (ptrdiff_t i = 0; i < 2*n; i += 2) {
-            s += ldabs(p[i]) + ldabs(p[i+1]);
+            s += q_abs(p[i]) + q_abs(p[i+1]);
         }
         return s;
     }
     for (ptrdiff_t i = 0; i < n; ++i) {
         p = (const T *)(x + i*incx);
-        s += ldabs(p[0]) + ldabs(p[1]);
+        s += q_abs(p[0]) + q_abs(p[1]);
     }
     return s;
 }
@@ -45,8 +46,8 @@ T qxasum_(const int *N, const C *x, const int *INCX)
     if (n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            T partial[64] = {0};
+            if (nthreads > QBLAS_L1_MAX_THREADS) nthreads = QBLAS_L1_MAX_THREADS;
+            T partial[QBLAS_L1_MAX_THREADS] = {0};
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

@@ -27,11 +27,13 @@
  * Fortran ABI:
  *   subroutine qgemm(transa, transb, m, n, k, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - all scalars by pointer; REAL(KIND=16) ↔ __float128
  */
 
 #include "qblas_l3_real.h"
+#include "qblas_tuning.h"
 #include <quadmath.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -137,7 +139,7 @@ void qgemm_(
      * MC*KC roughly fits the L2 target. */
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;  /* P-core L2 nominal */
+        const long L2_TARGET_BYTES = QBLAS_L2_TARGET_BYTES;  /* P-core L2 nominal */
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;

@@ -10,7 +10,7 @@
 
 typedef long double T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
 static void scal_kernel(ptrdiff_t n, T alpha, T *x, ptrdiff_t incx)
 {

@@ -1,5 +1,11 @@
 /*
- * mgemv — kind10 (REAL(KIND=10) / 80-bit multifloats::float64x2) port of OpenBLAS dgemv.
+ * mgemv — multifloats DD (float64x2, 128-bit double-double) port of OpenBLAS dgemv.
+ *
+ * ADAPTATION vs the verbatim kind10 source: the element type here is
+ * multifloats::float64x2 — a double-double of two binary64 limbs
+ * (128 bits), not the 80-bit x87 REAL(KIND=10) of the kind10 leg.
+ * Structure, loop order, blocking and thresholds are the kind10
+ * port's; only the element type and its arithmetic differ.
  *
  *   y := alpha * A   * x + beta * y    (TRANS = 'N')   A is M x N
  *   y := alpha * A^T * x + beta * y    (TRANS = 'T'/'C')
@@ -9,8 +15,9 @@
  *     on (m==0 || n==0), beta-scale of y, alpha==0 short-circuit, negative-
  *     stride pre-shift, dispatch to GEMV_N / GEMV_T kernel.
  *   - Kernels gemv_n / gemv_t mirror kernel/generic/gemv_{n,t}.c — the row-
- *     outer AXPY form for N and the column-outer dot form for T. No SIMD
- *     (x86_64 has no AVX path for 80-bit multifloats::float64x2).
+ *     outer AXPY form for N and the column-outer dot form for T. No SIMD,
+ *     by design: deliberately scalar retype (AVX2 SoA double-double paths
+ *     exist elsewhere in this repo).
  *
  * OpenMP: GEMV is bandwidth-bound, so block-partition the OUTPUT vector y
  * across threads (rows of A for 'N', columns of A for 'T'). All A reads
@@ -39,7 +46,8 @@
 
 typedef multifloats::float64x2 T;
 
-#define MULTI_THREAD_MINIMAL 4096   /* m*n threshold for main path */
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L2_MN   /* m*n threshold for main path */
 #define SPLIT_X_MN_MIN       9216   /* matches OpenBLAS 24*24*GEMM_THRESH^2 */
 #define Y_DUMMY_NUM          1024   /* element cap on m*nthreads in split_x */
 

@@ -11,7 +11,8 @@
 
 typedef __float128 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L1
 
 static void copy_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx,
                                      T       *y, ptrdiff_t incy)

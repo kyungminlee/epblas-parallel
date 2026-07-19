@@ -1,5 +1,11 @@
 /*
- * mtrsm — kind10 (REAL(KIND=10) / 80-bit multifloats::float64x2) port of OpenBLAS DTRSM.
+ * mtrsm — multifloats DD (float64x2, 128-bit double-double) port of OpenBLAS DTRSM.
+ *
+ * ADAPTATION vs the verbatim kind10 source: the element type here is
+ * multifloats::float64x2 — a double-double of two binary64 limbs
+ * (128 bits), not the 80-bit x87 REAL(KIND=10) of the kind10 leg.
+ * Structure, loop order, blocking and thresholds are the kind10
+ * port's; only the element type and its arithmetic differ.
  *
  *   op(A) * X = alpha * B    (SIDE='L')   →  B := alpha * inv(op(A)) * B_old
  *   X * op(A) = alpha * B    (SIDE='R')   →  B := alpha * B_old * inv(op(A))
@@ -38,14 +44,17 @@
  *
  * Fortran ABI matches the migrated reference:
  *   subroutine mtrsm(side, uplo, transa, diag, m, n, alpha, a, lda, b, ldb)
- *   - character args carry trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - REAL(KIND=10) scalars are passed by pointer
  *   - 'C' on transa is treated identically to 'T' for reals
  */
 
 #include "mblas_l3_real.h"
+#include "mblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -558,12 +567,11 @@ extern "C" void mtrsm_(
 
     if (M == 0 || N == 0) return;
 
-    /* alpha pre-scale of B (mirrors trsm_L.c/trsm_R.c GEMM_BETA pass —
-     * args.beta is set to alpha by interface/trsm.c). */
-    if (alpha != 1.0) {
+    /* alpha == 0 zeroes B outright; no pack buffers are needed. */
+    if (alpha == 0.0) {
         mblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
+        return;
     }
-    if (alpha == 0.0) return;
 
     int MC0, KC, NC;
     mblas_egemm_blocks(&MC0, &KC, &NC);
@@ -573,7 +581,7 @@ extern "C" void mtrsm_(
     int K_eff = lside ? M : N;
     int MC = MC0;
     if (K_eff <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = MBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K_eff * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -601,7 +609,11 @@ extern "C" void mtrsm_(
 
     T **Ap_arr = (T **)calloc((size_t)nthreads, sizeof(T *));
     T **Bp_arr = (T **)calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr || !Bp_arr) { free(Ap_arr); free(Bp_arr); return; }
+    if (!Ap_arr || !Bp_arr) {
+        free(Ap_arr); free(Bp_arr);
+        fprintf(stderr, "mtrsm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = (T *)aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -610,11 +622,20 @@ extern "C" void mtrsm_(
     }
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) {
-            if (Ap_arr) free(Ap_arr[t]);
-            if (Bp_arr) free(Bp_arr[t]);
+            free(Ap_arr[t]);
+            free(Bp_arr[t]);
         }
         free(Ap_arr); free(Bp_arr);
-        return;
+        fprintf(stderr, "mtrsm: pack buffer allocation failed\n");
+        abort();
+    }
+
+    /* alpha pre-scale of B (mirrors trsm_L.c/trsm_R.c GEMM_BETA pass —
+     * args.beta is set to alpha by interface/trsm.c). Deferred until
+     * after pack-buffer allocation so an allocation failure can never
+     * leave B scaled but untransformed. */
+    if (alpha != 1.0) {
+        mblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, alpha, b, (ptrdiff_t)ldb);
     }
 
 #ifdef _OPENMP

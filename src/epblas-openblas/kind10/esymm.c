@@ -30,15 +30,18 @@
  * Fortran ABI:
  *   subroutine esymm(side, uplo, m, n, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args with trailing hidden size_t lengths (gfortran)
+ *   - character args are passed as bare char* (hidden gfortran length
+ *     args deliberately omitted — never re-add them)
  *   - all scalars by pointer; REAL(KIND=10) ↔ long double
  *   - A is M×M when side='L', N×N when side='R'; only the UPLO-indicated
  *     triangle is read.
  */
 
 #include "eblas_l3_real.h"
+#include "eblas_tuning.h"
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -68,10 +71,12 @@ void esymm_(
 
     if (M <= 0 || N <= 0) return;
 
-    /* Beta pre-pass. */
-    eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta, c, (ptrdiff_t)(*ldc_));
-
-    if (alpha == 0.0L) return;
+    /* alpha==0: the beta pass on C is the entire operation. */
+    if (alpha == 0.0L) {
+        eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta, c,
+                         (ptrdiff_t)(*ldc_));
+        return;
+    }
 
     /* OpenBLAS's interface/symm.c side-swap: when SIDE=R, the symmetric
      * matrix logically lives in the B slot of the internal GEMM. This
@@ -85,7 +90,10 @@ void esymm_(
     const int ldc    = *ldc_;
     const int K = (side == 'L') ? M : N;
 
-    if (K == 0) return;
+    if (K == 0) {
+        eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
+        return;
+    }
 
     /* Block sizes (env-overridable). */
     int MC0, KC, NC;
@@ -93,7 +101,6 @@ void esymm_(
 
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;
@@ -115,11 +122,21 @@ void esymm_(
     long mnk = (long)M * (long)N * (long)K;
     if (mnk < 64L * 64L * 64L) nthreads = 1;
 
+    /* All pack allocations happen BEFORE the in-place beta pass on C so
+     * a failure can never leave C scaled but not updated; benchmark-
+     * reference policy is to abort() loudly on failure. */
     T *Bp = aligned_alloc(64, (bp_bytes + 63) & ~(size_t)63);
-    if (!Bp) return;
+    if (!Bp) {
+        fprintf(stderr, "esymm: pack buffer allocation failed\n");
+        abort();
+    }
 
     T **Ap_arr = calloc((size_t)nthreads, sizeof(T *));
-    if (!Ap_arr) { free(Bp); return; }
+    if (!Ap_arr) {
+        free(Bp);
+        fprintf(stderr, "esymm: pack buffer allocation failed\n");
+        abort();
+    }
     int alloc_ok = 1;
     for (int t = 0; t < nthreads; ++t) {
         Ap_arr[t] = aligned_alloc(64, (ap_bytes + 63) & ~(size_t)63);
@@ -128,8 +145,12 @@ void esymm_(
     if (!alloc_ok) {
         for (int t = 0; t < nthreads; ++t) free(Ap_arr[t]);
         free(Ap_arr); free(Bp);
-        return;
+        fprintf(stderr, "esymm: pack buffer allocation failed\n");
+        abort();
     }
+
+    /* Beta pre-pass — after every allocation has succeeded. */
+    eblas_egemm_beta((ptrdiff_t)M, (ptrdiff_t)N, beta, c, (ptrdiff_t)ldc);
 
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nthreads)

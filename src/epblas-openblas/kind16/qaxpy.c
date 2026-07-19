@@ -32,7 +32,8 @@
 
 typedef __float128 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L1
 
 static void axpy_kernel(ptrdiff_t n, T alpha, const T *x, ptrdiff_t incx,
                                               T *y,       ptrdiff_t incy)

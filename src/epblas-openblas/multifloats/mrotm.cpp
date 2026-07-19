@@ -23,7 +23,8 @@
 
 typedef multifloats::float64x2 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
 static void rotm_neg(ptrdiff_t lo, ptrdiff_t hi, ptrdiff_t incx,
                      T *x, T *y, T h11, T h12, T h21, T h22)

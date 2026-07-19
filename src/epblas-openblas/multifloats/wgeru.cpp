@@ -18,7 +18,8 @@
 using C = std::complex<multifloats::float64x2>;
 typedef std::complex<multifloats::float64x2> C;
 
-#define MULTI_THREAD_MINIMAL 4096
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L2_MN
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 

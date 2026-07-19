@@ -16,12 +16,13 @@ using C = std::complex<multifloats::float64x2>;
 typedef std::complex<multifloats::float64x2> C;
 typedef multifloats::float64x2 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T dd_abs(T x) { return multifloats::fabs(x); }
 static inline T cabs1(C z) {
     const T *p = (const T *)&z;
-    return ldabs(p[0]) + ldabs(p[1]);
+    return dd_abs(p[0]) + dd_abs(p[1]);
 }
 
 static void iamax_kernel(ptrdiff_t n, const C *x, ptrdiff_t incx,
@@ -55,9 +56,9 @@ extern "C" int iwamax_(const int *N, const C *x, const int *INCX)
     if (n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            ptrdiff_t pidx[64]; T pmax[64];
-            for (int i = 0; i < 64; ++i) { pidx[i] = -1; pmax[i] = 0.0; }
+            if (nthreads > MBLAS_L1_MAX_THREADS) nthreads = MBLAS_L1_MAX_THREADS;
+            ptrdiff_t pidx[MBLAS_L1_MAX_THREADS]; T pmax[MBLAS_L1_MAX_THREADS];
+            for (int i = 0; i < MBLAS_L1_MAX_THREADS; ++i) { pidx[i] = -1; pmax[i] = 0.0; }
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

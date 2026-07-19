@@ -37,7 +37,7 @@ static void blue_init(void)
     blue_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0.0 ? -x : x; }
+static inline T dd_abs(T x) { return mf::fabs(x); }
 
 extern "C" T mwnrm2_(const int *N, const mf::complex64x2 *x, const int *INCX)
 {
@@ -55,7 +55,7 @@ extern "C" T mwnrm2_(const int *N, const mf::complex64x2 *x, const int *INCX)
     for (std::ptrdiff_t i = 0; i < n; ++i) {
         const T *p = reinterpret_cast<const T *>(x + ix);
         for (int c = 0; c < 2; ++c) {
-            T ax = ldabs(p[c]);
+            T ax = dd_abs(p[c]);
             if (ax > btbig) {
                 T t = ax * bsbig;
                 abig += t * t;

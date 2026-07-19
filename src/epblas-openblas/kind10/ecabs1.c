@@ -4,7 +4,7 @@
 typedef _Complex long double C;
 typedef long double T;
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T ldabs(T x) { return __builtin_fabsl(x); }  /* branchless x87 fabs */
 
 T ecabs1_(const C *Z)
 {

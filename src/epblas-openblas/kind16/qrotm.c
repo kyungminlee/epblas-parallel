@@ -22,7 +22,8 @@
 
 typedef __float128 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "qblas_tuning.h"
+#define MULTI_THREAD_MINIMAL QBLAS_MT_MIN_L1
 
 static void rotm_neg(ptrdiff_t lo, ptrdiff_t hi, ptrdiff_t incx,
                      T *x, T *y, T h11, T h12, T h21, T h22)

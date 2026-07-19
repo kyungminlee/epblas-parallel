@@ -11,7 +11,7 @@
 
 typedef long double T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
 static T asum_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx)
 {
@@ -49,8 +49,8 @@ T easum_(const int *N, const T *x, const int *INCX)
     if (n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            T partial[64] = {0};
-            if (nthreads > 64) nthreads = 64;
+            T partial[L1_PARTIAL_MAX_THREADS] = {0};
+            if (nthreads > L1_PARTIAL_MAX_THREADS) nthreads = L1_PARTIAL_MAX_THREADS;
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

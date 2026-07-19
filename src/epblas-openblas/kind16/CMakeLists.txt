@@ -112,39 +112,29 @@ set(_helpers
 # Publish the overlay-covered routine set so the driver in
 # src/epblas-openblas/CMakeLists.txt knows which symbols to objcopy-rename
 # in the matching `${LIB_PREFIX}blas_openblas_migrated` archive.
-set(_routines "")
-foreach(_k ${_kernels})
-    string(REGEX REPLACE "\\.c$" "" _r "${_k}")
-    list(APPEND _routines "${_r}")
-endforeach()
+epblas_kernel_routines(_routines ${_kernels})
 set(EPBLAS_OPENBLAS_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
-add_library(${LIB_PREFIX}blas_openblas STATIC ${_kernels} ${_helpers})
-add_library(epblas-openblas::${LIB_PREFIX}blas_openblas ALIAS ${LIB_PREFIX}blas_openblas)
-
-# Consumer-facing target name is bare `${LIB_PREFIX}blas` — the
+# Archive + alias + c_std_99 + [-O3 <flags>] + guarded -march, via the
+# shared helper (cmake/EpblasKindHelpers.cmake).
+# Consumer-facing EXPORT_NAME is bare `${LIB_PREFIX}blas` — the
 # `epblas-openblas::` namespace already disambiguates from the parallel
 # package's composite. Internal target name keeps the `_openblas`
 # suffix because CMake requires per-project target uniqueness and the
 # parallel package's composite target is named `${LIB_PREFIX}blas`.
-set_target_properties(${LIB_PREFIX}blas_openblas PROPERTIES
-    EXPORT_NAME ${LIB_PREFIX}blas)
-
-target_include_directories(${LIB_PREFIX}blas_openblas PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common)
-
-target_compile_features(${LIB_PREFIX}blas_openblas PRIVATE c_std_99)
-target_compile_options(${LIB_PREFIX}blas_openblas PRIVATE
-    -O3
-    -ffp-contract=fast
-    # Fortran-style complex arithmetic — skip the NaN/Inf branch checks
-    # that GCC otherwise emits in __mulxc3/__divxc3.
-    -fcx-fortran-rules
+epblas_add_kind_archive(${LIB_PREFIX}blas_openblas
+    NAMESPACE epblas-openblas
+    LANGUAGE C
+    MARCH "${EPBLAS_OPENBLAS_MARCH}"
+    EXPORT_NAME ${LIB_PREFIX}blas
+    COMMON_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common
+    SOURCES ${_kernels} ${_helpers}
+    COMPILE_OPTIONS
+        -ffp-contract=fast
+        # Fortran-style complex arithmetic — skip the NaN/Inf branch checks
+        # that GCC otherwise emits in __mulxc3/__divxc3.
+        -fcx-fortran-rules
 )
-if(NOT "${EPBLAS_OPENBLAS_MARCH}" STREQUAL "")
-    target_compile_options(${LIB_PREFIX}blas_openblas PRIVATE
-        -march=${EPBLAS_OPENBLAS_MARCH})
-endif()
 
 if(OpenMP_C_FOUND)
     target_link_libraries(${LIB_PREFIX}blas_openblas PUBLIC OpenMP::OpenMP_C)

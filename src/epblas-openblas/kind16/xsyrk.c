@@ -5,7 +5,7 @@
  *   C := alpha * A^T * A + beta * C    (trans='T', A is K×N)
  *
  * Complex SYMMETRIC variant — no conjugation, A == A^T (NOT Hermitian).
- * HERK is a separate routine (xherk — task #65). Only the UPLO triangle
+ * HERK is a separate routine (xherk). Only the UPLO triangle
  * of C is read or written.
  *
  * Port source: OpenBLAS.
@@ -15,7 +15,7 @@
  *   - driver/level3/syrk_kernel.c   (qblas_ysyrk_kernel_{u,l} in
  *                                    common/qblas_l3_complex.c)
  *
- * Reuses qblas_ygemm_kernel + xgemm_ncopy / xgemm_tcopy from common/.
+ * Reuses qblas_ygemm_kernel + qblas_ygemm_ncopy / qblas_ygemm_tcopy from common/.
  * No conjugation, so packers are called with `conj = 0`.
  *
  * Fortran ABI:
@@ -26,6 +26,7 @@
  */
 
 #include "qblas_l3_complex.h"
+#include "qblas_tuning.h"
 #include <quadmath.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -71,7 +72,7 @@ void xsyrk_(
 
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = QBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K * 2L * (long)sizeof(T));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;

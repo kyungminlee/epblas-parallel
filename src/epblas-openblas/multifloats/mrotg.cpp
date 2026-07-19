@@ -37,14 +37,14 @@ static void safscale_init(void)
     safscale_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T dd_abs(T x) { return multifloats::fabs(x); }
 static inline T ldsign1(T x) { return x < 0 ? -1.0 : 1.0; }
 
 extern "C" void mrotg_(T *a, T *b, T *c, T *s)
 {
     if (!safscale_initialized) safscale_init();
     T av = *a, bv = *b;
-    T anorm = ldabs(av), bnorm = ldabs(bv);
+    T anorm = dd_abs(av), bnorm = dd_abs(bv);
 
     if (bnorm == 0.0) {
         *c = 1.0; *s = 0.0; *b = 0.0;

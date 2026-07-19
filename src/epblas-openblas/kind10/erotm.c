@@ -10,9 +10,9 @@
  * Reference: blas/src/erotm.f.
  *
  * Loop shape: dflag is loop-invariant, so each branch keeps its own
- * for-loop (source-level unswitching).  Findings rule 7 — do NOT collapse
- * to a single inner loop with branches; gcc loses unswitching and emits
- * 3× more store insns.
+ * for-loop (source-level unswitching).  Do NOT collapse to a single
+ * inner loop with branches; gcc loses unswitching and emits 3× more
+ * store insns.
  */
 #include <stddef.h>
 #ifdef _OPENMP
@@ -21,7 +21,7 @@
 
 typedef long double T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
 static void rotm_neg(ptrdiff_t lo, ptrdiff_t hi, ptrdiff_t incx,
                      T *x, T *y, T h11, T h12, T h21, T h22)

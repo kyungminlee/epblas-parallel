@@ -39,7 +39,7 @@
 
 typedef __float128 T;
 
-#define DTB_ENTRIES_K10  32
+#define DTB_ENTRIES  32  /* inherited unchanged from the kind10 tuning (same 16-byte element) */
 
 #define A_(i, j)  a[(size_t)(j) * (size_t)lda + (size_t)(i)]
 
@@ -106,7 +106,7 @@ static void trmv_kernel_N(int upper, int nounit, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
                           const T *a, ptrdiff_t lda, const T *x, T *y)
 {
-    const ptrdiff_t TB = DTB_ENTRIES_K10;
+    const ptrdiff_t TB = DTB_ENTRIES;
     for (ptrdiff_t is = m_from; is < m_to; is += TB) {
         ptrdiff_t min_i = (m_to - is < TB) ? m_to - is : TB;
         if (upper && is > 0) {
@@ -150,7 +150,7 @@ static void trmv_kernel_T(int upper, int nounit, ptrdiff_t n,
                           ptrdiff_t m_from, ptrdiff_t m_to,
                           const T *a, ptrdiff_t lda, const T *x, T *y)
 {
-    const ptrdiff_t TB = DTB_ENTRIES_K10;
+    const ptrdiff_t TB = DTB_ENTRIES;
     for (ptrdiff_t is = m_from; is < m_to; is += TB) {
         ptrdiff_t min_i = (m_to - is < TB) ? m_to - is : TB;
         if (upper && is > 0) {

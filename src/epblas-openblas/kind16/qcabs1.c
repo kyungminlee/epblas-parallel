@@ -5,10 +5,10 @@
 typedef __complex128 C;
 typedef __float128 T;
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T q_abs(T x) { return __builtin_fabsf128(x); }
 
 T qcabs1_(const C *Z)
 {
     const T *p = (const T *)Z;
-    return ldabs(p[0]) + ldabs(p[1]);
+    return q_abs(p[0]) + q_abs(p[1]);
 }

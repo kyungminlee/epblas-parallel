@@ -22,7 +22,8 @@ using C = std::complex<multifloats::float64x2>;
 typedef std::complex<multifloats::float64x2> C;
 typedef multifloats::float64x2 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
 static void scal_kernel(ptrdiff_t n, T alpha, T *base, ptrdiff_t incx)
 {

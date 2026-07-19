@@ -12,7 +12,8 @@
 
 typedef multifloats::float64x2 T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
 static T dot_kernel(ptrdiff_t n, const T *x, ptrdiff_t incx,
                                  const T *y, ptrdiff_t incy)
@@ -52,8 +53,8 @@ extern "C" T mdot_(const int *N, const T *x, const int *INCX,
     if (incx != 0 && incy != 0 && n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            T partial[64] = {0};
-            if (nthreads > 64) nthreads = 64;
+            T partial[MBLAS_L1_MAX_THREADS] = {0};
+            if (nthreads > MBLAS_L1_MAX_THREADS) nthreads = MBLAS_L1_MAX_THREADS;
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

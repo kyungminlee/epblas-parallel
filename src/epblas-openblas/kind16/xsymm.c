@@ -7,7 +7,7 @@
  * NOTE: ZSYMM operates on a complex SYMMETRIC matrix (A == A^T), NOT a
  * Hermitian matrix. There is no conjugation involved — the symmetric
  * reflection just copies (re, im) across the diagonal as-is. Hermitian
- * HEMM is a separate routine (xhemm — task #64).
+ * HEMM is a separate routine (xhemm).
  *
  * Port source: OpenBLAS.
  *   - interface/symm.c           (Z-variant: side-swap, xerbla, etc.)
@@ -25,13 +25,15 @@
  * Fortran ABI:
  *   subroutine xsymm(side, uplo, m, n, alpha, a, lda, b, ldb,
  *                    beta, c, ldc)
- *   - character args with trailing hidden size_t lengths (gfortran)
+ *   - character args are plain char* — NO trailing hidden length args
+ *     (declaring them caused the v0.9.1 frame corruption; never re-add)
  *   - alpha, beta are COMPLEX(KIND=16): 2 __float128s each (re, im)
  *   - a, b, c are COMPLEX(KIND=16) arrays (interleaved re,im)
  *   - lda, ldb, ldc are in COMPLEX(KIND=16) elements
  */
 
 #include "qblas_l3_complex.h"
+#include "qblas_tuning.h"
 #include <quadmath.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -85,7 +87,7 @@ void xsymm_(
 
     int MC = MC0;
     if (K <= KC) {
-        const long L2_TARGET_BYTES = 256L * 1024L;
+        const long L2_TARGET_BYTES = QBLAS_L2_TARGET_BYTES;
         long target_mc = L2_TARGET_BYTES / ((long)K * (long)(2 * sizeof(T)));
         if (target_mc > MC) {
             if (target_mc > 4L * MC0) target_mc = 4L * MC0;

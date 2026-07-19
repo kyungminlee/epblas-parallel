@@ -34,7 +34,7 @@ static void safscale_init(void)
     safscale_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T ldabs(T x) { return __builtin_fabsl(x); }  /* branchless x87 fabs */
 static inline T lmax(T a, T b) { return a > b ? a : b; }
 static inline T lmin(T a, T b) { return a < b ? a : b; }
 static inline T abssq(C t) {

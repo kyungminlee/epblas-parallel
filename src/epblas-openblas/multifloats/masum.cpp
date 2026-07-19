@@ -3,8 +3,8 @@
  *
  * Faithful retype of kind10/easum.c: long double -> multifloats::float64x2,
  * fabsl -> mf::fabs. Same 6-accumulator unroll, threading, and threshold;
- * only the element type and its abs differ. See
- * docs/adr/0002-openblas-kind16-faithful-handport.md.
+ * only the element type and its abs differ. (Port policy: the openblas
+ * faithful-handport ADR kept with the workspace notes, outside this repo.)
  *
  * Reference bails on incx <= 0.
  */
@@ -18,7 +18,8 @@
 namespace mf = multifloats;
 using T = mf::float64x2;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "mblas_tuning.h"
+#define MULTI_THREAD_MINIMAL MBLAS_MT_MIN_L1
 
 static T asum_kernel(std::ptrdiff_t n, const T *x, std::ptrdiff_t incx)
 {
@@ -54,8 +55,8 @@ extern "C" T masum_(const int *N, const T *x, const int *INCX)
     if (n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            T partial[64] = {};
-            if (nthreads > 64) nthreads = 64;
+            T partial[MBLAS_L1_MAX_THREADS] = {};
+            if (nthreads > MBLAS_L1_MAX_THREADS) nthreads = MBLAS_L1_MAX_THREADS;
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

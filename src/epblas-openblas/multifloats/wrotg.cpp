@@ -41,7 +41,7 @@ static void safscale_init(void)
     safscale_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0.0 ? -x : x; }
+static inline T dd_abs(T x) { return mf::fabs(x); }
 static inline T lmax(T a, T b) { return a > b ? a : b; }
 static inline T lmin(T a, T b) { return a < b ? a : b; }
 static inline T abssq(C t) {
@@ -67,7 +67,7 @@ extern "C" void wrotg_(C *Ain, C *Bin, T *Cout, C *Sout)
         c = 0.0;
         T g1;
         T gr = re(g), gi = im(g);
-        T agi = ldabs(gi), agr = ldabs(gr);
+        T agi = dd_abs(gi), agr = dd_abs(gr);
         if (gr == 0.0) {
             r = agi;
             s = std::conj(g) / r;
@@ -92,8 +92,8 @@ extern "C" void wrotg_(C *Ain, C *Bin, T *Cout, C *Sout)
             }
         }
     } else {
-        T f1 = lmax(ldabs(re(f)), ldabs(im(f)));
-        T g1 = lmax(ldabs(re(g)), ldabs(im(g)));
+        T f1 = lmax(dd_abs(re(f)), dd_abs(im(f)));
+        T g1 = lmax(dd_abs(re(g)), dd_abs(im(g)));
         T rtmax = mf::sqrt(safmax / 4.0);
         if (f1 > rtmin && f1 < rtmax && g1 > rtmin && g1 < rtmax) {
             T f2 = abssq(f);

@@ -23,6 +23,8 @@
 
 typedef _Complex long double C;
 
+/* Family-tuned threading gate (gemv/ger) — deviates from the shared
+ * default in eblas_tuning.h; kept local (family tuning). */
 #define MULTI_THREAD_MINIMAL 4096
 #define SPLIT_X_MN_MIN       9216   /* matches OpenBLAS 24*24*GEMM_THRESH^2 */
 #define Y_DUMMY_NUM          512    /* element cap on m*nthreads (complex = 2x storage) */

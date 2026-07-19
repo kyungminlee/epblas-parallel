@@ -12,9 +12,9 @@
 typedef _Complex long double C;
 typedef long double T;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T ldabs(T x) { return __builtin_fabsl(x); }  /* branchless x87 fabs */
 
 static T asum_kernel(ptrdiff_t n, const C *x, ptrdiff_t incx)
 {
@@ -44,8 +44,8 @@ T eyasum_(const int *N, const C *x, const int *INCX)
     if (n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            T partial[64] = {0};
+            if (nthreads > L1_PARTIAL_MAX_THREADS) nthreads = L1_PARTIAL_MAX_THREADS;
+            T partial[L1_PARTIAL_MAX_THREADS] = {0};
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

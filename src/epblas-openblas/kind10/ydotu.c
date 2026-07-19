@@ -8,7 +8,7 @@
 
 typedef _Complex long double C;
 
-#define MULTI_THREAD_MINIMAL 10000
+#include "eblas_tuning.h"
 
 static C dotu_kernel(ptrdiff_t n, const C *x, ptrdiff_t incx,
                                   const C *y, ptrdiff_t incy)
@@ -36,9 +36,9 @@ C ydotu_(const int *N, const C *x, const int *INCX,
     if (incx != 0 && incy != 0 && n > MULTI_THREAD_MINIMAL) {
         int nthreads = omp_get_max_threads();
         if (nthreads > 1) {
-            if (nthreads > 64) nthreads = 64;
-            C partial[64];
-            for (int i = 0; i < 64; ++i) partial[i] = 0.0L + 0.0iL;
+            if (nthreads > L1_PARTIAL_MAX_THREADS) nthreads = L1_PARTIAL_MAX_THREADS;
+            C partial[L1_PARTIAL_MAX_THREADS];
+            for (int i = 0; i < L1_PARTIAL_MAX_THREADS; ++i) partial[i] = 0.0L + 0.0iL;
             #pragma omp parallel num_threads(nthreads)
             {
                 int tid = omp_get_thread_num();

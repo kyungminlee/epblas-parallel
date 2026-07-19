@@ -35,14 +35,14 @@ static void safscale_init(void)
     safscale_initialized = 1;
 }
 
-static inline T ldabs(T x) { return x < 0 ? -x : x; }
+static inline T q_abs(T x) { return __builtin_fabsf128(x); }
 static inline T ldsign1(T x) { return x < 0 ? -1.0Q : 1.0Q; }
 
 void qrotg_(T *a, T *b, T *c, T *s)
 {
     if (!safscale_initialized) safscale_init();
     T av = *a, bv = *b;
-    T anorm = ldabs(av), bnorm = ldabs(bv);
+    T anorm = q_abs(av), bnorm = q_abs(bv);
 
     if (bnorm == 0.0Q) {
         *c = 1.0Q; *s = 0.0Q; *b = 0.0Q;

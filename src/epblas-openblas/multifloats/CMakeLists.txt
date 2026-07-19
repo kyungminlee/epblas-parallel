@@ -123,33 +123,24 @@ set(_helpers
 # Publish the overlay-covered routine set so the driver in
 # src/epblas-openblas/CMakeLists.txt knows which symbols to objcopy-rename
 # in the matching `${LIB_PREFIX}blas_openblas_migrated` archive.
-set(_routines "")
-foreach(_k ${_kernels})
-    string(REGEX REPLACE "\\.cpp$" "" _r "${_k}")
-    list(APPEND _routines "${_r}")
-endforeach()
+epblas_kernel_routines(_routines ${_kernels})
 set(EPBLAS_OPENBLAS_OVERLAY_ROUTINES "${_routines}" PARENT_SCOPE)
 
-add_library(${LIB_PREFIX}blas_openblas STATIC ${_kernels} ${_helpers})
-add_library(epblas-openblas::${LIB_PREFIX}blas_openblas ALIAS ${LIB_PREFIX}blas_openblas)
-
-set_target_properties(${LIB_PREFIX}blas_openblas PROPERTIES
-    EXPORT_NAME ${LIB_PREFIX}blas)
-
-target_include_directories(${LIB_PREFIX}blas_openblas PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common)
-
-target_compile_features(${LIB_PREFIX}blas_openblas PRIVATE cxx_std_17)
-target_compile_options(${LIB_PREFIX}blas_openblas PRIVATE
-    -O3
-    # NOT =fast: fast contracts across statements and breaks the
-    # error-free two_prod/two_sum transforms the DD type relies on.
-    -ffp-contract=on
+# Archive + alias + cxx_std_17 + [-O3 <flags>] + guarded -march, via the
+# shared helper (cmake/EpblasKindHelpers.cmake). EXPORT_NAME rationale:
+# see kind10/CMakeLists.txt.
+epblas_add_kind_archive(${LIB_PREFIX}blas_openblas
+    NAMESPACE epblas-openblas
+    LANGUAGE CXX
+    MARCH "${EPBLAS_OPENBLAS_MARCH}"
+    EXPORT_NAME ${LIB_PREFIX}blas
+    COMMON_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common
+    SOURCES ${_kernels} ${_helpers}
+    COMPILE_OPTIONS
+        # NOT =fast: fast contracts across statements and breaks the
+        # error-free two_prod/two_sum transforms the DD type relies on.
+        -ffp-contract=on
 )
-if(NOT "${EPBLAS_OPENBLAS_MARCH}" STREQUAL "")
-    target_compile_options(${LIB_PREFIX}blas_openblas PRIVATE
-        -march=${EPBLAS_OPENBLAS_MARCH})
-endif()
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(${LIB_PREFIX}blas_openblas PUBLIC OpenMP::OpenMP_CXX)
