@@ -7,6 +7,8 @@ semantics (minor = feature, patch = fix).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-20
+
 ### Added
 - User documentation ships with the binary releases: `cmake --install` now
   places README, LICENSE, CHANGELOG, and the Markdown user guide under
