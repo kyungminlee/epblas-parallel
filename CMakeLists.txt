@@ -364,6 +364,16 @@ configure_file(
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/epblas-parallel/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/epblas-parallel)
 
+# User-facing documentation ships with every install (and therefore every
+# release tarball): the top-level project docs plus the Markdown user guide.
+# Rendered HTML (Sphinx + Doxygen) is a separate release asset built in
+# .github/workflows/release.yml, not an install component.
+install(FILES README.md LICENSE CHANGELOG.md
+    DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(DIRECTORY doc/user/
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/user
+    FILES_MATCHING PATTERN "*.md")
+
 set(_epblas_parallel_install_targets "")
 set(_epblas_openblas_install_targets "")
 foreach(_target IN LISTS EPBLAS_PARALLEL_BUILT_TARGETS)

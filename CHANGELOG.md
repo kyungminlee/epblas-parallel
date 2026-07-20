@@ -7,6 +7,13 @@ semantics (minor = feature, patch = fix).
 
 ## [Unreleased]
 
+### Added
+- User documentation ships with the binary releases: `cmake --install` now
+  places README, LICENSE, CHANGELOG, and the Markdown user guide under
+  `share/doc/epblas-parallel/`, and the release workflow renders the
+  Sphinx/Doxygen HTML manual as a separate `…-docs-html.tar.gz` asset (a
+  docs-toolchain failure never blocks the binary release).
+
 ## [0.13.0] - 2026-07-19
 
 ### Fixed

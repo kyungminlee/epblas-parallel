@@ -33,3 +33,6 @@ benchmark/dual/drivers/
 
 # CTest scratch output
 Testing/
+
+# Generated from doc/conf.py.in (standalone Sphinx recipe / docs CI job)
+doc/conf.py
