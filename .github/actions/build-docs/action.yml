@@ -1,0 +1,26 @@
+name: Build docs
+description: >
+  Build the Sphinx + MyST + Breathe documentation via ./doc/build.sh.
+  Shared by docs.yml (GitHub Pages publish) and ci.yml (build check).
+
+runs:
+  using: composite
+  steps:
+    - name: Install doxygen
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y doxygen
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Install docs dependencies
+      shell: bash
+      run: |
+        uv venv doc/.venv
+        uv pip install --python doc/.venv -r doc/requirements.txt
+
+    - name: Build HTML documentation
+      shell: bash
+      run: ./doc/build.sh

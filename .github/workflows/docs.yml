@@ -1,0 +1,56 @@
+name: Docs
+
+# Build the Sphinx + MyST + Breathe documentation and publish it to GitHub
+# Pages (https://kyungminlee.github.io/epblas-parallel/). Runs on pushes to
+# main that touch the docs, and on manual dispatch.
+#
+# One-time setup (repo Settings -> Pages): set "Build and deployment" source
+# to "GitHub Actions". No branch or gh-pages branch is needed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'doc/**'
+      - 'include/epblas-parallel/version.h.in'
+      - 'CHANGELOG.md'
+      - 'VERSION'
+      - '.github/workflows/docs.yml'
+      - '.github/actions/build-docs/**'
+  workflow_dispatch:
+
+# Permissions required by the Pages deployment action.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Shared with ci.yml's docs build check.
+      - uses: ./.github/actions/build-docs
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: doc/_build/html
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

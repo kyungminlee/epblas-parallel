@@ -58,7 +58,7 @@ comments refer to; it supersedes the historical `doc/design.md`.)
 The perf harness relies on the same "same symbols, different archives" property
 in reverse: it namespaces par/ob/mig archives with `objcopy` so all three
 coexist in one binary — see
-[`../../benchmark/dual/BENCH_PROTOCOL.md`](../../benchmark/dual/BENCH_PROTOCOL.md).
+[`benchmark/dual/BENCH_PROTOCOL.md`](https://github.com/kyungminlee/epblas-parallel/blob/main/benchmark/dual/BENCH_PROTOCOL.md).
 
 ## OpenMP runtime
 

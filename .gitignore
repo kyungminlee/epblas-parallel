@@ -1,9 +1,10 @@
 # Local agent / editor state
 .claude/
 
-# Build artifacts
-build/
-build-*/
+# Build artifacts (build trees at the repo root; anchored so the pattern
+# can't swallow e.g. .github/actions/build-docs/)
+/build/
+/build-*/
 .cache/
 compile_commands.json
 
@@ -33,6 +34,3 @@ benchmark/dual/drivers/
 
 # CTest scratch output
 Testing/
-
-# Generated from doc/conf.py.in (standalone Sphinx recipe / docs CI job)
-doc/conf.py
