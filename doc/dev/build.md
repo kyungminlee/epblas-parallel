@@ -45,7 +45,7 @@ run automatically as part of the build:
 - **Python bench-driver generator** (`benchmark/gen_dual_harnesses.py`) — emits
   the per-routine dual-link perf drivers. It is invoked by the perf scripts, not
   the CMake build; to run or modify it see [test.md](test.md) and the perf
-  runbook [`../../benchmark/dual/README.md`](../../benchmark/dual/README.md).
+  runbook [`benchmark/dual/README.md`](https://github.com/kyungminlee/epblas-parallel/blob/main/benchmark/dual/README.md).
 
 ## Install
 

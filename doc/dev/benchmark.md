@@ -15,8 +15,8 @@ and the ratio **par / reference, smaller = faster** — never GF/s.
 
 | Doc | Role |
 |---|---|
-| [`../../benchmark/dual/README.md`](../../benchmark/dual/README.md) | the **runbook** — prerequisites, the three entry points, env knobs, reading the board, machine hygiene, troubleshooting. |
-| [`../../benchmark/dual/BENCH_PROTOCOL.md`](../../benchmark/dual/BENCH_PROTOCOL.md) | the **rationale** — why one process / interleaved / min-over-reps, and the pass/fail bars. |
+| [`benchmark/dual/README.md`](https://github.com/kyungminlee/epblas-parallel/blob/main/benchmark/dual/README.md) | the **runbook** — prerequisites, the three entry points, env knobs, reading the board, machine hygiene, troubleshooting. |
+| [`benchmark/dual/BENCH_PROTOCOL.md`](https://github.com/kyungminlee/epblas-parallel/blob/main/benchmark/dual/BENCH_PROTOCOL.md) | the **rationale** — why one process / interleaved / min-over-reps, and the pass/fail bars. |
 
 They live beside the scripts (`benchmark/dual/`) so the harness and its docs stay in
 sync. This page is the pointer from the dev-doc set; read the runbook first.
@@ -43,7 +43,8 @@ benchmark/dual/run_dual.sh q qsyrk,qsyr2k      # sweep a family → console boar
 cmake --workflow --preset sweep            # CI-style: run_dual.sh per family via ctest
 ```
 
-`update_routine.sh` re-renders the committed `benchmark/results.md`; raw
+`update_routine.sh` re-renders the committed
+[`benchmark/results.md`](benchmark/results.md) (the scoreboard); raw
 data is heavy and gitignored under `workspace/files/gap5/nsbench/`. Commit the
 updated scoreboard alongside the kernel change. Everything else — REPS≥40 for
 sub-2% verdicts, one pinned sweep at a time, idle box — is in the runbook.
@@ -51,3 +52,9 @@ sub-2% verdicts, one pinned sweep at a time, idle box — is in the runbook.
 > **Machine hygiene, in one line:** never run two pinned sweeps at once and
 > verify the box is idle before timing — contention fabricates gaps. See the
 > runbook's "Machine hygiene" section.
+
+```{toctree}
+:hidden:
+
+benchmark/results
+```

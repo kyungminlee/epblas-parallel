@@ -19,3 +19,15 @@ the shipped library. The only generated code is the *test/bench* infrastructure
 [build.md](build.md) and [test.md](test.md).
 
 User-facing docs live in [`../user/`](../user/index.md).
+
+```{toctree}
+:hidden:
+
+configure
+build
+test
+benchmark
+architecture
+debugging
+release
+```

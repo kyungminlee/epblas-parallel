@@ -2,7 +2,8 @@
 
 `epblas-parallel` provides hand-written, cache-blocked, OpenMP-parallel
 extended-precision BLAS overlays — a drop-in replacement for the serial
-[eplinalg](../../README.md) baseline across three precisions: **kind10**
+[eplinalg](https://github.com/kyungminlee/eplinalg) baseline across three
+precisions: **kind10**
 (80-bit `long double`), **kind16** (`__float128`), and **multifloats**
 (double-double).
 
@@ -12,3 +13,11 @@ extended-precision BLAS overlays — a drop-in replacement for the serial
 
 Building or extending the library itself? See the developer docs in
 [`../dev/`](../dev/index.md).
+
+```{toctree}
+:hidden:
+
+installation
+usage
+api/index
+```

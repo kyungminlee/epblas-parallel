@@ -1,7 +1,8 @@
 # API reference
 
 `epblas-parallel` does not define a new API — it re-implements the existing
-[eplinalg](../../../README.md) BLAS surface with the identical Fortran ABI, so
+[eplinalg](https://github.com/kyungminlee/eplinalg) BLAS surface with the
+identical Fortran ABI, so
 every entry point is called exactly as the serial baseline (and as Netlib BLAS,
 retyped to the extended precision). Linking the overlay changes performance,
 not call sites.

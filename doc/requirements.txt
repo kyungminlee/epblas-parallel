@@ -1,6 +1,10 @@
 # Documentation build dependencies (Sphinx + MyST for Markdown + Breathe for
-# the Doxygen-generated C API). Install with:  pip install -r doc/requirements.txt
-sphinx>=7.0
-myst-parser>=2.0
+# the Doxygen-generated C API). Install into the doc venv with:
+#   uv venv doc/.venv
+#   uv pip install --python doc/.venv -r doc/requirements.txt
+sphinx>=7.3
+myst-parser>=3.0
 breathe>=4.35
 furo>=2024.1
+sphinx-copybutton>=0.5
+sphinx-design>=0.6

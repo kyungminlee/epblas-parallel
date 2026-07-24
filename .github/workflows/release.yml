@@ -137,60 +137,9 @@ jobs:
           path: ${{ env.ARCHIVE }}.tar.gz
           retention-days: 7
 
-  # ── Rendered documentation (Sphinx + Doxygen) ────────────────────
-  docs:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # Docs are a supplementary asset: a doc-toolchain hiccup must never
-    # block the binary release. With continue-on-error the release job
-    # still runs on a docs failure; it tolerates the missing artifact.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install documentation toolchain
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends doxygen
-          pip install -r doc/requirements.txt
-
-      - name: Render HTML documentation
-        # Mirrors doc/conf.py.in's standalone recipe: sed-substitute the
-        # CMake @vars@ (the VERSION file is the single version source),
-        # generate the public version.h for Doxygen/Breathe, then Sphinx.
-        run: |
-          VERSION="$(tr -d '[:space:]' < VERSION)"
-          MAJOR="${VERSION%%.*}"; REST="${VERSION#*.}"
-          MINOR="${REST%%.*}"; PATCH="${REST#*.}"
-          D="${{ github.workspace }}/build-docs"
-          mkdir -p "$D/doxygen" "$D/include/epblas-parallel"
-          sed -e "s|@PROJECT_VERSION_MAJOR@|${MAJOR}|" \
-              -e "s|@PROJECT_VERSION_MINOR@|${MINOR}|" \
-              -e "s|@PROJECT_VERSION_PATCH@|${PATCH}|" \
-              -e "s|@PROJECT_VERSION@|${VERSION}|" \
-              include/epblas-parallel/version.h.in \
-              > "$D/include/epblas-parallel/version.h"
-          sed -e "s|@PROJECT_VERSION@|${VERSION}|" \
-              -e "s|@DOXYGEN_OUTPUT_DIR@|${D}/doxygen|" \
-              -e "s|@DOXYGEN_INPUT@|${D}/include|" \
-              doc/Doxyfile.in > "$D/Doxyfile"
-          doxygen "$D/Doxyfile"
-          sed -e "s|@PROJECT_VERSION@|${VERSION}|" \
-              -e "s|@DOXYGEN_XML_DIR@|${D}/doxygen/xml|" \
-              doc/conf.py.in > doc/conf.py
-          sphinx-build -b html doc "$D/html"
-          tar czf "epblas-parallel-v${VERSION}-docs-html.tar.gz" -C "$D/html" .
-
-      - name: Upload docs artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: epblas-parallel-docs-html
-          path: epblas-parallel-v*-docs-html.tar.gz
-          retention-days: 7
-
   # ── Create GitHub Release ────────────────────────────────────────
   release:
-    needs: [build, docs]
+    needs: [build]
     runs-on: ubuntu-latest
     # Pure download + repackage + publish; a healthy run is ~1 min.
     timeout-minutes: 15
@@ -201,16 +150,6 @@ jobs:
         with:
           path: artifacts/
           pattern: 'epblas-parallel-*-linux-x86_64'
-
-      - name: Download docs artifact
-        # Kept separate from the binary pattern above (the docs tarball
-        # must not be merged into the combined install tree), and
-        # tolerant: a failed docs job never blocks the binary release.
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts-docs/
-          name: epblas-parallel-docs-html
 
       - name: Collect tarballs
         run: |
@@ -238,12 +177,6 @@ jobs:
           done
           tar -czf "release/${ARCHIVE}.tar.gz" -C combined .
           ls -lh "release/${ARCHIVE}.tar.gz"
-
-      - name: Add docs tarball to the release set
-        # After the combined-tarball merge on purpose: the docs archive is
-        # a website, not an install tree.
-        continue-on-error: true
-        run: find artifacts-docs -name '*.tar.gz' -exec cp {} release/ \;
 
       - name: Create release
         uses: softprops/action-gh-release@v3
@@ -319,9 +252,8 @@ jobs:
 
             Every install tree carries the Markdown user guide under
             ``share/doc/epblas-parallel/`` (README, LICENSE, CHANGELOG,
-            ``user/``). The rendered HTML manual (Sphinx, user + dev
-            trees) ships separately as
-            ``epblas-parallel-vX.Y.Z-docs-html.tar.gz``.
+            ``user/``). Rendered HTML documentation:
+            https://kyungminlee.github.io/epblas-parallel/
 
             ### Test slot
 

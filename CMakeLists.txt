@@ -366,8 +366,8 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/epblas-parallel/version.h
 
 # User-facing documentation ships with every install (and therefore every
 # release tarball): the top-level project docs plus the Markdown user guide.
-# Rendered HTML (Sphinx + Doxygen) is a separate release asset built in
-# .github/workflows/release.yml, not an install component.
+# Rendered HTML (Sphinx + Doxygen, built by ./doc/build.sh) is published to
+# GitHub Pages by .github/workflows/docs.yml, not an install component.
 install(FILES README.md LICENSE CHANGELOG.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY doc/user/
